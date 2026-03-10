@@ -245,6 +245,181 @@ export function addMockObjectResponse(
   mockCatalog.addObjectResponse(matcher, response);
 }
 
+// ============================================================================
+// Conversation Fixtures for Testing
+// ============================================================================
+
+/**
+ * Optional assertions to validate the request when a fixture entry is matched.
+ * If any assertion fails, the test gets a descriptive error.
+ */
+export interface ConversationFixtureAssertions {
+  /** Assert request has exactly this many messages */
+  messageCount?: number;
+  /** Assert some message content contains all of these strings */
+  messagesContain?: string[];
+  /** Assert the last message content contains this string */
+  lastMessageContains?: string;
+  /** Assert these tool names are present in the request */
+  hasTools?: string[];
+  /** Assert system prompt contains this string */
+  systemContains?: string;
+}
+
+export type ConversationFixtureEntry =
+  | {
+    type: "sendRequest";
+    response: LLMResponse;
+    assert?: ConversationFixtureAssertions;
+  }
+  | {
+    type: "generateObject";
+    response: LLMGenerateObjectResponse;
+    assert?: ConversationFixtureAssertions;
+  };
+
+/**
+ * A declarative fixture describing a sequence of LLM responses.
+ * Responses are consumed in order (sequential matching).
+ */
+export interface ConversationFixture {
+  description?: string;
+  responses: ConversationFixtureEntry[];
+}
+
+function extractMessageText(
+  content: unknown,
+): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((p: any) => p.type === "text")
+      .map((p: any) => p.text ?? "")
+      .join(" ");
+  }
+  return "";
+}
+
+function runAssertions(
+  assertions: ConversationFixtureAssertions,
+  request: LLMRequest | LLMGenerateObjectRequest,
+  entryIndex: number,
+): void {
+  const label = `Fixture entry ${entryIndex}`;
+
+  if (assertions.messageCount !== undefined) {
+    if (request.messages.length !== assertions.messageCount) {
+      throw new Error(
+        `${label}: expected ${assertions.messageCount} messages, got ${request.messages.length}`,
+      );
+    }
+  }
+
+  if (assertions.messagesContain) {
+    for (const needle of assertions.messagesContain) {
+      const found = request.messages.some((m) =>
+        extractMessageText(m.content).includes(needle)
+      );
+      if (!found) {
+        throw new Error(
+          `${label}: expected some message to contain "${needle}"`,
+        );
+      }
+    }
+  }
+
+  if (assertions.lastMessageContains) {
+    const last = request.messages[request.messages.length - 1];
+    const text = last ? extractMessageText(last.content) : "";
+    if (!text.includes(assertions.lastMessageContains)) {
+      throw new Error(
+        `${label}: expected last message to contain "${assertions.lastMessageContains}", got "${text}"`,
+      );
+    }
+  }
+
+  if (assertions.hasTools) {
+    const tools = "tools" in request && request.tools
+      ? Object.keys(request.tools)
+      : [];
+    for (const toolName of assertions.hasTools) {
+      if (!tools.includes(toolName)) {
+        throw new Error(
+          `${label}: expected tool "${toolName}" in request, got [${
+            tools.join(", ")
+          }]`,
+        );
+      }
+    }
+  }
+
+  if (assertions.systemContains) {
+    const system = request.system ?? "";
+    if (!system.includes(assertions.systemContains)) {
+      throw new Error(
+        `${label}: expected system prompt to contain "${assertions.systemContains}"`,
+      );
+    }
+  }
+}
+
+/**
+ * Load a conversation fixture, queueing all responses as sequential mocks.
+ * Enables mock mode automatically.
+ *
+ * Example:
+ * ```ts
+ * import { loadConversationFixture } from "@commontools/llm/client";
+ *
+ * loadConversationFixture({
+ *   responses: [
+ *     { type: "sendRequest", response: { role: "assistant", content: "Hi!", id: "1" } },
+ *     { type: "sendRequest", response: { role: "assistant", content: "Bye!", id: "2" } },
+ *   ]
+ * });
+ * ```
+ */
+export function loadConversationFixture(fixture: ConversationFixture): void {
+  mockCatalog.enable();
+
+  for (let i = 0; i < fixture.responses.length; i++) {
+    const entry = fixture.responses[i];
+    const entryIndex = i;
+
+    if (entry.type === "sendRequest") {
+      const assertions = entry.assert;
+      mockCatalog.addResponse(
+        (request) => {
+          if (assertions) runAssertions(assertions, request, entryIndex);
+          return true;
+        },
+        entry.response,
+      );
+    } else if (entry.type === "generateObject") {
+      const assertions = entry.assert;
+      mockCatalog.addObjectResponse(
+        (request) => {
+          if (assertions) runAssertions(assertions, request, entryIndex);
+          return true;
+        },
+        entry.response,
+      );
+    }
+  }
+}
+
+/**
+ * Load a conversation fixture from a JSON file path.
+ * Enables mock mode automatically.
+ */
+export async function loadConversationFixtureFile(
+  path: string,
+): Promise<void> {
+  const text = await Deno.readTextFile(path);
+  const fixture: ConversationFixture = JSON.parse(text);
+  loadConversationFixture(fixture);
+}
+
 export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
