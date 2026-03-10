@@ -180,6 +180,39 @@ transformed). Inside a `computed()` body, ternaries are plain JS where a
   : null}
 ```
 
+**`fetchData` URLs must be CORS-friendly.** Patterns run in the browser, so any
+URL passed to `fetchData` must respond with `Access-Control-Allow-Origin: *` (or
+a matching origin). RSS feeds, private APIs, and many `.xml` endpoints do NOT
+support CORS. Prefer public JSON APIs that explicitly allow cross-origin
+requests. If a brief specifies a non-CORS source, replace it with a
+CORS-compatible alternative that provides equivalent data.
+
+**Don't `.set()` upstream cells inside `computed()`.** Writing to a cell that
+feeds into the same reactive graph causes cycles (the runtime caps at 101
+iterations and throws). Only write to *leaf* cells — cells whose updates don't
+feed back into the current computation. If you need to derive a value AND
+produce a side-effect, split them: use `computed()` for the derivation and
+`action()` for the write.
+
+```tsx
+// ❌ WRONG - .set() on a cell that feeds this computed → reactive cycle
+const sorted = computed(() => {
+  const items = allItems.get();
+  statusMessage.set(`${items.length} items`); // statusMessage feeds UI that reads allItems
+  return items.sort(compareFn);
+});
+
+// ✅ RIGHT - computed for derivation, action for side-effects
+const sorted = computed(() => allItems.get().sort(compareFn));
+const updateStatus = action(() => statusMessage.set(`${allItems.get().length} items`));
+```
+
+**When patterns compose, output/input field names must match exactly.** If
+pattern A's output feeds into pattern B's input, the field names in A's
+`Output` type must match B's `Input` type character-for-character. There is no
+automatic mapping — `chartData` and `chartEntries` are different fields.
+Coordinate naming across related patterns before building.
+
 ## Documentation
 
 Start with `docs/common/patterns/`—especially `docs/common/patterns/meta/` which contains generalizable idioms that grow over time.
