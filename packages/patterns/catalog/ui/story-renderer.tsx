@@ -15,6 +15,20 @@ import VGroupStory from "../stories/ct-vgroup-story.tsx";
 import HGroupStory from "../stories/ct-hgroup-story.tsx";
 import VScrollStory from "../stories/ct-vscroll-story.tsx";
 import HScrollStory from "../stories/ct-hscroll-story.tsx";
+import TextareaStory from "../stories/ct-textarea-story.tsx";
+import MessageInputStory from "../stories/ct-message-input-story.tsx";
+import FabStory from "../stories/ct-fab-story.tsx";
+import ToolbarStory from "../stories/ct-toolbar-story.tsx";
+import HeadingStory from "../stories/ct-heading-story.tsx";
+import LabelStory from "../stories/ct-label-story.tsx";
+import ChipStory from "../stories/ct-chip-story.tsx";
+import BadgeStory from "../stories/ct-badge-story.tsx";
+import SeparatorStory from "../stories/ct-separator-story.tsx";
+import MarkdownStory from "../stories/ct-markdown-story.tsx";
+import LoaderStory from "../stories/ct-loader-story.tsx";
+import SkeletonStory from "../stories/ct-skeleton-story.tsx";
+import CollapsibleStory from "../stories/ct-collapsible-story.tsx";
+import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
 
@@ -45,6 +59,20 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     const hgroupStory = HGroupStory({});
     const vscrollStory = VScrollStory({});
     const hscrollStory = HScrollStory({});
+    const textareaStory = TextareaStory({});
+    const messageInputStory = MessageInputStory({});
+    const fabStory = FabStory({});
+    const toolbarStory = ToolbarStory({});
+    const headingStory = HeadingStory({});
+    const labelStory = LabelStory({});
+    const chipStory = ChipStory({});
+    const badgeStory = BadgeStory({});
+    const separatorStory = SeparatorStory({});
+    const markdownStory = MarkdownStory({});
+    const loaderStory = LoaderStory({});
+    const skeletonStory = SkeletonStory({});
+    const collapsibleStory = CollapsibleStory({});
+    const tabsStory = TabsStory({});
     const chartStory = ChartStory({});
     const noteStory = NoteStory({});
 
@@ -66,6 +94,20 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           {s === "hgroup" ? hgroupStory : null}
           {s === "vscroll" ? vscrollStory : null}
           {s === "hscroll" ? hscrollStory : null}
+          {s === "textarea" ? textareaStory : null}
+          {s === "message-input" ? messageInputStory : null}
+          {s === "fab" ? fabStory : null}
+          {s === "toolbar" ? toolbarStory : null}
+          {s === "heading" ? headingStory : null}
+          {s === "label" ? labelStory : null}
+          {s === "chip" ? chipStory : null}
+          {s === "badge" ? badgeStory : null}
+          {s === "separator" ? separatorStory : null}
+          {s === "markdown" ? markdownStory : null}
+          {s === "loader" ? loaderStory : null}
+          {s === "skeleton" ? skeletonStory : null}
+          {s === "collapsible" ? collapsibleStory : null}
+          {s === "tabs" ? tabsStory : null}
           {s === "chart" ? chartStory : null}
           {s === "note" ? noteStory : null}
         </>
@@ -86,6 +128,20 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           {s === "hgroup" ? hgroupStory.controls : null}
           {s === "vscroll" ? vscrollStory.controls : null}
           {s === "hscroll" ? hscrollStory.controls : null}
+          {s === "textarea" ? textareaStory.controls : null}
+          {s === "message-input" ? messageInputStory.controls : null}
+          {s === "fab" ? fabStory.controls : null}
+          {s === "toolbar" ? toolbarStory.controls : null}
+          {s === "heading" ? headingStory.controls : null}
+          {s === "label" ? labelStory.controls : null}
+          {s === "chip" ? chipStory.controls : null}
+          {s === "badge" ? badgeStory.controls : null}
+          {s === "separator" ? separatorStory.controls : null}
+          {s === "markdown" ? markdownStory.controls : null}
+          {s === "loader" ? loaderStory.controls : null}
+          {s === "skeleton" ? skeletonStory.controls : null}
+          {s === "collapsible" ? collapsibleStory.controls : null}
+          {s === "tabs" ? tabsStory.controls : null}
           {s === "chart" ? chartStory.controls : null}
           {s === "note" ? noteStory.controls : null}
         </>

@@ -39,8 +39,11 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "button", label: "Button" },
                   { id: "checkbox", label: "Checkbox" },
                   { id: "input", label: "Input" },
+                  { id: "textarea", label: "Textarea" },
                   { id: "select", label: "Select" },
                   { id: "switch", label: "Switch" },
+                  { id: "message-input", label: "Message Input" },
+                  { id: "fab", label: "FAB" },
                 ],
               },
               {
@@ -48,6 +51,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 items: [
                   { id: "card", label: "Card" },
                   { id: "modal", label: "Modal" },
+                  { id: "toolbar", label: "Toolbar" },
                   { id: "vstack", label: "VStack" },
                   { id: "hstack", label: "HStack" },
                   { id: "vgroup", label: "VGroup" },
@@ -57,8 +61,30 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 ],
               },
               {
+                name: "Display",
+                items: [
+                  { id: "heading", label: "Heading" },
+                  { id: "label", label: "Label" },
+                  { id: "chip", label: "Chip" },
+                  { id: "badge", label: "Badge" },
+                  { id: "separator", label: "Separator" },
+                  { id: "markdown", label: "Markdown" },
+                ],
+              },
+              {
                 name: "Feedback",
-                items: [{ id: "progress", label: "Progress" }],
+                items: [
+                  { id: "progress", label: "Progress" },
+                  { id: "loader", label: "Loader" },
+                  { id: "skeleton", label: "Skeleton" },
+                ],
+              },
+              {
+                name: "Interactive",
+                items: [
+                  { id: "collapsible", label: "Collapsible" },
+                  { id: "tabs", label: "Tabs" },
+                ],
               },
               {
                 name: "Data Visualization",

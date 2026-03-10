@@ -146,6 +146,23 @@ export default pattern<SidebarInput, SidebarOutput>(
                 margin: "1px 8px",
                 borderRadius: "4px",
                 fontSize: "13px",
+                color: current === "textarea" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "textarea"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "textarea" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "textarea", selected })}
+            >
+              Textarea
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
                 color: current === "select" ? "#1ea7fd" : "#2e3438",
                 backgroundColor: current === "select"
                   ? "#e8f4fd"
@@ -173,6 +190,38 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "switch", selected })}
             >
               Switch
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "message-input" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "message-input"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "message-input" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "message-input", selected })}
+            >
+              Message Input
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "fab" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "fab" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "fab" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "fab", selected })}
+            >
+              FAB
             </div>
           </div>
 
@@ -221,6 +270,23 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "modal", selected })}
             >
               Modal
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "toolbar" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "toolbar"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "toolbar" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "toolbar", selected })}
+            >
+              Toolbar
             </div>
             <div
               style={{
@@ -326,6 +392,122 @@ export default pattern<SidebarInput, SidebarOutput>(
             </div>
           </div>
 
+          {/* Display */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Display
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "heading" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "heading"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "heading" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "heading", selected })}
+            >
+              Heading
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "label" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "label"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "label" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "label", selected })}
+            >
+              Label
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "chip" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "chip" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "chip" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "chip", selected })}
+            >
+              Chip
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "badge" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "badge"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "badge" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "badge", selected })}
+            >
+              Badge
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "separator" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "separator"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "separator" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "separator", selected })}
+            >
+              Separator
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "markdown" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "markdown"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "markdown" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "markdown", selected })}
+            >
+              Markdown
+            </div>
+          </div>
+
           {/* Feedback */}
           <div style={{ marginBottom: "8px" }}>
             <div
@@ -356,6 +538,88 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "progress", selected })}
             >
               Progress
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "loader" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "loader"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "loader" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "loader", selected })}
+            >
+              Loader
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "skeleton" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "skeleton"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "skeleton" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "skeleton", selected })}
+            >
+              Skeleton
+            </div>
+          </div>
+
+          {/* Interactive */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Interactive
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "collapsible" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "collapsible"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "collapsible" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "collapsible", selected })}
+            >
+              Collapsible
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "tabs" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "tabs" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "tabs" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "tabs", selected })}
+            >
+              Tabs
             </div>
           </div>
 
