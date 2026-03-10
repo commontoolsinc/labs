@@ -105,17 +105,14 @@ interface RecordOutput {
 // so it can modify the parent's subPieces list when a template is selected.
 
 // Inner lift: stores the initial pieces (receives pieces as input)
-const storeInitialPieces = lift(
-  toSchema<{
-    notesPiece: unknown;
-    notesSchema: unknown;
-    typePickerPiece: unknown;
-    typePickerSchema: unknown;
+const storeInitialPieces = lift<{
+    notesPiece: any;
+    notesSchema: any;
+    typePickerPiece: any;
+    typePickerSchema: any;
     subPieces: Writable<SubPieceEntry[]>;
     isInitialized: Writable<boolean>;
-  }>(),
-  undefined,
-  ({
+  }>(({
     notesPiece,
     notesSchema,
     typePickerPiece,
@@ -142,24 +139,19 @@ const storeInitialPieces = lift(
 // Outer lift: checks if empty, creates pieces, calls inner lift
 // TypePicker uses ContainerCoordinationContext protocol for parent access
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
-const initializeRecord = lift(
-  toSchema<{
+const initializeRecord = lift<{
     currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
     subPieces: Writable<SubPieceEntry[]>;
     trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     isInitialized: Writable<boolean>;
     recordPatternJson: string; // Computed that returns Record JSON string
-  }>(),
-  undefined,
-  (
-    {
+  }>(({
       currentPieces,
       subPieces,
       trashedSubPieces,
       isInitialized,
       recordPatternJson,
-    },
-  ) => {
+    }) => {
     if ((currentPieces || []).length === 0) {
       // Create Note as default module (rendered via ct-render variant="embedded")
       // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
