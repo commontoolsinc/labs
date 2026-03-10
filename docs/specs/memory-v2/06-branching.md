@@ -267,9 +267,12 @@ interface MergeRequest {
 }
 
 interface MergeResult {
-  status: "success" | "conflict";
-  mergeCommit?: Reference;        // Hash of the merge commit (on success)
+  status: "ready" | "conflict";
+  proposal?: MergeProposal;       // Client adds localSeq, then transacts
+  merged?: number;                // Number of entities to materialize
   conflicts?: BranchConflict[];   // Conflicting entities (on conflict)
+  sourceSeq: number;
+  baseSeq: number;
 }
 ```
 
@@ -309,19 +312,37 @@ merge(source, target):
       })
 
   if conflicts.length > 0:
-    return { status: "conflict", conflicts, mergeBase: base }
+    return {
+      status: "conflict",
+      conflicts,
+      sourceSeq: source.headSeq,
+      baseSeq,
+    }
 
-  mergeCommit = createMergeCommit(target, fastForwards, source, base)
-  return { status: "success", mergeCommit }
+  proposal = buildMergeProposal(target, fastForwards, source, base)
+  return {
+    status: "ready",
+    proposal,
+    merged: fastForwards.length,
+    sourceSeq: source.headSeq,
+    baseSeq,
+  }
 ```
 
 ### 6.7.3 Fast-Forward
 
 When only the source branch has modified an entity, the target branch
-fast-forwards by adopting the source branch's head for that entity. The source
-branch's facts are already in the shared fact history, so no data copying is
-needed. The target branch's head table is simply updated to point to the source
-branch's head fact.
+fast-forwards by materializing the source branch's visible state as an ordinary
+write on the target branch at the merge seq. In the baseline implementation:
+
+- If the source branch currently shows a live value, the merge transaction emits
+  a `set` on the target branch with that value.
+- If the source branch currently shows a tombstone, the merge transaction emits
+  a `delete` on the target branch.
+
+This keeps merge as a regular signed transaction, keeps point-in-time reads
+simple, and avoids a separate "adopt existing fact" mutation path. Reusing
+source facts directly can be added later as an optimization if needed.
 
 ### 6.7.4 CRDT Merge (Future Extension)
 
@@ -332,22 +353,28 @@ strategy (e.g., `"x-merge-strategy": "counter"` or `"x-merge-strategy":
 "lww-register"`). This extension is not part of the current specification but
 is noted as a natural evolution of the merge system.
 
-### 6.7.5 Merge Commit
+### 6.7.5 Merge Transaction
 
-A successful merge creates a **merge commit** on the target branch. This commit:
+A successful merge is finalized by submitting a **normal transaction** on the
+target branch. The merge API prepares a `MergeProposal`; the client adds its
+next `localSeq` and submits the resulting `ClientCommit` via `/memory/transact`.
 
-- Records the source branch name and its head seq at merge time.
-- Updates the target branch's head table for all fast-forwarded entities.
-- Advances the target branch's `headSeq` to the new global seq.
+The prepared `MergeProposal` carries:
 
-```typescript
-interface MergeCommitData {
-  type: "merge";
-  sourceBranch: BranchName;
-  sourceSeq: number;           // Source branch's headSeq at merge time
-  entities: EntityId[];        // Entities that were fast-forwarded
-}
-```
+- `branch = target`
+- `merge = { sourceBranch, sourceSeq, baseSeq }`
+- Confirmed reads for the source/target/base heads used to compute the merge
+- `pending = []` because the proposal is computed against confirmed branch state
+- One ordinary `set`/`delete` operation per merged entity
+
+There are no special non-transaction commits for merge. The resulting commit is
+signed, hashed, sequenced, stored, and replayed through the same path as any
+other client transaction.
+
+Clients SHOULD request merge when they do not have outstanding local pending
+writes on the source or target branch. If a caller needs to stack a merge on top
+of local pending work, it must rebuild the proposal against that local state
+before submission.
 
 ---
 
@@ -375,14 +402,14 @@ To resolve conflicts, the client:
 
 1. Inspects each `BranchConflict` to understand the divergence.
 2. Decides on a resolution value for each conflicting entity.
-3. Commits the resolution values as a regular commit on the **target branch**.
-4. Re-attempts the merge.
+3. Re-runs the merge with inline `resolutions`, or constructs the merge
+   transaction directly.
+4. Adds the next `localSeq` and submits the resulting `ClientCommit` on the
+   **target branch**.
 
-The re-merge will now see that the target branch's head for the conflicting
-entity is newer than the fork point, but the source branch's head matches the
-ancestor (because the source hasn't changed since the first merge attempt).
-This results in a fast-forward of the remaining non-conflicting entities, plus
-the already-resolved entities being left as-is on the target.
+The resulting merge transaction materializes the remaining non-conflicting
+source changes plus the explicit resolution values chosen for the conflicting
+entities, all on the target branch.
 
 Alternatively, the client can resolve all conflicts in a single step by
 committing the resolutions and immediately retrying the merge with a flag:
@@ -395,8 +422,8 @@ interface MergeRequest {
 }
 ```
 
-When `resolutions` is provided, the merge applies the resolution values for
-conflicting entities as part of the merge commit, resolving all conflicts
+When `resolutions` is provided, the merge folds those values into the generated
+merge transaction so the final `/memory/transact` can resolve all conflicts
 atomically.
 
 ### 6.8.3 Conflict Granularity
@@ -464,15 +491,16 @@ state of the `feature-x` branch as it was at seq 42:
      in `[0, forkSeq]` (inherited from parent).
 2. **Reconstruction**: the reconstruction algorithm from `05-queries.md` section
    5.5 applies, scoped to the branch. Only facts committed on the branch (or
-   inherited from ancestors before fork) with seq <= `atSeq` are
-   considered.
+   inherited from ancestors before fork) with seq <= `atSeq` are considered.
+   Because merge results are materialized as ordinary target-branch writes, no
+   extra merge-only read path is required.
 
 ### 6.10.2 Interaction with Merge Commits
 
-After a merge, the target branch contains facts from the source branch. A
-point-in-time query at a seq before the merge will not see the merged facts
-(they were committed at the merge seq). A query at or after the merge
-seq will see them.
+After a merge, the target branch exposes the merged state starting at the merge
+seq because the merge transaction wrote ordinary facts on the target branch at
+that seq. A point-in-time query at a seq before the merge will not see those
+facts; a query at or after the merge seq will.
 
 ---
 
@@ -516,8 +544,9 @@ live data:
 1. branch.create("draft-v2")
 2. commit({ branch: "draft-v2", operations: [...] })  // iterate on design
 3. commit({ branch: "draft-v2", operations: [...] })  // more changes
-4. merge({ source: "draft-v2", target: "main" })      // ship it
-5. branch.delete("draft-v2")                           // clean up
+4. proposal = merge({ source: "draft-v2", target: "main" })
+5. commit({ localSeq: nextLocalSeq(), ...proposal })   // ship it
+6. branch.delete("draft-v2")                           // clean up
 ```
 
 ### 6.12.2 Undo/Redo via Branching

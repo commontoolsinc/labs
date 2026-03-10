@@ -37,7 +37,7 @@ Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
 interface EntityDocument {
-  value?: JSONValue;    // The cell's data. Omitting means "undefined" (deleted).
+  value: JSONValue;     // The cell's data. Live entities always carry a value.
   source?: SourceLink;  // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   // Future: labels, schema, etc.
 }
@@ -48,13 +48,13 @@ interface SourceLink {
 ```
 
 The `value` property holds the cell's actual data. Storing it under a key
-(rather than as the top-level value) serves two purposes:
+(rather than as the top-level value) lets the envelope carry sibling metadata
+like `source` that travel with the value but are not part of it.
 
-1. **Representing `undefined`**: Omitting the `value` property signals that the
-   entity's value is `undefined`, without requiring a separate "deleted" fact
-   type for the soft-delete case.
-2. **Companion metadata**: The envelope holds sibling properties like `source`
-   that travel with the value but are not part of it.
+**Deletion is explicit**: removing an entity is represented only by a `Delete`
+fact (section 2.2). A missing `value` field is NOT used as a tombstone in v2.
+Supporting a live "undefined" cell value is deferred; if we need it later, it
+should use an explicit sentinel rather than overloading deletion semantics.
 
 **Source links**: The `source` property uses the short-link form
 `{"/":"<short-id>"}`. The runtime resolves this to `of:<short-id>` in the same
@@ -247,8 +247,8 @@ interface Blob {
   /** Content hash = identity. SHA-256 of the raw bytes. */
   hash: Reference;
 
-  /** Raw binary content. */
-  data: Uint8Array;
+  /** Immutable payload bytes. The hash is computed from this value. */
+  value: Uint8Array;
 
   /** MIME type, e.g. "image/png", "application/wasm". */
   contentType: string;
@@ -260,14 +260,19 @@ interface Blob {
 
 Key properties:
 
-- **Immutable**: Once a blob is stored, it never changes. Its hash is its
-  identity — if the content changes, it's a different blob.
-- **Deduplicated**: Two identical byte sequences produce the same hash and are
-  stored once.
-- **No history**: Blobs have no causal chain, no version numbers, no patches.
-  They simply exist or don't.
-- **Separate table**: Blobs live in their own storage table (`blob_store`),
-  distinct from entity facts. See §02 Storage for the schema.
+- **Immutable payload**: Once a blob payload is stored, it never changes. Its
+  hash is computed from the payload bytes — if the bytes change, it's a
+  different blob.
+- **Deduplicated**: Two identical payloads produce the same hash and are stored
+  once.
+- **No history on the payload itself**: Blob bytes have no causal chain, no
+  version numbers, and no patches.
+- **Mutable metadata lives separately**: Descriptions, provenance,
+  application-specific policy, and similar fields are regular entity state
+  keyed off the blob hash (section 5). This keeps blobs close to regular data:
+  immutable content-addressed value, mutable metadata beside it.
+- **Separate table**: Blob payloads live in their own storage table
+  (`blob_store`), distinct from entity facts. See §02 Storage for the schema.
 
 ### 4.1 Referencing Blobs from Entities
 
@@ -290,9 +295,9 @@ can validate that blob references resolve to actual blobs.
 
 ## 5. Blob Metadata
 
-Blobs themselves are immutable, but metadata about blobs (classification labels,
-descriptions, access policies) is mutable. Blob metadata is stored as a
-**regular entity** whose `id` is derived from the blob's content hash.
+Blobs themselves are immutable, but metadata about blobs (descriptions,
+provenance, application-specific policy) is mutable. Blob metadata is stored as
+a **regular entity** whose `id` is derived from the blob's content hash.
 
 ```typescript
 /**
@@ -310,16 +315,17 @@ interface BlobMetadata {
   /** The blob this metadata describes. */
   blob: Reference;
 
-  /** IFC classification labels for information flow control. */
-  labels: string[];
-
-  // Future: additional metadata fields (description, provenance, etc.)
+  // Future: additional metadata fields (description, provenance, labels, etc.)
 }
 ```
 
 Because metadata is a regular entity, it benefits from all entity features:
 versioning, causal chains, patches, conflict detection, point-in-time reads, and
 branch isolation.
+
+Phase 1 only requires the split between immutable blob payload and mutable blob
+metadata. Label/classification semantics are deferred until the metadata model
+is reintroduced.
 
 ---
 
@@ -396,7 +402,20 @@ interface SpliceOp {
 type PatchOp = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
 ```
 
-### 6.3 Patch Application Semantics
+### 6.3 Patch Classes
+
+Not all patches have the same concurrency behavior:
+
+- **Position-independent patches** target stable keys and overwrite content
+  without depending on collection ordering. Example: replacing `/profile/name`.
+  These are the best candidates for future claim-free fast paths.
+- **State-dependent patches** depend on the current shape or ordering of the
+  document. `remove`, `move`, and `splice` are in this class, and `add` can be
+  as well when it targets positional array locations. These should continue to
+  carry read dependencies until we introduce stronger semantics (for example,
+  match-based removal or CRDT/OT operations).
+
+### 6.4 Patch Application Semantics
 
 Patches are applied **in order**, left to right. Each operation in the list
 transforms the state produced by the previous operation. If any operation in the
@@ -413,7 +432,7 @@ function applyPatch(state: JSONValue, ops: PatchOp[]): JSONValue {
 }
 ```
 
-### 6.4 Patch Composition
+### 6.5 Patch Composition
 
 Multiple sequential patches can be **composed** into a single equivalent patch
 for optimization, but the storage layer does not perform this automatically.
@@ -571,8 +590,8 @@ metadata is stored as **regular entities** with well-known ID conventions.
 | Pattern | Purpose | Example |
 |---------|---------|---------|
 | `<space-did>` | Access control list for a space | `did:key:z6Mkk...` |
-| `urn:label:<entity>` | IFC labels for an entity | `urn:label:urn:entity:abc123` |
 | `urn:schema:<name>` | Schema definition | `urn:schema:todo-item` |
+| `urn:blob-meta:<hash>` | Mutable metadata for a blob payload | `urn:blob-meta:bafk...` |
 
 ### 9.2 Design Rationale
 

@@ -14,7 +14,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
    extension), not just whole-document replacement. Patches are stored as-is and
    replayed on read, with periodic snapshots for efficiency.
 4. **Content-addressed blobs** — Immutable, write-once binary data with mutable
-   metadata (IFC labels). Stored separately from entities.
+   metadata stored separately from entities.
 5. **Point-in-time retrieval** — Read any entity's state at any seq number on
    any branch.
 6. **Branching** — Lightweight branches with isolation, merging, and conflict
@@ -98,7 +98,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 | 2       | [02-storage.md](./02-storage.md)           | SQLite schema, tables, indices, patch storage, read path, snapshot creation, branch storage, point-in-time reads, garbage collection                |
 | 3       | [03-commit-model.md](./03-commit-model.md) | Operations, Transactions, Confirmed/Pending state, Validation rule, Stacked commits, Conflict handling                                              |
 | 4       | [04-protocol.md](./04-protocol.md)         | WebSocket transport, Message format, Commands (transact/query.subscribe/graph.query/branch), UCAN auth, Client API                                  |
-| 5       | [05-queries.md](./05-queries.md)           | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Classification/redaction, Entity references, Reactivity boundaries |
+| 5       | [05-queries.md](./05-queries.md)           | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Entity references, Reactivity boundaries (classification deferred in phase 1) |
 | 6       | [06-branching.md](./06-branching.md)       | Branch lifecycle, Isolation, Merging, Conflict resolution, Point-in-time on branches, Branch diff, Depth limits                                     |
 
 ## Implementation Materials
@@ -170,6 +170,7 @@ interface Transaction {
 
 // Client commit with two-tier reads
 interface ClientCommit {
+   localSeq: number;
    reads: {
       confirmed: ConfirmedRead[]; // Server-acknowledged reads
       pending: PendingRead[]; // Reads from unconfirmed commits
@@ -181,7 +182,7 @@ interface ClientCommit {
 
 // Entity values are stored in an envelope (not bare JSON)
 interface EntityDocument {
-   value?: JSONValue; // The cell's data. Omitting = undefined.
+   value: JSONValue; // The cell's data. Delete is represented by Delete facts.
    source?: SourceLink; // {"/":"<short-id>"} resolves to of:<short-id>.
 }
 interface SourceLink {
@@ -201,14 +202,13 @@ explicit.
 
 ## System Entity Conventions
 
-With the removal of the `the` dimension, system-level data (ACLs, schemas,
-labels) is stored as regular entities with well-known ID conventions:
+With the removal of the `the` dimension, system-level data (ACLs, schemas, blob
+metadata) is stored as regular entities with well-known ID conventions:
 
 | Entity Type         | ID Pattern              | Example                    |
 | ------------------- | ----------------------- | -------------------------- |
 | Access Control List | `<space-did>`           | `did:key:z6Mk...`          |
 | Schema              | `urn:schema:<name>`     | `urn:schema:contact`       |
-| Labels              | `urn:label:<entity-id>` | `urn:label:urn:entity:abc` |
 | Blob Metadata       | `urn:blob-meta:<hash>`  | `urn:blob-meta:bafk...`    |
 
 These are regular entities — they benefit from versioning, causal chains,

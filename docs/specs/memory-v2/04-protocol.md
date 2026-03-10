@@ -18,8 +18,9 @@ client and server. It supports all commands, including subscriptions that
 deliver real-time updates.
 
 **Connection**: The client initiates a WebSocket connection to the server. The
-server upgrades the HTTP request and establishes a session. The session persists
-until either side closes the connection.
+server upgrades the HTTP request and establishes a transport channel. The
+transport lasts until either side closes the connection; the logical memory
+session can be resumed across later connections (see below).
 
 **Protocol Version Negotiation**: The client MUST declare its protocol version
 in the **first WebSocket message** after connection. The server MUST reject
@@ -55,6 +56,56 @@ an error and closes the connection:
 **responses** (`task/return` receipts) and **effects** (`task/effect` for
 subscription updates). Every request has a deterministic invocation ID (derived
 from its content hash) that correlates responses back to requests.
+
+### 4.1.2 Logical Sessions and Resume
+
+Pending-read resolution and subscription ownership are scoped to a **logical
+session** per space, not to a single WebSocket connection. After protocol
+negotiation, the client opens or resumes that logical session with a signed
+command:
+
+```typescript
+type SessionId = string;  // Server-issued opaque identifier
+
+interface SessionOpenCommand {
+  cmd: "/memory/session/open";
+  sub: SpaceId;
+  args: {
+    sessionId?: SessionId;  // Omit on first connect; include on resume
+    seenSeq?: number;       // Highest canonical seq fully integrated by client
+  };
+}
+
+interface SessionOpenResult {
+  ok: {
+    sessionId: SessionId;
+    serverSeq: number;      // Current canonical head seq for the space
+  };
+}
+```
+
+Session rules:
+
+- The client MUST successfully call `session.open` for a space before sending
+  `transact`, `query`, `query.subscribe`, or `graph.query` commands for that
+  space on the current connection.
+- The server issues `sessionId` values and binds them to the authenticated
+  client/space so they cannot be forged by another principal.
+- Reconnecting with the same `sessionId` resumes the logical session if it has
+  not expired.
+- In the simple phase-1 implementation, the client is responsible for replaying
+  outstanding commits and resending active queries/subscriptions after resume.
+- A later optimization may let the server retain subscription state for a short
+  reconnect window, but that is not required for the first end-to-end version.
+
+Recommended reconnect flow:
+
+1. Send `session.open` with the prior `sessionId` and last integrated `seenSeq`.
+2. Replay locally retained commits that were never acknowledged, plus any
+   retained commits whose assigned `seq` may be newer than `seenSeq`.
+3. Re-issue active `query.subscribe` / `graph.query` subscriptions with
+   `since: seenSeq`, then let the server replay committed changes since that
+   cursor and re-evaluate the queries.
 
 ---
 
@@ -215,7 +266,7 @@ interface TransactSuccess {
 
 // Commit — the server's response after a successful transaction
 interface Commit {
-  hash: Reference;       // Content hash of the commit
+  hash: Reference;       // Content hash of the canonical client commit blob
   seq: number;           // Server-assigned seq number
   branch: BranchId;      // Branch the commit was applied to
   facts: StoredFact[];   // Facts produced by this commit
@@ -230,8 +281,9 @@ type TransactError =
 ```
 
 The `Commit` in the success response includes the seq number, the facts
-produced, the commit hash, and the target branch. This gives the client
-everything it needs to move the affected entities from pending to confirmed.
+produced, the stable commit hash, and the target branch. This gives the client
+everything it needs to move the affected entities from pending to confirmed and
+to deduplicate any later replay after reconnect.
 
 ### 4.3.2 `query` — One-Shot Query (Deprecated)
 
@@ -306,6 +358,10 @@ route updates to the correct subscription handler.
 **Lifecycle**: A subscription remains active until the client sends
 `query.unsubscribe` or the WebSocket connection closes. The server tracks
 active subscriptions per session.
+
+In the baseline reconnect flow, subscriptions are **not** resumed implicitly
+after a connection drop. The client re-opens the session, then resends each
+active subscription with an appropriate `since` cursor.
 
 ### 4.3.4 `query.unsubscribe` — Cancel a Subscription
 
@@ -396,7 +452,7 @@ interface CreateBranchResult {
   };
 }
 
-// Merge a branch into another
+// Prepare a merge transaction for one branch into another
 interface MergeBranchCommand {
   cmd: "/memory/branch/merge";
   sub: SpaceId;
@@ -409,10 +465,18 @@ interface MergeBranchCommand {
 
 interface MergeBranchResult {
   ok: {
-    commit: Commit;             // The merge commit on the target branch
-    merged: number;             // Number of entities merged
+    status: "ready" | "conflict";
+    proposal?: MergeProposal;         // Client adds localSeq, then transacts
+    merged?: number;                  // Number of entities in the proposal
+    conflicts?: BranchConflict[];     // Present when status === "conflict"
+    sourceSeq: number;
+    baseSeq: number;
   };
 }
+
+// This command does not mutate storage directly. It computes conflicts and, if
+// possible, returns a MergeProposal that the client wraps in a normal
+// ClientCommit and submits via /memory/transact.
 
 // Delete a branch
 interface DeleteBranchCommand {
@@ -556,6 +620,7 @@ are hierarchical: `OWNER` implies `WRITE`, which implies `READ`.
 
 | Command | Required Capability |
 |---------|---------------------|
+| `session.open` | `READ` |
 | `query.subscribe`, `graph.query`, `query` (deprecated) | `READ` |
 | `transact` | `WRITE` |
 | `branch/create`, `branch/merge`, `branch/delete` | `WRITE` |
@@ -693,12 +758,12 @@ notifications that the underlying v2 subscription system fires during
 `transact()` (since v2's local mode fires subscription callbacks synchronously
 within the same call stack).
 
-### 4.6.5 Classified Content
+### 4.6.5 Classified Content (Deferred)
 
-Facts with classification labels may be redacted before delivery. If a
-subscriber lacks the appropriate claims for a classification level, the
-server omits the `value` field from the fact (delivering the metadata —
-entity ID, seq, parent — without the content).
+Phase 1 does not perform label-based redaction in protocol delivery. If and
+when classification is reintroduced, it will be specified as an explicit
+extension to the query/subscription protocol rather than implied by the
+phase-1 command shapes.
 
 ---
 
@@ -771,8 +836,9 @@ import { connect } from "@commontools/memory";
 const session = connect({
   url: new URL("ws://localhost:8001"),
   as: signer,           // Signer with the client's private key
-  clock?: Clock,         // Optional clock for timestamp generation
-  ttl?: number,          // Optional TTL for invocations (seconds)
+  sessionId: previousSessionId, // Optional prior logical session to resume
+  clock,                 // Optional clock for timestamp generation
+  ttl,                   // Optional TTL for invocations (seconds)
 });
 ```
 
@@ -875,6 +941,9 @@ Closing a session:
 1. Cancels all pending invocations (rejects their promises)
 2. Closes all active subscriptions
 3. Closes the WebSocket connection
+
+If the client later reconnects with the same `sessionId`, it can resume the
+logical session, replay retained commits, and re-establish subscriptions.
 
 ---
 

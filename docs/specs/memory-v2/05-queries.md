@@ -2,7 +2,7 @@
 
 This section defines how clients retrieve data from a Space. The query system
 supports simple pattern matching, schema-driven graph traversal, point-in-time
-reads, subscriptions, and classification-based access control.
+reads, subscriptions, and branch-aware retrieval.
 
 ## 5.1 Query Types
 
@@ -86,8 +86,7 @@ Given a `Query`, the server:
 4. If `since` is provided, skip entities whose head seq is <= `since`.
 5. If `atSeq` is provided, reconstruct the entity state at that seq
    (see section 5.5).
-6. Apply classification checks (see section 5.6).
-7. Assemble and return a `FactSet`.
+6. Assemble and return a `FactSet`.
 
 ---
 
@@ -111,7 +110,6 @@ preserve this shared-code property.
 interface SchemaQuery extends QueryOptions {
   selectSchema: SchemaSelector;
   since?: number;
-  classification?: string[];  // IFC claims for access control
   limits?: SchemaQueryLimits;
 }
 
@@ -357,10 +355,9 @@ Given a `SchemaQuery`, the server:
    rules as simple queries).
 3. For each root entity:
    a. Loads the entity's current value.
-   b. Applies classification checks (see 5.6) to the root entity.
-   c. Runs the schema traversal algorithm (5.3.2), which recursively loads and
+   b. Runs the schema traversal algorithm (5.3.2), which recursively loads and
       filters linked entities.
-   d. Records all visited entities in the schema tracker.
+   c. Records all visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
 5. If `since` is provided, filters the result to only include entities whose
    seq exceeds `since`.
@@ -520,69 +517,17 @@ snapshot of the entire reachable graph at a single point in time.
 
 ---
 
-## 5.6 Classification and Redaction
+## 5.6 Classification and Redaction (Deferred)
 
-Entities may have associated blob metadata with IFC (Information Flow Control)
-labels. The query system enforces these labels to prevent unauthorized data
-access.
+Phase 1 of Memory v2 does **not** implement label-based query redaction.
+Authorization is enforced only by space-level ACLs (see `04-protocol.md`).
 
-### 5.6.1 Classification Model
+Classification labels and redacted query delivery will return in a later
+revision once the label/metadata model is redesigned. Until then:
 
-Each entity can have a `BlobMetadata` record that specifies classification
-labels:
-
-```typescript
-interface BlobMetadata {
-  blob: Reference;      // The blob this metadata describes
-  labels: string[];     // Classification labels (e.g. ["confidential", "pii"])
-}
-```
-
-Clients declare their classification claims in the query:
-
-```typescript
-interface SchemaQuery {
-  classification?: string[];  // e.g. ["confidential"]
-}
-```
-
-### 5.6.2 Access Check Algorithm
-
-During query execution, for each entity to be included in the result:
-
-1. Load the entity's blob metadata (if any).
-2. Extract the set of required classification labels.
-3. Compare against the caller's declared claims.
-4. If the required labels are a subset of the caller's claims, include the
-   entity in the result.
-5. If not, **omit** the entity from the result entirely. Do not return an error
-   -- the entity is silently redacted.
-
-```typescript
-function checkClassification(
-  requiredLabels: Set<string>,
-  callerClaims: Set<string>
-): boolean {
-  return requiredLabels.isSubsetOf(callerClaims);
-}
-```
-
-### 5.6.3 Redaction in Commits
-
-When a subscription sends incremental updates that include commit data, the
-commit's changes are redacted based on the subscriber's claims. Entities that
-the subscriber cannot access are stripped from the commit before sending:
-
-```
-redactCommit(commit, subscriberClaims):
-  for each entity in commit.changes:
-    labels = getLabels(entity)
-    if not labels.isSubsetOf(subscriberClaims):
-      remove entity from commit.changes
-  return commit
-```
-
-This mirrors the `redactCommits` function from `space-schema.ts`.
+- Query commands do not accept classification claims.
+- Subscription payloads are not partially redacted.
+- There is no special label entity type in the phase-1 protocol surface.
 
 ---
 
