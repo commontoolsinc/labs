@@ -16,15 +16,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         cost: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         state: {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount"]
@@ -58,8 +56,7 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["discount"]
@@ -73,11 +70,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -130,11 +126,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

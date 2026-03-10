@@ -38,12 +38,10 @@ const _p = pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             n: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             },
             u: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             }
         },
         required: ["n", "u"]
@@ -79,17 +77,14 @@ const _p = pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             n: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             },
             u: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             }
         },
         required: ["n", "u"]
-    },
-    asOpaque: true
+    }
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

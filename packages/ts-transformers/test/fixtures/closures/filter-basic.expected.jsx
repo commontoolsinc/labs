@@ -46,8 +46,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>Item #{item.key("id")}: {item.key("name")}</div>);
@@ -55,8 +54,7 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Item",
-                        asOpaque: true
+                        $ref: "#/$defs/Item"
                     }
                 },
                 required: ["element"],
@@ -81,11 +79,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -142,11 +139,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

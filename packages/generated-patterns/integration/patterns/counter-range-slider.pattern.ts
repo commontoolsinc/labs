@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface RangeSliderArgs {
@@ -161,33 +161,27 @@ const nudgeSlider = handler(
   },
 );
 
-const liftSliderState = lift(
-  toSchema<
-    { min: Cell<number>; max: Cell<number>; value: Cell<number> }
-  >(),
-  toSchema<
-    { min: number; max: number; span: number; value: number }
-  >(),
-  ({ min, max, value }) => {
-    const rawMin = min.get();
-    const rawMax = max.get();
-    const minValue = toFiniteNumber(rawMin, 0);
-    const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
-    const maxValue = maxCandidate > minValue ? maxCandidate : minValue + 100;
-    const current = clampNumber(
-      toFiniteNumber(value.get(), minValue),
-      minValue,
-      maxValue,
-    );
-    const span = maxValue - minValue;
-    return {
-      min: minValue,
-      max: maxValue,
-      span: span > 0 ? span : 1,
-      value: current,
-    };
-  },
-);
+const liftSliderState = lift<
+  { min: Writable<number>; max: Writable<number>; value: Writable<number> }
+>(({ min, max, value }) => {
+  const rawMin = min.get();
+  const rawMax = max.get();
+  const minValue = toFiniteNumber(rawMin, 0);
+  const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
+  const maxValue = maxCandidate > minValue ? maxCandidate : minValue + 100;
+  const current = clampNumber(
+    toFiniteNumber(value.get(), minValue),
+    minValue,
+    maxValue,
+  );
+  const span = maxValue - minValue;
+  return {
+    min: minValue,
+    max: maxValue,
+    span: span > 0 ? span : 1,
+    value: current,
+  };
+});
 
 const liftStepSize = lift((raw: number | undefined) => {
   const normalized = toFiniteNumber(raw, 1);

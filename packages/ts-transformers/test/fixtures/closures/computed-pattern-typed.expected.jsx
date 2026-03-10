@@ -13,8 +13,7 @@ export default pattern((__ct_pattern_input) => {
                 asCell: true
             },
             multiplier: {
-                type: "number",
-                asOpaque: true
+                type: "number"
             }
         },
         required: ["value", "multiplier"]

@@ -12,7 +12,7 @@ export default pattern<Record<string, never>>((_) => {
 
   const { entries } = wish<SummaryIndexResult>({
     query: "#summaryIndex",
-  }).result;
+  }).result!;
 
   const filtered = computed(() => {
     const q = query.get().toLowerCase().trim();

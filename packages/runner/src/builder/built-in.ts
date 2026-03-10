@@ -11,6 +11,7 @@ import type {
   RequireDefaults,
   Schema,
 } from "./types.ts";
+import { SELF } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
 import type {
   BuiltInCompileAndRunParams,
@@ -408,13 +409,15 @@ export const patternTool = (<
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<RequireDefaults<T>>) => any)
+    | ((
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any)
     | PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {
   const resolvedPattern = isPattern(fnOrPattern)
     ? fnOrPattern
-    : pattern(fnOrPattern);
+    : pattern(fnOrPattern as Parameters<typeof pattern>[0]);
 
   return {
     pattern: resolvedPattern,

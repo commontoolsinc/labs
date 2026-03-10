@@ -21,30 +21,14 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 showHistory: {
-                    type: "boolean",
-                    asOpaque: true
+                    type: "boolean"
                 },
                 messageCount: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 dismissedIndex: {
                     type: "number",
@@ -89,11 +73,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

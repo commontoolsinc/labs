@@ -33,8 +33,7 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema), {});
     // This should also be transformed
     const filtered = items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -74,16 +73,13 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             title: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             },
             done: {
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             },
             position: {
-                type: "number",
-                asOpaque: true
+                type: "number"
             }
         },
         required: ["title", "done", "position"]
@@ -121,8 +117,7 @@ export default pattern((__ct_pattern_input) => {
             type: "array",
             items: {
                 type: "string"
-            },
-            asOpaque: true
+            }
         },
         filtered: {
             type: "array",
@@ -130,21 +125,17 @@ export default pattern((__ct_pattern_input) => {
                 type: "object",
                 properties: {
                     title: {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     },
                     done: {
-                        type: "boolean",
-                        asOpaque: true
+                        type: "boolean"
                     },
                     position: {
-                        type: "number",
-                        asOpaque: true
+                        type: "number"
                     }
                 },
                 required: ["title", "done", "position"]
-            },
-            asOpaque: true
+            }
         }
     },
     required: ["mapped", "filtered"]

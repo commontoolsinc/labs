@@ -22,25 +22,18 @@ export default pattern((state) => {
                                     properties: {},
                                     additionalProperties: {
                                         type: "number"
-                                    },
-                                    asOpaque: true
+                                    }
                                 }
                             },
                             required: ["tagCounts"]
                         },
                         tag: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["state", "tag"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "number",
-                            asOpaque: true
-                        }]
+                    type: ["number", "undefined"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     state: {
                         tagCounts: state.key("tagCounts")
@@ -65,8 +58,7 @@ export default pattern((state) => {
                                         properties: {},
                                         additionalProperties: {
                                             type: "number"
-                                        },
-                                        asOpaque: true
+                                        }
                                     }
                                 },
                                 required: ["tagCounts"]
@@ -80,11 +72,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -135,11 +126,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

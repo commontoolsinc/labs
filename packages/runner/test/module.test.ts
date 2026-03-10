@@ -8,7 +8,7 @@ import {
   isOpaqueRef,
   type JSONSchema,
   type Module,
-  type OpaqueRef,
+  type OpaqueRef as _OpaqueRef,
   type Stream,
 } from "../src/builder/types.ts";
 import {
@@ -150,8 +150,7 @@ describe("module", () => {
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
-      const { value, nodes } =
-        (stream as unknown as OpaqueRef<{ $stream: true }>).export();
+      const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
@@ -242,8 +241,7 @@ describe("module", () => {
       );
       const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
-      const { value, nodes } =
-        (stream as unknown as OpaqueRef<{ $stream: true }>).export();
+      const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });

@@ -13,18 +13,15 @@ export default pattern((__ct_pattern_input) => {
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
     return {
         [NAME]: "unless schema test",
@@ -61,11 +58,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

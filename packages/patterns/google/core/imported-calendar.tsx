@@ -355,7 +355,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // ==========================================================================
   const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
     { query: "#calendarEvents" },
-  ).result;
+  ).result!;
 
   // Navigation State (Writable so navigation buttons work)
   const startDate = Writable.of(getWeekStart(getTodayDate()));
@@ -1025,7 +1025,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 })}
 
                 {/* Event Blocks - using derive() to compute everything at once */}
-                {importedEvents.map((evt) => {
+                {importedEvents.map((evt: any) => {
                   // Use derive() to extract display properties
                   // All derives guard against undefined events
                   const evtTitle = derive(

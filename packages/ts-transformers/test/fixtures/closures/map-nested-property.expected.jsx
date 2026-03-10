@@ -19,7 +19,59 @@ export default pattern((state) => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<div>
-            {item.key("name")} - edited by {state.key("currentUser", "firstName")} {state.key("currentUser", "lastName")}
+            {item.key("name")} - edited by {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                currentUser: {
+                                    type: "object",
+                                    properties: {
+                                        firstName: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["firstName"]
+                                }
+                            },
+                            required: ["currentUser"]
+                        }
+                    },
+                    required: ["state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { state: {
+                        currentUser: {
+                            firstName: state.key("currentUser").firstName
+                        }
+                    } }, ({ state }) => state.currentUser.firstName)} {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                currentUser: {
+                                    type: "object",
+                                    properties: {
+                                        lastName: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["lastName"]
+                                }
+                            },
+                            required: ["currentUser"]
+                        }
+                    },
+                    required: ["state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { state: {
+                        currentUser: {
+                            lastName: state.key("currentUser").lastName
+                        }
+                    } }, ({ state }) => state.currentUser.lastName)}
           </div>);
             }, {
                 type: "object",
@@ -37,12 +89,10 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             firstName: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             },
                                             lastName: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["firstName", "lastName"]
@@ -73,11 +123,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -153,11 +202,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

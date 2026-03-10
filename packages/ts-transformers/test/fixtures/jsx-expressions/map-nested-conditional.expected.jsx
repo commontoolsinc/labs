@@ -36,15 +36,16 @@ export default pattern((_state) => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
                 {__ctHelpers.when({
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{}, {
+                    anyOf: [{
+                            type: "string"
+                        }, {}, {
                             type: "object",
                             properties: {}
                         }]
@@ -68,11 +69,10 @@ export default pattern((_state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -102,11 +102,10 @@ export default pattern((_state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

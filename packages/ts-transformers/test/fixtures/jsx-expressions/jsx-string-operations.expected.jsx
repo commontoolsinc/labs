@@ -18,16 +18,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         title: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         lastName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["title", "firstName", "lastName"]
@@ -48,12 +45,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         lastName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["firstName", "lastName"]
@@ -73,8 +68,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["firstName"]
@@ -95,8 +89,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["firstName"]
@@ -115,12 +108,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         lastName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["firstName", "lastName"]
@@ -140,16 +131,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         title: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         lastName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["title", "firstName", "lastName"]
@@ -172,8 +160,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["firstName"]
@@ -192,8 +179,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         title: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["title"]
@@ -205,7 +191,33 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 title: state.key("title")
             } }, ({ state }) => state.title.toLowerCase())}</p>
-        <p>Length: {state.key("message", "length")}</p>
+        <p>Length: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        message: {
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["message"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                message: {
+                    length: state.key("message").length
+                }
+            } }, ({ state }) => state.message.length)}</p>
         <p>Substring: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -213,8 +225,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         message: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["message"]
@@ -235,12 +246,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["firstName", "count"]
@@ -260,12 +269,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         firstName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["firstName", "count"]
@@ -285,8 +292,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -333,11 +339,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

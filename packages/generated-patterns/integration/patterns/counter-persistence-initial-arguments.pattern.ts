@@ -173,15 +173,15 @@ export const counterPersistenceViaInitialArguments = pattern<
 
     const normalizedMetadata = liftNormalizeMetadata(metadata);
 
-    const currentValue = normalizedState.key("value");
-    const currentStep = normalizedState.key("step");
-    const historyView = normalizedState.key("history");
+    const currentValue = normalizedState.value;
+    const currentStep = normalizedState.step;
+    const historyView = normalizedState.history;
 
     const initializationStatus = liftInitializationStatus(normalizedState);
 
     const historyPreview = liftHistoryPreview(historyView);
 
-    const labelCell = normalizedMetadata.key("label");
+    const labelCell = normalizedMetadata.label;
     const summary =
       str`${labelCell}: value ${currentValue} (mode ${initializationStatus})`;
     const details = str`${summary} history ${historyPreview}`;

@@ -23,12 +23,10 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 prefix: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 suffix: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["prefix", "suffix"]
@@ -37,8 +35,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -69,12 +66,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     prefix: {
-                                        type: "string",
-                                        asOpaque: true
+                                        type: "string"
                                     },
                                     suffix: {
-                                        type: "string",
-                                        asOpaque: true
+                                        type: "string"
                                     }
                                 },
                                 required: ["prefix", "suffix"]
@@ -102,11 +97,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -171,11 +165,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

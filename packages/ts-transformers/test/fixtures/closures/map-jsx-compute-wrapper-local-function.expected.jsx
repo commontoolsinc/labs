@@ -11,8 +11,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {
                         type: "string"
-                    },
-                    asOpaque: true
+                    }
                 }
             },
             required: ["list"]
@@ -46,11 +45,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

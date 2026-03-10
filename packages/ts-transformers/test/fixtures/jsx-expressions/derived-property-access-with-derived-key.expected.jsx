@@ -21,8 +21,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "array",
                 items: {
                     $ref: "#/$defs/Item"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"],
@@ -50,13 +49,11 @@ export default pattern((__ct_pattern_input) => {
                     type: "string"
                 },
                 item: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
+                    $ref: "#/$defs/Item"
                 }
             },
             required: ["aisle", "item"]
         },
-        asOpaque: true,
         $defs: {
             Item: {
                 type: "object",
@@ -89,13 +86,11 @@ export default pattern((__ct_pattern_input) => {
                             type: "string"
                         },
                         item: {
-                            $ref: "#/$defs/Item",
-                            asOpaque: true
+                            $ref: "#/$defs/Item"
                         }
                     },
                     required: ["aisle", "item"]
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["itemsWithAisles"],
@@ -172,8 +167,7 @@ export default pattern((__ct_pattern_input) => {
                     items: {
                         $ref: "#/$defs/Assignment"
                     }
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["groupedByAisle"],
@@ -232,12 +226,10 @@ export default pattern((__ct_pattern_input) => {
                                 items: {
                                     $ref: "#/$defs/Assignment"
                                 }
-                            },
-                            asOpaque: true
+                            }
                         },
                         aisleName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["groupedByAisle", "aisleName"],
@@ -273,7 +265,6 @@ export default pattern((__ct_pattern_input) => {
                     items: {
                         $ref: "#/$defs/Assignment"
                     },
-                    asOpaque: true,
                     $defs: {
                         Assignment: {
                             type: "object",
@@ -307,8 +298,62 @@ export default pattern((__ct_pattern_input) => {
                 }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const assignment = __ct_pattern_input.key("element");
                     return (<div>
-                  <span>{assignment.key("item", "name")}</span>
-                  <ct-checkbox $checked={assignment.key("item", "done")}/>
+                  <span>{__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            name: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["name"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                name: assignment.key("item").name
+                            }
+                        } }, ({ assignment }) => assignment.item.name)}</span>
+                  <ct-checkbox $checked={__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            done: {
+                                                type: "boolean",
+                                                asCell: true
+                                            }
+                                        },
+                                        required: ["done"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean",
+                        asCell: true
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                done: assignment.key("item").done
+                            }
+                        } }, ({ assignment }) => assignment.item.done)}/>
                 </div>);
                 }, {
                     type: "object",
@@ -349,11 +394,10 @@ export default pattern((__ct_pattern_input) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
                         }],
                     $defs: {
                         UIRenderable: {
@@ -385,8 +429,7 @@ export default pattern((__ct_pattern_input) => {
                                     items: {
                                         $ref: "#/$defs/Assignment"
                                     }
-                                },
-                                asOpaque: true
+                                }
                             }
                         },
                         required: ["groupedByAisle"]
@@ -424,11 +467,10 @@ export default pattern((__ct_pattern_input) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -485,11 +527,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

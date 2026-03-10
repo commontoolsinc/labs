@@ -98,7 +98,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
 
   // Approach 2: .key() method - claims to maintain writability
   // Note: .key() returns OpaqueCell which is used in handlers for writes
-  const authViaKey = source.key("auth");
+  const authViaKey = (source as any).key("auth");
 
   // For display - all use direct property access on source
   // (both computedAuth and source.auth should show the same values)

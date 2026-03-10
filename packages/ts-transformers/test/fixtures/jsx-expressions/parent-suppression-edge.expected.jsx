@@ -81,8 +81,86 @@ export default pattern((state) => {
         <h3>Same Base, Different Properties</h3>
         {/* Multiple accesses to same object in one expression */}
         <p>
-          User info: {state.key("user", "name")} (age: {state.key("user", "age")}, email:{" "}
-          {state.key("user", "email")})
+          User info: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    name: state.key("user").name
+                }
+            } }, ({ state }) => state.user.name)} (age: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    age: state.key("user").age
+                }
+            } }, ({ state }) => state.user.age)}, email:{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                email: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["email"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    email: state.key("user").email
+                }
+            } }, ({ state }) => state.user.email)})
         </p>
 
         {/* String concatenation with multiple property accesses */}
@@ -98,19 +176,16 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 profile: {
                                     type: "object",
                                     properties: {
                                         location: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         },
                                         bio: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["location", "bio"]
@@ -149,8 +224,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 age: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["age"]
@@ -177,8 +251,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 age: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["age"]
@@ -200,84 +273,921 @@ export default pattern((state) => {
         <h3>Deeply Nested Property Chains</h3>
         {/* Multiple references to deeply nested object */}
         <p>
-          Theme: {state.key("config", "theme", "colors", "primary")} /{" "}
-          {state.key("config", "theme", "colors", "secondary")} on{" "}
-          {state.key("config", "theme", "colors", "background")}
+          Theme: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        colors: {
+                                            type: "object",
+                                            properties: {
+                                                primary: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["primary"]
+                                        }
+                                    },
+                                    required: ["colors"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        colors: {
+                            primary: state.key("config").theme.colors.primary
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.colors.primary)} /{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        colors: {
+                                            type: "object",
+                                            properties: {
+                                                secondary: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["secondary"]
+                                        }
+                                    },
+                                    required: ["colors"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        colors: {
+                            secondary: state.key("config").theme.colors.secondary
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.colors.secondary)} on{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        colors: {
+                                            type: "object",
+                                            properties: {
+                                                background: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["background"]
+                                        }
+                                    },
+                                    required: ["colors"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        colors: {
+                            background: state.key("config").theme.colors.background
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.colors.background)}
         </p>
 
         {/* Fonts from same nested structure */}
         <p>
-          Typography: Headings in {state.key("config", "theme", "fonts", "heading")}, body in
+          Typography: Headings in {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        fonts: {
+                                            type: "object",
+                                            properties: {
+                                                heading: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["heading"]
+                                        }
+                                    },
+                                    required: ["fonts"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        fonts: {
+                            heading: state.key("config").theme.fonts.heading
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.fonts.heading)}, body in
           {" "}
-          {state.key("config", "theme", "fonts", "body")}, code in{" "}
-          {state.key("config", "theme", "fonts", "mono")}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        fonts: {
+                                            type: "object",
+                                            properties: {
+                                                body: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["body"]
+                                        }
+                                    },
+                                    required: ["fonts"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        fonts: {
+                            body: state.key("config").theme.fonts.body
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.fonts.body)}, code in{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        fonts: {
+                                            type: "object",
+                                            properties: {
+                                                mono: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["mono"]
+                                        }
+                                    },
+                                    required: ["fonts"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        fonts: {
+                            mono: state.key("config").theme.fonts.mono
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.fonts.mono)}
         </p>
 
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["enabled", "disabled"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
-          {state.key("config", "theme", "colors", "primary")} primary color
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                features: {
+                                    type: "object",
+                                    properties: {
+                                        darkMode: {
+                                            type: "boolean"
+                                        }
+                                    },
+                                    required: ["darkMode"]
+                                }
+                            },
+                            required: ["features"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    features: {
+                        darkMode: state.key("config").features.darkMode
+                    }
+                }
+            } }, ({ state }) => state.config.features.darkMode), "enabled", "disabled")} with{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        colors: {
+                                            type: "object",
+                                            properties: {
+                                                primary: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["primary"]
+                                        }
+                                    },
+                                    required: ["colors"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        colors: {
+                            primary: state.key("config").theme.colors.primary
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.colors.primary)} primary color
         </p>
 
         <h3>Very Deep Nesting with Multiple References</h3>
         {/* Accessing different properties at same deep level */}
         <p>
-          Deep value: {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
+          Deep value: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        value: {
+                                                                            type: "string"
+                                                                        }
+                                                                    },
+                                                                    required: ["value"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: {
+                        structure: {
+                            "with": {
+                                many: {
+                                    levels: {
+                                        value: state.key("deeply").nested.structure.with.many.levels.value
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }, ({ state }) => state.deeply.nested.structure.with.many.levels.value)}
           {" "}
-          (count: {state.key("deeply", "nested", "structure", "with", "many", "levels", "count")})
+          (count: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        count: {
+                                                                            type: "number"
+                                                                        }
+                                                                    },
+                                                                    required: ["count"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: {
+                        structure: {
+                            "with": {
+                                many: {
+                                    levels: {
+                                        count: state.key("deeply").nested.structure.with.many.levels.count
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }, ({ state }) => state.deeply.nested.structure.with.many.levels.count)})
         </p>
 
         {/* Mixed depth from same root */}
         <p>
-          Mixed depths: {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
+          Mixed depths: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        value: {
+                                                                            type: "string"
+                                                                        }
+                                                                    },
+                                                                    required: ["value"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: {
+                        structure: {
+                            "with": {
+                                many: {
+                                    levels: {
+                                        value: state.key("deeply").nested.structure.with.many.levels.value
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }, ({ state }) => state.deeply.nested.structure.with.many.levels.value)}
           {" "}
-          in {state.key("deeply", "nested", "structure", "with", "many", "levels", "count")} items
+          in {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        count: {
+                                                                            type: "number"
+                                                                        }
+                                                                    },
+                                                                    required: ["count"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: {
+                        structure: {
+                            "with": {
+                                many: {
+                                    levels: {
+                                        count: state.key("deeply").nested.structure.with.many.levels.count
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }, ({ state }) => state.deeply.nested.structure.with.many.levels.count)} items
         </p>
 
         <h3>Arrays with Shared Base</h3>
         {/* Multiple array properties */}
         <p>
-          Array info: First has {state.key("arrays", "first", "length")} items, second has
+          Array info: First has {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                first: {
+                                    type: "object",
+                                    properties: {
+                                        length: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["length"]
+                                }
+                            },
+                            required: ["first"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    first: {
+                        length: state.key("arrays").first.length
+                    }
+                }
+            } }, ({ state }) => state.arrays.first.length)} items, second has
           {" "}
-          {state.key("arrays", "second", "length")} items
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                second: {
+                                    type: "object",
+                                    properties: {
+                                        length: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["length"]
+                                }
+                            },
+                            required: ["second"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    second: {
+                        length: state.key("arrays").second.length
+                    }
+                }
+            } }, ({ state }) => state.arrays.second.length)} items
         </p>
 
         {/* Nested array access with shared base */}
         <p>
-          Nested: {state.key("arrays", "nested", "0")!.items.length} items in first, count is
+          Nested: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            items: {
+                                                type: "array",
+                                                items: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            count: {
+                                                type: "number"
+                                            }
+                                        },
+                                        required: ["items", "count"]
+                                    }
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    nested: state.key("arrays").nested
+                }
+            } }, ({ state }) => state.arrays.nested[0]!.items.length)} items in first, count is
           {" "}
-          {state.key("arrays", "nested", "0")!.count}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            items: {
+                                                type: "array",
+                                                items: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            count: {
+                                                type: "number"
+                                            }
+                                        },
+                                        required: ["items", "count"]
+                                    }
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    nested: state.key("arrays").nested
+                }
+            } }, ({ state }) => state.arrays.nested[0]!.count)}
         </p>
 
         {/* Array and property access mixed */}
         <p>
-          First item: {state.key("arrays", "first", "0")} (total:{" "}
-          {state.key("arrays", "first", "length")})
+          First item: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                first: {
+                                    type: "array",
+                                    items: {
+                                        type: "string"
+                                    }
+                                }
+                            },
+                            required: ["first"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: ["string", "undefined"]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    first: state.key("arrays").first
+                }
+            } }, ({ state }) => state.arrays.first[0])} (total:{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arrays: {
+                            type: "object",
+                            properties: {
+                                first: {
+                                    type: "object",
+                                    properties: {
+                                        length: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["length"]
+                                }
+                            },
+                            required: ["first"]
+                        }
+                    },
+                    required: ["arrays"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                arrays: {
+                    first: {
+                        length: state.key("arrays").first.length
+                    }
+                }
+            } }, ({ state }) => state.arrays.first.length)})
         </p>
 
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
           Status: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "settings", "notifications"), __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                settings: {
+                                    type: "object",
+                                    properties: {
+                                        notifications: {
+                                            type: "boolean"
+                                        }
+                                    },
+                                    required: ["notifications"]
+                                }
+                            },
+                            required: ["settings"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    settings: {
+                        notifications: state.key("user").settings.notifications
+                    }
+                }
+            } }, ({ state }) => state.user.settings.notifications), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -287,15 +1197,13 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 settings: {
                                     type: "object",
                                     properties: {
                                         theme: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["theme"]
@@ -328,8 +1236,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -366,16 +1273,13 @@ export default pattern((state) => {
                                             type: "object",
                                             properties: {
                                                 small: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 },
                                                 medium: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 },
                                                 large: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 }
                                             },
                                             required: ["small", "medium", "large"]
@@ -412,8 +1316,7 @@ export default pattern((state) => {
         <p>
           Features:{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -433,12 +1336,10 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         darkMode: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         },
                                         animations: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         }
                                     },
                                     required: ["darkMode", "animations"]
@@ -452,8 +1353,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
@@ -477,8 +1377,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -505,8 +1404,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 email: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["email"]
@@ -527,37 +1425,374 @@ export default pattern((state) => {
 
         {/* Property access and method calls mixed */}
         <p>
-          Profile length: {state.key("user", "profile", "bio", "length")} chars in bio,{" "}
-          {state.key("user", "profile", "location", "length")} chars in location
+          Profile length: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        bio: {
+                                            type: "object",
+                                            properties: {
+                                                length: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["length"]
+                                        }
+                                    },
+                                    required: ["bio"]
+                                }
+                            },
+                            required: ["profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    profile: {
+                        bio: {
+                            length: state.key("user").profile.bio.length
+                        }
+                    }
+                }
+            } }, ({ state }) => state.user.profile.bio.length)} chars in bio,{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        location: {
+                                            type: "object",
+                                            properties: {
+                                                length: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["length"]
+                                        }
+                                    },
+                                    required: ["location"]
+                                }
+                            },
+                            required: ["profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    profile: {
+                        location: {
+                            length: state.key("user").profile.location.length
+                        }
+                    }
+                }
+            } }, ({ state }) => state.user.profile.location.length)} chars in location
         </p>
 
         <h3>Edge Cases for Parent Suppression</h3>
         {/* Same intermediate parent used differently */}
         <p>
-          User settings: Theme is {state.key("user", "settings", "theme")} with privacy{" "}
-          {state.key("user", "settings", "privacy")}
+          User settings: Theme is {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                settings: {
+                                    type: "object",
+                                    properties: {
+                                        theme: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["theme"]
+                                }
+                            },
+                            required: ["settings"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    settings: {
+                        theme: state.key("user").settings.theme
+                    }
+                }
+            } }, ({ state }) => state.user.settings.theme)} with privacy{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                settings: {
+                                    type: "object",
+                                    properties: {
+                                        privacy: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["privacy"]
+                                }
+                            },
+                            required: ["settings"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    settings: {
+                        privacy: state.key("user").settings.privacy
+                    }
+                }
+            } }, ({ state }) => state.user.settings.privacy)}
         </p>
 
         {/* Parent and child both used */}
         <p>
-          Data summary: {state.key("data", "items", "length")} items with average{" "}
-          {state.key("data", "totals", "average")}
+          Data summary: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        data: {
+                            type: "object",
+                            properties: {
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        length: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["length"]
+                                }
+                            },
+                            required: ["items"]
+                        }
+                    },
+                    required: ["data"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                data: {
+                    items: {
+                        length: state.key("data").items.length
+                    }
+                }
+            } }, ({ state }) => state.data.items.length)} items with average{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        data: {
+                            type: "object",
+                            properties: {
+                                totals: {
+                                    type: "object",
+                                    properties: {
+                                        average: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["average"]
+                                }
+                            },
+                            required: ["totals"]
+                        }
+                    },
+                    required: ["data"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                data: {
+                    totals: {
+                        average: state.key("data").totals.average
+                    }
+                }
+            } }, ({ state }) => state.data.totals.average)}
         </p>
 
         {/* Multiple levels of the same chain */}
         <p>
-          Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
-          {state.key("config", "theme", "fonts", "body")} with{" "}
+          Nested refs: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        colors: {
+                                            type: "object",
+                                            properties: {
+                                                primary: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["primary"]
+                                        }
+                                    },
+                                    required: ["colors"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        colors: {
+                            primary: state.key("config").theme.colors.primary
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.colors.primary)} in{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        fonts: {
+                                            type: "object",
+                                            properties: {
+                                                body: {
+                                                    type: "string"
+                                                }
+                                            },
+                                            required: ["body"]
+                                        }
+                                    },
+                                    required: ["fonts"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        fonts: {
+                            body: state.key("config").theme.fonts.body
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.fonts.body)} with{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["animations", "no animations"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                features: {
+                                    type: "object",
+                                    properties: {
+                                        animations: {
+                                            type: "boolean"
+                                        }
+                                    },
+                                    required: ["animations"]
+                                }
+                            },
+                            required: ["features"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    features: {
+                        animations: state.key("config").features.animations
+                    }
+                }
+            } }, ({ state }) => state.config.features.animations), "animations", "no animations")}
         </p>
 
         <h3>Extreme Parent Suppression Test</h3>
@@ -603,8 +1838,7 @@ export default pattern((state) => {
                     required: ["structure"]
                 }
             },
-            required: ["nested"],
-            asOpaque: true
+            required: ["nested"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -646,16 +1880,173 @@ export default pattern((state) => {
                     required: ["with"]
                 }
             },
-            required: ["structure"],
-            asOpaque: true
+            required: ["structure"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
-          {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        value: {
+                                                                            type: "string"
+                                                                        },
+                                                                        count: {
+                                                                            type: "number"
+                                                                        }
+                                                                    },
+                                                                    required: ["value", "count"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                structure: {
+                    type: "object",
+                    properties: {
+                        "with": {
+                            type: "object",
+                            properties: {
+                                many: {
+                                    type: "object",
+                                    properties: {
+                                        levels: {
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "string"
+                                                },
+                                                count: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value", "count"]
+                                        }
+                                    },
+                                    required: ["levels"]
+                                }
+                            },
+                            required: ["many"]
+                        }
+                    },
+                    required: ["with"]
+                }
+            },
+            required: ["structure"]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: state.key("deeply").nested
+                }
+            } }, ({ state }) => state.deeply.nested), "exists", "missing")}, Value:{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        deeply: {
+                            type: "object",
+                            properties: {
+                                nested: {
+                                    type: "object",
+                                    properties: {
+                                        structure: {
+                                            type: "object",
+                                            properties: {
+                                                "with": {
+                                                    type: "object",
+                                                    properties: {
+                                                        many: {
+                                                            type: "object",
+                                                            properties: {
+                                                                levels: {
+                                                                    type: "object",
+                                                                    properties: {
+                                                                        value: {
+                                                                            type: "string"
+                                                                        }
+                                                                    },
+                                                                    required: ["value"]
+                                                                }
+                                                            },
+                                                            required: ["levels"]
+                                                        }
+                                                    },
+                                                    required: ["many"]
+                                                }
+                                            },
+                                            required: ["with"]
+                                        }
+                                    },
+                                    required: ["structure"]
+                                }
+                            },
+                            required: ["nested"]
+                        }
+                    },
+                    required: ["deeply"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                deeply: {
+                    nested: {
+                        structure: {
+                            "with": {
+                                many: {
+                                    levels: {
+                                        value: state.key("deeply").nested.structure.with.many.levels.value
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }, ({ state }) => state.deeply.nested.structure.with.many.levels.value)}
         </p>
       </div>),
     };
@@ -911,11 +2302,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

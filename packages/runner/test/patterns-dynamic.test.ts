@@ -1044,7 +1044,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
       };
     });
 
@@ -1080,7 +1080,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
       };
     });
 

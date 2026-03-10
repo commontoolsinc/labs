@@ -5,7 +5,6 @@
       "type": "number"
     },
     "opaqueValue": {
-      "asOpaque": true,
       "type": "boolean"
     },
     "readonlyValue": {

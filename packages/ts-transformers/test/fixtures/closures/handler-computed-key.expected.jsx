@@ -20,8 +20,7 @@ export default pattern((state) => {
                     additionalProperties: {
                         type: "number",
                         asCell: true
-                    },
-                    asOpaque: true
+                    }
                 }
             },
             required: ["recordMap"]
@@ -57,11 +56,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

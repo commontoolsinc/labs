@@ -53,11 +53,10 @@ export default pattern((__ct_pattern_input) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -90,8 +89,7 @@ export default pattern((__ct_pattern_input) => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -100,8 +98,7 @@ export default pattern((__ct_pattern_input) => {
             type: "array",
             items: {
                 type: "string"
-            },
-            asOpaque: true
+            }
         }
     },
     required: ["$NAME", "$UI", "values"],
@@ -110,11 +107,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

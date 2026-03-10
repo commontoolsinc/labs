@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface SummaryArgs {
@@ -28,10 +28,10 @@ interface AdjustmentRecord {
 }
 
 interface SummaryInputs {
-  current: Cell<number>;
-  history: Cell<number[]>;
-  step: Cell<number>;
-  adjustments: Cell<AdjustmentRecord[]>;
+  current: Writable<number>;
+  history: Writable<number[]>;
+  step: Writable<number>;
+  adjustments: Writable<AdjustmentRecord[]>;
 }
 
 interface SummarySnapshot {
@@ -170,13 +170,11 @@ const liftSanitizeStep = lift((input: number | undefined) =>
 );
 const liftSanitizeHistory = lift(sanitizeHistory);
 const liftSanitizeAdjustments = lift(sanitizeAdjustments);
-const liftSummary = lift(
-  toSchema<SummaryInputs>(),
-  toSchema<SummarySnapshot>(),
+const liftSummary = lift<SummaryInputs>(
   ({ current, history, step, adjustments }) => {
     const currentNumber = toInteger(current.get(), 0);
-    const historyList = sanitizeHistory(history.get());
-    const adjustmentList = sanitizeAdjustments(adjustments.get());
+    const historyList = sanitizeHistory([...history.get()]);
+    const adjustmentList = sanitizeAdjustments([...adjustments.get()]);
     const lastAdjustment = adjustmentList.at(-1);
     const delta = lastAdjustment?.delta ?? 0;
     const previous = currentNumber - delta;

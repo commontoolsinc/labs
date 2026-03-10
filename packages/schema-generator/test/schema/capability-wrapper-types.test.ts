@@ -30,7 +30,7 @@ describe("Schema: Capability wrapper types", () => {
 
     expect(op).toBeDefined();
     expect(op.properties?.baz?.type).toBe("boolean");
-    expect(op.asOpaque).toBe(true);
+    expect(op.asOpaque).toBeUndefined();
   });
 
   it("resolves alias chains for capability wrappers", async () => {
@@ -60,6 +60,6 @@ describe("Schema: Capability wrapper types", () => {
     expect(wo.asCell).toBe(true);
 
     expect(op.properties?.enabled?.type).toBe("boolean");
-    expect(op.asOpaque).toBe(true);
+    expect(op.asOpaque).toBeUndefined();
   });
 });

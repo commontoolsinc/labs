@@ -35,7 +35,6 @@ export default pattern((input: Writable<State>) => {
     };
 }, {
     $ref: "#/$defs/State",
-    asOpaque: true,
     $defs: {
         State: {
             type: "object",
@@ -63,11 +62,10 @@ export default pattern((input: Writable<State>) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

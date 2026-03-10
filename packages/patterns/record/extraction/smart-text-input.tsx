@@ -336,7 +336,7 @@ export function SmartTextInput(
   // OCR using generateText with vision model
   const ocr = generateText({
     system: OCR_SYSTEM_PROMPT,
-    prompt: ocrPrompt,
+    prompt: ocrPrompt as any,
     model: "anthropic:claude-sonnet-4-5",
   });
 

@@ -20,8 +20,7 @@ export default pattern((state) => {
                         type: "array",
                         items: {
                             $ref: "#/$defs/Preference"
-                        },
-                        asOpaque: true
+                        }
                     }
                 },
                 required: ["preferences"]
@@ -45,8 +44,7 @@ export default pattern((state) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema, { state: {
             preferences: state.key("preferences")
@@ -87,10 +85,8 @@ export default pattern((state) => {
         liked: {
             type: "array",
             items: {
-                type: "string",
-                asOpaque: true
-            },
-            asOpaque: true
+                type: "string"
+            }
         }
     },
     required: ["liked"]

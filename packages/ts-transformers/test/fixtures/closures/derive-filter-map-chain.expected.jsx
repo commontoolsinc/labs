@@ -10,8 +10,13 @@ export default pattern((state) => {
     const wishQuery = derive({
         type: "object",
         properties: {
-            prefs: true,
-            food: true
+            prefs: {
+                type: "array",
+                items: true
+            },
+            food: {
+                type: "string"
+            }
         },
         required: ["prefs", "food"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -61,8 +66,7 @@ export default pattern((state) => {
     type: "object",
     properties: {
         wishQuery: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         }
     },
     required: ["wishQuery"]

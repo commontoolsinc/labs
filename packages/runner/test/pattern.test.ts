@@ -65,7 +65,7 @@ describe("pattern", () => {
     const double = lift(({ x }) => x * 2);
     const doublePattern = pattern<{ x: number }>(() => {
       const x = opaqueRef<number>(1);
-      x.for("x");
+      (x as any).for("x");
       return { double: double({ x }) };
     });
     expect(isPattern(doublePattern)).toBe(true);

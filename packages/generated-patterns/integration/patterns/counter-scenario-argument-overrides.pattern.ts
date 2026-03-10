@@ -172,8 +172,8 @@ export const counterWithScenarioArgumentOverrides = pattern<
   ({ value, step }) => {
     const sanitizedArguments = liftSanitizedArguments({ value, step });
 
-    const sanitizedValue = sanitizedArguments.key("value");
-    const sanitizedStep = sanitizedArguments.key("step");
+    const sanitizedValue = sanitizedArguments.value;
+    const sanitizedStep = sanitizedArguments.step;
 
     const runtimeValue = cell(0);
     const runtimeStep = cell(1);

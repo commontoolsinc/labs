@@ -11,8 +11,7 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -31,8 +30,7 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -62,8 +60,7 @@ export default pattern((cell) => {
             $ref: "#/$defs/JSXElement"
         },
         value: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["$UI", "value"],
@@ -72,11 +69,10 @@ export default pattern((cell) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

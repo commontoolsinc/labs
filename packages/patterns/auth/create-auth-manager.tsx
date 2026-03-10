@@ -149,7 +149,7 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const auth = wishResult.result.auth;
+      const auth = wishResult.result!.auth;
 
       // ======================================================================
       // SMALL FOCUSED COMPUTEDS
@@ -228,7 +228,7 @@ export function createAuthManager<T, R>(
       const currentEmail = computed(() => auth?.user?.email ?? "");
 
       // Refresh state
-      const refreshStream = wishResult.result.refreshToken;
+      const refreshStream = wishResult.result!.refreshToken;
       const refreshing = Writable.of(false);
       const isRefreshing = computed(() => refreshing.get());
       const refreshFailed = Writable.of(false);

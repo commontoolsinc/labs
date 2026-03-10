@@ -4,9 +4,9 @@ import * as __ctHelpers from "commontools";
  *
  * This mimics the pattern from default-app.tsx where:
  * - allCharms comes from wish<{ allCharms: MentionableCharm[] }>
- * - computed(() => allCharms.length) accesses .length on an OpaqueRef<T[]>
+ * - computed(() => allCharms.length) accesses .length on an array from wish
  *
- * The fix ensures the schema is { type: "array", items: { not: true, asOpaque: true } }
+ * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
 import { computed, NAME, pattern, UI, wish } from "commontools";
@@ -42,7 +42,7 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema).result;
+    } as const satisfies __ctHelpers.JSONSchema).result!;
     return {
         [NAME]: __ctHelpers.derive({
             type: "object",
@@ -113,11 +113,10 @@ export default pattern(() => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -138,8 +137,7 @@ export default pattern(() => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -151,11 +149,10 @@ export default pattern(() => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

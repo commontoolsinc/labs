@@ -16,12 +16,10 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 price: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 discount: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 }
             },
             required: ["price", "discount"]
@@ -35,16 +33,13 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 price: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 discount: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 tax: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 }
             },
             required: ["price", "discount", "tax"]
@@ -84,11 +79,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

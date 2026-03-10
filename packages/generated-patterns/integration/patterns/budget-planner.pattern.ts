@@ -7,7 +7,7 @@ import {
   handler,
   lift,
   pattern,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface BudgetCategoryInput {
@@ -433,54 +433,40 @@ const liftSanitizedTotal = lift((value: number | undefined) =>
   sanitizeTotalBudget(value)
 );
 
-const liftBaseState = lift(
-  toSchema<{
-    categories: Cell<BudgetCategoryInput[]>;
-    total: Cell<number>;
-  }>(),
-  toSchema<{
+const liftBaseState = lift<{
+  categories: Writable<BudgetCategoryInput[]>;
+  total: Writable<number>;
+}>(({ categories, total }) =>
+  sanitizeCategoryList(categories.get(), total.get())
+);
+
+const liftSummary = lift<{
+  total: Writable<number>;
+  base: Writable<{
     catalog: BudgetCategoryCatalog[];
     allocations: AllocationRecord;
-  }>(),
-  ({ categories, total }) =>
-    sanitizeCategoryList(categories.get(), total.get()),
-);
+  }>;
+  overrides: Writable<AllocationRecord | null>;
+}>(({ total, base, overrides }) => {
+  const baseStateValue = base.get();
+  const active = overrides.get() ?? baseStateValue.allocations;
+  return enforceAllocationLimits(
+    active,
+    baseStateValue.catalog,
+    sanitizeTotalBudget(total.get()),
+  );
+});
 
-const liftSummary = lift(
-  toSchema<{
-    total: Cell<number>;
-    base: Cell<{
-      catalog: BudgetCategoryCatalog[];
-      allocations: AllocationRecord;
-    }>;
-    overrides: Cell<AllocationRecord | null>;
-  }>(),
-  toSchema<BudgetSummary>(),
-  ({ total, base, overrides }) => {
-    const baseStateValue = base.get();
-    const active = overrides.get() ?? baseStateValue.allocations;
-    return enforceAllocationLimits(
-      active,
-      baseStateValue.catalog,
-      sanitizeTotalBudget(total.get()),
-    );
-  },
-);
-
-const liftSummaryLabel = lift(
-  toSchema<{
-    total: Cell<number>;
-    summary: Cell<BudgetSummary>;
-  }>(),
-  toSchema<string>(),
-  ({ total, summary }) => {
-    const totalValue = sanitizeTotalBudget(total.get());
-    const state = summary.get();
-    return `Allocated ${formatAmount(state.totalAllocated)} of ` +
-      `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
-      "remaining)";
-  },
-);
+const liftSummaryLabel = lift<{
+  total: Writable<number>;
+  summary: Writable<BudgetSummary>;
+}>(({ total, summary }) => {
+  const totalValue = sanitizeTotalBudget(total.get());
+  const state = summary.get();
+  return `Allocated ${formatAmount(state.totalAllocated)} of ` +
+    `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
+    "remaining)";
+});
 
 const liftStatusMessage = lift((state: BudgetSummary) => {
   if (state.remaining <= 0.01) {

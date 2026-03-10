@@ -24,12 +24,14 @@ Deno.test("computed throws error", async () => {
   });
 
   const testPattern = pattern<{ input: number }>(({ input }) => {
-    const poisoned = lift((val: number) => {
+    // deno-lint-ignore no-explicit-any
+    const poisoned = (lift((val: number) => {
       if (val > 1) throw new Error("Poisoned!");
       return `got: ${val}`;
-    })(input).for("poisoned");
+    })(input) as any).for("poisoned");
 
-    const healthy = lift((p: string) => `healthy: ${p}`)(poisoned).for(
+    // deno-lint-ignore no-explicit-any
+    const healthy = (lift((p: string) => `healthy: ${p}`)(poisoned) as any).for(
       "healthy",
     );
 

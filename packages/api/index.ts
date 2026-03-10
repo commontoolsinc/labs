@@ -863,19 +863,7 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> =
-  // Already a branded cell? Return as-is
-  [T] extends [AnyBrandedCell<any>] ? T
-    // Branded cell | undefined? Strip undefined to avoid brand collision
-    // in the OpaqueCell<T> & OpaqueRefInner<T> intersection below.
-    // The proxy never returns undefined at runtime, so this is safe.
-    : [NonNullable<T>] extends [AnyBrandedCell<any>]
-      ? [NonNullable<T>] extends [never] ? OpaqueCell<T> & OpaqueRefInner<T>
-      : NonNullable<T>
-    // Everything else: wrap in OpaqueCell + map inner properties
-    :
-      & OpaqueCell<T>
-      & OpaqueRefInner<T>;
+export type OpaqueRef<T> = T;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
@@ -906,9 +894,11 @@ type OpaqueRefInner<T> = [T] extends
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
-  [CELL_LIKE]?: unknown;
-};
+export type CellLike<T> =
+  | T
+  | (AnyBrandedCell<MaybeCellWrapped<T>> & {
+    [CELL_LIKE]?: unknown;
+  });
 type MaybeCellWrapped<T> =
   | T
   | AnyBrandedCell<T>
@@ -1479,7 +1469,9 @@ export type PatternToolFunction = <
   E extends object = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<RequireDefaults<T>>) => any)
+    | ((
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,

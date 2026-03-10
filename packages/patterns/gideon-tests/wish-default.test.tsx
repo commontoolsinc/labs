@@ -16,8 +16,9 @@ interface MinimalPiece {
 export default pattern(() => {
   // This is the core thing being tested: wish("#default") should resolve
   // and provide allPieces as a writable array
-  const { allPieces } =
-    wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" }).result;
+  const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>({
+    query: "#default",
+  }).result!;
 
   // Track state for assertions
   const initialLength = computed(() => allPieces?.get?.()?.length ?? -1);

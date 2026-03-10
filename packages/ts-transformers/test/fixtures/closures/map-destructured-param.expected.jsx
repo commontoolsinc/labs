@@ -21,15 +21,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         x: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         state: {
                             type: "object",
                             properties: {
                                 scale: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["scale"]
@@ -47,15 +45,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         y: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         state: {
                             type: "object",
                             properties: {
                                 scale: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["scale"]
@@ -84,8 +80,7 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     scale: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["scale"]
@@ -113,11 +108,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -178,11 +172,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

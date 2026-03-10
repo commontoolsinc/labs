@@ -30,8 +30,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             sum: {
-                type: "number",
-                asOpaque: true
+                type: "number"
             }
         },
         required: ["sum"]
@@ -40,8 +39,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
     return doubled;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
+    type: "number"
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

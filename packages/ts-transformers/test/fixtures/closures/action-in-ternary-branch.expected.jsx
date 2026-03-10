@@ -41,8 +41,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "object",
                 properties: {
                     description: {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     }
                 },
                 required: ["description"]
@@ -50,7 +49,7 @@ export default pattern((__ct_pattern_input) => {
         },
         required: ["card"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
+        "enum": [false, true, ""]
     } as const satisfies __ctHelpers.JSONSchema, { card: {
             description: card.key("description")
         } }, ({ card }) => {
@@ -84,19 +83,20 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {
                         title: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         description: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["title", "description"]
                 },
                 hasDescription: {
-                    type: "boolean",
-                    asOpaque: true
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "boolean"
+                        }]
                 },
                 startEditing: {
                     asStream: true
@@ -107,11 +107,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }],
             $defs: {
                 UIRenderable: {
@@ -135,7 +134,7 @@ export default pattern((__ct_pattern_input) => {
             <span>{card.title}</span>
             {/* Nested ternary with computed - triggers derive wrapper */}
             {__ctHelpers.ifElse({
-            type: "boolean"
+            "enum": [false, true, ""]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -146,13 +145,47 @@ export default pattern((__ct_pattern_input) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "null"
-                }, {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
+                }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
+        } as const satisfies __ctHelpers.JSONSchema, hasDescription, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                card: {
+                    type: "object",
+                    properties: {
+                        description: {
+                            type: "string"
+                        }
+                    },
+                    required: ["description"]
+                }
+            },
+            required: ["card"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, { card: {
+                description: card.description
+            } }, ({ card }) => <span>{card.description}</span>), null)}
             {/* Action in SAME branch - must be captured by the derive! */}
             <ct-button onClick={startEditing}>Edit</ct-button>
           </div>)))}
@@ -188,8 +221,7 @@ export default pattern((__ct_pattern_input) => {
             $ref: "#/$defs/JSXElement"
         },
         card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
+            $ref: "#/$defs/Card"
         }
     },
     required: ["$UI", "card"],
@@ -210,11 +242,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {
