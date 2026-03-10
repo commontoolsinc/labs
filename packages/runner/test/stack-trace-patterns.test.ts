@@ -1,45 +1,55 @@
-/// <cts-enable />
 // Tests that errors thrown from pattern lift() and handler() callbacks
-// produce stack traces with correct source locations pointing back to
-// the original test file with exact line numbers.
+// produce stack traces with correct ORIGINAL source locations when
+// compiled through the full CTS transformer pipeline.
 //
-// NOTE: The CTS transformer rewrites the source, shifting line numbers.
-// The asserted line numbers below are the *transformed* positions.
-// The goal is to eventually get the original pre-transformation line numbers
-// (e.g. the lift throw is on source line 44, but CTS transforms it to line 39).
+// These tests exercise the production compilation path:
+// source string → transformCtDirective → TypeScript + CTS transformers
+// → source maps → eval → error → parseStack → original line numbers.
 
 import { assertEquals, assertMatch } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
-import { handler, lift } from "../src/builder/module.ts";
-import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-const THIS_FILE = "stack-trace-patterns.test.ts";
+function makeProgram(source: string): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{ name: "/main.tsx", contents: source }],
+  };
+}
 
-// CTS-transformed line numbers for each throw site.
-// TODO: These should match the original source lines once source maps
-// are wired through the CTS transformer pipeline.
-const LIFT_THROW_LINE = 51; // source line 54
-const HANDLER_THROW_LINE = 114; // source line 120
-const NEGATIVE_THROW_LINE = 189; // source line 189
-
-Deno.test("lift error stack trace has exact line number", async () => {
+Deno.test("lift error through CTS pipeline has correct source line", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
+    apiUrl: new URL("http://localhost"),
     storageManager,
   });
 
-  const frame = pushFrame({
-    space,
-    generatedIdCounter: 0,
-    opaqueRefs: new Set(),
-    runtime,
-  });
+  // Pattern source: lift() call is on line 3, throw is on line 5.
+  // CTS transforms lift() into derive(), and setTextRange preserves the
+  // lift() call position (line 3) as the source map target for the
+  // entire transformed expression.
+  const LIFT_LINE = 3;
+  const source = [
+    "/// <cts-enable />", //                                  line 1
+    'import { lift, pattern } from "commontools";', //        line 2
+    "const double = lift((val: number) => {", //              line 3
+    "  if (val > 10) {", //                                   line 4
+    "    throw new Error('lift value too large');", //         line 5
+    "  }", //                                                 line 6
+    "  return val * 2;", //                                   line 7
+    "});", //                                                 line 8
+    "export default pattern<{ input: number }>(({ input }) => {", // line 9
+    "  const result = double(input);", //                     line 10
+    "  return { result };", //                                line 11
+    "});", //                                                 line 12
+  ].join("\n");
+
+  const patternFn = await runtime.harness.run(makeProgram(source));
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -47,25 +57,15 @@ Deno.test("lift error stack trace has exact line number", async () => {
     capturedError = err;
   });
 
-  const testPattern = pattern<{ input: number }>(({ input }) => {
-    const result = lift((val: number) => {
-      if (val > 10) {
-        throw new Error("lift value too large"); // source line 54, CTS line 39
-      }
-      return val * 2;
-    })(input).for("result");
-    return { result };
-  });
+  const resultCell = runtime.getCell(space, "lift-stack-trace-cts");
 
-  const resultCell = runtime.getCell(space, "lift-stack-trace-test");
-
-  runtime.setup(undefined, testPattern, { input: 5 }, resultCell);
+  await runtime.setup(undefined, patternFn, { input: 5 }, resultCell);
   runtime.start(resultCell);
 
   const initial = (await resultCell.pull()) as any;
   assertEquals(initial.result, 10);
 
-  // Trigger the error
+  // Trigger the error by setting input > 10
   const argumentCell = resultCell.getArgumentCell<{ input: number }>()!;
   const tx = runtime.edit();
   argumentCell.withTx(tx).set({ input: 20 });
@@ -78,32 +78,46 @@ Deno.test("lift error stack trace has exact line number", async () => {
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
 
-  // First frame must point to this file at the exact throw line
+  // First frame must point to the lift() call in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`${THIS_FILE}:${LIFT_THROW_LINE}:\\d+`),
-    `first frame should be ${THIS_FILE}:${LIFT_THROW_LINE}, got:\n${frames[0]}`,
+    new RegExp(`main\\.tsx:${LIFT_LINE}:\\d+`),
+    `first frame should reference main.tsx:${LIFT_LINE}, got:\n${frames[0]}`,
   );
 
-  popFrame(frame);
   await runtime.dispose();
   await storageManager.close();
 });
 
-Deno.test("handler error stack trace has exact line number", async () => {
+Deno.test("handler error through CTS pipeline has correct source line", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
+    apiUrl: new URL("http://localhost"),
     storageManager,
   });
 
-  const frame = pushFrame({
-    space,
-    generatedIdCounter: 0,
-    opaqueRefs: new Set(),
-    runtime,
-  });
+  // Pattern source: handler() call is on line 3, throw is on line 6.
+  // CTS transforms handler() and setTextRange preserves the handler()
+  // call position (line 3) as the source map target.
+  const HANDLER_LINE = 3;
+  const source = [
+    "/// <cts-enable />", //                                          line 1
+    'import { type Cell, handler, pattern } from "commontools";', //  line 2
+    "const clickHandler = handler(", //                               line 3
+    "  (event: { action: string }, state: { status: Cell<string> }) => {", // line 4
+    '    if (event.action === "crash") {', //                         line 5
+    "      throw new Error('handler crash on purpose');", //          line 6
+    "    }", //                                                       line 7
+    "    state.status.set(`did: ${event.action}`);", //               line 8
+    "  },", //                                                        line 9
+    ");", //                                                          line 10
+    "export default pattern<{ status: string }>(({ status }) => {", // line 11
+    "  return { status, stream: clickHandler({ status }) };", //      line 12
+    "});", //                                                         line 13
+  ].join("\n");
+
+  const patternFn = await runtime.harness.run(makeProgram(source));
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -111,26 +125,14 @@ Deno.test("handler error stack trace has exact line number", async () => {
     capturedError = err;
   });
 
-  const clickHandler = handler<
-    { action: string },
-    { status: string }
-  >(
-    ({ action }, state) => {
-      if (action === "crash") {
-        throw new Error("handler crash on purpose"); // source line 120, CTS line 104
-      }
-      state.status = `did: ${action}`;
-    },
-    { proxy: true },
+  const resultCell = runtime.getCell(space, "handler-stack-trace-cts");
+
+  await runtime.setup(
+    undefined,
+    patternFn,
+    { status: "idle" },
+    resultCell,
   );
-
-  const testPattern = pattern<{ status: string }>(({ status }) => {
-    return { status, stream: clickHandler({ status }) };
-  });
-
-  const resultCell = runtime.getCell(space, "handler-stack-trace-test");
-
-  runtime.setup(undefined, testPattern, { status: "idle" }, resultCell);
   runtime.start(resultCell);
 
   await resultCell.pull();
@@ -150,34 +152,42 @@ Deno.test("handler error stack trace has exact line number", async () => {
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
 
-  // First frame must point to this file at the exact throw line
+  // First frame must point to the handler() call in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`${THIS_FILE}:${HANDLER_THROW_LINE}:\\d+`),
-    `first frame should be ${THIS_FILE}:${HANDLER_THROW_LINE}, got:\n${
-      frames[0]
-    }`,
+    new RegExp(`main\\.tsx:${HANDLER_LINE}:\\d+`),
+    `first frame should reference main.tsx:${HANDLER_LINE}, got:\n${frames[0]}`,
   );
 
-  popFrame(frame);
   await runtime.dispose();
   await storageManager.close();
 });
 
-Deno.test("error stack has multiple frames including this file", async () => {
+Deno.test("lift error stack has multiple frames with correct source line", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
+    apiUrl: new URL("http://localhost"),
     storageManager,
   });
 
-  const frame = pushFrame({
-    space,
-    generatedIdCounter: 0,
-    opaqueRefs: new Set(),
-    runtime,
-  });
+  // Pattern source: lift() call is on line 3.
+  // CTS transforms lift() into derive(), setTextRange preserves line 3.
+  const LIFT_LINE = 3;
+  const source = [
+    "/// <cts-enable />", //                                  line 1
+    'import { lift, pattern } from "commontools";', //        line 2
+    "const double = lift((x: number) => {", //                line 3
+    "  if (x < 0) throw new Error('negative not supported');", // line 4
+    "  return x * 2;", //                                     line 5
+    "});", //                                                  line 6
+    "export default pattern<{ n: number }>(({ n }) => {", //   line 7
+    "  const doubled = double(n);", //                         line 8
+    "  return { doubled };", //                                line 9
+    "});", //                                                  line 10
+  ].join("\n");
+
+  const patternFn = await runtime.harness.run(makeProgram(source));
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -185,49 +195,39 @@ Deno.test("error stack has multiple frames including this file", async () => {
     capturedError = err;
   });
 
-  const testPattern = pattern<{ n: number }>(({ n }) => {
-    const doubled = lift((x: number) => {
-      if (x < 0) throw new Error("negative not supported"); // source line 189, CTS line 179
-      return x * 2;
-    })(n).for("doubled");
-    return { doubled };
-  });
+  const resultCell = runtime.getCell(space, "multi-frame-cts");
 
-  const resultCell = runtime.getCell(space, "error-message-test");
-
-  runtime.setup(undefined, testPattern, { n: 1 }, resultCell);
+  await runtime.setup(undefined, patternFn, { n: 1 }, resultCell);
   runtime.start(resultCell);
   await resultCell.pull();
 
+  // Trigger error by setting n < 0
   const argumentCell = resultCell.getArgumentCell<{ n: number }>()!;
   const tx = runtime.edit();
   argumentCell.withTx(tx).set({ n: -5 });
   await tx.commit();
   await runtime.scheduler.idle();
 
-  assertEquals(capturedError !== null, true);
+  assertEquals(capturedError !== null, true, "error should have been caught");
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: negative not supported");
 
-  // First frame points to exact line
+  // First frame points to the lift() call
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`${THIS_FILE}:${NEGATIVE_THROW_LINE}:\\d+`),
-    `first frame should be ${THIS_FILE}:${NEGATIVE_THROW_LINE}, got:\n${
-      frames[0]
-    }`,
+    new RegExp(`main\\.tsx:${LIFT_LINE}:\\d+`),
+    `first frame should reference main.tsx:${LIFT_LINE}, got:\n${frames[0]}`,
   );
 
-  // Should have multiple frames (not just one)
+  // Should have multiple frames
   assertEquals(
     frames.length > 1,
     true,
     `should have multiple frames, got ${frames.length}:\n${stack}`,
   );
 
-  popFrame(frame);
   await runtime.dispose();
   await storageManager.close();
 });
