@@ -2,90 +2,94 @@
 
 ## Status
 
-Draft (revised per architect review)
+Draft (round 3 revision)
 
 ## Overview
 
 Common Tools needs bidirectional integration with messaging platforms (WhatsApp,
-Telegram, Signal, Discord, iMessage, Slack). Some services can authenticate from
-a server. Others (iMessage, Signal) can only connect from the user's machine.
+Telegram, Signal, Discord, iMessage, Slack). The key architectural insight:
+**server-side platforms are just patterns** -- no new infrastructure needed.
+Local-only platforms (iMessage, Signal, WhatsApp/Baileys) need a lightweight
+daemon for machine access.
 
-Each platform is its own pattern with its own lossless types. Platform-specific
-adapters write platform-specific inbound types into platform-specific cells.
-Outbound messaging is via per-platform `sendMessage` Stream handlers. A
-higher-level "Unified Inbox" pattern can optionally normalize for display, but
-normalization is a consumer choice, not a transport requirement.
-
----
-
-## Two Axes of Integration
-
-The architecture is determined by two independent axes:
-
-| | Server can authenticate | Only user's machine can connect |
-|---|---|---|
-| **Webhook/push** | Telegram (webhook), Discord, Slack | -- |
-| **Polling** | Telegram (getUpdates) | iMessage (chat.db), Signal, WhatsApp/Baileys |
-
-### Axis 1: Where does the connection live?
-
-**Server-side** (toolshed): Telegram bot tokens, Discord bot tokens, Slack bot
-tokens, WhatsApp Business API tokens can all be stored and used server-side.
-These use the existing infrastructure -- no new architecture needed.
-
-**User's machine** (local daemon): iMessage requires macOS filesystem access.
-Signal requires local phone registration via signal-cli. WhatsApp/Baileys
-requires local QR code pairing. Only the user's machine can connect.
-
-### Axis 2: What is the connection model?
-
-**Push/webhook**: External service POSTs to a toolshed webhook endpoint. Uses
-the existing webhook ingress system (`/api/webhooks/:id` -> `sendToStream()`).
-Near-instant delivery.
-
-**Polling**: Adapter periodically checks for new data. Server-side polling uses
-`bgUpdater` (60s interval). Local polling uses `fs.watch` or short-interval
-timers.
-
-**Persistent connection**: Some protocols (Discord gateway WebSocket, Signal
-JSON-RPC, Baileys WebSocket) need a long-lived connection. These cannot use
-`bgUpdater` (which is fire-and-forget per tick). They need a dedicated process --
-either a toolshed long-running service or the local daemon.
+Every platform pattern exports the same consumer-facing shape: inbox data as
+cells, a `sendMessage` Stream handler, and JSDoc `#tags` for wish() discovery.
+Consumer patterns like Unified Inbox don't know or care whether delivery happens
+via fetch() or daemon -- they just `.send()` to the Stream.
 
 ---
 
-## Server-Side Integrations (Existing Infrastructure)
+## Two Classes of Platform
 
-Server-side messaging follows the **same pattern as the Google OAuth
-integration** (`packages/toolshed/routes/integrations/google-oauth/`). No new
-architecture is needed -- just new integration modules using existing primitives:
+### Server-Side Platforms (Pure Patterns)
 
-1. **Auth/setup**: Toolshed route at `/api/integrations/{service}/` handles bot
-   token or OAuth configuration
-2. **Inbound (push)**: Register a webhook via the existing webhook ingress
-   system. External service POSTs to `/api/webhooks/:id`, toolshed calls
-   `sendToStream()` into the pattern's inbox stream cell
-3. **Inbound (poll)**: Register the pattern for background updates via
-   `setBGCharm()`. The `bgUpdater` handler fetches new messages every 60 seconds
-4. **Outbound**: Toolshed integration route proxies send requests to the
-   external API
+Telegram, Discord, Slack, and WhatsApp Business are **just patterns**. The
+pattern's `sendMessage` handler calls `fetch()` to the platform API. Inbound
+messages arrive via webhook. No daemon, no toolshed watcher, no new
+infrastructure.
 
-**Example: Telegram webhook mode**
+A Telegram pattern is no different from any other pattern that calls an external
+API. Toolshed provides auth/token setup routes (following the Google OAuth
+model), but the pattern itself handles all messaging logic.
+
+### Local-Only Platforms (Daemon-Bridged)
+
+iMessage needs `chat.db` access. Signal needs `signal-cli` subprocess.
+WhatsApp/Baileys needs local QR pairing. These require a daemon running on the
+user's machine to bridge local data sources into the cell fabric.
+
+| Platform | Why local? | Connection type |
+|----------|-----------|----------------|
+| iMessage | macOS `chat.db` + AppleScript | Filesystem polling |
+| Signal | `signal-cli` subprocess | JSON-RPC (persistent) |
+| WhatsApp/Baileys | QR code pairing | WebSocket (persistent) |
+
+---
+
+## Inbound Message Delivery
+
+Preference order for how messages arrive into platform pattern cells:
+
+### 1. Server-side webhook (preferred)
+
+External service POSTs to `/api/webhooks/:id`, toolshed calls
+`sendToStream()`. Instant delivery. Works for Telegram (`setWebhook`), Discord
+(Interactions endpoint), Slack (Events API).
+
+This is the **default and required path** for server-side messaging. Webhooks
+are instant; polling is not acceptable for message delivery.
+
+### 2. Server-side reactive polling (future)
+
+Pattern uses `wish("#now:1000")` for fast interval-based polling. Not yet
+landed. Currently, `bgUpdater` at 60s is the only server-side poll option --
+acceptable as an interim hack for non-latency-sensitive maintenance tasks (token
+refresh, health checks), not as the long-term messaging design.
+
+### 3. Local daemon (local-only platforms)
+
+Daemon runs on the user's machine, reactively responds to fabric updates via
+`cell.sink()`, and bridges to local data sources (`chat.db`, `signal-cli`,
+Baileys).
+
+---
+
+## Server-Side Platform Pattern Anatomy
+
+Each server-side platform is a self-contained pattern that:
+
+- Uses **webhook ingress** for inbound messages (instant delivery)
+- Uses **`fetch()`** in handlers for outbound sends
+- Uses **toolshed integration routes** for auth/token setup only
+- Uses **`bgUpdater`** only for maintenance (token refresh, health checks)
+
+**Example: Telegram pattern**
 
 ```
-1. Toolshed route stores bot token, calls Telegram setWebhook pointing to /api/webhooks/:id
+1. Toolshed route stores bot token, calls Telegram setWebhook → /api/webhooks/:id
 2. Telegram POSTs updates to /api/webhooks/:id
 3. Webhook handler calls sendToStream() into the Telegram pattern's inbox
-4. Pattern's sendMessage handler calls toolshed route to proxy to Telegram sendMessage API
-```
-
-**Example: Telegram polling mode**
-
-```
-1. Toolshed route stores bot token, registers charm via setBGCharm()
-2. Every 60s, bgUpdater fires, charm calls getUpdates with stored offset
-3. New messages pushed to inbox stream
-4. Outbound same as webhook mode
+4. Pattern's sendMessage handler calls fetch() to Telegram sendMessage API
 ```
 
 **Key existing code:**
@@ -99,14 +103,13 @@ architecture is needed -- just new integration modules using existing primitives
 
 ---
 
-## Common Gateway: Local Daemon (User's Machine Only)
+## Common Gateway: Local Daemon (Local-Only Platforms)
 
-For platforms that can only connect from the user's machine, a standalone Deno
-process ("Common Gateway") runs locally, imports the CT runtime library directly,
-and bridges local data sources into the cell fabric.
+The daemon exists **only** because iMessage/Signal/WhatsApp-Baileys need local
+machine access. For everything server-side, patterns handle it themselves.
 
-The daemon is scoped strictly to local-only services. Server-side services use
-the existing toolshed infrastructure described above.
+A standalone Deno process ("Common Gateway") runs locally, imports the CT
+runtime library directly, and bridges local data sources into the cell fabric.
 
 ### Core Architecture
 
@@ -161,6 +164,62 @@ const { error } = await cell.runtime.editWithRetry((tx) => {
 const streamCell = cell.asSchema({ asStream: true });
 streamCell.withTx(tx).send(payload);
 ```
+
+### Daemon Internals
+
+**Static adapter registry.** Adapters are configured in
+`~/.common-gateway/config.json`, not discovered dynamically. The config
+specifies which adapters are enabled and their cell links for inbox/send
+Streams.
+
+```json
+{
+  "toolshedUrl": "https://toolshed.saga-castor.ts.net",
+  "identityKeyPath": "../labs/claude.key",
+  "space": "my-space",
+  "adapters": {
+    "imessage": {
+      "enabled": true,
+      "inboxCellLink": "...",
+      "sendCellLink": "..."
+    },
+    "signal": {
+      "enabled": true,
+      "phoneNumber": "+1234567890",
+      "inboxCellLink": "...",
+      "sendCellLink": "..."
+    }
+  }
+}
+```
+
+**Single Deno event loop with async tasks per adapter.** Each adapter runs as
+an independent async task within the same Deno process. No worker threads, no
+subprocess per adapter -- just concurrent promises on one event loop.
+
+**Error isolation.** One adapter crashing does not take down others. Each
+adapter task catches its own errors, logs them, and attempts restart with
+exponential backoff. The gateway API exposes per-adapter health status.
+
+**Send stream discovery from config.** The daemon reads cell links from config,
+calls `cell.sink()` on each platform's sendMessage Stream, and dispatches to
+the appropriate local adapter when events arrive.
+
+**Lightweight PlatformAdapter interface** (internal to the daemon, not
+fabric-level):
+
+```typescript
+interface PlatformAdapter {
+  readonly name: string;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  readonly healthy: boolean;
+}
+```
+
+Each adapter's `start()` method sets up inbound polling/connections and
+registers `cell.sink()` watchers for outbound sends. The daemon orchestrates
+lifecycle but delegates all platform logic to the adapter.
 
 ### Per-Platform Adapter Notes
 
@@ -357,56 +416,84 @@ type TelegramChat = {
 
 ---
 
-## Per-Platform Send Handlers
+## Uniform Send API
 
-Outbound messaging uses per-platform `sendMessage` Stream handlers. Each
-platform exposes its own handler with platform-appropriate parameters. The
-handler interface is a Stream -- callers call `.send()` which is fire-and-forget.
-
-Stream `.send()` returns `void`. If delivery confirmation is needed, it flows
-back through a separate delivery-status cell, not as a return value.
+All platforms share a single `sendMessage` Stream type using a discriminated
+union on `platform`. The schema generator produces `anyOf` with
+enum-constrained discriminator fields. Each platform pattern's `sendMessage`
+handler matches on `platform` and acts on its variant's fields.
 
 ```typescript
-// === iMessage ===
-type IMessageSend = Stream<{
-  chatGuid: string;             // which chat to send to
-  text: string;
-  replyToGuid?: string;         // iMessage GUID of message to reply to
-  attachments?: IMessageAttachment[];
-}>;
+type SendMessage =
+  | {
+      platform: "imessage";
+      text: string;
+      chatGuid: string;
+      replyToGuid?: string;
+      attachments?: MessageAttachment[];
+    }
+  | {
+      platform: "signal";
+      text: string;
+      phoneNumber?: string;
+      groupId?: string;
+      quoteTimestamp?: number;
+      expiresInSeconds?: number;
+      attachments?: MessageAttachment[];
+    }
+  | {
+      platform: "telegram";
+      text: string;
+      chatId: number;
+      replyToMessageId?: number;
+      parseMode?: "HTML" | "Markdown";
+    }
+  | {
+      platform: "discord";
+      text: string;
+      channelId: string;
+      replyToMessageId?: string;
+      embeds?: unknown[];
+      attachments?: MessageAttachment[];
+    };
 
-// === Signal ===
-type SignalSend = Stream<{
-  phoneNumber?: string;         // direct message recipient
-  groupId?: string;             // or group chat
-  text: string;
-  quoteTimestamp?: number;      // Signal quote by timestamp
-  expiresInSeconds?: number;    // disappearing messages
-  attachments?: SignalAttachment[];
-}>;
+interface MessageAttachment {
+  data: string;              // base64 or data URI
+  mimeType: string;
+  filename?: string;
+}
+```
 
-// === Telegram ===
-type TelegramSend = Stream<{
-  chatId: number;               // Telegram chat ID
-  text: string;
-  replyToMessageId?: number;    // Telegram message ID
-  parseMode?: "HTML" | "Markdown";
-}>;
+### Platform Pattern Output with #tags
 
-// === Discord ===
-type DiscordSend = Stream<{
-  channelId: string;            // Discord channel ID
-  text: string;
-  replyToMessageId?: string;    // Discord message ID
-  embeds?: Array<Record<string, unknown>>;
-}>;
+Each platform pattern exports its Output with JSDoc `#tags` for wish()
+discovery. This is how consumer patterns find platform inboxes without hardcoded
+references.
+
+```typescript
+/** iMessage integration. #imessage #messaging */
+interface Output {
+  chats: IMessageChat[];
+  sendMessage: Stream<SendMessage>;
+}
+
+/** Telegram bot integration. #telegram #messaging */
+interface Output {
+  chats: TelegramChat[];
+  sendMessage: Stream<SendMessage>;
+}
+
+/** Discord integration. #discord #messaging */
+interface Output {
+  chats: DiscordChat[];
+  sendMessage: Stream<SendMessage>;
+}
 ```
 
 ### Delivery Status (Optional)
 
-Since Stream sends are fire-and-forget, patterns that need delivery confirmation
-observe a separate status cell updated by the daemon or toolshed after the
-external API call completes:
+Stream `.send()` returns `void`. If delivery confirmation is needed, it flows
+back through a separate delivery-status cell, not as a return value:
 
 ```typescript
 type DeliveryStatus = {
@@ -430,37 +517,57 @@ type DeliveryStatus = {
 - **WhatsApp/Baileys:** Event-driven WebSocket (persistent connection). Pushed
   as platform-specific messages to inbox.
 
-### Inbound (server-side, existing infrastructure)
+### Inbound (server-side, webhook)
 
-- **Telegram (webhook):** External service POSTs to `/api/webhooks/:id`,
-  toolshed calls `sendToStream()`.
-- **Telegram (poll):** `bgUpdater` fires every 60s, charm calls `getUpdates`.
-- **Discord/Slack:** Webhook ingress or long-running service.
+- **Telegram:** Telegram POSTs to `/api/webhooks/:id`, toolshed calls
+  `sendToStream()`. Instant.
+- **Discord:** Interactions endpoint webhook. Same flow.
+- **Slack:** Events API webhook. Same flow.
 
-### Outbound (fabric -> external, daemon)
+### Outbound (consumer -> platform, uniform)
 
-Each platform's `sendMessage` Stream handler is watched by the daemon via
-`cell.sink()`. When a pattern sends a message, the sink fires and the daemon
-dispatches to the appropriate adapter.
+Consumer patterns call `.send()` on the platform's `sendMessage` Stream with
+the appropriate discriminated union variant. The platform pattern's handler
+dispatches:
+
+- **Server-side patterns:** Handler calls `fetch()` to the platform API
+  directly.
+- **Local patterns:** Daemon watches the sendMessage Stream via `cell.sink()`
+  and dispatches to the local adapter.
 
 ```typescript
-// iMessage example
-iMessageSendStream.sink((message) => {
-  iMessageAdapter.send(message.chatGuid, message.text, message.replyToGuid);
-});
+// Server-side: Telegram pattern's sendMessage handler
+const handleSendMessage = handler<SendMessage, {}>(
+  (message, {}) => {
+    if (message.platform !== "telegram") return;
+    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      body: JSON.stringify({
+        chat_id: message.chatId,
+        text: message.text,
+        reply_to_message_id: message.replyToMessageId,
+        parse_mode: message.parseMode,
+      }),
+    });
+  },
+);
 
-// Signal example
-signalSendStream.sink((message) => {
-  signalAdapter.send(message.phoneNumber, message.text, {
-    expiresInSeconds: message.expiresInSeconds,
-  });
+// Local: daemon watches iMessage sendMessage Stream
+iMessageSendStream.sink((message) => {
+  if (message.platform !== "imessage") return;
+  iMessageAdapter.send(message.chatGuid, message.text, message.replyToGuid);
 });
 ```
 
-### Outbound (fabric -> external, server-side)
+### Stream/Sink Reliability
 
-Pattern's `sendMessage` handler calls a toolshed integration route that proxies
-to the external API (same model as existing Discord integration).
+- **`Stream.send()` queues in the scheduler**, not lossy. Events are persisted
+  via `editWithRetry()` transactions before being dispatched.
+- **`cell.sink()` fires for every event.** The sink callback receives each
+  `.send()` payload individually.
+- **Transaction safety on daemon crash:** Unprocessed send events remain in the
+  Stream cell. On restart, the daemon re-attaches sinks and processes any
+  queued events.
 
 ### Single-Machine Assumption
 
@@ -476,11 +583,101 @@ one writer for local-source data.
    path, space name. Saves config to `~/.common-gateway/config.json`.
 2. **Start:** Loads config, initializes runtime client, connects to storage,
    starts enabled platform adapters, sets up `cell.sink()` watchers on each
-   platform's send handler.
+   platform's send Stream.
 3. **Running:** Inbound messages flow reactively into per-platform Stream cells.
    Send handler sinks fire callbacks for outbound delivery.
 4. **`--daemon` mode:** Runs as a background process. On macOS, can install as a
    launchd service.
+
+---
+
+## Unified Inbox Pattern (Consumer)
+
+The Unified Inbox is a **consumer pattern** that discovers platform inboxes via
+`wish()`, aggregates messages via `computed()`, and routes replies to the
+correct platform's `sendMessage` Stream.
+
+```typescript
+import { handler, UI, NAME } from "@commontools/common-ui";
+
+// Discover all messaging platform patterns via #messaging tag
+const imessage = wish<{
+  chats: IMessageChat[];
+  sendMessage: Stream<SendMessage>;
+}>({ query: "#imessage #messaging" });
+
+const telegram = wish<{
+  chats: TelegramChat[];
+  sendMessage: Stream<SendMessage>;
+}>({ query: "#telegram #messaging" });
+
+const discord = wish<{
+  chats: DiscordChat[];
+  sendMessage: Stream<SendMessage>;
+}>({ query: "#discord #messaging" });
+
+// Normalize all platform messages into a unified timeline
+interface UnifiedMessage {
+  platform: string;
+  chatId: string;
+  sender: string;
+  text: string | null;
+  timestamp: number;
+  raw: unknown;               // preserve original for platform-specific features
+}
+
+const allMessages = computed(() => {
+  const messages: UnifiedMessage[] = [];
+
+  for (const chat of imessage.result?.chats ?? []) {
+    for (const msg of chat.messages) {
+      messages.push({
+        platform: "imessage",
+        chatId: chat.chatGuid,
+        sender: msg.isFromMe ? "me" : msg.handleId,
+        text: msg.text,
+        timestamp: new Date(msg.timestamp).getTime(),
+        raw: msg,
+      });
+    }
+  }
+
+  for (const chat of telegram.result?.chats ?? []) {
+    for (const msg of chat.messages) {
+      messages.push({
+        platform: "telegram",
+        chatId: String(chat.chatId),
+        sender: msg.isFromMe ? "me" : msg.from.firstName,
+        text: msg.text,
+        timestamp: msg.timestamp * 1000,
+        raw: msg,
+      });
+    }
+  }
+
+  // ... same for discord, signal
+
+  return messages.sort((a, b) => b.timestamp - a.timestamp);
+});
+
+// Route replies to the correct platform's sendMessage Stream
+function sendReply(platform: string, payload: SendMessage) {
+  switch (platform) {
+    case "imessage": imessage.result?.sendMessage.send(payload); break;
+    case "telegram": telegram.result?.sendMessage.send(payload); break;
+    case "discord":  discord.result?.sendMessage.send(payload); break;
+  }
+}
+```
+
+The Unified Inbox pattern:
+
+- Discovers platform patterns via `wish()` with `#messaging` tags
+- Projects platform-specific types into a common display format (lossy
+  normalization -- only for rendering, not storage)
+- Routes outbound replies to the correct per-platform `sendMessage` Stream
+  based on which conversation the user is viewing
+- Individual platform patterns work independently without the Unified Inbox
 
 ---
 
@@ -528,61 +725,12 @@ common-tools-app/
 
 ---
 
-## Unified Inbox Pattern (Higher-Level Consumer)
-
-The Unified Inbox is a **consumer pattern** that optionally normalizes
-per-platform messages for display. It is not part of the transport layer --
-it subscribes to the per-platform inboxes and projects into a common view.
-
-```
-+----------------------------------------------+
-|  Unified Inbox Pattern                       |
-|  (higher-level normalization consumer)       |
-|                                              |
-|  +-----------+  +-------------------------+  |
-|  | Telegram  |  | iMessage inbox          |  |
-|  | inbox     |  | Signal inbox            |  |
-|  | Discord   |  | WhatsApp inbox          |  |
-|  | inbox     |  | (platform-specific      |  |
-|  | (lossless)|  |  lossless types)        |  |
-|  +-----+-----+  +-----------+-------------+  |
-|        |                    |                |
-|        +--------+-----------+                |
-|                 v                             |
-|        normalize() -- project to             |
-|        common display fields                 |
-|        (consumer's choice, lossy)            |
-|                 |                             |
-|                 v                             |
-|        +----------------+                     |
-|        | Chat UI        |                     |
-|        | (conversation  |                     |
-|        |  list + detail)|                     |
-|        +----------------+                     |
-|                 |                             |
-|                 v (reply)                     |
-|        route to per-platform                  |
-|        sendMessage handler                    |
-+----------------------------------------------+
-```
-
-The Unified Inbox pattern:
-
-- Subscribes to each platform's inbox Stream cells (discovered via `wish()`)
-- Projects platform-specific types into a common display format (lossy
-  normalization -- only for rendering, not storage)
-- Routes outbound replies to the correct per-platform `sendMessage` handler
-  based on which conversation the user is viewing
-- Individual platform patterns work independently without the Unified Inbox
-
----
-
 ## Comparison with OpenClaw
 
 | Aspect | OpenClaw | Common Tools |
 |--------|----------|-------------|
-| Runtime | Single Node.js Gateway process | Split: toolshed (server) + daemon (local) |
-| Server services | All local | Existing toolshed infra (webhooks, bgUpdater) |
+| Runtime | Single Node.js Gateway process | Split: patterns (server) + daemon (local) |
+| Server services | All local | Pure patterns (fetch + webhooks) |
 | Local services | Same process | Local daemon (Common Gateway) |
 | Communication | Internal function calls | Cell fabric (runtime library) |
 | State | In-memory + local DB | Reactive cells in shared storage |
@@ -591,21 +739,22 @@ The Unified Inbox pattern:
 | Signal | signal-cli JSON-RPC | signal-cli JSON-RPC (same) |
 | Packaging | Docker / systemd | Standalone binary / Tauri sidecar |
 | Message types | Normalized at transport | Per-platform lossless, normalize at consumer |
-| Outbound | Shared send queue | Per-platform Stream handlers |
+| Outbound | Shared send queue | Uniform sendMessage Stream (discriminated union) |
 
 **Key architectural difference:** OpenClaw is a monolith -- everything runs in
-one process. CT's approach is distributed -- server-side services use existing
-toolshed infrastructure (webhook ingress, `setBGCharm()`, integration routes),
-local-only services run in the daemon, and they both write to the same cell
-fabric. Each platform is its own pattern with its own lossless types and its own
-send handler. This means:
+one process. CT's approach splits cleanly: server-side platforms are just
+patterns that call `fetch()` and receive webhooks, local-only platforms use the
+daemon, and they all write to the same cell fabric. Each platform exports the
+same consumer-facing shape (inbox cells + `sendMessage` Stream). This means:
 
-- Server-side services work without the daemon running
+- Server-side platforms work without any daemon
 - The daemon only handles truly local things (filesystem, local subprocesses)
 - State is always available via the web (even if daemon is offline, you see
   last-synced messages)
 - No information is lost at the transport layer -- platform-specific features
   (reactions, threads, disappearing messages) are preserved
+- Consumer patterns use `wish()` to discover platforms and don't care about
+  delivery mechanism
 
 ---
 
@@ -634,10 +783,10 @@ send handler. This means:
    conversation entities? Existing patterns strongly favor inline arrays, but
    per-message entities enable fine-grained addressability.
 
-7. **Persistent connections server-side:** Discord gateway and Slack socket mode
-   need long-lived connections that don't fit the `bgUpdater` model. Should
-   these run as dedicated toolshed services, or should webhook mode be the
-   default for server-side?
+7. **`wish("#now:1000")` for fast polling:** Once reactive polling lands,
+   server-side patterns can poll at sub-second intervals without bgUpdater.
+   This eliminates the 60s limitation and may make webhooks optional for some
+   platforms.
 
 ---
 
@@ -658,8 +807,7 @@ send handler. This means:
 
 ### Phase 3: Server-Side Channels
 
-- [ ] Telegram integration in toolshed (webhook ingress + `setBGCharm()` +
-      send route, following Google OAuth model)
+- [ ] Telegram pattern (webhook ingress + `fetch()` send, pure pattern)
 - [ ] Discord integration upgrade (currently webhook-only, add full messaging)
 - [ ] WhatsApp local adapter (Baileys) with lossless type and send handler
 
@@ -672,8 +820,8 @@ send handler. This means:
 
 ### Phase 5: Unified Experience
 
-- [ ] Unified Inbox pattern (higher-level normalization consumer)
-- [ ] Cross-platform reply routing via per-platform send handlers
+- [ ] Unified Inbox pattern (wish-based discovery, computed aggregation)
+- [ ] Cross-platform reply routing via uniform sendMessage Stream
 - [ ] Notification integration (Tauri native notifications)
 - [ ] Mobile Tauri plugins (Android SMS)
 - [ ] Auto-update for daemon/app
