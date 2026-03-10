@@ -38,6 +38,10 @@ function reqPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+/**
+ * **Browser-only.** Requires IndexedDB. On the server, use
+ * `FileSystemCompilationCache` instead.
+ */
 export class IDBCompilationCache implements CompilationCacheStorage {
   private dbPromise: Promise<IDBDatabase> | undefined;
 

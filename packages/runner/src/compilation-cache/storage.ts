@@ -11,7 +11,7 @@ export interface CompilationCacheEntry {
 export interface CompilationCacheStorage {
   get(programHash: string): Promise<CompilationCacheEntry | undefined>;
   set(programHash: string, entry: CompilationCacheEntry): Promise<void>;
-  /** Delete all entries not matching the given fingerprint. */
+  /** Delete all entries not matching the given fingerprint. Returns number evicted. */
   evictStale(currentFingerprint: string): Promise<number>;
   /** Delete oldest entries until at most `keepCount` remain. Returns number evicted. */
   evictOldest(keepCount: number): Promise<number>;

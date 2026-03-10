@@ -1,8 +1,16 @@
+import { getLogger } from "@commontools/utils/logger";
 import type {
   CompilationCacheEntry,
   CompilationCacheStorage,
 } from "./storage.ts";
 
+const logger = getLogger("compilation-cache");
+
+/**
+ * **Server-only.** Requires Deno filesystem APIs (`Deno.readTextFile`,
+ * `Deno.writeTextFile`, `Deno.mkdir`, `Deno.rename`, `Deno.remove`,
+ * `Deno.readDir`). In the browser, use `IDBCompilationCache` instead.
+ */
 export class FileSystemCompilationCache implements CompilationCacheStorage {
   constructor(private cacheDir: string) {}
 
@@ -47,16 +55,18 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
             await Deno.remove(filePath);
             evicted++;
           }
-        } catch {
-          // Corrupt or unreadable entry — remove it
+        } catch (err) {
+          logger.warn("fs-cache", `Corrupt cache entry ${filePath}`, err);
           try {
             await Deno.remove(filePath);
             evicted++;
           } catch { /* already gone */ }
         }
       }
-    } catch {
-      // Cache directory doesn't exist yet — nothing to evict
+    } catch (err) {
+      if (!(err instanceof Deno.errors.NotFound)) {
+        logger.warn("fs-cache", `Failed to read cache directory`, err);
+      }
     }
     return evicted;
   }
@@ -71,12 +81,15 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
           const text = await Deno.readTextFile(filePath);
           const entry = JSON.parse(text) as CompilationCacheEntry;
           entries.push({ name: dirEntry.name, cachedAt: entry.cachedAt });
-        } catch {
-          // Corrupt — treat as oldest
+        } catch (err) {
+          logger.warn("fs-cache", `Corrupt cache entry ${filePath}`, err);
           entries.push({ name: dirEntry.name, cachedAt: 0 });
         }
       }
-    } catch {
+    } catch (err) {
+      if (!(err instanceof Deno.errors.NotFound)) {
+        logger.warn("fs-cache", `Failed to read cache directory`, err);
+      }
       return 0;
     }
 

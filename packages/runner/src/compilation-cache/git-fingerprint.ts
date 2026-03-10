@@ -2,6 +2,9 @@
  * Compute a fingerprint from the current git state.
  * Used for server-side compilation cache invalidation.
  *
+ * **Server-only.** Requires Deno APIs and `git` on PATH. In the browser,
+ * use `InitializationData.buildHash` (the worker bundle hash) instead.
+ *
  * Returns undefined when not in a git repository (e.g., Docker deployment).
  * In that case, the compilation cache should be disabled — without git
  * we have no way to detect code changes.
