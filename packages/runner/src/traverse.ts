@@ -83,6 +83,14 @@ const enum TypeValidity {
   Unknown = 2,
 }
 
+type ValuePath = readonly ["value", ...string[]];
+export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
+  path: ValuePath;
+};
+export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
+  address: IMemorySpaceValueAddress;
+};
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -598,7 +606,7 @@ export function mergeAnyOfMatches<T>(
  * The address must start with "value", or we won't be able to generate this link.
  */
 function getNormalizedLink(
-  address: IMemorySpaceAddress,
+  address: IMemorySpaceValueAddress,
   schema?: JSONSchema,
 ): NormalizedFullLink {
   if (address.path.length === 0 || address.path[0] !== "value") {
@@ -637,7 +645,7 @@ export abstract class BaseObjectTraverser {
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
   ): TraverseResult<Immutable<StorableValue>>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -656,7 +664,7 @@ export abstract class BaseObjectTraverser {
    * @returns
    */
   protected traverseDAG(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
@@ -699,10 +707,10 @@ export abstract class BaseObjectTraverser {
             index < defaultValue.length
             ? defaultValue[index]
             : undefined;
-        let docItem: IMemorySpaceAttestation = {
+        let docItem: IMemorySpaceValueAttestation = {
           address: {
             ...doc.address,
-            path: [...doc.address.path, index.toString()],
+            path: appendToPath(doc.address.path, index.toString()),
           },
           value: item,
         };
@@ -808,7 +816,10 @@ export abstract class BaseObjectTraverser {
           [k, v],
         ) => {
           const itemDoc = {
-            address: { ...doc.address, path: [...doc.address.path, k] },
+            address: {
+              ...doc.address,
+              path: appendToPath(doc.address.path, k),
+            },
             value: v,
           };
           const val = this.traverseDAG(
@@ -848,7 +859,7 @@ export abstract class BaseObjectTraverser {
 
   // Wrapper for getAtPath that provides all the parameters that are class fields.
   protected getDocAtPath(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     path: readonly string[],
     selector?: SchemaPathSelector,
     lastNode: LastNode = "value",
@@ -876,9 +887,9 @@ export abstract class BaseObjectTraverser {
    * @returns
    */
   protected nextLink(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     selector?: SchemaPathSelector,
-  ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
+  ): [IMemorySpaceValueAttestation, SchemaPathSelector | undefined] {
     if (isPrimitiveCellLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return followPointer(
@@ -929,7 +940,7 @@ export abstract class BaseObjectTraverser {
  */
 export function getAtPath(
   tx: IExtendedStorageTransaction,
-  doc: IMemorySpaceAttestation,
+  doc: IMemorySpaceValueAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
@@ -938,7 +949,7 @@ export function getAtPath(
   includeSource?: boolean,
   lastNode: LastNode = "value",
 ): [
-  IMemorySpaceAttestation,
+  IMemorySpaceValueAttestation,
   SchemaPathSelector | undefined,
 ] {
   let curDoc = doc;
@@ -983,13 +994,19 @@ export function getAtPath(
       if (part === "length") {
         curDoc = {
           ...curDoc,
-          address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+          address: {
+            ...curDoc.address,
+            path: appendToPath(curDoc.address.path, part),
+          },
           value: curDoc.value.length,
         };
       } else {
         curDoc = {
           ...curDoc,
-          address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+          address: {
+            ...curDoc.address,
+            path: appendToPath(curDoc.address.path, part),
+          },
           value: elementAt(curDoc.value, part),
         };
       }
@@ -1001,7 +1018,10 @@ export function getAtPath(
       // captures that invalidation.
       curDoc = {
         ...curDoc,
-        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+        address: {
+          ...curDoc.address,
+          path: appendToPath(curDoc.address.path, part),
+        },
         value: curDoc.value.length,
       };
     } else if (
@@ -1010,7 +1030,10 @@ export function getAtPath(
       const cursorObj = curDoc.value as Immutable<JSONObject>;
       curDoc = {
         ...curDoc,
-        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+        address: {
+          ...curDoc.address,
+          path: appendToPath(curDoc.address.path, part),
+        },
         value: cursorObj[part] as Immutable<StorableDatum>,
       };
       tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
@@ -1027,7 +1050,7 @@ export function getAtPath(
         ...curDoc,
         address: {
           ...curDoc.address,
-          path: [...curDoc.address.path, ...missing],
+          path: appendPartsToPath(curDoc.address.path, missing),
         },
         value: undefined,
       };
@@ -1039,7 +1062,9 @@ export function getAtPath(
   }
 }
 
-function notFound(address: IMemorySpaceAddress): IMemorySpaceAttestation {
+function notFound(
+  address: IMemorySpaceValueAddress,
+): IMemorySpaceValueAttestation {
   return {
     address,
     value: undefined,
@@ -1095,7 +1120,7 @@ function getTrackerKey(
  */
 function followPointer(
   tx: IExtendedStorageTransaction,
-  doc: IMemorySpaceAttestation,
+  doc: IMemorySpaceValueAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
@@ -1104,7 +1129,7 @@ function followPointer(
   includeSource?: boolean,
   lastNode?: LastNode,
 ): [
-  IMemorySpaceAttestation,
+  IMemorySpaceValueAttestation,
   SchemaPathSelector | undefined,
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
@@ -1112,7 +1137,7 @@ function followPointer(
   const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
-  const target: IMemorySpaceAddress = {
+  const target: IMemorySpaceValueAddress = {
     space: link.space,
     id: link.id,
     type: "application/json",
@@ -1178,13 +1203,23 @@ function followPointer(
     // If the doc exists, but we don't have our entire path to the link target,
     // see if we can get there through intermediate documents.
     const lastPath = (error !== undefined)
-      ? error.path
-      : valueEntry.address.path;
+      ? error.path // this may not be a ValuePath
+      : valueEntry.address.path; // this is a ValuePath
     if (valueEntry === undefined || valueEntry.value === undefined) {
+      let lastExisting: ValuePath = ["value"];
       // Never slice below "value" - it's the minimum valid path for getNormalizedLink
-      const lastExisting = lastPath.length <= 1
-        ? ["value"]
-        : lastPath.slice(0, -1);
+      if (lastPath.length > 1) {
+        // It's possible an error path may not have a value. If so, we throw.
+        if (lastPath[0] !== "value") {
+          logger.error(
+            "traverse",
+            () => ["Invalid path:", lastPath, error, valueEntry?.address],
+          );
+          throw new Error("Invalid path (not a ValuePath)");
+        }
+        // The last element in path wasn't found, so chop that off
+        lastExisting = ["value", ...lastPath.slice(1, -1)];
+      }
       const remaining = target.path.slice(lastExisting.length);
       const partialTarget = { ...target, path: lastExisting };
       const lastValue = tx.readOrThrow(partialTarget)!;
@@ -1673,7 +1708,8 @@ function narrowSchema(
         "traverse",
         () => ["Mismatched paths", docPath, selector.path],
       );
-      return { path: [], schema: false };
+      // these paths should include value even if we failed to match
+      return { path: ["value"], schema: false };
     }
     pathIndex++;
   }
@@ -1788,7 +1824,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   }
 
   override traverse(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
     // Reset per-traverse stats (but NOT the shared memo)
@@ -1818,11 +1854,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-    const rv = this.traverseWithSelector(
-      doc,
-      this.selector,
-      link,
-    );
+    const rv = this.traverseWithSelector(doc, this.selector, link);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
     if (elapsed > 100) {
@@ -1876,7 +1908,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * we can call traverseWithSchema instead.
    */
   traverseWithSelector(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
@@ -1950,7 +1982,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    *   the doc does not match the schema
    */
   traverseWithSchema(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
@@ -1986,7 +2018,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   }
 
   private _traverseWithSchemaInner(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
@@ -2426,7 +2458,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    *  elements failed to validate.
    */
   private traverseArrayWithSchema(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
@@ -2437,10 +2469,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     // We use `every` here so if our input is a sparse array, so is our output.
     const valid = docArray.every((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
-      let curDoc: IMemorySpaceAttestation = {
+      let curDoc: IMemorySpaceValueAttestation = {
         address: {
           ...doc.address,
-          path: [...doc.address.path, index.toString()],
+          path: appendToPath(doc.address.path, index.toString()),
         },
         value: item,
       };
@@ -2607,7 +2639,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * @returns An object with only the properties that matched the schema
    */
   private traverseObjectWithSchema(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
   ): Record<string, Immutable<StorableValue>> | undefined {
@@ -2642,7 +2674,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       }
       const propAddress = {
         ...doc.address,
-        path: [...doc.address.path, propKey],
+        path: appendToPath(doc.address.path, propKey),
       };
       // If we have a link, the traverseWithSchema will handle that for us.
       // If we have a value, we instead need to handle it ourselves
@@ -2685,7 +2717,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         }
         const propAddress = {
           ...doc.address,
-          path: [...doc.address.path, propKey],
+          path: appendToPath(doc.address.path, propKey),
         };
         if (SchemaObjectTraverser.asCellOrStream(propSchema)) {
           const { ok: val, error } = this.traverseWithSchema({
@@ -2744,7 +2776,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   // The doc.value should be a primitive cell link, and we've already
   // done a nonRecursive read on it.
   private traversePointerWithSchema(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
@@ -2823,7 +2855,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   }
 
   private traversePrimitive(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): Immutable<StorableValue> {
     if (SchemaObjectTraverser.asCellOrStream(schema)) {
@@ -2873,7 +2905,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   }
 
   private applyDefault(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): StorableDatum | undefined {
     if (isObject(schema) && schema.default !== undefined) {
@@ -2883,7 +2915,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return undefined;
   }
 
-  private getDebugValue(doc: IMemorySpaceAttestation) {
+  private getDebugValue(doc: IMemorySpaceValueAttestation) {
     if (doc.value === undefined) {
       return "undefined";
     }
@@ -3166,7 +3198,7 @@ function getCircularReplacer() {
  *   information that we should use for the cell.
  */
 function getNextCellLink(
-  doc: IMemorySpaceAttestation,
+  doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
 ): NormalizedFullLink {
   // For my cell link, itemLink currently points to the last redirect
@@ -3188,4 +3220,14 @@ function getNextCellLink(
     doc.value,
   ]);
   return getNormalizedLink(doc.address, schema);
+}
+
+// helper function - since path starts with value, the new array will too
+function appendToPath(path: ValuePath, part: string): ValuePath {
+  return [...path, part] as ValuePath;
+}
+
+// helper function - since path starts with value, the new array will too
+function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
+  return [...path, ...parts] as ValuePath;
 }

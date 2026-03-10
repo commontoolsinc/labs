@@ -33,7 +33,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value + 1), __ctHelpers.derive({
             type: "object",
             properties: {
@@ -52,7 +52,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value + 2), "undefined")}
       </div>),
     };

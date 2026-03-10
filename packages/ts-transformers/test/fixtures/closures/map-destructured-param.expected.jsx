@@ -12,61 +12,66 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.mapWithPattern(__ctHelpers.pattern(({ element: { x, y }, params: { state } }) => (<div>
+        {state.key("points").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element", "x");
+                const y = __ct_pattern_input.key("element", "y");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             Point: ({__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        x: {
+                            type: "number",
+                            asOpaque: true
                         },
-                        required: ["scale"]
-                    }
-                },
-                required: ["x", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
-                state: {
-                    scale: state.scale
-                }
-            }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    y: {
-                        type: "number",
-                        asOpaque: true
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["scale"]
+                        }
                     },
+                    required: ["x", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    x: x,
                     state: {
-                        type: "object",
-                        properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["scale"]
+                        scale: state.key("scale")
                     }
-                },
-                required: ["y", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                y: y,
-                state: {
-                    scale: state.scale
-                }
-            }, ({ y, state }) => y * state.scale)})
-          </div>), {
+                }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        y: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["scale"]
+                        }
+                    },
+                    required: ["y", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    y: y,
+                    state: {
+                        scale: state.key("scale")
+                    }
+                }, ({ y, state }) => y * state.scale)})
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -127,7 +132,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    scale: state.scale
+                    scale: state.key("scale")
                 }
             })}
       </div>),

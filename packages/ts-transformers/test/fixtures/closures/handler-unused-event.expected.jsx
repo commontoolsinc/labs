@@ -28,7 +28,7 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1))({
             state: {
-                counter: state.counter
+                counter: state.key("counter")
             }
         })}>
         Increment (ignore event)

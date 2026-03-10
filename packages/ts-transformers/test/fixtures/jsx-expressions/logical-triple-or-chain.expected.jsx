@@ -18,7 +18,13 @@ export default pattern((_state) => {
     return {
         [UI]: (<div>
         {/* Triple || chain - first truthy wins */}
-        <span>{__ctHelpers.derive({
+        <span>{__ctHelpers.unless({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: ["number", "string"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 primary: {
@@ -32,19 +38,20 @@ export default pattern((_state) => {
             },
             required: ["primary", "secondary"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "string",
-                    "enum": ["no content"]
-                }]
+            type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
             primary: primary,
             secondary: secondary
-        }, ({ primary, secondary }) => primary.get().length || secondary.get().length || "no content")}</span>
+        }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
 
         {/* Triple || with mixed types */}
-        <span>{__ctHelpers.derive({
+        <span>{__ctHelpers.unless({
+            type: ["number", "undefined"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -57,8 +64,8 @@ export default pattern((_state) => {
             },
             required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length || 0)}</span>
+            type: ["number", "undefined"]
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
       </div>),
     };
 }, false as const satisfies __ctHelpers.JSONSchema, {

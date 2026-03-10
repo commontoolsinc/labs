@@ -11,7 +11,8 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element, params: {} }) => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const element = __ct_pattern_input.key("element");
                 const __ct_val_key = dynamicKey;
                 const val = __ctHelpers.derive({
                     type: "object",
@@ -33,13 +34,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

@@ -9,7 +9,7 @@ function nextKey(): string {
     return `key-${counter}`;
 }
 export default pattern((state) => {
-    const recordMap = state.records;
+    const recordMap = state.key("records");
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",

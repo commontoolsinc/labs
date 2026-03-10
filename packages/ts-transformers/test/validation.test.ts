@@ -640,6 +640,45 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       "Map callback outside JSX in pattern should be allowed (transformed to pattern)",
     );
   });
+
+  await t.step(
+    "allows nested map/filter callbacks inside module-scope helpers",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      interface Entry {
+        label: string;
+        score: number;
+      }
+
+      const normalize = (entries: Entry[]) =>
+        entries
+          .map((entry) => ({
+            label: entry.label.trim(),
+            score: entry.score,
+          }))
+          .filter((entry) => entry.score > 0);
+
+      export default pattern<{ entries: Entry[] }>(({ entries }) => {
+        const normalized = normalize(entries);
+        return { normalized };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const creationErrors = errors.filter((error) =>
+        error.type === "pattern-context:function-creation"
+      );
+      assertEquals(
+        creationErrors.length,
+        0,
+        "Callbacks in standalone helpers should not be flagged as pattern-context function creation",
+      );
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
@@ -994,6 +1033,35 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   );
 
   await t.step(
+    "errors on .map() after ?? [] fallback regardless of legacy flag",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).map((item) => <span>{item.name}</span>)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+    },
+  );
+
+  await t.step(
     "allows .map() on direct property access (correct usage)",
     async () => {
       const source = `/// <cts-enable />
@@ -1228,6 +1296,11 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should mention .map()",
       );
+      assertEquals(
+        errors[0]!.message.includes(".get().map(...)"),
+        true,
+        "Error should suggest explicit .get().map(...) workaround",
+      );
     },
   );
 
@@ -1251,6 +1324,32 @@ Deno.test("Standalone Function Validation", async (t) => {
         errors.length,
         0,
         "Reactive operations inside patternTool() should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "keeps unresolved patternTool callbacks in compute context",
+    async () => {
+      const source = `/// <cts-enable />
+      const helpers: Record<string, unknown> = {};
+
+      const tool = (helpers.patternTool as (fn: (input: { value?: string }) => string | undefined) => unknown)(
+        (input) => input?.value,
+      );
+      tool;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const optionalErrors = errors.filter((error) =>
+        error.type === "pattern-context:optional-chaining"
+      );
+      assertEquals(
+        optionalErrors.length,
+        0,
+        "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
       );
     },
   );

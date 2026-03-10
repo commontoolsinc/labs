@@ -12,28 +12,32 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Performs computation on element property - should wrap in computed() */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: {} }) => (<div>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                return (<div>
             Item #{index}: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    name: item.name
-                } }, ({ item }) => item.name.toUpperCase())}
-          </div>), {
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["item"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { item: {
+                        name: item.key("name")
+                    } }, ({ item }) => item.name.toUpperCase())}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -41,13 +45,9 @@ export default pattern((state) => {
                     },
                     index: {
                         type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

@@ -74,7 +74,11 @@ export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
 
 export const schema: typeof schemaFunction = (schema) => schema;
 
-export { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
+export {
+  AuthSchema,
+  OAuth2TokenSchema,
+  WebhookConfigSchema,
+} from "./schema-lib.ts";
 export type {
   AnyCell,
   AnyCellWrapping,

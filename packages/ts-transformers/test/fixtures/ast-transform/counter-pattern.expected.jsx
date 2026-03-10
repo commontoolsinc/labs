@@ -34,7 +34,7 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
 });
 export default pattern((state) => {
     return {
-        [NAME]: str `Simple counter: ${state.value}`,
+        [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
@@ -47,7 +47,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, state.value, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, state.key("value"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -65,12 +65,12 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
-        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
+        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
       </div>),
-        value: state.value,
+        value: state.key("value"),
     };
 }, {
     type: "object",

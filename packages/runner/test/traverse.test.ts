@@ -29,10 +29,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "@commontools/runner";
-import {
-  IMemorySpaceAddress,
-  IMemorySpaceAttestation,
-} from "../src/storage/interface.ts";
+import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
 function getTraverser(
@@ -608,13 +605,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docAFoo = {
+          const docAFoo: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "foo"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.foo as StorableDatum,
           };
           const docASelector = {
@@ -675,13 +672,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = { path: ["value", "current"], schema: true };
@@ -743,13 +740,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = {
@@ -825,7 +822,7 @@ for (const canonicalHashing of [false, true]) {
         const cfc = new ContextualFlowControl();
         const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
 
-        const doc: IMemorySpaceAttestation = {
+        const doc: IMemorySpaceValueAttestation = {
           address: {
             space: "did:null:null",
             id: docUri,

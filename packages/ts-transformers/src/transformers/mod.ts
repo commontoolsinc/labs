@@ -1,4 +1,5 @@
 export { CastValidationTransformer } from "./cast-validation.ts";
+export { CapabilityLoweringTransformer } from "./capability-lowering.ts";
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { OpaqueRefJSXTransformer } from "./opaque-ref-jsx.ts";

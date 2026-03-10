@@ -409,7 +409,7 @@ export default pattern(() => {
 
       // === NAME computed format ===
       // KNOWN BUG: NAME not updating after note creation in test environment
-      { assertion: assert_name_format, skip: true },
+      { assertion: assert_name_format },
 
       // === Selection system ===
       { assertion: assert_selection_initial },

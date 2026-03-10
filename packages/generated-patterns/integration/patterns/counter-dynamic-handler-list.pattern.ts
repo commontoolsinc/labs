@@ -139,7 +139,7 @@ const liftSlots = lift(
     });
   },
 );
-const liftHandlers = lift((entries: unknown) => {
+const liftHandlers = lift((entries: { adjust: unknown }[] | undefined) => {
   if (!Array.isArray(entries)) return [] as unknown[];
   return entries.map((item: any) => item?.adjust);
 });

@@ -62,9 +62,9 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                matrix: state.matrix,
-                row: state.row,
-                col: state.col
+                matrix: state.key("matrix"),
+                row: state.key("row"),
+                col: state.key("col")
             } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
 
         {/* Triple nested access */}
@@ -112,16 +112,16 @@ export default pattern((state) => {
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
-                    arrays: state.nested.arrays,
-                    index: state.nested.index
+                    arrays: state.key("nested").arrays,
+                    index: state.key("nested").index
                 },
-                row: state.row
+                row: state.key("row")
             } }, ({ state }) => state.nested.arrays[state.nested.index]![state.row])}</p>
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
         <p>
-          First and last: {state.items[0]} and{" "}
+          First and last: {state.key("items", "0")} and{" "}
           {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -148,7 +148,7 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}
         </p>
 
@@ -174,7 +174,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr
+                arr: state.key("arr")
             } }, ({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!)}</p>
 
         <h3>Computed Indices</h3>
@@ -213,9 +213,9 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr,
-                a: state.a,
-                b: state.b
+                arr: state.key("arr"),
+                a: state.key("a"),
+                b: state.key("b")
             } }, ({ state }) => state.arr[state.a + state.b])}</p>
 
         {/* Index from computation involving array */}
@@ -249,8 +249,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                row: state.row
+                items: state.key("items"),
+                row: state.key("row")
             } }, ({ state }) => state.items[state.row % state.items.length])}</p>
 
         {/* Complex index expression */}
@@ -284,8 +284,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr,
-                a: state.a
+                arr: state.key("arr"),
+                a: state.key("a")
             } }, ({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)])}</p>
 
         <h3>Chained Element Access</h3>
@@ -338,9 +338,9 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.users,
-                selectedUser: state.selectedUser,
-                selectedScore: state.selectedScore
+                users: state.key("users"),
+                selectedUser: state.key("selectedUser"),
+                selectedScore: state.key("selectedScore")
             } }, ({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore])!}
         </p>
 
@@ -378,8 +378,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                indices: state.indices
+                items: state.key("items"),
+                indices: state.key("indices")
             } }, ({ state }) => state.items[state.indices[0]!])}</p>
 
         {/* Array element used as index for same array */}
@@ -409,7 +409,7 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr
+                arr: state.key("arr")
             } }, ({ state }) => state.arr[state.arr[0]!])}</p>
 
         <h3>Mixed Property and Element Access</h3>
@@ -449,8 +449,8 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
-                    arrays: state.nested.arrays,
-                    index: state.nested.index
+                    arrays: state.key("nested").arrays,
+                    index: state.key("nested").index
                 }
             } }, ({ state }) => state.nested.arrays[state.nested.index]!.length)}</p>
 
@@ -492,8 +492,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.users,
-                selectedUser: state.selectedUser
+                users: state.key("users"),
+                selectedUser: state.key("selectedUser")
             } }, ({ state }) => state.users[state.selectedUser]!.name.length)}</p>
 
         <h3>Element Access in Conditions</h3>
@@ -536,8 +536,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr,
-                a: state.a
+                arr: state.key("arr"),
+                a: state.key("a")
             } }, ({ state }) => state.arr[state.a]! > 10), __ctHelpers.derive({
             type: "object",
             properties: {
@@ -564,9 +564,9 @@ export default pattern((state) => {
             type: "string",
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                b: state.b
-            } }, ({ state }) => state.items[state.b]!), state.items[0]!)}
+                items: state.key("items"),
+                b: state.key("b")
+            } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
         </p>
 
         {/* Element access in boolean expression */}
@@ -612,9 +612,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                matrix: state.matrix,
-                row: state.row,
-                col: state.col
+                matrix: state.key("matrix"),
+                row: state.key("row"),
+                col: state.key("col")
             } }, ({ state }) => state.matrix[state.row]![state.col]! > 0), "positive", "non-positive")}
         </p>
 
@@ -649,9 +649,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr,
-                a: state.a,
-                b: state.b
+                arr: state.key("arr"),
+                a: state.key("a"),
+                b: state.key("b")
             } }, ({ state }) => state.arr[state.a]! * state.arr[state.b]!)}</p>
 
         {/* Element access with string concatenation */}
@@ -683,8 +683,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                indices: state.indices
+                items: state.key("items"),
+                indices: state.key("indices")
             } }, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!)}</p>
 
         {/* Multiple element accesses in single expression */}
@@ -709,7 +709,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: state.arr
+                arr: state.key("arr")
             } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
       </div>),
     };

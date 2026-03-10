@@ -6,7 +6,9 @@ interface BaseState {
 }
 // Partial<BaseState> should make both 'a' and 'b' optional in the schema
 type PartState = Partial<BaseState>;
-export default pattern(({ a, b }) => {
+export default pattern((__ct_pattern_input) => {
+    const a = __ct_pattern_input.key("a");
+    const b = __ct_pattern_input.key("b");
     return {
         readA: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
@@ -19,8 +21,7 @@ export default pattern(({ a, b }) => {
                             asCell: true
                         }]
                 }
-            },
-            required: ["a"]
+            }
         } as const satisfies __ctHelpers.JSONSchema, (_, { a }) => console.log(a))({
             a: a
         }),
@@ -35,8 +36,7 @@ export default pattern(({ a, b }) => {
                             asCell: true
                         }]
                 }
-            },
-            required: ["b"]
+            }
         } as const satisfies __ctHelpers.JSONSchema, (_, { b }) => console.log(b))({
             b: b
         }),

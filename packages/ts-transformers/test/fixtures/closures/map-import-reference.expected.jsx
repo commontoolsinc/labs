@@ -17,39 +17,38 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>
             Item: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["price"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    price: item.price
-                } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
-          </div>), {
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
+                        }
+                    },
+                    required: ["item"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { item: {
+                        price: item.key("price")
+                    } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

@@ -8,7 +8,7 @@ interface State {
 // The handler receives { detail: { items: [...], value: ... } }
 export default pattern((state) => {
     return {
-        [UI]: (<ct-select $value={state.selectedValue} items={[
+        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
             ]} onct-change={__ctHelpers.handler({
@@ -17,22 +17,9 @@ export default pattern((state) => {
                 detail: {
                     type: "object",
                     properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    label: {
-                                        type: "string"
-                                    },
-                                    value: true
-                                },
-                                required: ["label", "value"]
-                            }
-                        },
                         value: true
                     },
-                    required: ["items", "value"]
+                    required: ["value"]
                 }
             },
             required: ["detail"]
@@ -60,8 +47,8 @@ export default pattern((state) => {
             state.changeCount.set(state.changeCount.get() + 1);
         })({
             state: {
-                selectedValue: state.selectedValue,
-                changeCount: state.changeCount
+                selectedValue: state.key("selectedValue"),
+                changeCount: state.key("changeCount")
             }
         })}/>),
     };

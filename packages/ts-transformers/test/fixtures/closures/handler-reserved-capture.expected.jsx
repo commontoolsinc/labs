@@ -4,7 +4,7 @@ interface State {
     label: string;
 }
 export default pattern((state) => {
-    const __ct_handler_event = state.label;
+    const __ct_handler_event = state.key("label");
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",

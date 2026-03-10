@@ -15,9 +15,13 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
-            {item.name} - edited by {state.currentUser.firstName} {state.currentUser.lastName}
-          </div>), {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
+            {item.key("name")} - edited by {state.key("currentUser", "firstName")} {state.key("currentUser", "lastName")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -89,8 +93,8 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     currentUser: {
-                        firstName: state.currentUser.firstName,
-                        lastName: state.currentUser.lastName
+                        firstName: state.key("currentUser").firstName,
+                        lastName: state.key("currentUser").lastName
                     }
                 }
             })}

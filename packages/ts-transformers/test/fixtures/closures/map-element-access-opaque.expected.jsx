@@ -7,44 +7,48 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.sortedTags.mapWithPattern(__ctHelpers.pattern(({ element: tag, params: { state } }) => (<span>
+        {state.key("sortedTags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const tag = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>
             {tag}: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            tagCounts: {
-                                type: "object",
-                                properties: {},
-                                additionalProperties: {
-                                    type: "number"
-                                },
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                tagCounts: {
+                                    type: "object",
+                                    properties: {},
+                                    additionalProperties: {
+                                        type: "number"
+                                    },
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["tagCounts"]
                         },
-                        required: ["tagCounts"]
+                        tag: {
+                            type: "string",
+                            asOpaque: true
+                        }
                     },
-                    tag: {
-                        type: "string",
-                        asOpaque: true
-                    }
-                },
-                required: ["state", "tag"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        type: "undefined"
-                    }, {
-                        type: "number",
-                        asOpaque: true
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                state: {
-                    tagCounts: state.tagCounts
-                },
-                tag: tag
-            }, ({ state, tag }) => state.tagCounts[tag])}
-          </span>), {
+                    required: ["state", "tag"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "number",
+                            asOpaque: true
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    state: {
+                        tagCounts: state.key("tagCounts")
+                    },
+                    tag: tag
+                }, ({ state, tag }) => state.tagCounts[tag])}
+          </span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -95,7 +99,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    tagCounts: state.tagCounts
+                    tagCounts: state.key("tagCounts")
                 }
             })}
       </div>),

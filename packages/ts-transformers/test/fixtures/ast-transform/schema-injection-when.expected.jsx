@@ -4,7 +4,9 @@ interface State {
     enabled: boolean;
     message: string;
 }
-export default pattern(({ enabled, message }) => {
+export default pattern((__ct_pattern_input) => {
+    const enabled = __ct_pattern_input.key("enabled");
+    const message = __ct_pattern_input.key("message");
     // when(condition, value) - returns value if condition is truthy, else condition
     const result = when({
         type: "boolean",

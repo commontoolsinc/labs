@@ -135,8 +135,9 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {Array} mentioned - Optional Cell of live Pieces mentioned in content
  * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
  * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
- * @attr {number} maxLineWidth - Optional max line width in ch units
- *   (default: undefined)
+ * @attr {number|string} maxLineWidth - Optional max line width. Numbers are
+ *   treated as ch units (e.g. 80 → "80ch"), strings are used as-is
+ *   (e.g. "700px", "50rem"). Default: undefined
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
@@ -169,7 +170,18 @@ export class CTCodeEditor extends BaseElement {
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
-    maxLineWidth: { type: Number },
+    maxLineWidth: {
+      converter: {
+        fromAttribute(value: string | null) {
+          if (value === null) return undefined;
+          const num = Number(value);
+          return Number.isNaN(num) ? value : num;
+        },
+        toAttribute(value: number | string | undefined) {
+          return value?.toString() ?? null;
+        },
+      },
+    },
     tabSize: { type: Number },
     tabIndent: { type: Boolean },
     theme: { type: String, reflect: true },
@@ -191,7 +203,7 @@ export class CTCodeEditor extends BaseElement {
   declare pattern: CellHandle<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
-  declare maxLineWidth?: number;
+  declare maxLineWidth?: number | string;
   declare tabSize: number;
   declare tabIndent: boolean;
   declare theme: "light" | "dark";
@@ -982,9 +994,12 @@ export class CTCodeEditor extends BaseElement {
     // Update max line width theme
     if (changedProperties.has("maxLineWidth") && this._editorView) {
       const n = this.maxLineWidth;
-      const ext = typeof n === "number" && n > 0
+      const maxWidth = typeof n === "number"
+        ? (n > 0 ? `${n}ch` : undefined)
+        : n;
+      const ext = maxWidth
         ? EditorView.theme({
-          ".cm-content": { maxWidth: `${n}ch` },
+          ".cm-content": { maxWidth },
         })
         : [] as unknown as Extension;
       this._editorView.dispatch({
@@ -1117,13 +1132,14 @@ export class CTCodeEditor extends BaseElement {
   private _getModeExtension(): Extension {
     if (this.mode !== "prose") return [];
 
+    const hasCustomWidth = this.maxLineWidth !== undefined;
     return [
       EditorView.theme({
         ".cm-content": {
-          fontFamily: "inherit",
+          fontFamily: "var(--ct-theme-font-family, var(--ct-font-family-sans))",
           lineHeight: "1.6",
           padding: "8px 0",
-          maxWidth: "700px",
+          ...(!hasCustomWidth && { maxWidth: "700px" }),
           margin: "0 auto",
         },
         ".cm-line": {
@@ -1166,13 +1182,17 @@ export class CTCodeEditor extends BaseElement {
       this._indentUnitComp.of(
         indentUnit.of(" ".repeat(this.tabSize ?? 2)),
       ),
-      // Optional max line width (in ch)
+      // Optional max line width (number → ch, string → as-is)
       this._maxLineWidthComp.of(
-        typeof this.maxLineWidth === "number" && this.maxLineWidth > 0
-          ? EditorView.theme({
-            ".cm-content": { maxWidth: `${this.maxLineWidth}ch` },
-          })
-          : [] as unknown as Extension,
+        (() => {
+          const n = this.maxLineWidth;
+          const maxWidth = typeof n === "number"
+            ? (n > 0 ? `${n}ch` : undefined)
+            : n;
+          return maxWidth
+            ? EditorView.theme({ ".cm-content": { maxWidth } })
+            : [] as unknown as Extension;
+        })(),
       ),
       // Theme (dark -> oneDark)
       this._themeComp.of(this.theme === "dark" ? oneDark : []),

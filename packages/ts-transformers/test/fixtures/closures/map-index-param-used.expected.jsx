@@ -12,35 +12,40 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: { state } }) => (<div>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             Item #{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    index: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            offset: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        index: {
+                            type: "number",
+                            asOpaque: true
                         },
-                        required: ["offset"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                offset: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["offset"]
+                        }
+                    },
+                    required: ["index", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    index: index,
+                    state: {
+                        offset: state.key("offset")
                     }
-                },
-                required: ["index", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                index: index,
-                state: {
-                    offset: state.offset
-                }
-            }, ({ index, state }) => index + state.offset)}: {item.name}
-          </div>), {
+                }, ({ index, state }) => index + state.offset)}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -104,7 +109,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    offset: state.offset
+                    offset: state.key("offset")
                 }
             })}
       </div>),

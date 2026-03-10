@@ -125,11 +125,15 @@ const applyStep = handler(
   },
 );
 
-const liftCurrentValue = lift((input: unknown) => toNumber(input, 0));
+const liftCurrentValue = lift((input: number | undefined) =>
+  toNumber(input, 0)
+);
 
-const liftCurrentPhase = lift((input: unknown) => toSafeString(input, "idle"));
+const liftCurrentPhase = lift((input: string | undefined) =>
+  toSafeString(input, "idle")
+);
 
-const liftCompletedPhases = lift((input: unknown) => {
+const liftCompletedPhases = lift((input: string[] | undefined) => {
   if (!Array.isArray(input)) return [];
   const result: string[] = [];
   for (const value of input) {

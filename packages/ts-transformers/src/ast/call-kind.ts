@@ -43,6 +43,16 @@
 import ts from "typescript";
 
 import { isCommonToolsSymbol } from "../core/mod.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+
+const ARRAY_METHOD_NAMES = new Set([
+  "map",
+  "mapWithPattern",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+]);
 
 const BUILDER_SYMBOL_NAMES = new Set([
   "pattern",
@@ -163,8 +173,13 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    if (name === "map" || name === "mapWithPattern") {
-      return { kind: "array-map" };
+    if (ARRAY_METHOD_NAMES.has(name)) {
+      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
+      // Plain Array.prototype methods should not be treated as reactive.
+      const receiverType = checker.getTypeAtLocation(target.expression);
+      if (isOpaqueRefType(receiverType, checker)) {
+        return { kind: "array-map" };
+      }
     }
     if (name === "derive") {
       return { kind: "derive" };
@@ -247,8 +262,8 @@ function resolveSymbolKind(
     if (cellKind) return cellKind;
 
     if (
-      isArrayMapDeclaration(declaration) ||
-      isOpaqueRefMapDeclaration(declaration)
+      isArrayMethodDeclaration(declaration) ||
+      isOpaqueRefMethodDeclaration(declaration)
     ) {
       return { kind: "array-map", symbol: resolved };
     }
@@ -339,7 +354,7 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  if (name === "map" || name === "mapWithPattern") {
+  if (ARRAY_METHOD_NAMES.has(name)) {
     return { kind: "array-map", symbol: resolved };
   }
 
@@ -400,21 +415,18 @@ function detectCellMethodFromDeclaration(
   return undefined;
 }
 
-function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
+function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (declaration.name.text !== "map") return false;
+  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;
   return ARRAY_OWNER_NAMES.has(owner);
 }
 
-function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
+function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (
-    declaration.name.text !== "map" &&
-    declaration.name.text !== "mapWithPattern"
-  ) return false;
+  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;

@@ -6,42 +6,40 @@ interface State {
 }
 export default pattern((state) => {
     // Explicitly type as Cell to ensure closure transformation
-    const typedValues: Cell<number[]> = cell(state.values, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema);
+    const typedValues: Cell<number[]> = cell(state.key("values"));
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__ctHelpers.pattern(({ element: value, params: { state } }) => (<span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    value: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number",
-                                asOpaque: true
-                            }
+        {typedValues.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const value = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
                         },
-                        required: ["multiplier"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                multiplier: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["multiplier"]
+                        }
+                    },
+                    required: ["value", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    value: value,
+                    state: {
+                        multiplier: state.key("multiplier")
                     }
-                },
-                required: ["value", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                value: value,
-                state: {
-                    multiplier: state.multiplier
-                }
-            }, ({ value, state }) => value * state.multiplier)}</span>), {
+                }, ({ value, state }) => value * state.multiplier)}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -88,7 +86,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    multiplier: state.multiplier
+                    multiplier: state.key("multiplier")
                 }
             })}
       </div>),

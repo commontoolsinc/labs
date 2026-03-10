@@ -13,12 +13,43 @@ export interface SchemaHint {
   readonly items?: unknown;
 }
 
+export type ReactiveCapability =
+  | "opaque"
+  | "readonly"
+  | "writeonly"
+  | "writable";
+
+export interface CapabilityParamDefault {
+  readonly path: readonly string[];
+  readonly defaultType: ts.TypeNode;
+}
+
+export interface CapabilityParamSummary {
+  readonly name: string;
+  readonly capability: ReactiveCapability;
+  readonly readPaths: readonly (readonly string[])[];
+  readonly writePaths: readonly (readonly string[])[];
+  readonly passthrough: boolean;
+  readonly wildcard: boolean;
+  readonly defaults?: readonly CapabilityParamDefault[];
+}
+
+export interface FunctionCapabilitySummary {
+  readonly params: readonly CapabilityParamSummary[];
+  /** True when analysis was short-circuited due to recursion. */
+  readonly recursive?: boolean;
+}
+
 /**
  * Registry for passing schema hints between transformer stages.
  * Keyed by TypeNode (unique per usage) to avoid conflicts when the same
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+export type CapabilitySummaryRegistry = WeakMap<
+  ts.Node,
+  FunctionCapabilitySummary
+>;
 
 export interface TransformationOptions {
   readonly mode?: TransformMode;
@@ -27,6 +58,7 @@ export interface TransformationOptions {
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
   readonly schemaHints?: SchemaHints;
+  readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.

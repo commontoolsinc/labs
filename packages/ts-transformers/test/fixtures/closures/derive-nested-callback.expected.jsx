@@ -36,7 +36,11 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern(({ element: n, params: { multiplier } }) => n * multiplier.get(), {
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        const n = __ct_pattern_input.key("element");
+        const multiplier = __ct_pattern_input.key("params", "multiplier");
+        return n * multiplier.get();
+    }, {
         type: "object",
         properties: {
             element: {
