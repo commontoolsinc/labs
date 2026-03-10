@@ -1518,6 +1518,12 @@ export class CellImpl<T extends StorableValue>
       array: (T extends Array<infer U> ? U : T)[],
     ) => boolean,
   ): OpaqueRef<number> {
+    // Uses lift rather than a per-element-pattern builtin (like filter/map)
+    // because findIndex returns a plain number, not an element reference —
+    // there's no benefit to per-element reactive tracking. The lift approach
+    // short-circuits naturally and the predicate receives unwrapped values,
+    // so normal JS comparisons work. Tradeoff: reruns the full search on any
+    // array change. For per-element reactivity, use filter(pred)[0] instead.
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return -1;
       return list.findIndex(fn);
