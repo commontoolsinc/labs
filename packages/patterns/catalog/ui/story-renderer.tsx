@@ -44,108 +44,77 @@ interface StoryRendererOutput {
 
 export default pattern<StoryRendererInput, StoryRendererOutput>(
   ({ selected }) => {
-    const s = computed(() => selected.get());
-    const buttonStory = ButtonStory({});
-    const checkboxStory = CheckboxStory({});
-    const inputStory = InputStory({});
-    const selectStory = SelectStory({});
-    const switchStory = SwitchStory({});
-    const cardStory = CardStory({});
-    const modalStory = ModalStory({});
-    const progressStory = ProgressStory({});
-    const vstackStory = VStackStory({});
-    const hstackStory = HStackStory({});
-    const vgroupStory = VGroupStory({});
-    const hgroupStory = HGroupStory({});
-    const vscrollStory = VScrollStory({});
-    const hscrollStory = HScrollStory({});
-    const textareaStory = TextareaStory({});
-    const messageInputStory = MessageInputStory({});
-    const fabStory = FabStory({});
-    const toolbarStory = ToolbarStory({});
-    const headingStory = HeadingStory({});
-    const labelStory = LabelStory({});
-    const chipStory = ChipStory({});
-    const badgeStory = BadgeStory({});
-    const separatorStory = SeparatorStory({});
-    const markdownStory = MarkdownStory({});
-    const loaderStory = LoaderStory({});
-    const skeletonStory = SkeletonStory({});
-    const collapsibleStory = CollapsibleStory({});
-    const tabsStory = TabsStory({});
-    const chartStory = ChartStory({});
-    const noteStory = NoteStory({});
+    const story = computed(() => {
+      switch (selected.get()) {
+        case "button":
+          return ButtonStory({});
+        case "checkbox":
+          return CheckboxStory({});
+        case "input":
+          return InputStory({});
+        case "select":
+          return SelectStory({});
+        case "switch":
+          return SwitchStory({});
+        case "card":
+          return CardStory({});
+        case "modal":
+          return ModalStory({});
+        case "progress":
+          return ProgressStory({});
+        case "vstack":
+          return VStackStory({});
+        case "hstack":
+          return HStackStory({});
+        case "vgroup":
+          return VGroupStory({});
+        case "hgroup":
+          return HGroupStory({});
+        case "vscroll":
+          return VScrollStory({});
+        case "hscroll":
+          return HScrollStory({});
+        case "textarea":
+          return TextareaStory({});
+        case "message-input":
+          return MessageInputStory({});
+        case "fab":
+          return FabStory({});
+        case "toolbar":
+          return ToolbarStory({});
+        case "heading":
+          return HeadingStory({});
+        case "label":
+          return LabelStory({});
+        case "chip":
+          return ChipStory({});
+        case "badge":
+          return BadgeStory({});
+        case "separator":
+          return SeparatorStory({});
+        case "markdown":
+          return MarkdownStory({});
+        case "loader":
+          return LoaderStory({});
+        case "skeleton":
+          return SkeletonStory({});
+        case "collapsible":
+          return CollapsibleStory({});
+        case "tabs":
+          return TabsStory({});
+        case "chart":
+          return ChartStory({});
+        case "note":
+          return NoteStory({});
+        default:
+          return null;
+      }
+    });
 
     return {
       [NAME]: "StoryRenderer",
-      [UI]: (
-        <>
-          {s === "button" ? buttonStory : null}
-          {s === "checkbox" ? checkboxStory : null}
-          {s === "input" ? inputStory : null}
-          {s === "select" ? selectStory : null}
-          {s === "switch" ? switchStory : null}
-          {s === "card" ? cardStory : null}
-          {s === "modal" ? modalStory : null}
-          {s === "progress" ? progressStory : null}
-          {s === "vstack" ? vstackStory : null}
-          {s === "hstack" ? hstackStory : null}
-          {s === "vgroup" ? vgroupStory : null}
-          {s === "hgroup" ? hgroupStory : null}
-          {s === "vscroll" ? vscrollStory : null}
-          {s === "hscroll" ? hscrollStory : null}
-          {s === "textarea" ? textareaStory : null}
-          {s === "message-input" ? messageInputStory : null}
-          {s === "fab" ? fabStory : null}
-          {s === "toolbar" ? toolbarStory : null}
-          {s === "heading" ? headingStory : null}
-          {s === "label" ? labelStory : null}
-          {s === "chip" ? chipStory : null}
-          {s === "badge" ? badgeStory : null}
-          {s === "separator" ? separatorStory : null}
-          {s === "markdown" ? markdownStory : null}
-          {s === "loader" ? loaderStory : null}
-          {s === "skeleton" ? skeletonStory : null}
-          {s === "collapsible" ? collapsibleStory : null}
-          {s === "tabs" ? tabsStory : null}
-          {s === "chart" ? chartStory : null}
-          {s === "note" ? noteStory : null}
-        </>
-      ),
-      controls: (
-        <>
-          {s === "button" ? buttonStory.controls : null}
-          {s === "checkbox" ? checkboxStory.controls : null}
-          {s === "input" ? inputStory.controls : null}
-          {s === "select" ? selectStory.controls : null}
-          {s === "switch" ? switchStory.controls : null}
-          {s === "card" ? cardStory.controls : null}
-          {s === "modal" ? modalStory.controls : null}
-          {s === "progress" ? progressStory.controls : null}
-          {s === "vstack" ? vstackStory.controls : null}
-          {s === "hstack" ? hstackStory.controls : null}
-          {s === "vgroup" ? vgroupStory.controls : null}
-          {s === "hgroup" ? hgroupStory.controls : null}
-          {s === "vscroll" ? vscrollStory.controls : null}
-          {s === "hscroll" ? hscrollStory.controls : null}
-          {s === "textarea" ? textareaStory.controls : null}
-          {s === "message-input" ? messageInputStory.controls : null}
-          {s === "fab" ? fabStory.controls : null}
-          {s === "toolbar" ? toolbarStory.controls : null}
-          {s === "heading" ? headingStory.controls : null}
-          {s === "label" ? labelStory.controls : null}
-          {s === "chip" ? chipStory.controls : null}
-          {s === "badge" ? badgeStory.controls : null}
-          {s === "separator" ? separatorStory.controls : null}
-          {s === "markdown" ? markdownStory.controls : null}
-          {s === "loader" ? loaderStory.controls : null}
-          {s === "skeleton" ? skeletonStory.controls : null}
-          {s === "collapsible" ? collapsibleStory.controls : null}
-          {s === "tabs" ? tabsStory.controls : null}
-          {s === "chart" ? chartStory.controls : null}
-          {s === "note" ? noteStory.controls : null}
-        </>
-      ),
+      [UI]: <>{story}</>,
+      controls: <>{story.controls}</>,
     };
   },
 );
