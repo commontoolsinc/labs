@@ -213,8 +213,17 @@ separates its read dependencies into confirmed and pending tiers, enabling the
 server to validate freshness and resolve pending references.
 
 ```typescript
+type SessionId = string;  // Server-issued opaque identifier, resumable across reconnects
+
+interface MergeContext {
+  sourceBranch: BranchId;
+  sourceSeq: number;
+  baseSeq: number;
+}
+
 interface ClientCommit {
-  // Client-assigned pending commit index (monotonic per session, starts at 1)
+  // Client-assigned pending commit index (monotonic per resumable session,
+  // starts at 1)
   localSeq: number;
 
   // Read dependencies from confirmed state
@@ -231,6 +240,19 @@ interface ClientCommit {
 
   // Target branch (defaults to default branch)
   branch?: BranchId;
+
+  // Optional merge provenance. Merges are still ordinary signed transactions.
+  merge?: MergeContext;
+}
+
+interface MergeProposal {
+  reads: {
+    confirmed: ConfirmedRead[];
+    pending: [];  // Built against confirmed branch state only
+  };
+  operations: Operation[];
+  branch: BranchId;
+  merge: MergeContext;
 }
 
 // A read from confirmed (server-acknowledged) state.
@@ -255,11 +277,12 @@ reads are against confirmed state (so it can validate freshness using seq
 comparison) and which are against pending state (so it can resolve them once
 the referenced pending commit is confirmed or rejected).
 
-**Why `localSeq` instead of commit hashes?** The client assigns a
-monotonically increasing local index to each pending commit. This is simpler
-than computing and tracking provisional hashes. The server annotates stored
-commits with a mapping from `localSeq` to confirmed server seq values; this
-annotation is separate from the signed payload.
+**Why `localSeq` instead of commit hashes?** Pending-read tracking needs a
+cheap session-local handle for stacked optimistic writes, so the client assigns
+a monotonically increasing local index to each pending commit. The commit hash
+still exists as the stable content ID of the signed client commit; the server
+stores a translation from `localSeq` to the resulting `{ hash, seq }` once the
+commit is confirmed. That translation is separate from the signed payload.
 
 ---
 
@@ -438,6 +461,16 @@ resolution metadata.
 
 ```typescript
 interface CommitLogEntry {
+  // Content hash of the canonical client commit blob. Stable across replay.
+  hash: Reference;
+
+  // Server-issued logical session identifier for the submitting client/space.
+  // Pending-read resolution is scoped to this session and survives reconnects.
+  sessionId: SessionId;
+
+  // The client-local pending index used on that session.
+  localSeq: number;
+
   // The original commit as submitted by the client (includes localSeq)
   original: ClientCommit;
 
@@ -446,9 +479,13 @@ interface CommitLogEntry {
     // Seq number assigned to this commit
     seq: number;
 
-    // Session-scoped mapping from client localSeq -> confirmed server seq.
-    // Used to resolve pending reads that reference earlier local commits.
-    localSeqMappings: Map<number, number>;
+    // Session-scoped resolution of pending reads referenced by this commit.
+    // Stored as plain JSON, not as a language-level Map.
+    resolvedPendingReads: Array<{
+      localSeq: number;
+      hash: Reference;
+      seq: number;
+    }>;
   };
 }
 ```
@@ -456,8 +493,8 @@ interface CommitLogEntry {
 **Why preserve the original?** The commit log is an audit trail. Preserving the
 original submission allows verifiers to replay the validation logic: given the
 server state at the time, was this commit valid? The resolution metadata records
-the server's decisions (seq assignment, localSeq resolution) so the outcome can
-be reproduced.
+the server's decisions (seq assignment, submitting session, and pending-read
+resolution) so the outcome can be reproduced.
 
 ### 3.7.3 Seq Assignment
 
@@ -481,6 +518,38 @@ Fact → seq=N → CommitLogEntry with seq=N
 
 Given any fact, the client can find the producing commit by querying for the
 commit log entry with the matching seq.
+
+### 3.7.4 Commit Hashes, Signing, and Replay
+
+Each committed transaction has two identifiers with different roles:
+
+- **`hash`** — the content hash of the canonical `ClientCommit` blob. This is
+  stable across retransmission and is the identifier that corresponds to what
+  the client signed.
+- **`seq`** — the server-assigned canonical ordering position used by queries,
+  subscriptions, and point-in-time reads.
+
+The server verifies the client's signature before accepting a commit, computes
+the canonical commit hash from the original `ClientCommit`, and stores both the
+original payload and the resolved `{ hash, seq }` translation. If a client
+replays the same commit after reconnecting, the server SHOULD deduplicate by
+`hash` and return the existing result instead of applying the transaction twice.
+
+### 3.7.5 Session Identity and Reconnect
+
+Pending-read resolution is scoped to a **logical session**, not to a single
+TCP/WebSocket connection. The server issues a `SessionId` that is bound to the
+authenticated client for a given space and remains valid across reconnects
+until the server expires it.
+
+On reconnect:
+
+1. The client resumes the logical session and tells the server the highest
+   canonical `seq` it has fully integrated.
+2. The client replays any locally retained commits that were not acknowledged,
+   plus any retained commits whose assigned `seq` may be newer than the
+   server-visible cursor.
+3. The server deduplicates replays by commit `hash`.
 
 ---
 

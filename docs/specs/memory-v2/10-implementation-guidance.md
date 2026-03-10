@@ -100,7 +100,8 @@ subscriptions:
 | `IStorageSubscriptionCapability` | `IStorageNotificationCapability` | Same                                                          |
 
 Keep `StorageNotification` (the union type) and `subscribe()` (the method on
-`IStorageManager` that returns a cancel handle) unchanged.
+`IStorageManager`) unchanged at the public API boundary. More generally, keep
+interfaces used outside storage code stable and adapt underneath them.
 
 ---
 
@@ -143,6 +144,10 @@ class StorageManager {
   }
 }
 ```
+
+The cutover should happen at high-level storage interfaces such as
+`IExtendedStorageTransaction` and `IStorageProvider`. Keep those public-facing
+contracts stable while swapping the implementation underneath them.
 
 ### Test Selection
 
@@ -324,9 +329,9 @@ The client assigns a monotonically increasing `localSeq` to each pending commit.
 When building a new commit, if a read came from a pending write, the read
 references that commit's `localSeq`.
 
-The server annotates the stored commit with a mapping from `localSeq` to actual
-server-side commit identifiers. This annotation is separate from the signed
-payload (so signatures remain valid).
+The server annotates the stored commit with a mapping from `localSeq` to the
+final `{ hash, seq }` assigned to that commit. This annotation is separate from
+the signed payload (so signatures remain valid).
 
 Server validation of pending reads is simple: look up whether the commit at
 `localSeq` N succeeded. If yes, the pending read is valid. If that commit was
@@ -353,6 +358,20 @@ The v1 code has a `deepEqual` check during eviction (keep nursery value if it
 differs from server value). With the explicit pending/confirmed model, this
 simplifies: just track which `localSeq` each pending value belongs to, and on
 confirm/reject, update accordingly.
+
+### Resumable Sessions First, Server Resume Later
+
+Build reconnect support in two stages:
+
+1. **Phase 1 baseline**: The server issues a logical `sessionId` per space. On
+   reconnect, the client resumes that session, sends its highest integrated
+   `seq`, replays retained commits, and resends active subscriptions.
+2. **Phase 2 optimization**: The server may keep recent subscription state for a
+   short reconnect window and support a lighter-weight resume path.
+
+The first stage is enough for correctness and crash/reconnect resilience. It is
+also easier to reason about because the client remains the source of truth for
+which subscriptions should exist.
 
 ---
 
@@ -441,10 +460,10 @@ the implementations will inevitably diverge and cause subtle bugs.
 
 ## 9. Schema-Driven Queries and traverse.ts
 
-### All Data Queries Use `graph.query`
+### `graph.query` Is Required, Not Exclusive
 
-All production data queries use `graph.query` with `SchemaPathSelector`. This is
-the only query mechanism — there is no alternative.
+`graph.query` with `SchemaPathSelector` is required for cell sync and
+schema-driven traversal. It is not the only query mechanism.
 
 `packages/runner/src/traverse.ts` contains `SchemaObjectTraverser` and
 `BaseObjectTraverser`. The server imports these via
@@ -460,12 +479,17 @@ import { SchemaObjectTraverser } from "@commontools/runner/traverse";
 - Schema-driven graph traversal follows the same link resolution rules
 - Cell links, write redirects, and cycle detection work the same everywhere
 
-`syncCell()` uses `graph.query` to load cells and follow schema-defined
-references. Every integration test exercises `syncCell()`.
+`syncCell()` depends on the schema-query path to load cells and follow
+schema-defined references. Every integration test exercises that path.
 
-Wildcard subscriptions (`"*"`) exist only for commit log streaming (server-to-
-server replication) and are being deprecated. They are not a data query
-mechanism.
+At the same time, the protocol should still support:
+
+- one-shot `query` for tests, compatibility, and one-time sync
+- `query.subscribe` for simple subscriptions
+- internal commit-log streaming without reintroducing a public type axis
+
+The public v2 data model assumes JSON entities only. Do not preserve v1's
+typed-data model just to carry the commit log forward as another pseudo-entity.
 
 ### `schema: false` Means "Matches Nothing"
 
@@ -540,6 +564,13 @@ Multiple transactions can be batched into a single signed message:
 
 Each invocation succeeds or fails independently. Invocation 1 succeeding does
 not depend on invocation 2. Batching optimizes signatures, not atomicity.
+
+Keep the commit hash even though runtime semantics move to `seq`:
+
+- **Commit hash** identifies the canonical signed `ClientCommit` blob and is the
+  stable dedupe key for replay.
+- **`seq`** is the server's canonical ordering and the only identifier the read
+  path, subscription path, and PIT logic should depend on.
 
 ### Queries Can Also Be Batched
 
@@ -731,22 +762,30 @@ dependencies) because `diffAndUpdate()` reads the current value to compute
 diffs.
 
 Later phases will optimize: `Cell.set()` can directly produce `patch`
-operations, and eventually `Cell.push()` / `Cell.remove()` can produce targeted
-`splice` operations. Once patches are used directly, the implicit claim from
-`diffAndUpdate()` goes away — only explicit claims remain.
+operations, and eventually `Cell.push()` / `Cell.remove()` can produce more
+targeted operations. But not all patches are equal:
+
+- **Position-independent patches** overwrite stable keys and are candidates for
+  future claim-free fast paths.
+- **State-dependent patches** depend on the current shape or ordering of the
+  document. `splice`, positional array edits, and today's `remove` behavior are
+  in this class and should retain read dependencies until we add stronger
+  semantics.
 
 ### Concurrent Patches Without Claims
 
 Two patches to the same entity without read claims are treated as
-last-writer-wins (LWW). They can both succeed if they only write and don't read:
+last-writer-wins (LWW) **only when they are genuinely blind overwrites**:
 
 ```
-Client A: patch /name = "Alice" (no claims)
-Client B: patch /age = 30 (no claims)
+Client A: replace /name = "Alice" (no claims)
+Client B: replace /age = 30 (no claims)
 → Both succeed. Patches apply sequentially on the server.
 ```
 
-Patches only conflict if there are read claims with stale versions.
+Do not generalize this to state-dependent operations like `splice` or today's
+`remove` behavior. Those depend on the current document shape and should keep
+claims until we introduce position-independent variants.
 
 ---
 
@@ -755,7 +794,10 @@ Patches only conflict if there are read claims with stale versions.
 ### Purpose
 
 A single test that runs the same random operations against both v1 and v2
-providers, producing structured logs, then asserts the logs are identical.
+providers and compares the behavior visible at the cutover interfaces
+(`IExtendedStorageTransaction`, `IStorageProvider`, scheduler notifications).
+The goal is equivalent observable behavior at that boundary, not identical
+internal transport or commit-log machinery.
 
 ### Design
 
@@ -801,7 +843,7 @@ for (const version of ["v1", "v2"]) {
   // ... run random operations, log everything ...
   logs[version] = log;
 }
-deepEqual(logs.v1, logs.v2); // Must be identical
+assertObservableEquivalence(logs.v1, logs.v2);
 ```
 
 ---
@@ -884,21 +926,25 @@ with `MEMORY_VERSION=v2` is the success criterion for Phase 1.
 10. ACL + space initialization
 11. Batch signing via UCANTO
 12. `merkle-reference/json` everywhere
-13. V1 code path guards
-14. Randomized v1/v2 parallel test
-15. All existing integration tests passing with `MEMORY_VERSION=v2`
+13. Public storage APIs stable at the cutover boundary
+14. Resumable logical sessions with client-driven replay/resubscribe
+15. V1 code path guards
+16. Randomized v1/v2 parallel test
+17. All existing integration tests passing with `MEMORY_VERSION=v2`
 
 ### Phase 2: Optimization
 
 1. JSON Patch optimization (Cell.set → patch operations)
-2. Direct Cell.push/remove → splice operations
-3. Remove claims from operations that use patches directly
+2. Position-independent remove/update forms
+3. Claim-free fast paths only for position-independent patch classes
+4. Short-lived server-side subscription resume cache
 
 ### Phase 3: Advanced Features
 
 1. Branching wired up end-to-end
 2. GC scheduling
 3. CRDT/OT operations for text
+4. Classification/redaction with the redesigned metadata model
 
 ### Order of Implementation Within Phase 1
 
@@ -1036,9 +1082,9 @@ interface PendingRead {
 }
 ```
 
-Add: "The server annotates stored commits with a mapping from `localSeq` to
-server-side commit identifiers. This annotation is separate from the signed
-payload."
+Add: "The server annotates stored commits with a mapping from `localSeq` to the
+resolved `{ hash, seq }` for that commit. This annotation is separate from the
+signed payload."
 
 ### A.3. Remove `parent` from Operations (03-commit-model.md §3.1)
 

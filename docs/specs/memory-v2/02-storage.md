@@ -184,10 +184,13 @@ were applied atomically.
 
 ```sql
 CREATE TABLE commit (
-  hash        TEXT    NOT NULL PRIMARY KEY,  -- Content hash of the commit
-  seq     INTEGER NOT NULL,             -- Lamport clock (same as facts in this commit)
+  hash        TEXT    NOT NULL PRIMARY KEY,  -- Content hash of the canonical client commit blob
+  seq         INTEGER NOT NULL,              -- Lamport clock (same as facts in this commit)
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this commit was applied to
-  reads       JSON,                         -- Read set: {entityId: seq} for validation
+  session_id  TEXT    NOT NULL,              -- Server-assigned session identifier
+  local_seq   INTEGER NOT NULL,              -- Client-local pending index on that session
+  original    JSON    NOT NULL,              -- Canonical ClientCommit as submitted/signed
+  resolution  JSON    NOT NULL,              -- { seq, resolvedPendingReads: [{ localSeq, hash, seq }] }
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))  -- Wall-clock timestamp
 );
 
@@ -196,16 +199,23 @@ CREATE INDEX idx_commit_seq ON commit (seq);
 
 -- Query commits by branch (for branch history)
 CREATE INDEX idx_commit_branch ON commit (branch);
+
+-- Resolve pending-read dependencies quickly
+CREATE UNIQUE INDEX idx_commit_session_local_seq
+  ON commit (session_id, local_seq);
 ```
 
 **Column details:**
 
 | Column | Description |
 |--------|-------------|
-| `hash` | Content hash of the commit's logical content. |
+| `hash` | Content hash of the canonical client commit blob. |
 | `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. |
 | `branch` | Which branch this commit targets. |
-| `reads` | JSON object recording the seq of each entity that was read as a precondition for this commit. Used for optimistic concurrency validation (see §03 Commit Model). |
+| `session_id` | Identifies the logical client session that submitted the commit. Pending-read resolution is session-scoped and survives reconnects. |
+| `local_seq` | The client-local pending index on that session. Every committed mutation is an ordinary client transaction, including merges. |
+| `original` | The canonical `ClientCommit` payload, preserved for audit, replay, and commit-hash verification. |
+| `resolution` | Server-side resolution metadata, including the assigned `seq` and the resolved `{ localSeq, hash, seq }` mapping for any pending-read dependencies. |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
 
 ### 3.5 `snapshot` — Periodic Full-Value Materializations
@@ -288,13 +298,18 @@ INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
 CREATE TABLE IF NOT EXISTS commit (
   hash        TEXT    NOT NULL PRIMARY KEY,
-  seq     INTEGER NOT NULL,
+  seq         INTEGER NOT NULL,
   branch      TEXT    NOT NULL DEFAULT '',
-  reads       JSON,
+  session_id  TEXT    NOT NULL,
+  local_seq   INTEGER NOT NULL,
+  original    JSON    NOT NULL,
+  resolution  JSON    NOT NULL,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_commit_seq ON commit (seq);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON commit (branch);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
+  ON commit (session_id, local_seq);
 
 CREATE TABLE IF NOT EXISTS fact (
   hash        TEXT    NOT NULL PRIMARY KEY,
@@ -729,12 +744,27 @@ VALUES (:branch_name, :entity_id, :fact_hash, :seq)
 ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
-The `commit` row records which branch was written to:
+The `commit` row records which branch was written to, plus the submitting
+session and the original/resolved commit payloads:
 
 ```sql
-INSERT INTO commit (hash, seq, branch, reads)
-VALUES (:commit_hash, :seq, :branch_name, :reads_json);
+INSERT INTO commit (
+  hash, seq, branch, session_id, local_seq, original, resolution
+)
+VALUES (
+  :commit_hash,
+  :seq,
+  :branch_name,
+  :session_id,
+  :local_seq,
+  :original_json,
+  :resolution_json
+);
 ```
+
+If a client replays a previously accepted transaction after reconnecting, the
+server can detect it by `commit.hash` and return the already-recorded result
+instead of applying the transaction twice.
 
 ### 8.3 Branch Seq Numbering
 
@@ -820,9 +850,11 @@ For point-in-time reads on a branch, the query must include:
 
 - Facts written directly on the target branch
 - Facts inherited from ancestor branches, constrained by each fork seq
+- Facts written by merge transactions on the target branch at their merge seq
 
-A practical pattern is to build a branch-lineage CTE with a per-ancestor max seq,
-then query an `effective_fact` CTE built from that lineage:
+In the phase-3 baseline, merges are materialized as ordinary target-branch
+writes, so the same lineage-based `effective_fact` query works for both regular
+commits and merge commits:
 
 ```sql
 WITH RECURSIVE lineage(name, parent_branch, fork_seq, max_seq) AS (
