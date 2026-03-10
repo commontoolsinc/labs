@@ -244,6 +244,7 @@ interface TransactCommand {
     operations: Operation[];
     codeCID?: Reference;
     branch?: BranchId;
+    merge?: MergeContext;
   };
 }
 
@@ -836,7 +837,6 @@ import { connect } from "@commontools/memory";
 const session = connect({
   url: new URL("ws://localhost:8001"),
   as: signer,           // Signer with the client's private key
-  sessionId: previousSessionId, // Optional prior logical session to resume
   clock,                 // Optional clock for timestamp generation
   ttl,                   // Optional TTL for invocations (seconds)
 });
@@ -845,12 +845,28 @@ const session = connect({
 The `connect` function opens a WebSocket, sets up the bidirectional message
 stream, and returns a `MemorySession`.
 
+```typescript
+interface MountOptions {
+  sessionId?: SessionId;
+  seenSeq?: number;
+}
+
+interface MemorySession {
+  mount(space: SpaceId, options?: MountOptions): SpaceSession;
+  close(): void;
+}
+```
+
 ### 4.8.2 Space Session
 
-A session is scoped to a specific space by calling `mount`:
+A session is scoped to a specific space by calling `mount`. This is also where
+the client supplies logical-session resume data for the `session.open` flow:
 
 ```typescript
-const space = session.mount("did:key:z6Mk...");
+const space = session.mount("did:key:z6Mk...", {
+  sessionId: previousSessionId,
+  seenSeq: lastIntegratedSeq,
+});
 ```
 
 This returns a `SpaceSession` with methods for reading and writing:
@@ -867,6 +883,7 @@ interface SpaceSession {
     operations: Operation[];
     codeCID?: Reference;
     branch?: BranchId;
+    merge?: MergeContext;
   }): Promise<Result<Commit, ConflictError | TransactionError>>;
 
   // Schema-driven query with optional subscription
