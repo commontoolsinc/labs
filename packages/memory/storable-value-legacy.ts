@@ -1,5 +1,4 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
-import { deepEqual } from "@commontools/utils/deep-equal";
 import type {
   StorableNativeObject,
   StorableValue,
@@ -510,21 +509,4 @@ function isStorableArray(array: unknown[]): boolean {
   }
 
   return true;
-}
-
-/**
- * Compares two storable values for equality.
- *
- * Flag OFF (legacy): uses JSON.stringify comparison, matching the behavior of
- * the original `JSON.parse(JSON.stringify(...))` round-trip (strips undefined,
- * coerces NaN to null, etc.).
- *
- * Flag ON (rich): uses deep structural equality that correctly handles
- * undefined, sparse arrays, and other extended types.
- */
-export function valueEqual(a: unknown, b: unknown): boolean {
-  if (getExperimentalStorableConfig().richStorableValues) {
-    return deepEqual(a, b);
-  }
-  return JSON.stringify(a) === JSON.stringify(b);
 }
