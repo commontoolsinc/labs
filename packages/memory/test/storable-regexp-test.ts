@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   DECONSTRUCT,
@@ -13,7 +13,12 @@ import {
   StorableNativeWrapper,
   StorableRegExp,
 } from "../storable-native-instances.ts";
-import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
+import {
+  canBeStored,
+  resetStorableValueConfig,
+  setStorableValueConfig,
+  shallowStorableFromNativeValue,
+} from "../storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -218,20 +223,30 @@ describe("StorableRegExp", () => {
   // Conversion: toRichStorableValue
   // --------------------------------------------------------------------------
 
-  describe("toRichStorableValue", () => {
+  describe("shallowStorableFromNativeValue (rich path)", () => {
     it("converts RegExp to StorableRegExp", () => {
-      const result = toRichStorableValue(/abc/gi);
-      expect(result).toBeInstanceOf(StorableRegExp);
-      expect((result as StorableRegExp).regex.source).toBe("abc");
-      expect((result as StorableRegExp).regex.flags).toBe("gi");
+      setStorableValueConfig({ richStorableValues: true });
+      try {
+        const result = shallowStorableFromNativeValue(/abc/gi);
+        expect(result).toBeInstanceOf(StorableRegExp);
+        expect((result as StorableRegExp).regex.source).toBe("abc");
+        expect((result as StorableRegExp).regex.flags).toBe("gi");
+      } finally {
+        resetStorableValueConfig();
+      }
     });
 
     it("rejects RegExp with extra enumerable properties", () => {
-      const re = /abc/;
-      (re as unknown as Record<string, unknown>).custom = 1;
-      expect(() => toRichStorableValue(re)).toThrow(
-        "Cannot store RegExp with extra enumerable properties",
-      );
+      setStorableValueConfig({ richStorableValues: true });
+      try {
+        const re = /abc/;
+        (re as unknown as Record<string, unknown>).custom = 1;
+        expect(() => shallowStorableFromNativeValue(re)).toThrow(
+          "Cannot store RegExp with extra enumerable properties",
+        );
+      } finally {
+        resetStorableValueConfig();
+      }
     });
   });
 
@@ -284,6 +299,13 @@ describe("StorableRegExp", () => {
   // --------------------------------------------------------------------------
 
   describe("canBeStored", () => {
+    beforeEach(() => {
+      setStorableValueConfig({ richStorableValues: true });
+    });
+    afterEach(() => {
+      resetStorableValueConfig();
+    });
+
     it("returns true for plain RegExp", () => {
       expect(canBeStored(/abc/gi)).toBe(true);
     });

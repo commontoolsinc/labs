@@ -1,5 +1,5 @@
 import { refer } from "@commontools/memory/reference";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -32,7 +32,7 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   delete (inputsOnly as Record<string, unknown>).result;
   // refer() cannot hash undefined values; normalize to a deep storable shape
   // (omits undefined object props, converts undefined array elements to null).
-  const storableInputs = toDeepStorableValue(inputsOnly);
+  const storableInputs = storableFromNativeValue(inputsOnly);
   const normalized = storableInputs === undefined ? {} : storableInputs;
   return refer(normalized as Record<string, unknown>).toString();
 }

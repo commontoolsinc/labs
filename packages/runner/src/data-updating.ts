@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toStorableValue,
+  shallowStorableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
@@ -441,7 +441,7 @@ export function normalizeAndDiff(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  const storableValue = toStorableValue(newValue);
+  const storableValue = shallowStorableFromNativeValue(newValue);
   if (storableValue !== newValue) {
     diffLogger.debug(
       "diff",
