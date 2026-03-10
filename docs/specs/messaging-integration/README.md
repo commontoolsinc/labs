@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft (round 3 revision)
+Draft (round 4 revision)
 
 ## Overview
 
@@ -192,6 +192,30 @@ Streams.
   }
 }
 ```
+
+**Config Discovery.** Hardcoded cell links in config go stale when the user
+redeploys a platform pattern (new entity ID). To solve this, each platform
+pattern writes its own cell links to a well-known `messaging-config` entity
+in the user's space on deploy:
+
+```typescript
+// Written by each platform pattern on deploy
+interface MessagingConfig {
+  [platform: string]: {
+    inboxLink: string;     // cell link to platform's inbox Stream
+    outboxLink?: string;   // cell link to outbox cell (local-only platforms)
+    updatedAt: string;     // ISO 8601
+  };
+}
+```
+
+The daemon watches this config entity via `cell.sink()` and dynamically updates
+its adapter connections when links change. When a platform pattern is
+redeployed, it writes new links to the config entity, and the daemon picks them
+up automatically -- no manual config update needed.
+
+For v1, manual config in `~/.common-gateway/config.json` works as a fallback.
+Auto-discovery via the config entity replaces it as the default path.
 
 **Single Deno event loop with async tasks per adapter.** Each adapter runs as
 an independent async task within the same Deno process. No worker threads, no
@@ -475,18 +499,21 @@ references.
 interface Output {
   chats: IMessageChat[];
   sendMessage: Stream<SendMessage>;
+  outbox: PendingMessage[];        // local-only: persistent outbox
 }
 
 /** Telegram bot integration. #telegram #messaging */
 interface Output {
   chats: TelegramChat[];
   sendMessage: Stream<SendMessage>;
+  // No outbox -- server-side, handler calls fetch() directly
 }
 
 /** Discord integration. #discord #messaging */
 interface Output {
   chats: DiscordChat[];
   sendMessage: Stream<SendMessage>;
+  // No outbox -- server-side, handler calls fetch() directly
 }
 ```
 
@@ -502,6 +529,58 @@ type DeliveryStatus = {
   lastDelivered?: string;       // ISO 8601
 };
 ```
+
+### Error Handling for Outbound Sends
+
+Stream `.send()` handlers that call external APIs must handle failures.
+The model is `GmailClient.googleRequest()` at
+`packages/patterns/google/core/util/gmail-client.ts:612-681`: retry with
+exponential backoff, handle auth refresh (401), respect rate limits (429).
+
+**Pattern:** The handler wraps `fetch()` in try/catch, retries with backoff,
+and updates the `DeliveryStatus` cell on success or final failure. Retry is
+application-level -- there is no framework retry middleware.
+
+```typescript
+// Server-side: Telegram handler with error handling
+const handleSendMessage = handler<SendMessage, {}>(
+  async (message, {}) => {
+    if (message.platform !== "telegram") return;
+
+    let lastError: string | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: message.chatId,
+            text: message.text,
+            reply_to_message_id: message.replyToMessageId,
+            parse_mode: message.parseMode,
+          }),
+        });
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get("Retry-After") ?? 1);
+          await new Promise((r) => setTimeout(r, retryAfter * 1000));
+          continue;
+        }
+        if (!res.ok) throw new Error(`Telegram API ${res.status}`);
+        // Update delivery status on success
+        deliveryStatus.set({ pending: 0, lastDelivered: new Date().toISOString() });
+        return;
+      } catch (err) {
+        lastError = String(err);
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+      }
+    }
+    deliveryStatus.set({ pending: 0, lastError });
+  },
+);
+```
+
+For local-only platforms, the daemon's outbox consumer applies the same
+retry-with-backoff pattern before removing items from the outbox.
 
 ---
 
@@ -532,8 +611,8 @@ dispatches:
 
 - **Server-side patterns:** Handler calls `fetch()` to the platform API
   directly.
-- **Local patterns:** Daemon watches the sendMessage Stream via `cell.sink()`
-  and dispatches to the local adapter.
+- **Local patterns:** Handler appends to a persistent outbox cell. Daemon
+  watches the outbox via `cell.sink()` and dispatches to the local adapter.
 
 ```typescript
 // Server-side: Telegram pattern's sendMessage handler
@@ -552,22 +631,70 @@ const handleSendMessage = handler<SendMessage, {}>(
   },
 );
 
-// Local: daemon watches iMessage sendMessage Stream
-iMessageSendStream.sink((message) => {
-  if (message.platform !== "imessage") return;
-  iMessageAdapter.send(message.chatGuid, message.text, message.replyToGuid);
+// Local: daemon watches iMessage outbox cell
+iMessageOutboxCell.sink((outbox) => {
+  for (const item of outbox) {
+    if (processedIds.has(item.id)) continue;
+    iMessageAdapter.send(item.payload.chatGuid, item.payload.text, item.payload.replyToGuid);
+    processedIds.add(item.id);
+    editWithRetry((tx) => {
+      // Remove delivered item from outbox
+      outboxCell.withTx(tx).set(outbox.filter((i) => i.id !== item.id));
+    });
+  }
 });
 ```
 
 ### Stream/Sink Reliability
 
-- **`Stream.send()` queues in the scheduler**, not lossy. Events are persisted
-  via `editWithRetry()` transactions before being dispatched.
-- **`cell.sink()` fires for every event.** The sink callback receives each
-  `.send()` payload individually.
-- **Transaction safety on daemon crash:** Unprocessed send events remain in the
-  Stream cell. On restart, the daemon re-attaches sinks and processes any
-  queued events.
+- **`Stream.send()` fires `cell.listeners` synchronously** -- an in-memory
+  `Set` of callbacks. Stream events are **not** persisted to storage.
+- **`cell.sink()` fires for every `.send()` call**, but only while the process
+  is running. If the handler process is offline when `.send()` executes, the
+  event is lost.
+- **Server-side patterns:** This is fine. The handler runs in-process on
+  toolshed, so `fetch()` executes immediately in the `.send()` callback.
+- **Local-only patterns:** Events sent while the daemon is offline are lost.
+  The outbox cell (below) solves this.
+
+### Outbox Cell (Local-Only Platforms)
+
+Server-side patterns don't need durability for outbound sends -- their handler
+calls `fetch()` directly in-process on toolshed. Local-only platforms need a
+persistent outbox because the daemon may be offline when the consumer sends.
+
+Each local-only platform pattern adds an `outbox` cell to its Output:
+
+```typescript
+interface PendingMessage {
+  id: string;           // crypto.randomUUID() — dedup key
+  payload: SendMessage; // the send variant for this platform
+  createdAt: string;    // ISO 8601
+}
+```
+
+The `outbox` is a regular `Writable<Default<PendingMessage[], []>>` cell,
+persisted via normal cell writes. This is the key insight: because the
+`sendMessage` handler runs on toolshed (not on the daemon), it always succeeds
+-- it just appends to the outbox cell, which is durable storage.
+
+**Data flow:**
+
+```
+Consumer .send() → Stream handler on toolshed → outbox.push(...)
+  → persisted to storage → syncs to daemon → cell.sink() fires
+  → adapter delivers → outbox.remove(item)
+```
+
+**Daemon outbox consumption:**
+
+- Daemon watches `outbox` with `cell.sink()` on the regular cell (fires on
+  every state change, including changes made while offline)
+- On delivery success: daemon removes item from outbox via `editWithRetry()`
+- On daemon restart: syncs outbox cell, processes all remaining items
+- Dedup: daemon maintains in-memory `processedIds` Set; for crash between
+  delivery and removal, accept idempotent re-delivery for v1 (a local delivery
+  log file can provide stricter dedup later)
 
 ### Single-Machine Assumption
 
