@@ -1,12 +1,15 @@
 {
   "name": "@commontools/runner",
   "tasks": {
-    "test": "ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write --allow-run test/*.test.ts",
+    "test": "ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts",
     "bench": {
       "description": "Run Cell benchmarks for performance analysis",
       "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/*.bench.ts"
     },
     "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts"
+  },
+  "imports": {
+    "fake-indexeddb": "npm:fake-indexeddb@6.0.0"
   },
   "exports": {
     ".": "./src/index.ts",

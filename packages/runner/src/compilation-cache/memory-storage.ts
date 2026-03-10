@@ -3,6 +3,11 @@ import type {
   CompilationCacheStorage,
 } from "./storage.ts";
 
+/**
+ * In-memory implementation for use in tests. Not persistent across
+ * restarts — use `IDBCompilationCache` (browser) or
+ * `FileSystemCompilationCache` (server) for real caching.
+ */
 export class MemoryCompilationCache implements CompilationCacheStorage {
   private store = new Map<string, CompilationCacheEntry>();
 

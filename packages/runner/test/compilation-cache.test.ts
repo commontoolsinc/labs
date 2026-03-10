@@ -1,8 +1,10 @@
+import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   CachedCompiler,
   FileSystemCompilationCache,
+  IDBCompilationCache,
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
 import type { CompilationCacheStorage } from "../src/compilation-cache/mod.ts";
@@ -203,6 +205,22 @@ storageTests(
         await Deno.remove(fsTempDir, { recursive: true });
       } catch { /* already cleaned up */ }
       fsTempDir = undefined;
+    }
+  },
+);
+
+// Run tests for IDBCompilationCache (using fake-indexeddb polyfill)
+let idbStorage: IDBCompilationCache | undefined;
+storageTests(
+  "IDB",
+  () => {
+    idbStorage = new IDBCompilationCache();
+    return idbStorage;
+  },
+  async () => {
+    if (idbStorage) {
+      await idbStorage.clear();
+      idbStorage = undefined;
     }
   },
 );

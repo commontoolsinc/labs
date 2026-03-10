@@ -8,6 +8,16 @@ export interface CompilationCacheEntry {
   cachedAt: number;
 }
 
+/**
+ * Persistent key-value store for compiled JS (`JsScript`).
+ *
+ * Keyed by a content hash of the input program. Each entry carries a
+ * fingerprint so stale results from a previous compiler version can be
+ * detected and evicted. Implementations exist for IndexedDB (browser),
+ * filesystem (server/Deno), and in-memory (tests).
+ *
+ * See docs/specs/compilation-cache.md for design rationale.
+ */
 export interface CompilationCacheStorage {
   get(programHash: string): Promise<CompilationCacheEntry | undefined>;
   set(programHash: string, entry: CompilationCacheEntry): Promise<void>;

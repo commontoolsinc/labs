@@ -116,6 +116,7 @@
     "npm:dom-serializer@*": "2.0.0",
     "npm:domhandler@*": "5.0.3",
     "npm:esbuild@~0.25.5": "0.25.12",
+    "npm:fake-indexeddb@6.0.0": "6.0.0",
     "npm:gcp-metadata@6.1.0": "6.1.0",
     "npm:hash-wasm@^4.11.0": "4.12.0",
     "npm:hono-pino@0.7": "0.7.2_hono@4.10.5_pino@9.14.0",
@@ -1367,6 +1368,9 @@
     "extend@3.0.2": {
       "integrity": "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="
     },
+    "fake-indexeddb@6.0.0": {
+      "integrity": "sha512-YEboHE5VfopUclOck7LncgIqskAqnv4q0EWbYCaxKKjAvO93c+TJIaBuGy8CBFdbg9nKdpN3AuPRwVBJ4k7NrQ=="
+    },
     "fast-copy@3.0.2": {
       "integrity": "sha512-dl0O9Vhju8IrcLndv2eU4ldt1ftXMqqfgN4H1cpmGV7P6jeB9FwpN9a2c8DPGE1Ys88rNUJVYDHq73CGAGOPfQ=="
     },
@@ -1963,6 +1967,11 @@
           "jsr:@commontools/leb128@*",
           "jsr:@db/sqlite@0.12",
           "npm:@opentelemetry/api@^1.9.0"
+        ]
+      },
+      "packages/runner": {
+        "dependencies": [
+          "npm:fake-indexeddb@6.0.0"
         ]
       },
       "packages/schema-generator": {
