@@ -77,6 +77,19 @@ export class OpaqueGetValidationTransformer extends Transformer {
       return;
     }
 
+    // If the type actually has a callable .get() method, allow it.
+    // This catches Writable<T>/Stream<T> types that the brand-based
+    // detection may miss (e.g. when destructured from callback params).
+    if (this.typeHasGetMethod(receiverType, checker)) {
+      return;
+    }
+
+    // Inside handler callbacks, .get() is always valid because
+    // handlers run imperatively and the runtime provides cell proxies.
+    if (this.isInsideHandlerCallback(node)) {
+      return;
+    }
+
     // Determine if the receiver is a reactive value (type-based or structural)
     const isReactive = cellKind === "opaque" ||
       this.isReactiveExpression(receiverExpr, checker);
@@ -96,6 +109,23 @@ export class OpaqueGetValidationTransformer extends Transformer {
         node,
       });
     }
+  }
+
+  /**
+   * Check if the type has a callable .get() method (i.e. it's a Cell/Writable/Stream).
+   * When the brand-based detection fails, this serves as a fallback to avoid
+   * false positives on types that legitimately support .get().
+   */
+  private typeHasGetMethod(type: ts.Type, checker: ts.TypeChecker): boolean {
+    const getProperty = type.getProperty("get");
+    if (!getProperty) return false;
+    const getType = checker.getTypeOfSymbolAtLocation(
+      getProperty,
+      getProperty.valueDeclaration ?? getProperty.declarations?.[0] ??
+        {} as ts.Node,
+    );
+    // Check it's callable (has call signatures)
+    return getType.getCallSignatures().length > 0;
   }
 
   /**
@@ -177,6 +207,31 @@ export class OpaqueGetValidationTransformer extends Transformer {
       const name = callee.name.text;
       return name === "pattern" || name === "handler" ||
         name === "lift" || name === "computed" || name === "render";
+    }
+    return false;
+  }
+
+  /**
+   * Check if a node is inside a handler/action callback where .get() is valid.
+   * Handler callbacks are imperative contexts — the runtime provides cell proxies
+   * that support .get() even when the type system says otherwise.
+   */
+  private isInsideHandlerCallback(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+        const call = current.parent;
+        if (call && ts.isCallExpression(call)) {
+          const callee = call.expression;
+          const name = ts.isIdentifier(callee)
+            ? callee.text
+            : ts.isPropertyAccessExpression(callee)
+            ? callee.name.text
+            : undefined;
+          if (name === "handler") return true;
+        }
+      }
+      current = current.parent;
     }
     return false;
   }
