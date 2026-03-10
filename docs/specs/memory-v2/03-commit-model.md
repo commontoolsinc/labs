@@ -504,15 +504,36 @@ atomicity.
 ### 3.7.2 CommitLogEntry
 
 The commit log preserves both the original client submission and the server's
-resolution metadata. For `/memory/transact`, the stored entry has the following
-shape. Branch lifecycle writes (`/memory/branch/create` and
-`/memory/branch/delete`) are sequenced into the same storage commit log but use
-command-specific payloads and have no pending-read resolution data.
+resolution metadata. The commit log stores successful **write-class** commands:
+ordinary `/memory/transact` commits plus branch lifecycle writes
+(`/memory/branch/create` and `/memory/branch/delete`).
 
 ```typescript
+type BranchLifecycleWrite =
+  | {
+      cmd: "/memory/branch/create";
+      args: {
+        localSeq: number;
+        name: BranchId;
+        fromBranch?: BranchId;
+        atSeq?: number;
+      };
+    }
+  | {
+      cmd: "/memory/branch/delete";
+      args: {
+        localSeq: number;
+        name: BranchId;
+      };
+    };
+
+type WritePayload = ClientCommit | BranchLifecycleWrite;
+
 interface CommitLogEntry {
-  // Content hash of the canonical ClientCommit payload. Stable across replay
-  // and independent of the outer UCAN wrapper.
+  // Content hash of the canonical write payload. For `/memory/transact`, this
+  // is the `ClientCommit` hash. For branch lifecycle writes, this is the hash
+  // of the normalized `{ cmd, args }` payload. Stable across replay and
+  // independent of the outer UCAN wrapper.
   hash: Reference;
 
   // Raw content-addressed references of the authenticated transport envelope.
@@ -526,17 +547,17 @@ interface CommitLogEntry {
   // The client-local pending index used on that session.
   localSeq: number;
 
-  // The original semantic commit payload extracted from invocation.args
-  original: ClientCommit;
+  // The original semantic write payload extracted from the invocation
+  original: WritePayload;
 
   // Server-assigned resolution metadata
   resolution: {
     // Seq number assigned to this commit
     seq: number;
 
-    // Session-scoped resolution of pending reads referenced by this commit.
-    // Stored as plain JSON, not as a language-level Map.
-    resolvedPendingReads: Array<{
+    // Present for `/memory/transact` rows only. Branch lifecycle writes have no
+    // pending-read resolution data.
+    resolvedPendingReads?: Array<{
       localSeq: number;
       hash: Reference;
       seq: number;
@@ -546,12 +567,14 @@ interface CommitLogEntry {
 ```
 
 **Why preserve the original?** The commit log is an audit trail. Preserving the
-semantic `ClientCommit` payload allows verifiers to replay validation logic:
-given the server state at the time, was this commit valid? The linked
-`invocationRef` and `authorizationRef` preserve who authorized that payload and
-under which proof. The resolution metadata records the server's decisions (seq
-assignment, submitting session, and pending-read resolution) so the outcome can
-be reproduced.
+semantic write payload allows verifiers to replay the relevant logic: for
+`/memory/transact`, was the commit valid against the observed reads and writes;
+for branch lifecycle writes, was the metadata mutation valid against the branch
+state and naming rules? The linked `invocationRef` and `authorizationRef`
+preserve who authorized that payload and under which proof. The resolution
+metadata records the server's decisions (seq assignment, submitting session,
+and, when applicable, pending-read resolution) so the outcome can be
+reproduced.
 
 ### 3.7.3 Seq Assignment
 
@@ -578,30 +601,33 @@ commit log entry with the matching seq.
 
 ### 3.7.4 Commit Hashes, Signing, and Replay
 
-Each committed transaction has two identifiers with different roles:
+Each committed write-class operation has identifiers with different roles:
 
-- **`hash`** — the content hash of the canonical `ClientCommit` payload. This is
-  stable across retransmission and identifies the semantic mutation payload.
+- **`hash`** — the content hash of the canonical write payload. For
+  `/memory/transact`, this is the `ClientCommit` payload hash. For branch
+  lifecycle writes, it is the normalized `{ cmd, args }` payload hash. This is
+  stable across retransmission and identifies the semantic write payload.
 - **`invocationRef`** — the content hash of the canonical UCAN invocation that
-  carried the `ClientCommit` over the wire.
+  carried the write over the wire.
 - **`authorizationRef`** — the content hash of the verified authorization blob
   whose proof/signature covered `invocationRef`. Batched sibling invocations may
   share this value.
-- **`(sessionId, localSeq)`** — the logical idempotence key for replay and
-  pending-read resolution.
+- **`(sessionId, localSeq)`** — the logical idempotence key for replay. For
+  `/memory/transact`, it also scopes pending-read resolution.
 - **`seq`** — the server-assigned canonical ordering position used by queries,
   subscriptions, and point-in-time reads.
 
 The server verifies the invocation/authorization envelope before accepting a
-commit, computes the canonical commit hash from the inner `ClientCommit`
-payload, computes `invocationRef` / `authorizationRef` from the outer blobs,
-and stores all three references together with the resolved `{ hash, seq }`
-translation. If a client replays the same commit after reconnecting, the server
+write-class command, computes the canonical `hash` from the inner semantic
+payload (`ClientCommit` for `/memory/transact`, normalized `{ cmd, args }` for
+branch lifecycle writes), computes `invocationRef` / `authorizationRef` from
+the outer blobs, and stores all three references together with the resolved
+metadata. If a client replays the same write after reconnecting, the server
 SHOULD deduplicate by `(sessionId, localSeq)` and verify that the replayed
 `hash` matches the stored row before returning the existing result. A mismatched
 hash for the same `(sessionId, localSeq)` is a protocol error. Replays MAY
 arrive inside a fresh invocation or authorization wrapper; that does not change
-the identity of the underlying `ClientCommit`.
+the identity of the underlying semantic write payload.
 
 ### 3.7.5 Session Identity and Reconnect
 
@@ -796,7 +822,7 @@ v2 model described in this section.
 | Nursery | Pending | Same concept, standard name |
 | `since` | `seq` | Same concept, renamed for clarity |
 | `CommitData.transaction` | `CommitLogEntry.original` | Preserves original submission |
-| UCAN transport envelope | `CommitLogEntry.invocationRef` + `CommitLogEntry.authorizationRef` | New: preserves authenticated command wrapper separately from semantic commit payload |
+| UCAN transport envelope | `CommitLogEntry.invocationRef` + `CommitLogEntry.authorizationRef` | New: preserves authenticated command wrapper separately from semantic write payload |
 | *(implicit)* | `CommitLogEntry.resolution` | New: explicit server-side metadata |
 
 ---
