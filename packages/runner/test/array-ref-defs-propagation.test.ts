@@ -80,13 +80,12 @@ describe("$defs propagation in array item schema extraction", () => {
     // storageProvider.sync() and eventually to joinSchema().
     const value = [cellLink];
 
-    // Before the fix: itemSchema = { $ref: "#/$defs/Item" } (no $defs)
-    //   → sync({ schema: { $ref: "#/$defs/Item" } })
-    //   → pull() → joinSchema(classifications, { $ref: "#/$defs/Item" })
-    //   → resolveSchemaRefsOrThrow throws!
+    // Before the fix: itemSchema was extracted as bare schema.items
+    //   → { $ref: "#/$defs/Item" } with no $defs
+    //   → sync → pull → joinSchema → resolveSchemaRefsOrThrow throws!
     //
-    // After the fix: itemSchema = { $ref: "#/$defs/Item", $defs: { Item: ... } }
-    //   → sync resolves $ref successfully
+    // After the fix: cfc.getSchemaAtPath(schema, [index]) resolves the
+    //   $ref using the parent's $defs, returning the resolved item schema.
     //
     // The sync call itself won't find data (fake ID), but it will
     // call pull() which calls joinSchema() on the schema — and that's

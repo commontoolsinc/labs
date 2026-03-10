@@ -2322,16 +2322,11 @@ export class StorageManager implements IStorageManager {
 
     // Recurse into object/array
     if (Array.isArray(value)) {
-      let itemSchema = schema && isObject(schema) && schema.items
-        ? schema.items as JSONSchema
-        : undefined;
-      // Carry $defs from parent schema so $ref pointers in items can resolve
-      if (
-        itemSchema && isObject(itemSchema) && isObject(schema) && schema.$defs
-      ) {
-        itemSchema = { ...itemSchema, $defs: schema.$defs };
-      }
-      for (const item of value) {
+      for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        const itemSchema = schema
+          ? cfc.getSchemaAtPath(schema, [String(i)])
+          : undefined;
         this.collectLinkedCellSyncs(
           item,
           base,
