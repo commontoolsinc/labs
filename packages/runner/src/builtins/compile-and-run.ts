@@ -237,6 +237,10 @@ export function compileAndRun(
         // how we pass input into the builtin.
 
         runtime.runSynced(result, pattern, input.get());
+        runtime.editWithRetry((asyncTx) => {
+          result.withTx(asyncTx).key("isHidden").set(true);
+        });
+        runtime.pieceCreatedCallback?.(result);
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

@@ -691,12 +691,16 @@ export class ContextualFlowControl {
             subSchemaStrings.push(subSchemaString);
           }
         }
-        if (subSchemas.length === 0) {
-          cursor = false;
-        } else if (subSchemas.length === 1) {
-          cursor = subSchemas[0];
-        } else {
-          cursor = { "anyOf": subSchemas };
+        // Only update cursor from subSchemas if the isTrueSchema branch
+        // didn't already set cursor = true and break out of the loop.
+        if (cursor !== true) {
+          if (subSchemas.length === 0) {
+            cursor = false;
+          } else if (subSchemas.length === 1) {
+            cursor = subSchemas[0];
+          } else {
+            cursor = { "anyOf": subSchemas };
+          }
         }
         break;
       }
