@@ -17,7 +17,7 @@ import { createCell } from "../cell.ts";
  * @returns An OpaqueRef
  */
 function opaqueRefWithCell<T>(
-  value?: Opaque<T> | T,
+  value?: Opaque<T> | T | undefined,
   schema?: JSONSchema,
   kind?: CellKind,
 ): OpaqueRef<T> {
@@ -68,16 +68,16 @@ function opaqueRefWithCell<T>(
 // Legacy opaqueRef for backward compatibility - creates proxies without Cell
 // This is used during pattern construction before we have a runtime
 export function opaqueRef<S extends JSONSchema>(
-  value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S>,
+  value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S> | undefined,
   schema: S,
 ): OpaqueRef<SchemaWithoutCell<S>>;
 export function opaqueRef<T>(
-  value?: Opaque<T> | T,
+  value?: Opaque<T> | T | undefined,
   schema?: JSONSchema,
 ): OpaqueRef<T>;
 
 export function opaqueRef<T>(
-  value?: Opaque<T> | T,
+  value?: Opaque<T> | T | undefined,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
   return opaqueRefWithCell<T>(value, schema);

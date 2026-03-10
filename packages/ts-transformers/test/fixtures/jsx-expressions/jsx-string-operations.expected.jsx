@@ -191,7 +191,33 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 title: state.key("title")
             } }, ({ state }) => state.title.toLowerCase())}</p>
-        <p>Length: {state.key("message", "length")}</p>
+        <p>Length: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        message: {
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["message"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                message: {
+                    length: state.key("message").length
+                }
+            } }, ({ state }) => state.message.length)}</p>
         <p>Substring: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -313,10 +339,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

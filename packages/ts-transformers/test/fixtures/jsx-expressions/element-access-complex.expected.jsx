@@ -52,11 +52,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
@@ -97,11 +93,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.key("nested").arrays,
@@ -113,7 +105,28 @@ export default pattern((state) => {
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
         <p>
-          First and last: {state.key("items", "0")} and{" "}
+          First and last: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: ["string", "undefined"]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                items: state.key("items")
+            } }, ({ state }) => state.items[0])} and{" "}
           {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -132,11 +145,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}
@@ -192,11 +201,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
@@ -225,11 +230,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 row: state.key("row")
@@ -257,11 +258,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a")
@@ -307,11 +304,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser"),
@@ -344,11 +337,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 indices: state.key("indices")
@@ -373,11 +362,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.key("arr")
             } }, ({ state }) => state.arr[state.arr[0]!])}</p>
@@ -524,7 +509,28 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 b: state.key("b")
-            } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
+            } }, ({ state }) => state.items[state.b]!), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                items: state.key("items")
+            } }, ({ state }) => state.items[0]!))}
         </p>
 
         {/* Element access in boolean expression */}
@@ -760,10 +766,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

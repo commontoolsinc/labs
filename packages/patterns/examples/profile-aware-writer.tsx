@@ -33,7 +33,7 @@ export default pattern<Input>(({ title }) => {
   const profile = wish<Cell<string>>({ query: "#profile" });
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result.get();
+    const profileText = profile.result!.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";

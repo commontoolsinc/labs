@@ -67,8 +67,8 @@ export function applyInputIfcToOutput<T, R>(
 // Attach ifc classification to OpaqueRef objects reachable
 // from the outputs without descending into OpaqueRef objects
 // TODO(@ubik2) Investigate: can we have cycles here?
-function attachCfcToOutputs<T, R>(
-  outputs: Opaque<R>,
+function attachCfcToOutputs(
+  outputs: unknown,
   cfc: ContextualFlowControl,
   lubClassification: string,
 ) {

@@ -387,11 +387,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   color: "#b91c1c",
                 }}
               >
-                Error loading registry:{" "}
-                {computed(() =>
-                  console.log("registryError 2", registryError)
-                ) &&
-                  ""}
+                Error loading registry:{computed(() => {
+                  console.log("registryError 2", registryError);
+                  return "";
+                })}
                 <pre>{JSON.stringify(registryError, null, 2)}</pre>
               </div>,
             )}

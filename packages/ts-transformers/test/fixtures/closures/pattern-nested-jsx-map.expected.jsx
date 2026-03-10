@@ -75,48 +75,20 @@ export default pattern((__ct_pattern_input) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
-            items: {
-                $ref: "#/$defs/UIRenderable"
-            },
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
+            items: {}
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
+            anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }, {
                     type: "array",
-                    items: {
-                        $ref: "#/$defs/UIRenderable"
-                    }
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
+                    items: {}
+                }]
         } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return (<div>
@@ -227,10 +199,10 @@ export default pattern((__ct_pattern_input) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -291,10 +263,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -364,10 +336,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

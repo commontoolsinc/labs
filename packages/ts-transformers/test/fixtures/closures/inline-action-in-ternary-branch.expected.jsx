@@ -37,8 +37,83 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
-            <span>{state.key("card", "title")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        card: {
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["title"]
+                        },
+                        isEditing: {
+                            type: "boolean",
+                            asCell: true
+                        }
+                    },
+                    required: ["card", "isEditing"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                card: {
+                    title: state.key("card").title
+                },
+                isEditing: state.key("isEditing")
+            } }, ({ state }) => (<div>
+            <span>{__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        card: {
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["title"]
+                        }
+                    },
+                    required: ["card"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                card: {
+                    title: state.card.title
+                }
+            } }, ({ state }) => state.card.title)}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
             {__ctHelpers.derive({
@@ -60,10 +135,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -77,7 +152,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, { state: {
-                    isEditing: state.key("isEditing")
+                    isEditing: state.isEditing
                 } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
                 type: "object",
                 properties: {
@@ -98,7 +173,7 @@ export default pattern((state) => {
                     isEditing: state.isEditing
                 }
             })}>Edit</ct-button>))}
-          </div>)}
+          </div>)))}
       </ct-card>),
         card: state.key("card"),
     };
@@ -156,10 +231,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

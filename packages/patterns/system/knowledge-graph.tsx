@@ -207,7 +207,7 @@ const KnowledgeGraph = pattern<Input>(() => {
         { piece: Writable<MentionablePiece>; summary: string; name: string }
       >;
     }
-  >({ query: "#summaryIndex" }).result;
+  >({ query: "#summaryIndex" }).result!;
 
   // LLM agent state
   const messages = Writable.of<BuiltInLLMMessage[]>([]);

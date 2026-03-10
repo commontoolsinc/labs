@@ -286,8 +286,17 @@ export function createDataFlowAnalyzer(
       const declarations = symbol.getDeclarations();
       if (!declarations) return undefined;
       for (const declaration of declarations) {
-        if (!ts.isParameter(declaration)) continue;
-        let functionNode: ts.Node | undefined = declaration.parent;
+        // Walk up from BindingElements to find the enclosing Parameter
+        let paramNode: ts.Node = declaration;
+        while (
+          ts.isBindingElement(paramNode) ||
+          ts.isObjectBindingPattern(paramNode) ||
+          ts.isArrayBindingPattern(paramNode)
+        ) {
+          paramNode = paramNode.parent;
+        }
+        if (!ts.isParameter(paramNode)) continue;
+        let functionNode: ts.Node | undefined = paramNode.parent;
         while (functionNode && !ts.isFunctionLike(functionNode)) {
           functionNode = functionNode.parent;
         }
@@ -309,19 +318,88 @@ export function createDataFlowAnalyzer(
     const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean =>
       getOpaqueParameterCallKind(symbol) !== undefined;
 
+    /** Check if a symbol is a local variable initialized from a reactive call
+     *  (e.g. `const bar = computed(...)`, `const items = wish(...).result!`).
+     *  Walks through NonNull, property access, and type assertions to find
+     *  the underlying call expression. */
+    const REACTIVE_CALL_KINDS = new Set([
+      "builder",
+      "derive",
+      "wish",
+      "cell-factory",
+      "cell-for",
+      "generate-object",
+    ]);
+    const isVariableFromReactiveCall = (
+      symbol: ts.Symbol | undefined,
+    ): boolean => {
+      if (!symbol) return false;
+      const declarations = symbol.getDeclarations();
+      if (!declarations) return false;
+      for (const decl of declarations) {
+        let initExpr: ts.Expression | undefined;
+        if (ts.isVariableDeclaration(decl) && decl.initializer) {
+          initExpr = decl.initializer;
+        } else if (ts.isBindingElement(decl)) {
+          // Walk up from BindingElement to the VariableDeclaration
+          let parent: ts.Node = decl;
+          while (
+            ts.isBindingElement(parent) ||
+            ts.isObjectBindingPattern(parent) ||
+            ts.isArrayBindingPattern(parent)
+          ) {
+            parent = parent.parent;
+          }
+          if (ts.isVariableDeclaration(parent) && parent.initializer) {
+            initExpr = parent.initializer;
+          }
+        }
+        if (!initExpr) continue;
+        // Walk through wrappers to find the call expression
+        let current: ts.Expression = initExpr;
+        while (true) {
+          if (
+            ts.isNonNullExpression(current) ||
+            ts.isParenthesizedExpression(current) ||
+            ts.isAsExpression(current) ||
+            ts.isTypeAssertionExpression(current)
+          ) {
+            current = current.expression;
+            continue;
+          }
+          if (ts.isPropertyAccessExpression(current)) {
+            current = current.expression;
+            continue;
+          }
+          break;
+        }
+        if (ts.isCallExpression(current)) {
+          const callKind = detectCallKind(current, checker);
+          if (callKind && REACTIVE_CALL_KINDS.has(callKind.kind)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
     const isImplicitOpaqueRefExpression = (
       expr: ts.Expression,
     ): boolean => {
       const root = findRootIdentifier(expr);
       if (!root) return false;
       const symbol = tryGetSymbol(root);
-      return isRootOpaqueParameter(symbol);
+      return isRootOpaqueParameter(symbol) ||
+        isVariableFromReactiveCall(symbol);
     };
 
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
       const aggregated = getAggregatedSymbols(scope, context.scopes);
-      if (aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
+      if (
+        aggregated.has(symbol) &&
+        (isRootOpaqueParameter(symbol) || isVariableFromReactiveCall(symbol))
+      ) {
         return false;
       }
       return aggregated.has(symbol);
@@ -395,6 +473,16 @@ export function createDataFlowAnalyzer(
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
         recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+      // Check if this identifier is a variable assigned from a reactive call
+      // (e.g. const bar = computed(...), const items = wish(...).result!)
+      if (isVariableFromReactiveCall(symbol)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: reactive call result
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,

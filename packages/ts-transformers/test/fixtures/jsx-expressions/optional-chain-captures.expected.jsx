@@ -14,7 +14,34 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        <span>{state.key("maybe", "value")}</span>
+        <span>{__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        maybe: {
+                            anyOf: [{
+                                    type: "undefined"
+                                }, {
+                                    type: "object",
+                                    properties: {
+                                        value: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["value"]
+                                }]
+                        }
+                    }
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: ["number", "undefined"]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                maybe: state.key("maybe")
+            } }, ({ state }) => state.maybe?.value)}</span>
         {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<span>{__ctHelpers.derive({
@@ -27,17 +54,13 @@ export default pattern((state) => {
                                     anyOf: [{
                                             type: "undefined"
                                         }, {
-                                            anyOf: [{
-                                                    type: "undefined"
-                                                }, {
-                                                    type: "object",
-                                                    properties: {
-                                                        value: {
-                                                            type: "number"
-                                                        }
-                                                    },
-                                                    required: ["value"]
-                                                }]
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value"]
                                         }]
                                 }
                             }
@@ -77,10 +100,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -145,10 +168,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

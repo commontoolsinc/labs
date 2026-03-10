@@ -369,6 +369,15 @@ function isReactiveMapOrigin(
     if (kind?.kind === "builder" && kind.builderName === "computed") {
       return true;
     }
+    // wish(), cell factories, and generateObject return reactive values
+    if (
+      kind?.kind === "wish" ||
+      kind?.kind === "cell-factory" ||
+      kind?.kind === "cell-for" ||
+      kind?.kind === "generate-object"
+    ) {
+      return true;
+    }
 
     // Syntactic chaining detection: .filter().map() — the intermediate result
     // of a reactive array method call is still reactive.
@@ -444,6 +453,23 @@ function isReactiveMapOrigin(
         )
       ) {
         return true;
+      }
+      // Also check if the binding element is from a variable declaration
+      // with a reactive initializer (e.g. const { items } = wish(...).result!)
+      let parent: ts.Node = declaration;
+      while (
+        ts.isBindingElement(parent) ||
+        ts.isObjectBindingPattern(parent) ||
+        ts.isArrayBindingPattern(parent)
+      ) {
+        parent = parent.parent;
+      }
+      if (ts.isVariableDeclaration(parent) && parent.initializer) {
+        if (
+          isReactiveMapOrigin(parent.initializer, context, seenSymbols)
+        ) {
+          return true;
+        }
       }
     }
 

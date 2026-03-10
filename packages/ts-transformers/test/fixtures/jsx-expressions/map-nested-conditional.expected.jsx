@@ -43,7 +43,9 @@ export default pattern((_state) => {
                             properties: {}
                         }]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{}, {
+                    anyOf: [{
+                            type: "string"
+                        }, {}, {
                             type: "object",
                             properties: {}
                         }]
@@ -67,10 +69,10 @@ export default pattern((_state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -100,10 +102,10 @@ export default pattern((_state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

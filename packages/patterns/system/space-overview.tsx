@@ -66,7 +66,7 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
     query: "#summaryIndex",
-  }).result;
+  }).result!;
   const profileWish = wish<string>({ query: "#profile" });
   const profileText = computed(() => profileWish.result ?? "");
 

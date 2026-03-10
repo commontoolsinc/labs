@@ -210,7 +210,7 @@ export default pattern<Input, Output>(
             </div>
             <ct-button
               onClick={invokeServerStream({
-                stream: serverStream,
+                stream: serverStream!,
                 lastInvocationStatus,
                 invocationCount,
               })}
