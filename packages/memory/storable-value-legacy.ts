@@ -404,7 +404,7 @@ function toDeepStorableValueInternal(
  * @param array The array to check.
  * @returns `true` if the array has only numeric properties, `false` otherwise.
  */
-function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
+export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
   const len = array.length;
   const keys = Object.keys(array);
 

@@ -21,6 +21,7 @@ import {
   type NativeTag,
   tagFromNativeValue,
 } from "./type-tags.ts";
+import { isArrayWithOnlyIndexProperties } from "./storable-value-legacy.ts";
 
 /**
  * Shallow-clone a `StorableValueLayer` to achieve a desired frozenness.
@@ -571,7 +572,7 @@ export function isRichStorableValue(
       if (Array.isArray(value)) {
         // In the rich path, arrays with `undefined` elements and sparse holes
         // are accepted. Only reject arrays with non-index properties.
-        return isRichStorableArray(value);
+        return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
       // StorableInstance, handled above).
@@ -589,27 +590,6 @@ export function isRichStorableValue(
       return false;
     }
   }
-}
-
-/**
- * Checks whether an array is acceptable in the rich storable path. Unlike
- * `isStorableArray` in storable-value.ts, this accepts `undefined` elements
- * and sparse holes. It only rejects arrays with non-index properties.
- */
-function isRichStorableArray(array: unknown[]): boolean {
-  const len = array.length;
-  const keys = Object.keys(array);
-
-  // More keys than length means there must be named (non-index) properties.
-  if (keys.length > len) {
-    return false;
-  }
-
-  // Verify all keys are valid indices (non-negative integers < length).
-  return !keys.some((k) => {
-    const n = Number(k);
-    return !Number.isInteger(n) || n < 0 || n >= len;
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -682,7 +662,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
 
       if (Array.isArray(value)) {
         // Check array structure (no named properties).
-        if (!isRichStorableArray(value)) {
+        if (!isArrayWithOnlyIndexProperties(value)) {
           seen.delete(value);
           return false;
         }
