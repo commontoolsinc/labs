@@ -1,8 +1,20 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
-import type { StorableValue } from "./interface.ts";
-import { toDeepRichStorableValue } from "./storable-value-modern.ts";
+import type {
+  StorableNativeObject,
+  StorableValue,
+  StorableValueLayer,
+} from "./interface.ts";
+import {
+  canBeStored as canBeStoredRich,
+  isRichStorableValue,
+  toDeepRichStorableValue,
+} from "./storable-value-modern.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
-import { toDeepStorableValueLegacy } from "./storable-value-legacy.ts";
+import {
+  canBeStoredLegacy,
+  isStorableValueLegacy,
+  toDeepStorableValueLegacy,
+} from "./storable-value-legacy.ts";
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
@@ -158,6 +170,52 @@ export function toDeepStorableValue(
     return toDeepRichStorableValue(value, freeze);
   }
   return toDeepStorableValueLegacy(value);
+}
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched type checks
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines if the given value is considered "storable" by the system per se
+ * (without invoking any conversions such as `.toJSON()`). This function does
+ * not recursively validate nested values in arrays or objects.
+ *
+ * Flag OFF (legacy): storable values are JSON-encodable values plus
+ * `undefined`. Flag ON (rich): delegates to `isRichStorableValue` which
+ * accepts the extended type system.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is storable per se, `false` otherwise.
+ */
+export function isStorableValue(
+  value: unknown,
+): value is StorableValueLayer {
+  if (currentConfig.richStorableValues) {
+    return isRichStorableValue(value);
+  }
+  return isStorableValueLegacy(value);
+}
+
+/**
+ * Returns `true` if `toDeepStorableValue()` would succeed on the value.
+ * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
+ * or a deep tree thereof.
+ *
+ * Flag OFF (legacy): equivalent to `isStorableValue()` (non-recursive).
+ * Flag ON (rich): delegates to the rich `canBeStored` which recursively
+ * validates nested values.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value can be stored, `false` otherwise.
+ */
+export function canBeStored(
+  value: unknown,
+): value is StorableValue | StorableNativeObject {
+  if (currentConfig.richStorableValues) {
+    return canBeStoredRich(value);
+  }
+  return canBeStoredLegacy(value);
 }
 
 // ---------------------------------------------------------------------------

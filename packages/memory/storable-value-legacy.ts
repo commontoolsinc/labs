@@ -4,11 +4,7 @@ import type {
   StorableValue,
   StorableValueLayer,
 } from "./interface.ts";
-import {
-  canBeStored as canBeStoredRich,
-  isRichStorableValue,
-  toRichStorableValue,
-} from "./storable-value-modern.ts";
+import { toRichStorableValue } from "./storable-value-modern.ts";
 import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 /**
@@ -129,24 +125,16 @@ function hasToJSONMethod(
 }
 
 /**
- * Determines if the given value is considered "storable" by the system per se
- * (without invoking any conversions such as `.toJSON()`). This function does
- * not recursively validate nested values in arrays or objects.
- *
- * For the purposes of this system, storable values are values which are
- * JSON-encodable, _plus_ `undefined`. On the latter: A top-level `undefined`
- * indicates that the salient stored value is to be deleted. `undefined` as an
- * object property value is treated as if it were absent. Arrays must not
- * contain `undefined` elements (including holes); these get converted to `null`
- * during conversion to storable form.
+ * Legacy implementation of `isStorableValue()` for the JSON-only type system.
+ * Determines if the given value is considered "storable" per se (without
+ * invoking any conversions such as `.toJSON()`).
  *
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
-export function isStorableValue(value: unknown): value is StorableValueLayer {
-  if (getExperimentalStorableConfig().richStorableValues) {
-    return isRichStorableValue(value);
-  }
+export function isStorableValueLegacy(
+  value: unknown,
+): value is StorableValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -181,30 +169,17 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
 }
 
 /**
- * Returns `true` if `toDeepStorableValue()` would succeed on the value.
- * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
- * or a deep tree thereof. Recursive: all nested values in arrays and objects
- * must also be storable or convertible.
- *
- * The distinction:
- * - `isStorableValue(x)` -- "is x already a `StorableValue`?"
- * - `canBeStored(x)` -- "could x be converted to a `StorableValue`?"
- *
- * Only available when `richStorableValues` is ON. When the flag is OFF, this
- * falls back to a non-recursive check equivalent to `isStorableValue()`.
+ * Legacy implementation of `canBeStored()` for the JSON-only type system.
+ * In legacy mode, equivalent to `isStorableValueLegacy()` since the legacy
+ * path doesn't support `StorableNativeObject` types.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
  */
-export function canBeStored(
+export function canBeStoredLegacy(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
-  if (getExperimentalStorableConfig().richStorableValues) {
-    return canBeStoredRich(value);
-  }
-  // In legacy mode, canBeStored is equivalent to isStorableValue --
-  // the legacy path doesn't support StorableNativeObject types.
-  return isStorableValue(value);
+  return isStorableValueLegacy(value);
 }
 
 /**
@@ -263,7 +238,7 @@ function shallowStorableFromNativeValueLegacy(
       if (hasToJSONMethod(value)) {
         const converted = value.toJSON();
 
-        if (!isStorableValue(converted)) {
+        if (!isStorableValueLegacy(converted)) {
           throw new Error(
             `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
           );

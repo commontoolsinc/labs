@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isArrayIndexPropertyName,
-  isStorableValue,
   shallowStorableFromNativeValue,
 } from "../storable-value-legacy.ts";
 import {
+  isStorableValue,
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
   toDeepStorableValue,
