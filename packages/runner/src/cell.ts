@@ -1508,7 +1508,9 @@ export class CellImpl<T extends StorableValue>
   /**
    * Find the index of the first matching element in an array cell.
    * Similar to Array.prototype.findIndex but reactive — re-runs when any
-   * element changes. Returns -1 if no match is found.
+   * element changes. Returns -1 if no match is found. Throws TypeError
+   * if the value is not an array, which surfaces as a scheduler error
+   * and leaves the result undefined.
    */
   findIndex(
     this: IsThisObject,
