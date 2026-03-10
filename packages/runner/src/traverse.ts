@@ -816,7 +816,7 @@ export abstract class BaseObjectTraverser {
           const itemDoc = {
             address: {
               ...doc.address,
-              path: [...doc.address.path, k] as unknown as ValuePath,
+              path: appendToPath(doc.address.path, k),
             },
             value: v,
           };
@@ -1201,22 +1201,23 @@ function followPointer(
     // If the doc exists, but we don't have our entire path to the link target,
     // see if we can get there through intermediate documents.
     const lastPath = (error !== undefined)
-      ? error.path
-      : valueEntry.address.path;
+      ? error.path // this may not be a ValuePath
+      : valueEntry.address.path; // this is a ValuePath
     if (valueEntry === undefined || valueEntry.value === undefined) {
+      let lastExisting: ValuePath = ["value"];
       // Never slice below "value" - it's the minimum valid path for getNormalizedLink
-      const lastExisting = lastPath.length <= 1
-        ? ["value"]
-        : lastPath.slice(0, -1);
-      const remaining = target.path.slice(lastExisting.length);
-      if (lastExisting[0] !== "value") {
-        logger.error(
-          "traverse",
-          () => ["Invalid path:", lastExisting, error, valueEntry?.address],
-        );
-        throw new Error("Invalid path");
+      if (lastPath.length > 1) {
+        if (lastPath[0] !== "value") {
+          logger.error(
+            "traverse",
+            () => ["Invalid path:", lastPath, error, valueEntry?.address],
+          );
+          throw new Error("Invalid path ");
+        }
+        lastExisting = ["value", ...lastPath.slice(1, -1)];
       }
-      const partialTarget = { ...target, path: lastExisting as ValuePath };
+      const remaining = target.path.slice(lastExisting.length);
+      const partialTarget = { ...target, path: lastExisting };
       const lastValue = tx.readOrThrow(partialTarget)!;
       // We can continue with the target, but provide the top level target doc
       // to getAtPath.
