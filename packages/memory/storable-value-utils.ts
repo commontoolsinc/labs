@@ -14,10 +14,6 @@ const CHAR_CODE_0 = "0".charCodeAt(0);
  * Indicates whether the given string to be used as a property name (for an
  * object or array) is syntactically valid as an array index per se.
  *
- * Per the ECMAScript spec, valid array indices are integers in the range
- * 0 to 2^32 - 2 (inclusive). The value 2^32 - 1 (4294967295) is reserved
- * as `array.length` for a max-length array and is not a valid index.
- *
  * @param name - The property name to check
  * @returns `true` if `name` when used on an array would access an indexed
  *   element of that array.
@@ -70,8 +66,8 @@ export function isArrayIndexPropertyName(name: string): boolean {
     num = (num * 10) + digit;
   }
 
-  // Only accept in-range values: 0 to 2^32 - 2 (0xFFFFFFFE).
-  return (num <= 0xFFFFFFFE);
+  // Only accept in-range values.
+  return (num < (2 ** 31));
 }
 
 /**

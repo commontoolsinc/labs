@@ -296,10 +296,8 @@ function toDeepStorableValueInternal(
       converted.set(original, value);
     }
     // `undefined` at non-top-level should be omitted (matches JSON.stringify).
-    // In arrays, return `null` instead of OMIT to match JSON.stringify semantics
-    // (which coerces undefined to null in array positions).
     if (value === undefined && converted.size > 0) {
-      return inArray ? null : OMIT;
+      return OMIT;
     }
     // At this point, value is a primitive (null, boolean, number, string) or
     // undefined - all valid StorableValue types.
