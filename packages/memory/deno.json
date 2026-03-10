@@ -39,6 +39,7 @@
     "./consumer": "./consumer.ts",
     "./provider": "./provider.ts",
     "./v2": "./v2.ts",
+    "./v2/server": "./v2/server.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
     "./reference": "./reference.ts",

@@ -21,13 +21,28 @@ console.log("Memory: Initializing provider...");
 const result = await Memory.Provider.open({
   store: storeUrl,
   serviceDid: identity.did(),
+  memoryVersion: "v1",
+});
+
+const v2Result = await Memory.Provider.open({
+  store: storeUrl,
+  serviceDid: identity.did(),
+  memoryVersion: "v2",
 });
 
 if (result.error) {
   throw result.error;
 }
 
+if (v2Result.error) {
+  throw v2Result.error;
+}
+
 export const memory = result.ok;
+export const memoryV2 = v2Result.ok;
+export const memoryV2Server = new Memory.V2Server.Server({
+  memory: memoryV2,
+});
 console.log("Memory: Provider initialized successfully");
 
 export { Memory };

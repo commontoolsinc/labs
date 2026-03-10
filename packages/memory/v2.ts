@@ -8,6 +8,7 @@ export const EMPTY_VALUE_REF = "__empty__" as const;
 export type EntityId = string;
 export type BranchName = string;
 export type SessionId = string;
+export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -89,24 +90,40 @@ export interface SessionOpenArgs {
   seenSeq?: number;
 }
 
+export interface SessionOpenCommand {
+  cmd: "session.open";
+  id: JobId;
+  protocol: typeof MEMORY_V2_PROTOCOL;
+  args: SessionOpenArgs;
+}
+
 export interface SessionOpenResult {
   sessionId: SessionId;
   serverSeq: number;
 }
 
+export interface V2Error {
+  name: string;
+  message: string;
+}
+
+export type V2Result<Value> = { ok: Value } | { error: V2Error };
+
 export interface TaskReturn<Result> {
   the: "task/return";
-  of: `job:${string}`;
+  of: JobId;
   is: Result;
 }
 
 export interface TaskEffect<Effect> {
   the: "task/effect";
-  of: `job:${string}`;
+  of: JobId;
   is: Effect;
 }
 
 export type Receipt<Result, Effect> = TaskReturn<Result> | TaskEffect<Effect>;
+export type ClientMessage = SessionOpenCommand;
+export type ServerMessage = TaskReturn<V2Result<unknown>>;
 
 export const toSourceLink = (id: string): SourceLink => ({ "/": id });
 

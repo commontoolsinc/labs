@@ -1,8 +1,81 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import { Memory, memory } from "../memory.ts";
+import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commontools/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
+
+const readFirstSocketMessage = async (
+  socket: WebSocket,
+): Promise<string | undefined> => {
+  return await new Promise((resolve, reject) => {
+    const onMessage = (event: MessageEvent) => {
+      cleanup();
+      if (typeof event.data !== "string") {
+        reject(new Error("Memory websocket expects text frames"));
+        return;
+      }
+      resolve(event.data);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Memory websocket failed before negotiation"));
+    };
+    const onClose = () => {
+      cleanup();
+      resolve(undefined);
+    };
+    const cleanup = () => {
+      socket.removeEventListener("message", onMessage);
+      socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
+    };
+
+    socket.addEventListener("message", onMessage, { once: true });
+    socket.addEventListener("error", onError, { once: true });
+    socket.addEventListener("close", onClose, { once: true });
+  });
+};
+
+const attachV1SocketPipeline = (socket: WebSocket, firstMessage: string) => {
+  const { readable, writable } = Memory.Socket.fromWithPrefix<string, string>(
+    socket,
+    [firstMessage],
+  );
+
+  readable
+    .pipeThrough(Codec.UCAN.fromStringStream())
+    .pipeThrough(memory.session())
+    .pipeThrough(Codec.Receipt.toStringStream())
+    .pipeTo(writable);
+};
+
+const attachV2SocketPipeline = async (
+  socket: WebSocket,
+  firstMessage: string,
+): Promise<boolean> => {
+  const initialResponse = await memoryV2Server.respond(firstMessage);
+  if (initialResponse === null) {
+    return false;
+  }
+
+  socket.send(initialResponse);
+  socket.onmessage = async (event) => {
+    if (typeof event.data !== "string") {
+      socket.close(1003, "Memory websocket expects text frames");
+      return;
+    }
+
+    const response = await memoryV2Server.respond(event.data);
+    if (response === null) {
+      socket.close(1003, "Unsupported memory/v2 message");
+      return;
+    }
+
+    socket.send(response);
+  };
+
+  return true;
+};
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   return await createSpan("memory.transact", async (span) => {
@@ -91,19 +164,20 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
       span.setAttribute("websocket.upgrade", "success");
 
-      createSpan("memory.socket.setup", (setupSpan) => {
-        const { readable, writable } = Memory.Socket.from<string, string>(
-          socket,
-        );
-        setupSpan.setAttribute("socket.setup", "complete");
+      void createSpan("memory.socket.setup", async (setupSpan) => {
+        const firstMessage = await readFirstSocketMessage(socket);
+        if (firstMessage === undefined) {
+          setupSpan.setAttribute("socket.setup", "closed-before-message");
+          return;
+        }
 
-        // We can't await the pipeline in a WebSocket handler,
-        // so we just record that we've set it up
-        readable
-          .pipeThrough(Codec.UCAN.fromStringStream())
-          .pipeThrough(memory.session())
-          .pipeThrough(Codec.Receipt.toStringStream())
-          .pipeTo(writable);
+        if (await attachV2SocketPipeline(socket, firstMessage)) {
+          setupSpan.setAttribute("socket.setup", "memory-v2");
+          return;
+        }
+
+        attachV1SocketPipeline(socket, firstMessage);
+        setupSpan.setAttribute("socket.setup", "memory-v1");
       });
 
       return response;

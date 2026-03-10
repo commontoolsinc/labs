@@ -14,5 +14,6 @@ export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
 export * as Telemetry from "./telemetry.ts";
 export * as V2 from "./v2.ts";
+export * as V2Server from "./v2/server.ts";
 export * from "./acl.ts";
 export * from "./reference.ts";
