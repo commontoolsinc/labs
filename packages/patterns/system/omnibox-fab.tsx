@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   computed,
+  fetchData,
   handler,
   ifElse,
   NAME,
@@ -19,7 +20,6 @@ import {
   calculator,
   fetchAndRunPattern,
   listMentionable,
-  listPatternIndex,
   listRecent,
   navigateToPattern,
   readWebpage,
@@ -127,6 +127,25 @@ export default pattern<OmniboxFABInput>(
 
     const profile = wish<string>({ query: "#profile" });
 
+    const patternIndexUrl = wish<{ url: Writable<string> }>({
+      query: "#pattern-index",
+    });
+    const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+    computed(() => {
+      const urlRef = patternIndexUrl?.result?.url;
+      const urlValue = typeof urlRef?.get === "function"
+        ? urlRef.get()
+        : (typeof urlRef === "string" ? urlRef : undefined);
+      if (typeof urlValue === "string" && urlValue.length > 0) {
+        resolvedPatternUrl.set(urlValue);
+      }
+    });
+
+    const { result: patternIndex } = fetchData({
+      url: resolvedPatternUrl,
+      mode: "text",
+    });
+
     const profileContext = computed(() => {
       const profileText = profile.result;
       return profileText
@@ -136,11 +155,14 @@ export default pattern<OmniboxFABInput>(
 
     const systemPrompt = computed(() => {
       const profileSection = profileContext;
+      const indexText = patternIndex
+        ? `\n\n--- Available Patterns ---\n${patternIndex}\n---`
+        : "";
       return `You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.
-${profileSection}
+${profileSection}${indexText}
 Tool usage priority:
 - For finding content in the space: use searchSpace with a query to search across all piece summaries and names
-- For patterns: listPatternIndex first
+- For patterns: review the available patterns listed above, then use fetchAndRunPattern to instantiate one
 - For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
 - Remove attachments when no longer relevant
@@ -161,7 +183,6 @@ Be matter-of-fact. Prefer action to explanation.`;
         pattern: calculator,
       },
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
-      listPatternIndex: patternTool(listPatternIndex),
       navigateTo: patternTool(navigateToPattern),
       wishAndNavigate: patternTool(wishTool),
       listMentionable: patternTool(listMentionable, { mentionable }),
