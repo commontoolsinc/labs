@@ -11,50 +11,7 @@ import {
   toDeepRichStorableValue,
   toRichStorableValue,
 } from "./storable-value-modern.ts";
-
-/**
- * Configuration for experimental storable-value features gated behind
- * `RuntimeOptions.experimental`. Uses ambient (module-level) state so that
- * deep call sites can check flags without parameter threading.
- *
- * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
- */
-export interface ExperimentalStorableConfig {
-  /** When `true`, `shallowStorableFromNativeValue` and `toDeepStorableValue` use the
-   *  extended type system (bigint, Map, Set, Uint8Array, Date, etc.). */
-  richStorableValues: boolean;
-}
-
-const defaultConfig: ExperimentalStorableConfig = {
-  richStorableValues: false,
-};
-
-let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
-
-/**
- * Activates experimental storable-value features. Called by the `Runtime`
- * constructor to propagate `ExperimentalOptions` into the memory layer.
- * Merges the provided partial config with defaults.
- */
-export function setExperimentalStorableConfig(
-  config: Partial<ExperimentalStorableConfig>,
-): void {
-  currentConfig = { ...defaultConfig, ...config };
-}
-
-/** Returns the current experimental storable-value configuration. */
-export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
-  return currentConfig;
-}
-
-/**
- * Restores experimental storable-value configuration to defaults. Called by
- * `Runtime.dispose()` to avoid leaking flags between runtime instances or
- * test runs.
- */
-export function resetExperimentalStorableConfig(): void {
-  currentConfig = { ...defaultConfig };
-}
+import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 /**
  * Character code for digit `0`.
@@ -189,7 +146,7 @@ function hasToJSONMethod(
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
 export function isStorableValue(value: unknown): value is StorableValueLayer {
-  if (currentConfig.richStorableValues) {
+  if (getExperimentalStorableConfig().richStorableValues) {
     return isRichStorableValue(value);
   }
   switch (typeof value) {
@@ -244,7 +201,7 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
 export function canBeStored(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
-  if (currentConfig.richStorableValues) {
+  if (getExperimentalStorableConfig().richStorableValues) {
     return canBeStoredRich(value);
   }
   // In legacy mode, canBeStored is equivalent to isStorableValue --
@@ -273,7 +230,7 @@ export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  if (currentConfig.richStorableValues) {
+  if (getExperimentalStorableConfig().richStorableValues) {
     return toRichStorableValue(value, freeze);
   }
   return shallowStorableFromNativeValueLegacy(value);
@@ -388,7 +345,7 @@ export function toDeepStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValue {
-  if (currentConfig.richStorableValues) {
+  if (getExperimentalStorableConfig().richStorableValues) {
     return toDeepRichStorableValue(value, freeze);
   }
   return toDeepStorableValueLegacy(value);
@@ -566,7 +523,7 @@ function isStorableArray(array: unknown[]): boolean {
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
-  if (currentConfig.richStorableValues) {
+  if (getExperimentalStorableConfig().richStorableValues) {
     return deepEqual(a, b);
   }
   return JSON.stringify(a) === JSON.stringify(b);

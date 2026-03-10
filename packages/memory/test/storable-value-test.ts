@@ -3,11 +3,13 @@ import { expect } from "@std/expect";
 import {
   isArrayIndexPropertyName,
   isStorableValue,
-  resetExperimentalStorableConfig,
-  setExperimentalStorableConfig,
   shallowStorableFromNativeValue,
   toDeepStorableValue,
 } from "../storable-value-legacy.ts";
+import {
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+} from "../storable-value.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
 describe("storable-value", () => {

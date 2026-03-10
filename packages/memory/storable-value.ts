@@ -44,23 +44,66 @@ export let nativeFromStorableValue: (
 ) => StorableValue;
 
 // ---------------------------------------------------------------------------
-// Storable value conversion flag and dispatch configuration
+// Experimental storable value configuration
 // ---------------------------------------------------------------------------
 
 /**
- * Module-level flag for storable value conversion, set by the `Runtime`
- * constructor via `setStorableValueConfig()`. When enabled, the public
- * API symbols dispatch through the rich conversion functions.
+ * Configuration for experimental storable-value features gated behind
+ * `RuntimeOptions.experimental`. Uses ambient (module-level) state so that
+ * deep call sites can check flags without parameter threading.
+ *
+ * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
  */
-let storableValueEnabled = false;
+export interface ExperimentalStorableConfig {
+  /** When `true`, storable value functions use the extended type system
+   *  (bigint, Map, Set, Uint8Array, Date, etc.). */
+  richStorableValues: boolean;
+}
+
+const defaultConfig: ExperimentalStorableConfig = {
+  richStorableValues: false,
+};
+
+let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
+
+/**
+ * Activates experimental storable-value features. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions` into the memory layer.
+ * Merges the provided partial config with defaults.
+ */
+export function setExperimentalStorableConfig(
+  config: Partial<ExperimentalStorableConfig>,
+): void {
+  currentConfig = { ...defaultConfig, ...config };
+  configureDispatch();
+}
+
+/** Returns the current experimental storable-value configuration. */
+export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
+  return currentConfig;
+}
+
+/**
+ * Restores experimental storable-value configuration to defaults. Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetExperimentalStorableConfig(): void {
+  currentConfig = { ...defaultConfig };
+  configureDispatch();
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch configuration
+// ---------------------------------------------------------------------------
 
 /**
  * Reassign the public API symbols based on the current value of
- * `storableValueEnabled`. Called at module load and whenever the flag
- * changes.
+ * `currentConfig.richStorableValues`. Called at module load and whenever
+ * the config changes.
  */
 function configureDispatch(): void {
-  if (storableValueEnabled) {
+  if (currentConfig.richStorableValues) {
     // ----- Rich storable value implementations -----
 
     storableFromNativeValue = (
@@ -87,26 +130,6 @@ function configureDispatch(): void {
       return value;
     };
   }
-}
-
-/**
- * Activates or deactivates storable value conversion mode. Called by the
- * `Runtime` constructor to propagate
- * `ExperimentalOptions.richStorableValues` into the memory layer.
- */
-export function setStorableValueConfig(enabled: boolean): void {
-  storableValueEnabled = enabled;
-  configureDispatch();
-}
-
-/**
- * Restores storable value conversion mode to its default (disabled).
- * Called by `Runtime.dispose()` to avoid leaking flags between runtime
- * instances or test runs.
- */
-export function resetStorableValueConfig(): void {
-  storableValueEnabled = false;
-  configureDispatch();
 }
 
 // ---------------------------------------------------------------------------
