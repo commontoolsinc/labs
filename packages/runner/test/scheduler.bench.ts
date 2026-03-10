@@ -83,6 +83,7 @@ Deno.bench(
         action,
         {
           reads: [source.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -139,6 +140,7 @@ Deno.bench(
         action,
         {
           reads: [input.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -196,6 +198,7 @@ Deno.bench(
         action,
         {
           reads: [source.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -250,6 +253,7 @@ Deno.bench(
         action,
         {
           reads: [source.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -299,6 +303,7 @@ Deno.bench(
         action,
         {
           reads: [input.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -365,6 +370,7 @@ Deno.bench(
         actionAB,
         {
           reads: [a.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [b.getAsNormalizedFullLink()],
         },
         {},
@@ -379,6 +385,7 @@ Deno.bench(
         actionAC,
         {
           reads: [a.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [c.getAsNormalizedFullLink()],
         },
         {},
@@ -395,6 +402,7 @@ Deno.bench(
         actionBCD,
         {
           reads: [b.getAsNormalizedFullLink(), c.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [result.getAsNormalizedFullLink()],
         },
         {},
@@ -449,6 +457,7 @@ Deno.bench(
         action,
         {
           reads: [input.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -507,6 +516,7 @@ Deno.bench(
       action,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       {},
@@ -770,6 +780,7 @@ Deno.bench(
         action,
         {
           reads: [{ ...baseLink, id: `test:read-${i}` }],
+          shallowReads: [],
           writes: [{ ...baseLink, id: `test:write-${i}` }],
         },
         {},
@@ -805,6 +816,7 @@ Deno.bench(
         action,
         {
           reads: [sharedRead],
+          shallowReads: [],
           writes: [{
             space,
             id: `test:output-${i}` as const,
@@ -849,11 +861,19 @@ Deno.bench(
     ];
 
     // Initial subscribe
-    runtime.scheduler.subscribe(action, { reads, writes }, {});
+    runtime.scheduler.subscribe(
+      action,
+      { reads, shallowReads: [], writes },
+      {},
+    );
 
     // Simulate 100 resubscribe cycles
     for (let i = 0; i < 100; i++) {
-      runtime.scheduler.resubscribe(action, { reads, writes });
+      runtime.scheduler.resubscribe(action, {
+        reads,
+        shallowReads: [],
+        writes,
+      });
     }
 
     runtime.scheduler.unsubscribe(action);

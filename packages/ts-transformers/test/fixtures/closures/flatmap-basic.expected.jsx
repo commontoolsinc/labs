@@ -1,69 +1,43 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
-interface Group {
-    name: string;
-    members: string[];
+interface Item {
+    id: number;
+    tags: string[];
 }
 interface State {
-    groups: Group[];
+    items: Item[];
 }
-// FIXTURE: flatmap-basic
-// Verifies: .flatMap() and .map() on reactive arrays are both transformed
-//   .flatMap(fn) → .flatMapWithPattern(pattern(...), {})
-//   .map(fn)     → .mapWithPattern(pattern(...), {})
-// Context: flatMap expands each group into its members array, then map
-//   renders each. No captured outer variables — params objects are empty {}
-// Known limitation: the chained .map() element schema is `true` (any) because
-//   the compiler doesn't yet propagate output schemas through chained
-//   transforms. Once that's implemented, it should infer {type:"string"}.
 export default pattern((state) => {
     return {
-        [UI]: (<ul>
-        {state.groups.flatMapWithPattern(__ctHelpers.pattern(({ element: group, params: {} }) => group.members, {
+        [UI]: (<div>
+        {state.key("items").flatMapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>Item #{item.key("id")}</div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Group"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
+                        $ref: "#/$defs/Item"
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
-                    Group: {
+                    Item: {
                         type: "object",
                         properties: {
-                            name: {
-                                type: "string"
+                            id: {
+                                type: "number"
                             },
-                            members: {
+                            tags: {
                                 type: "array",
                                 items: {
                                     type: "string"
                                 }
                             }
                         },
-                        required: ["name", "members"]
+                        required: ["id", "tags"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                },
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: member, params: {} }) => (<li>{member}</li>), {
-                type: "object",
-                properties: {
-                    element: true,
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -86,34 +60,34 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema), {})}
-      </ul>),
+      </div>),
     };
 }, {
     type: "object",
     properties: {
-        groups: {
+        items: {
             type: "array",
             items: {
-                $ref: "#/$defs/Group"
+                $ref: "#/$defs/Item"
             }
         }
     },
-    required: ["groups"],
+    required: ["items"],
     $defs: {
-        Group: {
+        Item: {
             type: "object",
             properties: {
-                name: {
-                    type: "string"
+                id: {
+                    type: "number"
                 },
-                members: {
+                tags: {
                     type: "array",
                     items: {
                         type: "string"
                     }
                 }
             },
-            required: ["name", "members"]
+            required: ["id", "tags"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {

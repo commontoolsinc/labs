@@ -9,7 +9,8 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<ul>
-        {state.spots.mapWithPattern(__ctHelpers.pattern(({ element: spot, params: {} }) => {
+        {state.key("spots").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const spot = __ct_pattern_input.key("element");
                 const { spotNumber: sn } = spot;
                 return <li>{sn}</li>;
             }, {
@@ -17,13 +18,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Spot"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Spot: {
                         type: "object",

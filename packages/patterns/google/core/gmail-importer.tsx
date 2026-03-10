@@ -16,16 +16,16 @@ import {
   VNode,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
+type Confidential<T> = T;
+
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
-type Confidential<T> = CFC<T, "confidential">;
 
 /**
  * Writable cell with sync method.

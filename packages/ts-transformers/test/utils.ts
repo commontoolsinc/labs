@@ -513,7 +513,10 @@ export async function transformFiles(
     }
   }
 
-  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
+  const pipeline = new CommonToolsTransformerPipeline({
+    mode,
+    logger,
+  });
 
   const out: Record<string, string> = {};
   for (const fileName of Object.keys(files)) {
@@ -749,7 +752,10 @@ export async function validateFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
-  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
+  const pipeline = new CommonToolsTransformerPipeline({
+    mode,
+    logger,
+  });
 
   const outputs: Record<string, string> = {};
   for (const fileName of Object.keys(files)) {

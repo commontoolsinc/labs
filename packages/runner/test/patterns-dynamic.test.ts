@@ -389,6 +389,54 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(result.key("doubled").get()).toEqual([10, 20, 10]);
   });
 
+  it("should clean up pattern runs when map list becomes undefined", async () => {
+    let runCount = 0;
+    const double = lift((x: number) => {
+      runCount++;
+      return x * 2;
+    });
+
+    const mapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, doubled: values.map((x) => double(x)) };
+    });
+
+    const resultCell = runtime.getCell<
+      { values: number[]; doubled: number[] }
+    >(
+      space,
+      "map-undef-cleanup",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, mapPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("doubled").get()).toEqual([2, 4, 6]);
+    expect(runCount).toBe(3);
+
+    // Set list to undefined — should clean up and produce empty output
+    result.withTx(tx).key("values").set(undefined as any);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("doubled").get()).toEqual([]);
+
+    // Restore list — runs must re-execute (old runs were stopped)
+    const runsBeforeRestore = runCount;
+    result.withTx(tx).key("values").set([4, 5]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("doubled").get()).toEqual([8, 10]);
+    expect(runCount - runsBeforeRestore).toBe(2);
+  });
+
   // ── filter builtin tests ──────────────────────────────────────────────
 
   it("should filter an array by predicate", async () => {

@@ -52,6 +52,7 @@ import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
 import { getLogger } from "@commontools/utils/logger";
 import { ACL_TYPE, isACL } from "./acl.ts";
+import { COMMIT_LOG_TYPE } from "./commit.ts";
 import { createSchemaMemo, MapSet } from "@commontools/runner/traverse";
 import type { SchemaPathSelector } from "./consumer.ts";
 
@@ -60,8 +61,76 @@ const logger = getLogger("memory-provider", {
   level: "warn",
 });
 
+const DOC_KEY_PATTERN = /([^/]+)\/([^/]+)\/(.+)/;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+const SCHEMA_FLUSH_LOG_INTERVAL_MS = 60_000;
+
+/** Tracks schema flush statistics across all sessions. */
+const schemaFlushStats = {
+  /** Total flushes triggered (all sources) */
+  flushes: 0,
+  /** Flushes where batching deferred at least one commit */
+  batched: 0,
+  /** Flushes triggered synchronously before returning a ConflictError */
+  conflictFlushes: 0,
+  /** Total commits accumulated across all flushes */
+  totalCommitsAccumulated: 0,
+  /** Distribution of batch sizes (commits per flush) */
+  batchSizes: new Map<number, number>(),
+  /** Total elapsed ms across all flushes */
+  totalFlushMs: 0,
+
+  record(commitCount: number, isConflict: boolean, elapsedMs: number) {
+    this.flushes++;
+    this.totalCommitsAccumulated += commitCount;
+    this.totalFlushMs += elapsedMs;
+    if (commitCount > 1) this.batched++;
+    if (isConflict) this.conflictFlushes++;
+    const bucket = commitCount >= 10 ? 10 : commitCount;
+    this.batchSizes.set(bucket, (this.batchSizes.get(bucket) ?? 0) + 1);
+  },
+
+  report(): string[] {
+    if (this.flushes === 0) return [];
+    const avg = (this.totalCommitsAccumulated / this.flushes).toFixed(1);
+    const avgMs = (this.totalFlushMs / this.flushes).toFixed(1);
+    const dist = [...this.batchSizes.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([size, count]) => `${size === 10 ? "10+" : size}:${count}`)
+      .join(" ");
+    return [
+      `flushes=${this.flushes}`,
+      `batched=${this.batched}`,
+      `conflictFlushes=${this.conflictFlushes}`,
+      `avgBatch=${avg}`,
+      `avgMs=${avgMs}`,
+      `dist=[${dist}]`,
+    ];
+  },
+
+  reset() {
+    this.flushes = 0;
+    this.batched = 0;
+    this.conflictFlushes = 0;
+    this.totalCommitsAccumulated = 0;
+    this.batchSizes.clear();
+    this.totalFlushMs = 0;
+  },
+};
+
+let lastSchemaFlushReport = 0;
+
+function maybeReportSchemaFlushStats() {
+  const now = Date.now();
+  if (now - lastSchemaFlushReport < SCHEMA_FLUSH_LOG_INTERVAL_MS) return;
+  lastSchemaFlushReport = now;
+  const lines = schemaFlushStats.report();
+  if (lines.length > 0) {
+    logger.warn("schema-flush-stats", () => lines);
+    schemaFlushStats.reset();
+  }
+}
 
 export interface SlowQuery {
   timestamp: number;
@@ -161,6 +230,13 @@ export interface Provider<Protocol extends Proto> {
     ucan: UCAN<ConsumerInvocationFor<Ability, Protocol>>,
   ): Await<ConsumerResultFor<Ability, Protocol>>;
 
+  /**
+   * Dispose all sessions without closing the ReadableStream pipe.
+   * Clears pending timers and unsubscribes from memory, but leaves
+   * the consumer's pipe intact.
+   */
+  disposeSessions(): void;
+
   close(): CloseResult;
 }
 
@@ -202,6 +278,18 @@ class MemoryProvider<
     return session;
   }
 
+  /**
+   * Dispose all sessions without closing the ReadableStream pipe.
+   * This clears pending timers and unsubscribes from memory, but
+   * leaves the consumer's pipe intact so runtime.dispose() can
+   * complete its scheduler.idle() call.
+   */
+  disposeSessions() {
+    for (const session of this.sessions) {
+      (session as MemoryProviderSession<Space, MemoryProtocol>).dispose();
+    }
+  }
+
   async close() {
     const promises = [];
     for (const session of this.sessions) {
@@ -232,6 +320,10 @@ class MemoryProviderSession<
     | undefined;
 
   channels: Map<InvocationURL<ContentId<Subscribe>>, Set<string>> = new Map();
+  // Reverse index: watchAddress → Set of channel IDs that watch it.
+  // Allows O(changes) commit matching instead of O(channels × changes).
+  private watchIndex: Map<string, Set<InvocationURL<ContentId<Subscribe>>>> =
+    new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
@@ -249,6 +341,14 @@ class MemoryProviderSession<
   // Traversal results from one subscription are reused by subsequent
   // subscriptions that traverse the same doc+path+schema combos.
   private sharedSchemaMemo = createSchemaMemo();
+  // Cached SpaceSession per space to avoid Memory.mount overhead on every commit.
+  private spaceSessionCache = new Map<MemorySpace, SpaceSession<Space>>();
+  // Accumulated doc keys per space for debounced schema matching
+  private pendingSchemaChanges = new Map<MemorySpace, Set<string>>();
+  // Timer for the debounced schema flush (setTimeout(0))
+  private schemaFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  // Duration of the previous schema flush (ms), for batch logging
+  private lastFlushMs = 0;
 
   constructor(
     public memory: MemorySession,
@@ -286,6 +386,10 @@ class MemoryProviderSession<
           await this.invoke(
             command as UCAN<ConsumerCommandInvocation<Protocol>>,
           );
+          // Schedule a debounced flush. The 5ms window lets multiple
+          // rapid commits (e.g. buffered websocket messages) coalesce
+          // into a single schema traversal.
+          this.scheduleSchemaFlush();
         } catch (error) {
           logger.error(
             "stream-error",
@@ -352,6 +456,10 @@ class MemoryProviderSession<
     return { ok: {} };
   }
   dispose() {
+    if (this.schemaFlushTimer !== null) {
+      clearTimeout(this.schemaFlushTimer);
+      this.schemaFlushTimer = null;
+    }
     this.memory.unsubscribe(this);
     this.controller = undefined;
     this.sessions?.delete(this);
@@ -571,6 +679,16 @@ class MemoryProviderSession<
         const result = await this.memory.transact(invocation);
         const txElapsed = logger.timeEnd("transact");
         if (result.error) {
+          // On conflict, flush any pending schema revisions before replying.
+          // The client retries immediately on conflict, and may need linked
+          // docs (e.g. a new document referenced by a changed pointer) that
+          // are only discovered through schema traversal.
+          if (
+            (result.error as { name?: string }).name === "ConflictError" &&
+            this.pendingSchemaChanges.size > 0
+          ) {
+            await this.flushSchemaChanges(/* isConflict */ true);
+          }
           logger.warn(
             "transact-error",
             () => [
@@ -599,16 +717,22 @@ class MemoryProviderSession<
         const selector = ("select") in invocation.args
           ? invocation.args.select
           : invocation.args.selectSchema;
-        this.channels.set(
-          of,
-          new Set(
-            Subscription.channels(invocation.sub, selector),
-          ),
+        const watchAddresses = new Set(
+          Subscription.channels(invocation.sub, selector),
         );
+        this.channels.set(of, watchAddresses);
+        for (const addr of watchAddresses) {
+          let ids = this.watchIndex.get(addr);
+          if (!ids) {
+            ids = new Set();
+            this.watchIndex.set(addr, ids);
+          }
+          ids.add(of);
+        }
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
-        this.channels.delete(of);
+        this.removeChannel(of);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
         }
@@ -637,7 +761,7 @@ class MemoryProviderSession<
     }
   }
 
-  async commit(commit: Commit<Space>, labels?: Memory.FactSelection) {
+  commit(commit: Commit<Space>, labels?: Memory.FactSelection) {
     logger.timeStart("commit");
     // We should really only have one item, but it's technically legal to have
     // multiple transactions in the same commit, so iterate
@@ -649,22 +773,21 @@ class MemoryProviderSession<
       if (Subscription.isTransactionReadOnly(redactedData.transaction)) {
         continue;
       }
-      // First, check to see if any of our schema queries need to be notified
-      // Any queries that lack access are skipped (with a console log)
-      logger.timeStart("commit", "schema-match");
-      const schemaFacts = await this.getSchemaSubscriptionMatches(
+      // Accumulate schema changes for deferred link-traversal evaluation.
+      this.accumulateSchemaChanges(redactedData.transaction);
+
+      // Cheaply read current values of directly-changed docs that are already
+      // tracked by schema subscriptions. This avoids the expensive
+      // evaluateDocumentLinks traversal while still sending the most important
+      // revisions (the docs that actually changed) with the commit.
+      const directRevisions = this.getDirectChangedRevisions(
         redactedData.transaction,
       );
-      logger.timeEnd("commit", "schema-match");
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
-      const commitJobIds: InvocationURL<ContentId<Subscribe>>[] = [];
-      for (const [id, channels] of this.channels) {
-        if (Subscription.match(redactedData.transaction, channels)) {
-          commitJobIds.push(id);
-        }
-      }
+      // Use the reverse watchIndex for O(changes) matching instead of O(channels × changes).
+      const commitJobIds = this.findMatchingChannels(redactedData.transaction);
 
       if (commitJobIds.length > 0) {
         // The client has a subscription to the space's commit log
@@ -672,7 +795,7 @@ class MemoryProviderSession<
           commit: {
             [item.of]: { [item.the]: { [item.cause]: { is: redactedData } } },
           } as Commit<Space>,
-          revisions: this.filterKnownFacts(schemaFacts),
+          revisions: this.filterKnownFacts(directRevisions),
         };
 
         for (const id of commitJobIds) {
@@ -685,6 +808,9 @@ class MemoryProviderSession<
         }
       }
     }
+    // Schedule a debounced flush (5ms window). Multiple rapid commits
+    // coalesce into a single schema traversal.
+    this.scheduleSchemaFlush();
     logger.timeEnd("commit");
     return { ok: {} };
   }
@@ -733,6 +859,102 @@ class MemoryProviderSession<
 
   private toKey(fv: Readonly<FactAddress>) {
     return `${fv.of}/${fv.the}`;
+  }
+
+  /**
+   * Find channels matching a transaction using the reverse watchIndex.
+   * O(changes × 4) instead of O(channels × changes × 4).
+   */
+  private findMatchingChannels(
+    transaction: Transaction<MemorySpace>,
+  ): InvocationURL<ContentId<Subscribe>>[] {
+    if (this.watchIndex.size === 0) return [];
+
+    const matched = new Set<InvocationURL<ContentId<Subscribe>>>();
+    const space = transaction.sub;
+
+    // Check commit-log watchers first
+    this.collectWatchMatches(matched, space, space, COMMIT_LOG_TYPE);
+
+    // Check each changed fact
+    for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
+      if (fact.value !== true) {
+        this.collectWatchMatches(matched, space, fact.of, fact.the);
+      }
+    }
+
+    return [...matched];
+  }
+
+  /** Look up the 4 watch address variants and add matching channel IDs. */
+  private collectWatchMatches(
+    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    space: string,
+    of: string,
+    the: string,
+  ) {
+    const ANY = Subscription.ANY;
+    // exact, wildcard-of, wildcard-the, wildcard-both
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of, the }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of: ANY, the }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of, the: ANY }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of: ANY, the: ANY }),
+    );
+  }
+
+  private addWatchHits(
+    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    addr: string,
+  ) {
+    const ids = this.watchIndex.get(addr);
+    if (ids) {
+      for (const id of ids) matched.add(id);
+    }
+  }
+
+  /** Remove a channel and clean up its entries in the watchIndex. */
+  private removeChannel(id: InvocationURL<ContentId<Subscribe>>) {
+    const addresses = this.channels.get(id);
+    if (addresses) {
+      for (const addr of addresses) {
+        const ids = this.watchIndex.get(addr);
+        if (ids) {
+          ids.delete(id);
+          if (ids.size === 0) this.watchIndex.delete(addr);
+        }
+      }
+      this.channels.delete(id);
+    }
+  }
+
+  /** Get or cache a SpaceSession, avoiding Memory.mount overhead on repeat calls. */
+  private async getSpaceSession(
+    space: MemorySpace,
+  ): Promise<SpaceSession<Space>> {
+    let session = this.spaceSessionCache.get(space);
+    if (!session) {
+      const mountResult = await Memory.mount(
+        this.memory as Memory.Memory,
+        space,
+      );
+      if (mountResult.error) {
+        throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
+      }
+      session = mountResult.ok as unknown as SpaceSession<Space>;
+      this.spaceSessionCache.set(space, session);
+    }
+    return session;
   }
 
   private addSchemaSubscription<Space extends MemorySpace>(
@@ -810,6 +1032,223 @@ class MemoryProviderSession<
   }
 
   /**
+   * Cheaply read current fact values for docs changed in this transaction
+   * that are already tracked by schema subscriptions or wildcard queries.
+   * No schema traversal — just direct SQLite reads for the changed docs.
+   */
+  private getDirectChangedRevisions<Space extends MemorySpace>(
+    transaction: Transaction<Space>,
+  ): Revision<Fact>[] {
+    if (this.schemaChannels.size === 0) return [];
+
+    const space = transaction.sub;
+    const spaceSession = this.spaceSessionCache.get(space);
+    if (!spaceSession) return [];
+
+    const revisions: Revision<Fact>[] = [];
+    const hasWildcard = [...this.schemaChannels.values()].some(
+      (s) => s.isWildcardQuery,
+    );
+
+    for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
+      if (fact.value === true) continue;
+      const docKey = `${space}/${fact.of}/${fact.the}`;
+      // Include if tracked by sharedSchemaTracker or any wildcard query exists
+      const isTracked = this.sharedSchemaTracker.has(docKey);
+      if (!isTracked && !hasWildcard) continue;
+
+      const selected = selectFact(spaceSession, {
+        the: fact.the as Memory.MIME,
+        of: fact.of as Memory.URI,
+      });
+      if (!selected) continue;
+
+      revisions.push({
+        of: selected.of,
+        the: selected.the,
+        cause: causeFromString(selected.cause),
+        is: selected.is,
+        since: selected.since,
+      });
+    }
+
+    return revisions;
+  }
+
+  /**
+   * Collect changed doc keys from a transaction into the pending set
+   * for batched schema evaluation.
+   */
+  private accumulateSchemaChanges<Space extends MemorySpace>(
+    transaction: Transaction<Space>,
+  ): void {
+    if (this.schemaChannels.size === 0) return;
+
+    const space = transaction.sub;
+    const changedDocs = this.extractChangedDocKeys(space, transaction);
+    if (changedDocs.size === 0) return;
+
+    let pending = this.pendingSchemaChanges.get(space);
+    if (!pending) {
+      pending = new Set<string>();
+      this.pendingSchemaChanges.set(space, pending);
+    }
+    for (const doc of changedDocs) {
+      pending.add(doc);
+    }
+  }
+
+  /**
+   * Schedule a schema flush via setTimeout(0).
+   * Yields to the macrotask queue so websocket I/O callbacks can
+   * fire and accumulate more changes before we flush.
+   * Only one timer is ever in flight — additional commits just
+   * accumulate in pendingSchemaChanges and get picked up when
+   * the timer fires.
+   */
+  private scheduleSchemaFlush(): void {
+    if (this.pendingSchemaChanges.size === 0) return;
+    if (this.schemaFlushTimer !== null) return;
+    this.schemaFlushTimer = setTimeout(() => {
+      this.schemaFlushTimer = null;
+      this.flushSchemaChanges();
+    }, 0);
+  }
+
+  /**
+   * Flush accumulated schema changes: run schema matching once for all
+   * coalesced commits and send revisions to active commit-log subscribers.
+   */
+  private async flushSchemaChanges(
+    isConflict = false,
+  ): Promise<void> {
+    // Cancel any pending scheduled flush since we're flushing now
+    if (this.schemaFlushTimer !== null) {
+      clearTimeout(this.schemaFlushTimer);
+      this.schemaFlushTimer = null;
+    }
+
+    // Guard against flush after session disposal
+    if (!this.controller) return;
+
+    // Snapshot and clear pending changes
+    const pending = this.pendingSchemaChanges;
+    this.pendingSchemaChanges = new Map();
+
+    if (pending.size === 0) return;
+
+    // Count total accumulated doc keys across all spaces
+    let commitCount = 0;
+    for (const docs of pending.values()) commitCount += docs.size;
+    const t0 = performance.now();
+
+    logger.timeStart("schema-flush");
+
+    try {
+      for (const [space, changedDocs] of pending) {
+        if (changedDocs.size === 0) continue;
+        if (this.schemaChannels.size === 0) continue;
+
+        const spaceSession = await this.getSpaceSession(space);
+
+        // Find affected docs using the shared schemaTracker (for non-wildcard)
+        const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
+        for (const docKey of changedDocs) {
+          const existingSelectors = this.sharedSchemaTracker.get(docKey);
+          if (existingSelectors !== undefined) {
+            sharedAffectedDocs.set(docKey, new Set(existingSelectors));
+          }
+        }
+
+        // Process shared affected docs
+        const { newFacts } = this.processIncrementalUpdate(
+          spaceSession,
+          sharedAffectedDocs,
+        );
+
+        // Add facts from wildcard subscriptions
+        for (const [_jobId, subscription] of this.schemaChannels) {
+          if (subscription.isWildcardQuery) {
+            const wildcardDocs = this.findAffectedDocsForWildcard(
+              changedDocs,
+              subscription.invocation,
+            );
+            if (wildcardDocs.size > 0) {
+              const wildcardResult = this.processIncrementalUpdate(
+                spaceSession,
+                wildcardDocs,
+              );
+              for (const [key, fact] of wildcardResult.newFacts) {
+                newFacts.set(key, fact);
+              }
+            }
+          }
+        }
+
+        const revisions = this.filterKnownFacts([...newFacts.values()]);
+        if (revisions.length === 0) continue;
+
+        // Send revisions to all commit-log channels for this space.
+        // Uses an empty commit payload — the consumer handles this as a
+        // revision-only delivery (no commit parsing needed).
+        const commitJobIds = this.findCommitLogChannels(space);
+        if (commitJobIds.length === 0) continue;
+
+        const revisionCommit: EnhancedCommit<MemorySpace> = {
+          commit: {} as Commit<MemorySpace>,
+          revisions,
+        };
+
+        for (const id of commitJobIds) {
+          this.perform({
+            the: "task/effect",
+            of: id,
+            is: revisionCommit,
+          });
+        }
+      }
+    } catch (error) {
+      // The flush fires from a setTimeout and may race with session
+      // teardown or store closure. Log and discard — the revisions are
+      // best-effort; direct revisions were already sent with the commit.
+      logger.warn(
+        "schema-flush-error",
+        () => ["Deferred schema flush failed:", error],
+      );
+    }
+
+    logger.timeEnd("schema-flush");
+    const flushMs = performance.now() - t0;
+    const prevFlushMs = this.lastFlushMs;
+    this.lastFlushMs = flushMs;
+    schemaFlushStats.record(commitCount, isConflict, flushMs);
+    if (commitCount > 1) {
+      logger.warn(
+        "schema-flush-batch",
+        () => [
+          `saved=${commitCount - 1}`,
+          `flushMs=${flushMs.toFixed(1)}`,
+          `prevFlushMs=${prevFlushMs.toFixed(1)}`,
+          isConflict ? "conflict" : "",
+        ],
+      );
+    }
+    maybeReportSchemaFlushStats();
+  }
+
+  /**
+   * Find commit-log channels matching a given space.
+   * Reuses collectWatchMatches which checks exact + wildcard patterns.
+   */
+  private findCommitLogChannels(
+    space: MemorySpace,
+  ): InvocationURL<ContentId<Subscribe>>[] {
+    const matched = new Set<InvocationURL<ContentId<Subscribe>>>();
+    this.collectWatchMatches(matched, space, space, COMMIT_LOG_TYPE);
+    return [...matched];
+  }
+
+  /**
    * Incrementally find schema subscription matches after a transaction.
    *
    * For wildcard queries (of: "_"): Match changed docs against type pattern.
@@ -834,15 +1273,9 @@ class MemoryProviderSession<
       return [];
     }
 
-    // Get access to the space session for evaluating documents
-    const mountResult = await Memory.mount(
-      this.memory as Memory.Memory,
-      space,
-    );
-    if (mountResult.error) {
-      throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
-    }
-    const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
+    // Get access to the space session for evaluating documents.
+    // Use cached session to avoid Memory.mount async/tracing overhead per commit.
+    const spaceSession = await this.getSpaceSession(space);
     const tMount = performance.now();
 
     // Find affected docs using the shared schemaTracker (for non-wildcard)
@@ -1000,11 +1433,7 @@ class MemoryProviderSession<
         if (!staleSchemaTracker.has(docKey) && loaded.value !== undefined) {
           const details = sharedManager.getDetails(loaded.address);
           if (details) {
-            const factKey = this.formatAddress(spaceSession.subject, {
-              of: loaded.address.id,
-              the: loaded.address.type,
-            });
-            newFacts.set(factKey, {
+            newFacts.set(docKey, {
               of: loaded.address.id,
               the: loaded.address.type,
               cause: causeFromString(details.cause),
@@ -1018,21 +1447,25 @@ class MemoryProviderSession<
 
     // Also include the affected (changed) docs themselves — their data
     // may have changed even if they were already tracked.
+    // Use sharedManager.load to leverage the cache from traversal above,
+    // avoiding redundant SQLite reads vs raw selectFact.
     for (const [docKey, _schemaSelectors] of affectedDocs) {
       const address = this.parseDocKey(docKey);
       if (address === undefined) continue;
-      const fact = selectFact(spaceSession, {
+      const loaded = sharedManager.load({
+        id: address.id,
+        type: address.type,
+      });
+      if (!loaded || loaded.value === undefined) continue;
+      const details = sharedManager.getDetails(loaded.address);
+      if (!details) continue;
+      const factKey = `${spaceSession.subject}/${address.id}/${address.type}`;
+      newFacts.set(factKey, {
         of: address.id,
         the: address.type,
-      });
-      if (!fact || fact.is === undefined) continue;
-      const factKey = this.formatAddress(spaceSession.subject, fact);
-      newFacts.set(factKey, {
-        of: fact.of,
-        the: fact.the,
-        cause: causeFromString(fact.cause),
-        is: fact.is,
-        since: fact.since,
+        cause: causeFromString(details.cause),
+        is: loaded.value,
+        since: details.since,
       });
     }
 
@@ -1045,8 +1478,7 @@ class MemoryProviderSession<
   ): { space: MemorySpace; id: Memory.URI; type: Memory.MIME } | undefined {
     // Parse docKey back to space, id, and type (format is "space/id/type")
     // Note: type can contain slashes (e.g., "application/json")
-    const pattern = new RegExp("([^/]+)/([^/]+)/(.+)");
-    const match = pattern.exec(docKey);
+    const match = DOC_KEY_PATTERN.exec(docKey);
     if (match === null) {
       return undefined;
     }

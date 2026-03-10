@@ -7,23 +7,23 @@ type ItemTuple = [
 interface State {
     items: ItemTuple[];
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* Array destructured parameter - without fix, 'item' would be
                 incorrectly captured in params due to shorthand usage in JSX */}
-        {items.mapWithPattern(__ctHelpers.pattern(({ element: [item], params: {} }) => (<div data-item={item}>{item}</div>), {
+        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element", "0");
+                return (<div data-item={item}>{item}</div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/ItemTuple"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     ItemTuple: {
                         type: "array",
@@ -56,9 +56,14 @@ export default pattern(({ items }) => {
             } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Multiple array destructured params */}
-        {items.mapWithPattern(__ctHelpers.pattern(({ element: [item, count], index, params: {} }) => (<div key={index}>
+        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element", "0");
+                const count = __ct_pattern_input.key("element", "1");
+                const index = __ct_pattern_input.key("index");
+                return (<div key={index}>
             {item}: {count}
-          </div>), {
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -66,13 +71,9 @@ export default pattern(({ items }) => {
                     },
                     index: {
                         type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     ItemTuple: {
                         type: "array",

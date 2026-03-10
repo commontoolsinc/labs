@@ -38,7 +38,10 @@ const logger = getLogger("extended-storage-transaction", {
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
-    (tx: IExtendedStorageTransaction) => void
+    (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void
   >();
 
   constructor(public tx: IStorageTransaction) {}
@@ -184,16 +187,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // that promise always resolves, even if the commit fails, in which case it
     // passes an error message as result. An exception here would be an internal
     // error that should propagate.
-    promise.then((_result) => {
+    promise.then((result) => {
       // Call all callbacks, wrapping each in try/catch to prevent one
       // failing callback from breaking others
       for (const callback of this.commitCallbacks) {
         try {
-          callback(this);
+          callback(this, result);
         } catch (error) {
           logger.error("storage-error", "Error in commit callback:", error);
         }
       }
+    }).catch((error) => {
+      logger.error(
+        "storage-error",
+        "Transaction commit promise rejected:",
+        error,
+      );
     });
 
     return promise;
@@ -209,7 +218,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void {
     this.commitCallbacks.add(callback);
   }
 }
@@ -341,7 +355,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.commit();
   }
 
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void {
     return this.wrapped.addCommitCallback(callback);
   }
 }

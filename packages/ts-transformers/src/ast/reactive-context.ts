@@ -1,48 +1,42 @@
-/**
- * Reactive Context Detection
- *
- * Shared utilities for detecting whether code is in a reactive context
- * where opaque access is restricted vs. a safe wrapper context where
- * opaque access is allowed.
- *
- * ## Context Types
- *
- * **Restricted Reactive Contexts** (opaque reading NOT allowed):
- * - pattern body
- * - pattern body
- * - render body
- * - map/mapWithPattern callbacks on opaques/cells
- *
- * **Safe Wrapper Contexts** (opaque reading IS allowed):
- * - computed() callbacks
- * - action() callbacks
- * - derive() callbacks
- * - lift() callbacks
- * - handler() callbacks
- * - Inline JSX event handlers (onClick={() => {...}}) - transformed to handler()
- * - Standalone function definitions (we can't know where they're called from)
- * - JSX expressions (handled by OpaqueRefJSXTransformer)
- *
- * This module is used by both validation transformers (to report errors)
- * and transformation transformers (to decide when to rewrite).
- */
 import ts from "typescript";
 import { detectCallKind } from "./call-kind.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+
+export type ReactiveContextKind = "pattern" | "compute" | "neutral";
+
+export type ReactiveContextOwner =
+  | "pattern"
+  | "render"
+  | "array-map"
+  | "jsx-callback"
+  | "computed"
+  | "derive"
+  | "action"
+  | "lift"
+  | "handler"
+  | "standalone"
+  | "unknown";
+
+export interface ReactiveContextInfo {
+  readonly kind: ReactiveContextKind;
+  readonly owner: ReactiveContextOwner;
+  readonly inJsxExpression: boolean;
+}
+
+export interface ReactiveContextLookup {
+  isMapCallback(node: ts.Node): boolean;
+}
 
 /**
- * Builder names that establish a "reactive context" where reading opaques is NOT allowed.
+ * Builder names that establish a pattern context where opaque reading and
+ * computation lowering rules apply.
  */
 export const RESTRICTED_CONTEXT_BUILDERS = new Set([
-  "pattern",
   "pattern",
   "render",
 ]);
 
 /**
- * Builder names that are "safe wrappers" where reading opaques IS allowed.
- * Note: derive is handled separately via callKind.kind === "derive" since it
- * has its own call kind, but is also a safe wrapper.
+ * Builder names that establish compute context.
  */
 export const SAFE_WRAPPER_BUILDERS = new Set([
   "computed",
@@ -53,302 +47,242 @@ export const SAFE_WRAPPER_BUILDERS = new Set([
 ]);
 
 export interface CallbackContext {
-  /** The function (arrow or regular) that forms the callback */
   callback: ts.ArrowFunction | ts.FunctionExpression;
-  /** The call expression this callback is an argument to */
   call: ts.CallExpression;
 }
 
-/**
- * Finds the enclosing callback context for a node.
- * Returns the callback function and the call it's an argument to.
- */
+function resolveContextAnchor(node: ts.Node): ts.Node {
+  const original = ts.getOriginalNode(node);
+  if (original && original !== node && original.parent) {
+    return original;
+  }
+  return node;
+}
+
 export function findEnclosingCallbackContext(
   node: ts.Node,
 ): CallbackContext | undefined {
-  let current: ts.Node | undefined = node.parent;
-
+  let current: ts.Node | undefined = resolveContextAnchor(node).parent;
   while (current) {
-    // Check if we're inside an arrow function or function expression
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const functionParent = current.parent;
-      if (functionParent && ts.isCallExpression(functionParent)) {
-        // Check if this function is an argument to the call
-        if (functionParent.arguments.includes(current as ts.Expression)) {
-          return {
-            callback: current,
-            call: functionParent,
-          };
+      const parent: ts.Node | undefined = current.parent;
+      if (parent && ts.isCallExpression(parent)) {
+        if (parent.arguments.includes(current as ts.Expression)) {
+          return { callback: current, call: parent };
         }
       }
     }
     current = current.parent;
   }
-
   return undefined;
 }
 
-/**
- * Checks if a function is an inline JSX event handler.
- *
- * An inline JSX event handler is an arrow function or function expression
- * that is the value of a JSX attribute starting with "on" (like onClick, onSubmit, etc.).
- *
- * These get transformed into handler() calls, so they're safe wrappers.
- */
 function isInlineJsxEventHandler(
   func: ts.ArrowFunction | ts.FunctionExpression,
 ): boolean {
   const parent = func.parent;
-
-  // Check if function is inside a JSX expression
-  if (ts.isJsxExpression(parent)) {
-    const jsxExprParent = parent.parent;
-
-    // Check if JSX expression is inside a JSX attribute
-    if (ts.isJsxAttribute(jsxExprParent)) {
-      const attrName = jsxExprParent.name.getText();
-      // Event handlers start with "on"
-      return attrName.startsWith("on");
-    }
-  }
-
-  return false;
+  if (!ts.isJsxExpression(parent)) return false;
+  const jsxExprParent = parent.parent;
+  if (!ts.isJsxAttribute(jsxExprParent)) return false;
+  return jsxExprParent.name.getText().startsWith("on");
 }
 
-/**
- * Checks if a function is a "standalone" function definition.
- *
- * A standalone function is one that's NOT directly a callback to a builder/map call.
- * Examples:
- * - `function helper() { ... }` - function declaration
- * - `const helper = () => { ... }` - arrow function assigned to variable
- * - `const helper = function() { ... }` - function expression assigned to variable
- *
- * We skip validation inside standalone functions because we can't know where
- * they're called from. If they're only called from safe wrappers (like computed),
- * they're actually safe.
- */
-export function isStandaloneFunctionDefinition(
-  func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-): boolean {
-  // Function declarations are always standalone
-  if (ts.isFunctionDeclaration(func)) {
-    return true;
-  }
-
-  const parent = func.parent;
-
-  // Arrow/function expression assigned to a variable: `const helper = () => { }`
-  if (ts.isVariableDeclaration(parent)) {
-    return true;
-  }
-
-  // Arrow/function expression as property value: `{ helper: () => { } }`
-  if (ts.isPropertyAssignment(parent)) {
-    return true;
-  }
-
-  // If it's a callback to a call expression, it's NOT standalone
-  // (it's either a builder callback, map callback, or safe wrapper callback)
-  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
-    return false;
-  }
-
-  // If it's in a JSX attribute, it's NOT standalone (it's an inline handler)
-  if (ts.isJsxExpression(parent)) {
-    return false;
-  }
-
-  // Default to not standalone for other cases
-  return false;
-}
-
-/**
- * Checks if a node is inside a safe callback wrapper where opaque reading is allowed.
- *
- * Safe callback wrappers are:
- * - computed, action, derive, lift, handler callbacks
- * - inline JSX event handlers
- * - standalone function definitions (we can't know where they're called from)
- *
- * NOTE: This does NOT include JSX expressions. Use isInsideSafeWrapper for that.
- * This function is used by the OpaqueRefJSXTransformer which needs to transform
- * JSX expressions (so it shouldn't skip them).
- */
-export function isInsideSafeCallbackWrapper(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): boolean {
+function isWithinJsxExpression(node: ts.Node): boolean {
   let current: ts.Node | undefined = node.parent;
-
   while (current) {
-    // Check for function declarations (always standalone)
-    if (ts.isFunctionDeclaration(current)) {
-      if (isStandaloneFunctionDefinition(current)) {
-        return true;
-      }
-    }
-
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      // Check for inline JSX event handlers (onClick={() => {...}})
-      // These get transformed into handler() calls
-      if (isInlineJsxEventHandler(current)) {
-        return true;
-      }
-
-      // Check for standalone function definitions (const helper = () => {...})
-      // We skip validation because we can't know where they're called from
-      if (isStandaloneFunctionDefinition(current)) {
-        return true;
-      }
-
-      const functionParent = current.parent;
-      if (
-        functionParent &&
-        ts.isCallExpression(functionParent) &&
-        functionParent.arguments.includes(current as ts.Expression)
-      ) {
-        const callKind = detectCallKind(functionParent, checker);
-        if (callKind) {
-          // derive is a safe wrapper
-          if (callKind.kind === "derive") {
-            return true;
-          }
-          // Check builder-based safe wrappers
-          if (
-            callKind.kind === "builder" &&
-            SAFE_WRAPPER_BUILDERS.has(callKind.builderName)
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-    current = current.parent;
-  }
-
-  return false;
-}
-
-/**
- * Checks if a node is inside a safe wrapper callback where opaque reading is allowed.
- *
- * Safe wrappers are:
- * - computed, action, derive, lift, handler callbacks
- * - inline JSX event handlers
- * - standalone function definitions (we can't know where they're called from)
- * - JSX expressions (handled by OpaqueRefJSXTransformer)
- *
- * This is used by validation transformers to avoid reporting errors for code
- * that will be transformed or is in a safe context.
- */
-export function isInsideSafeWrapper(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): boolean {
-  let current: ts.Node | undefined = node.parent;
-
-  while (current) {
-    // Check for JSX expressions - these are handled by OpaqueRefJSXTransformer
-    // which rewrites opaque access to use derive()
     if (ts.isJsxExpression(current)) {
       return true;
     }
     current = current.parent;
   }
-
-  // Also check for callback-based safe wrappers
-  return isInsideSafeCallbackWrapper(node, checker);
-}
-
-/**
- * Checks if a node is inside a restricted reactive context where opaque reading is NOT allowed.
- *
- * Restricted contexts are: pattern, render bodies, and map callbacks on opaques.
- */
-export function isInsideRestrictedContext(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): boolean {
-  let current: ts.Node | undefined = node.parent;
-
-  while (current) {
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const functionParent = current.parent;
-      if (
-        functionParent &&
-        ts.isCallExpression(functionParent) &&
-        functionParent.arguments.includes(current as ts.Expression)
-      ) {
-        const callKind = detectCallKind(functionParent, checker);
-        if (callKind) {
-          // pattern, render are restricted
-          if (
-            callKind.kind === "builder" &&
-            RESTRICTED_CONTEXT_BUILDERS.has(callKind.builderName)
-          ) {
-            return true;
-          }
-          // array-map on opaques/cells is restricted, but only if the
-          // receiver is actually a reactive type (OpaqueRef/Cell). Plain array
-          // methods (Array.prototype.filter/map/flatMap) share the same
-          // "array-map" call kind but should not create a restricted context.
-          if (callKind.kind === "array-map") {
-            // Default to reactive (restricted). If we can't determine the
-            // receiver type (e.g. ElementAccessExpression like arr["filter"]),
-            // we conservatively treat it as restricted — this errs on the safe
-            // side (false positives, not false negatives).
-            let isReactive = true;
-            if (
-              ts.isPropertyAccessExpression(functionParent.expression) ||
-              ts.isPropertyAccessChain(functionParent.expression)
-            ) {
-              const receiverType = checker.getTypeAtLocation(
-                functionParent.expression.expression,
-              );
-              if (
-                !(receiverType.flags & ts.TypeFlags.Any) &&
-                !isOpaqueRefType(receiverType, checker)
-              ) {
-                isReactive = false;
-              }
-            }
-            if (isReactive) return true;
-          }
-        }
-      }
-    }
-    current = current.parent;
-  }
-
   return false;
 }
 
+function isNamedCallbackCall(
+  call: ts.CallExpression,
+  name: string,
+): boolean {
+  const expression = call.expression;
+  if (ts.isIdentifier(expression)) {
+    return expression.text === name;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text === name;
+  }
+  return false;
+}
+
+export function isStandaloneFunctionDefinition(
+  func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+): boolean {
+  if (ts.isFunctionDeclaration(func)) {
+    return true;
+  }
+
+  const parent = func.parent;
+  if (ts.isVariableDeclaration(parent)) return true;
+  if (ts.isPropertyAssignment(parent)) return true;
+  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
+    return false;
+  }
+  if (ts.isJsxExpression(parent)) return false;
+  return false;
+}
+
+function getBuilderContext(
+  builderName: string,
+): { kind: ReactiveContextKind; owner: ReactiveContextOwner } | undefined {
+  if (builderName === "pattern") {
+    return { kind: "pattern", owner: "pattern" };
+  }
+  if (builderName === "render") {
+    return { kind: "pattern", owner: "render" };
+  }
+  if (builderName === "computed") {
+    return { kind: "compute", owner: "computed" };
+  }
+  if (builderName === "action") {
+    return { kind: "compute", owner: "action" };
+  }
+  if (builderName === "lift") {
+    return { kind: "compute", owner: "lift" };
+  }
+  if (builderName === "handler") {
+    return { kind: "compute", owner: "handler" };
+  }
+  return undefined;
+}
+
 /**
- * Checks if a node is in a "restricted reactive context" where reading opaques is NOT allowed.
+ * Classifies the effective context at a node.
  *
- * This returns true if:
- * - We're inside a pattern body OR a .map callback on opaques
- * - AND we're NOT inside a safe wrapper (computed, action, derive, lift, handler)
- *
- * @example
- * // Returns true (restricted - opaque reading not allowed):
- * pattern(({ item }) => {
- *   const x = item.price > 100; // <-- here
- * });
- *
- * // Returns false (safe wrapper - opaque reading allowed):
- * pattern(({ item }) => {
- *   const x = computed(() => item.price > 100); // <-- here (inside computed)
- * });
+ * Rule: nearest known CT callback boundary wins; unknown callbacks inherit the
+ * parent context by continuing the ancestor scan.
  */
+export function classifyReactiveContext(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): ReactiveContextInfo {
+  const anchor = resolveContextAnchor(node);
+  let current: ts.Node | undefined = anchor.parent;
+  let inJsxExpression = false;
+
+  while (current) {
+    if (ts.isJsxExpression(current)) {
+      inJsxExpression = true;
+    }
+
+    if (ts.isFunctionDeclaration(current)) {
+      if (isStandaloneFunctionDefinition(current)) {
+        return { kind: "compute", owner: "standalone", inJsxExpression };
+      }
+    }
+
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      // Transformed mapWithPattern callbacks are explicitly tracked and should
+      // always be treated as pattern callbacks, regardless of symbol lookup.
+      if (lookup?.isMapCallback(current)) {
+        return { kind: "pattern", owner: "array-map", inJsxExpression };
+      }
+
+      if (isInlineJsxEventHandler(current)) {
+        return { kind: "compute", owner: "handler", inJsxExpression };
+      }
+
+      if (isStandaloneFunctionDefinition(current)) {
+        return { kind: "compute", owner: "standalone", inJsxExpression };
+      }
+
+      const callParent: ts.Node | undefined = current.parent;
+      if (
+        callParent &&
+        ts.isCallExpression(callParent) &&
+        callParent.arguments.includes(current)
+      ) {
+        const callKind = detectCallKind(callParent, checker);
+        if (callKind?.kind === "derive") {
+          return { kind: "compute", owner: "derive", inJsxExpression };
+        }
+
+        if (callKind?.kind === "builder") {
+          const builderContext = getBuilderContext(callKind.builderName);
+          if (builderContext) {
+            return { ...builderContext, inJsxExpression };
+          }
+          // Unknown builder callback: inherit parent context.
+        }
+
+        if (callKind?.kind === "pattern-tool") {
+          return { kind: "compute", owner: "unknown", inJsxExpression };
+        }
+
+        if (callKind?.kind === "array-map") {
+          // Non-transformed map callbacks inherit the parent context.
+          current = current.parent;
+          continue;
+        }
+
+        // Fallback for synthetic helper calls where symbol-based call-kind
+        // classification can fail transiently during transformation.
+        if (
+          isNamedCallbackCall(callParent, "pattern") ||
+          isNamedCallbackCall(callParent, "patternTool")
+        ) {
+          return { kind: "pattern", owner: "pattern", inJsxExpression };
+        }
+
+        // Unknown callbacks inside JSX expressions should run in compute context.
+        // This ensures chains like `list.map(...).filter(...)` are treated as
+        // compute callbacks rather than pattern callbacks.
+        if (inJsxExpression || isWithinJsxExpression(current)) {
+          return { kind: "compute", owner: "jsx-callback", inJsxExpression };
+        }
+      }
+    }
+
+    current = current.parent;
+  }
+
+  return {
+    kind: "neutral",
+    owner: "unknown",
+    inJsxExpression,
+  };
+}
+
+export function isInsideSafeCallbackWrapper(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): boolean {
+  const info = classifyReactiveContext(node, checker, lookup);
+  return info.kind === "compute";
+}
+
+export function isInsideSafeWrapper(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): boolean {
+  const info = classifyReactiveContext(node, checker, lookup);
+  return info.kind === "compute" || info.inJsxExpression;
+}
+
+export function isInsideRestrictedContext(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
+): boolean {
+  const info = classifyReactiveContext(node, checker, lookup);
+  return info.kind === "pattern";
+}
+
 export function isInRestrictedReactiveContext(
   node: ts.Node,
   checker: ts.TypeChecker,
+  lookup?: ReactiveContextLookup,
 ): boolean {
-  // Only restricted if we're in a restricted context but NOT in a safe wrapper
-  // Safe wrappers are checked first (innermost) to ensure they take precedence
-  return isInsideRestrictedContext(node, checker) &&
-    !isInsideSafeWrapper(node, checker);
+  const info = classifyReactiveContext(node, checker, lookup);
+  return info.kind === "pattern" && !info.inJsxExpression;
 }

@@ -1,36 +1,34 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
 interface Item {
+    id: number;
     name: string;
     active: boolean;
 }
 interface State {
     items: Item[];
 }
-// FIXTURE: filter-basic
-// Verifies: .filter() and .map() on reactive arrays are both transformed
-//   .filter(fn) → .filterWithPattern(pattern(...), {})
-//   .map(fn)    → .mapWithPattern(pattern(...), {})
-// Context: No captured outer variables — params objects are empty {}
 export default pattern((state) => {
     return {
-        [UI]: (<ul>
-        {state.items.filterWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.active, {
+        [UI]: (<div>
+        {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return item.key("active");
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",
                         properties: {
+                            id: {
+                                type: "number"
+                            },
                             name: {
                                 type: "string"
                             },
@@ -38,29 +36,31 @@ export default pattern((state) => {
                                 type: "boolean"
                             }
                         },
-                        required: ["name", "active"]
+                        required: ["id", "name", "active"]
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean",
                 asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<li>{item.name}</li>), {
+            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>Item #{item.key("id")}: {item.key("name")}</div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item",
                         asOpaque: true
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",
                         properties: {
+                            id: {
+                                type: "number"
+                            },
                             name: {
                                 type: "string"
                             },
@@ -68,7 +68,7 @@ export default pattern((state) => {
                                 type: "boolean"
                             }
                         },
-                        required: ["name", "active"]
+                        required: ["id", "name", "active"]
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -93,7 +93,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema), {})}
-      </ul>),
+      </div>),
     };
 }, {
     type: "object",
@@ -110,6 +110,9 @@ export default pattern((state) => {
         Item: {
             type: "object",
             properties: {
+                id: {
+                    type: "number"
+                },
                 name: {
                     type: "string"
                 },
@@ -117,7 +120,7 @@ export default pattern((state) => {
                     type: "boolean"
                 }
             },
-            required: ["name", "active"]
+            required: ["id", "name", "active"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {

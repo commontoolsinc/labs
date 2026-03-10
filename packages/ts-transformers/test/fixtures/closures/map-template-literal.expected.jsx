@@ -13,46 +13,50 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            prefix: {
-                                type: "string",
-                                asOpaque: true
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                prefix: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                suffix: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
                             },
-                            suffix: {
-                                type: "string",
-                                asOpaque: true
-                            }
+                            required: ["prefix", "suffix"]
                         },
-                        required: ["prefix", "suffix"]
+                        item: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["state", "item"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    state: {
+                        prefix: state.key("prefix"),
+                        suffix: state.key("suffix")
                     },
                     item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
+                        name: item.key("name")
                     }
-                },
-                required: ["state", "item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                state: {
-                    prefix: state.prefix,
-                    suffix: state.suffix
-                },
-                item: {
-                    name: item.name
-                }
-            }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>), {
+                }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -117,8 +121,8 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    prefix: state.prefix,
-                    suffix: state.suffix
+                    prefix: state.key("prefix"),
+                    suffix: state.key("suffix")
                 }
             })}
       </div>),

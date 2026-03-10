@@ -69,8 +69,11 @@ export class PatternContextValidationTransformer extends Transformer {
       // Note: isInRestrictedReactiveContext returns false for JSX expressions
       // (they are handled by OpaqueRefJSXTransformer), so this won't flag
       // optional chaining inside JSX like <div>{user?.name}</div>
-      if (ts.isPropertyAccessExpression(node) && node.questionDotToken) {
-        if (isInRestrictedReactiveContext(node, checker)) {
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        node.questionDotToken
+      ) {
+        if (isInRestrictedReactiveContext(node, checker, context)) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -87,24 +90,19 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        // Check for .map()/.filter()/.flatMap() on fallback expressions (x ?? [] or x || [])
+        // Check for .map() on fallback expressions (x ?? [] or x || [])
         // Only in restricted context (pattern body) where this pattern causes runtime failures.
-        // Note: We use isInsideRestrictedContext (not isInRestrictedReactiveContext) because
-        // the fallback pattern fails even inside JSX expressions (which are "safe" for other
-        // validations but still need this check). However, we DO skip inside callback-based
-        // safe wrappers (computed, derive, action, etc.) where OpaqueRef is auto-unwrapped
-        // and the fallback produces a plain array — no type mismatch occurs.
-        if (
-          isInsideRestrictedContext(node, checker) &&
-          !isInsideSafeCallbackWrapper(node, checker)
-        ) {
-          this.validateMapOnFallbackExpression(node, context, checker);
+        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
+        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
+        // other validations but still need this check).
+        if (isInsideRestrictedContext(node, checker, context)) {
+          this.validateMapOnFallbackExpression(node, context, checker, analyze);
         }
 
         // Check for .get() calls
         if (
           this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker)
+          isInRestrictedReactiveContext(node, checker, context)
         ) {
           context.reportDiagnostic({
             severity: "error",
@@ -164,7 +162,7 @@ export class PatternContextValidationTransformer extends Transformer {
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
     // Skip if not in restricted reactive context
-    if (!isInRestrictedReactiveContext(node, checker)) {
+    if (!isInRestrictedReactiveContext(node, checker, context)) {
       return;
     }
 
@@ -249,14 +247,14 @@ export class PatternContextValidationTransformer extends Transformer {
     if (this.isInsideJsx(node)) return;
 
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
-    if (isInsideSafeCallbackWrapper(node, checker)) return;
+    if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
     // Skip if this function IS a callback to a safe wrapper
     // e.g., computed(() => ...), action(() => ...), derive(() => ...)
     if (this.isSafeWrapperCallback(node, checker)) return;
 
     // Only error if inside restricted context (pattern/render)
-    if (!isInsideRestrictedContext(node, checker)) return;
+    if (!isInsideRestrictedContext(node, checker, context)) return;
 
     context.reportDiagnostic({
       severity: "error",
@@ -335,7 +333,7 @@ export class PatternContextValidationTransformer extends Transformer {
       : "handler";
 
     // Only error if inside restricted context
-    if (!isInsideRestrictedContext(node, checker)) return;
+    if (!isInsideRestrictedContext(node, checker, context)) return;
 
     // Check if lift() is immediately invoked: lift(fn)(args)
     // In this case, suggest computed() instead
@@ -401,7 +399,8 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateMapOnFallbackExpression(
     node: ts.CallExpression,
     context: TransformationContext,
-    checker: ts.TypeChecker,
+    _checker: ts.TypeChecker,
+    analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
     if (!ts.isPropertyAccessExpression(node.expression)) return;
     const methodName = node.expression.name.text;
@@ -428,12 +427,9 @@ export class PatternContextValidationTransformer extends Transformer {
       return;
     }
 
-    // Check if left side is OpaqueRef and right side is not
-    const leftType = checker.getTypeAtLocation(target.left);
-    const rightType = checker.getTypeAtLocation(target.right);
-
-    const leftIsOpaque = isOpaqueRefType(leftType, checker);
-    const rightIsOpaque = isOpaqueRefType(rightType, checker);
+    // Check if left side traces to a reactive pattern parameter and right side does not
+    const leftIsOpaque = analyze(target.left).containsOpaqueRef;
+    const rightIsOpaque = analyze(target.right).containsOpaqueRef;
 
     if (leftIsOpaque && !rightIsOpaque) {
       context.reportDiagnostic({
@@ -540,7 +536,8 @@ export class PatternContextValidationTransformer extends Transformer {
                   message:
                     `.map() on reactive types is not allowed inside standalone functions. ` +
                     `Standalone functions cannot capture reactive closures. ` +
-                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                    `If this is an explicit Cell/Writable value and eager mapping is acceptable, use <cell>.get().map(...).`,
                   node,
                 });
                 return;

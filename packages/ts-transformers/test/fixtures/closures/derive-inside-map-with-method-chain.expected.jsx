@@ -21,51 +21,50 @@ export default pattern((state) => {
                 - subs is a derive callback parameter (unwrapped at runtime)
                 - .filter() returns a plain JS array
                 - Plain arrays don't have .mapWithPattern() */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
-            <h2>{item.title}</h2>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>
+            <h2>{item.key("title")}</h2>
             <p>
               Active items:{" "}
               {derive({
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/SubItem"
-                    },
-                    $defs: {
-                        SubItem: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "number"
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/SubItem"
+                        },
+                        $defs: {
+                            SubItem: {
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "number"
+                                    },
+                                    name: {
+                                        type: "string"
+                                    },
+                                    active: {
+                                        type: "boolean"
+                                    }
                                 },
-                                name: {
-                                    type: "string"
-                                },
-                                active: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["id", "name", "active"]
+                                required: ["id", "name", "active"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, item.subItems, (subs) => subs
-                    .filter((s) => s.active)
-                    .map((s) => s.name)
-                    .join(", "))}
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, item.key("subItems"), (subs) => subs
+                        .filter((s) => s.active)
+                        .map((s) => s.name)
+                        .join(", "))}
             </p>
-          </div>), {
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

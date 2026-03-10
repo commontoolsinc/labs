@@ -6,7 +6,9 @@ interface BaseState {
 }
 // Required<BaseState> should make 'a' required in the schema
 type ReqState = Required<BaseState>;
-export default pattern(({ a, b }) => {
+export default pattern((__ct_pattern_input) => {
+    const a = __ct_pattern_input.key("a");
+    const b = __ct_pattern_input.key("b");
     return {
         setA: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",

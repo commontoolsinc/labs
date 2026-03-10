@@ -8,6 +8,7 @@ import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   type BaseMemoryAddress,
   type IAttestation,
+  IMemorySpaceValueAttestation,
   ManagedStorageTransaction,
   type ObjectStorageManager,
   SchemaObjectTraverser,
@@ -148,11 +149,11 @@ function runTest(objectManager: TestObjectManager) {
   const tx = new ExtendedStorageTransaction(managedTx);
   const traverser = new SchemaObjectTraverser(tx, selector);
   const doc = objectManager.load(docAddress)!;
-  const factValue = {
+  const factValue: IMemorySpaceValueAttestation = {
     address: {
       ...doc.address,
       space: "did:null:null" as MemorySpace,
-      path: [...doc.address.path, "value"],
+      path: ["value"],
     },
     value: (doc.value as JSONObject).value,
   };

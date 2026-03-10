@@ -17,75 +17,83 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
-            {state.prefix}: {item.name}
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
+            {state.key("prefix")}: {item.key("name")}
             <ul>
-              {item.tags.mapWithPattern(__ctHelpers.pattern(({ element: tag, params: { item } }) => (<li>{item.name} - {tag.name}</li>), {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Tag"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                item: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string",
-                                            asOpaque: true
-                                        }
-                                    },
-                                    required: ["name"]
-                                }
+              {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                        const tag = __ct_pattern_input.key("element");
+                        const item = __ct_pattern_input.key("params", "item");
+                        return (<li>{item.key("name")} - {tag.key("name")}</li>);
+                    }, {
+                        type: "object",
+                        properties: {
+                            element: {
+                                $ref: "#/$defs/Tag"
                             },
-                            required: ["item"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Tag: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "number"
+                            params: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            name: {
+                                                type: "string",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["name"]
+                                    }
                                 },
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name"]
+                                required: ["item"]
+                            }
+                        },
+                        required: ["element", "params"],
+                        $defs: {
+                            Tag: {
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "number"
+                                    },
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["id", "name"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        anyOf: [{
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                $ref: "#/$defs/UIRenderable",
+                                asOpaque: true
+                            }],
+                        $defs: {
+                            UIRenderable: {
+                                type: "object",
+                                properties: {
+                                    $UI: {
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }
+                                },
+                                required: ["$UI"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema), {
-                    item: {
-                        name: item.name
-                    }
-                })}
+                    } as const satisfies __ctHelpers.JSONSchema), {
+                        item: {
+                            name: item.key("name")
+                        }
+                    })}
             </ul>
-          </div>), {
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -164,7 +172,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    prefix: state.prefix
+                    prefix: state.key("prefix")
                 }
             })}
       </div>),

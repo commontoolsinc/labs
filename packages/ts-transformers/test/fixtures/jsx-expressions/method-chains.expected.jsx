@@ -45,7 +45,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text
+                text: state.key("text")
             } }, ({ state }) => state.text.trim().toLowerCase())}</p>
 
         {/* Chain with reactive argument */}
@@ -73,8 +73,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text,
-                searchTerm: state.searchTerm
+                text: state.key("text"),
+                searchTerm: state.key("searchTerm")
             } }, ({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()))}
         </p>
 
@@ -99,7 +99,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text
+                text: state.key("text")
             } }, ({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase())}
         </p>
 
@@ -132,9 +132,13 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                threshold: state.threshold
-            } }, ({ state }) => state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x > state.threshold, {
+                items: state.key("items"),
+                threshold: state.key("threshold")
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return x > state.key("threshold");
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -169,33 +173,37 @@ export default pattern((state) => {
 
         {/* Filter then map */}
         <ul>
-          {state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => __ctHelpers.derive({
-            type: "object",
-            properties: {
-                x: {
-                    type: "number",
-                    asOpaque: true
-                },
-                state: {
-                    type: "object",
-                    properties: {
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
-                        }
+          {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    x: {
+                        type: "number",
+                        asOpaque: true
                     },
-                    required: ["threshold"]
+                    state: {
+                        type: "object",
+                        properties: {
+                            threshold: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["threshold"]
+                    }
+                },
+                required: ["x", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                x: x,
+                state: {
+                    threshold: state.key("threshold")
                 }
-            },
-            required: ["x", "state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            x: x,
-            state: {
-                threshold: state.threshold
-            }
-        }, ({ x, state }) => x > state.threshold), {
+            }, ({ x, state }) => x > state.threshold);
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -223,35 +231,39 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema), {
             state: {
-                threshold: state.threshold
+                threshold: state.key("threshold")
             }
-        }).mapWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => (<li>Value: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                x: {
-                    type: "number",
-                    asOpaque: true
-                },
-                state: {
-                    type: "object",
-                    properties: {
-                        factor: {
-                            type: "number",
-                            asOpaque: true
-                        }
+        }).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return (<li>Value: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    x: {
+                        type: "number",
+                        asOpaque: true
                     },
-                    required: ["factor"]
+                    state: {
+                        type: "object",
+                        properties: {
+                            factor: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["factor"]
+                    }
+                },
+                required: ["x", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                x: x,
+                state: {
+                    factor: state.key("factor")
                 }
-            },
-            required: ["x", "state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            x: x,
-            state: {
-                factor: state.factor
-            }
-        }, ({ x, state }) => x * state.factor)}</li>), {
+            }, ({ x, state }) => x * state.factor)}</li>);
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -299,7 +311,7 @@ export default pattern((state) => {
             }
         } as const satisfies __ctHelpers.JSONSchema), {
             state: {
-                factor: state.factor
+                factor: state.key("factor")
             }
         })}
         </ul>
@@ -336,10 +348,14 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                start: state.start,
-                end: state.end
-            } }, ({ state }) => state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x > state.start, {
+                items: state.key("items"),
+                start: state.key("start"),
+                end: state.key("end")
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return x > state.key("start");
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -369,7 +385,11 @@ export default pattern((state) => {
             state: {
                 start: state.start
             }
-        }).filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x < state.end, {
+        }).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return x < state.key("end");
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -435,9 +455,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                start: state.start,
-                end: state.end
+                items: state.key("items"),
+                start: state.key("start"),
+                end: state.key("end")
             } }, ({ state }) => state.items.slice(state.start, state.end).join(", "))}
         </p>
 
@@ -469,9 +489,13 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                names: state.names,
-                prefix: state.prefix
-            } }, ({ state }) => state.names.filterWithPattern(__ctHelpers.pattern(({ element: n, params: { state } }) => n.startsWith(state.prefix), {
+                names: state.key("names"),
+                prefix: state.key("prefix")
+            } }, ({ state }) => state.key("names").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const n = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return n.startsWith(state.key("prefix"));
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -536,37 +560,36 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                names: state.names,
-                searchTerm: state.searchTerm
+                names: state.key("names"),
+                searchTerm: state.key("searchTerm")
             } }, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)))}
         </p>
 
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.mapWithPattern(__ctHelpers.pattern(({ element: name, params: {} }) => (<li>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string",
-                        asOpaque: true
-                    }
-                },
-                required: ["name"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>), {
+          {state.key("names").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const name = __ct_pattern_input.key("element");
+                return (<li>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["name"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         type: "string"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -619,8 +642,8 @@ export default pattern((state) => {
             type: "number",
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                prices: state.prices,
-                discount: state.discount
+                prices: state.key("prices"),
+                discount: state.key("discount")
             } }, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
         </p>
 
@@ -652,8 +675,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                factor: state.factor
+                items: state.key("items"),
+                factor: state.key("factor")
             } }, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
             state.factor)}
         </p>
@@ -686,8 +709,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                prices: state.prices,
-                discount: state.discount
+                prices: state.key("prices"),
+                discount: state.key("discount")
             } }, ({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2))}
         </p>
 
@@ -716,8 +739,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text,
-                prefix: state.prefix
+                text: state.key("text"),
+                prefix: state.key("prefix")
             } }, ({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim())}
         </p>
 
@@ -746,8 +769,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text,
-                prefix: state.prefix
+                text: state.key("text"),
+                prefix: state.key("prefix")
             } }, ({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
             .join("-"))}
         </p>
@@ -793,9 +816,13 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.users,
-                minAge: state.minAge
-            } }, ({ state }) => state.users.filterWithPattern(__ctHelpers.pattern(({ element: u, params: { state } }) => u.age >= state.minAge && u.active, {
+                users: state.key("users"),
+                minAge: state.key("minAge")
+            } }, ({ state }) => state.key("users").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const u = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return u.key("age") >= state.key("minAge") && u.key("active");
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -842,54 +869,57 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.mapWithPattern(__ctHelpers.pattern(({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse({
-                type: "boolean",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, u.active, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    u: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["u"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { u: {
-                    name: u.name
-                } }, ({ u }) => u.name.toUpperCase()), __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    u: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["u"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { u: {
-                    name: u.name
-                } }, ({ u }) => u.name.toLowerCase()))}</li>), {
+          {state.key("users").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const u = __ct_pattern_input.key("element");
+                return (<li>{__ctHelpers.ifElse({
+                    type: "boolean",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, u.key("active"), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        u: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["u"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { u: {
+                        name: u.key("name")
+                    } }, ({ u }) => u.name.toUpperCase()), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        u: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["u"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, { u: {
+                        name: u.key("name")
+                    } }, ({ u }) => u.name.toLowerCase()))}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -906,13 +936,9 @@ export default pattern((state) => {
                             }
                         },
                         required: ["name", "age", "active"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -985,8 +1011,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.users,
-                minAge: state.minAge
+                users: state.key("users"),
+                minAge: state.key("minAge")
             } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
         </p>
         <p>All active: {__ctHelpers.ifElse({
@@ -1030,7 +1056,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.users
+                users: state.key("users")
             } }, ({ state }) => state.users.every((u) => u.active)), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
@@ -1058,8 +1084,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text,
-                prefix: state.prefix
+                text: state.key("text"),
+                prefix: state.key("prefix")
             } }, ({ state }) => state.text.trim().length + state.prefix.trim().length)}
         </p>
 
@@ -1095,8 +1121,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text,
-                threshold: state.threshold
+                text: state.key("text"),
+                threshold: state.key("threshold")
             } }, ({ state }) => state.text.trim().length > state.threshold), "Yes", "No")}
         </p>
 
@@ -1126,8 +1152,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                words: state.words,
-                separator: state.separator
+                words: state.key("words"),
+                separator: state.key("separator")
             } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
       </div>),
     };

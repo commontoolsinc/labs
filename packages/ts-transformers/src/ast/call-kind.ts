@@ -45,6 +45,15 @@ import ts from "typescript";
 import { isCommonToolsSymbol } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
+const ARRAY_METHOD_NAMES = new Set([
+  "map",
+  "mapWithPattern",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+]);
+
 const BUILDER_SYMBOL_NAMES = new Set([
   "pattern",
   "handler",
@@ -62,16 +71,6 @@ const ARRAY_OWNER_NAMES = new Set([
 const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRefMethods",
   "OpaqueRef",
-]);
-
-/** Includes WithPattern variants so call-kind detection works on already-transformed code. */
-const ARRAY_METHOD_NAMES = new Set([
-  "map",
-  "mapWithPattern",
-  "filter",
-  "filterWithPattern",
-  "flatMap",
-  "flatMapWithPattern",
 ]);
 
 const CELL_LIKE_CLASSES = new Set([
@@ -174,14 +173,11 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    // Fallback: classify as array-map only if the receiver is a reactive type.
-    // Name alone is insufficient — filter/flatMap/map are common on plain arrays.
     if (ARRAY_METHOD_NAMES.has(name)) {
+      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
+      // Plain Array.prototype methods should not be treated as reactive.
       const receiverType = checker.getTypeAtLocation(target.expression);
-      if (
-        !(receiverType.flags & ts.TypeFlags.Any) &&
-        isOpaqueRefType(receiverType, checker)
-      ) {
+      if (isOpaqueRefType(receiverType, checker)) {
         return { kind: "array-map" };
       }
     }
@@ -267,7 +263,7 @@ function resolveSymbolKind(
 
     if (
       isArrayMethodDeclaration(declaration) ||
-      isOpaqueRefMapDeclaration(declaration)
+      isOpaqueRefMethodDeclaration(declaration)
     ) {
       return { kind: "array-map", symbol: resolved };
     }
@@ -358,6 +354,10 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
+  if (ARRAY_METHOD_NAMES.has(name)) {
+    return { kind: "array-map", symbol: resolved };
+  }
+
   return undefined;
 }
 
@@ -424,7 +424,7 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
   return ARRAY_OWNER_NAMES.has(owner);
 }
 
-function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
+function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
   if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 

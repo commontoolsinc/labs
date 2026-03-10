@@ -10,7 +10,9 @@ interface TestOutput {
     title: string;
     count: number;
 }
-export default pattern(({ title, [SELF]: self }) => {
+export default pattern((__ct_pattern_input) => {
+    const title = __ct_pattern_input.key("title");
+    const self = __ct_pattern_input[__ctHelpers.SELF];
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -38,7 +40,7 @@ export default pattern(({ title, [SELF]: self }) => {
         console.log("self.title:", self.title);
     })({
         self: {
-            title: self.title
+            title: self.key("title")
         }
     });
     // Action closing over both `self` and `count`

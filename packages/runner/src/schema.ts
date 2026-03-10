@@ -19,11 +19,13 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
+  IMemorySpaceValueAddress,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -450,8 +452,16 @@ export function validateAndTransform(
 
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
-  const address = { space, id, type, path: ["value", ...path] };
-  const doc = { address, value: tx!.readValueOrThrow(ref) };
+  const address: IMemorySpaceValueAddress = {
+    space,
+    id,
+    type,
+    path: ["value", ...path],
+  };
+  // Get the full value without telling the scheduler. The traverse method will
+  // notify the scheduler for shallow reads as they occur.
+  const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
+  const doc = { address, value: value };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,

@@ -3,7 +3,6 @@ import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 
@@ -13,14 +12,17 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
  * state here; on re-serialization, it uses the preserved `typeTag` to produce
  * the original wire format. See Section 3.3 of the formal spec.
  */
-export class UnknownStorable extends ExplicitTagStorable
-  implements StorableInstance {
+export class UnknownStorable extends ExplicitTagStorable {
   constructor(typeTag: string, state: StorableValue) {
     super(typeTag, state);
   }
 
   [DECONSTRUCT](): StorableValue {
     return { type: this.typeTag, state: this.state };
+  }
+
+  protected shallowUnfrozenClone(): UnknownStorable {
+    return new UnknownStorable(this.typeTag, this.state);
   }
 
   static [RECONSTRUCT](

@@ -15,7 +15,9 @@ interface PatternInput {
     items: Cell<Default<Item[], [
     ]>>;
 }
-export default pattern(({ customContent, items }) => {
+export default pattern((__ct_pattern_input) => {
+    const customContent = __ct_pattern_input.key("customContent");
+    const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<div>
         {/* unless(condition, fallback) where fallback is a reactive map */}
@@ -40,18 +42,17 @@ export default pattern(({ customContent, items }) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, {
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, customContent, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => <li>{item.label}</li>, {
+        } as const satisfies __ctHelpers.JSONSchema, customContent, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const item = __ct_pattern_input.key("element");
+            return <li>{item.key("label")}</li>;
+        }, {
             type: "object",
             properties: {
                 element: {
                     $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
                 }
             },
-            required: ["element", "params"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",

@@ -32,9 +32,13 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<ct-button onClick={handleClick({ count: state.count })}>
-            {item.name}
-          </ct-button>), {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<ct-button onClick={handleClick({ count: state.key("count") })}>
+            {item.key("name")}
+          </ct-button>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -95,7 +99,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    count: state.count
+                    count: state.key("count")
                 }
             })}
       </div>),

@@ -42,8 +42,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                index: state.index
+                items: state.key("items"),
+                index: state.key("index")
             } }, ({ state }) => state.items[state.index])}</p>
 
         {/* Computed index */}
@@ -73,7 +73,7 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
 
         {/* Double indexing */}
@@ -114,9 +114,9 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                matrix: state.matrix,
-                row: state.row,
-                col: state.col
+                matrix: state.key("matrix"),
+                row: state.key("row"),
+                col: state.key("col")
             } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
       </div>),
     };

@@ -38,6 +38,7 @@ function rewriteChildExpressions(
   node: ts.Expression,
   context: RewriteParams["context"],
   analyze: AnalyzeFn,
+  reactiveContextKind: RewriteParams["reactiveContextKind"],
   inSafeContext?: boolean,
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
@@ -46,7 +47,7 @@ function rewriteChildExpressions(
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
         // Skip wrapping if inside a safe callback wrapper (computed/derive/action/etc.)
         // This prevents double-wrapping expressions already in a reactive context
-        if (isInsideSafeCallbackWrapper(child, context.checker)) {
+        if (isInsideSafeCallbackWrapper(child, context.checker, context)) {
           return visitEachChildWithJsx(child, visitor, context.tsContext);
         }
 
@@ -55,6 +56,7 @@ function rewriteChildExpressions(
           analysis,
           context,
           analyze,
+          reactiveContextKind,
           inSafeContext,
         });
         if (result) {
@@ -76,17 +78,20 @@ export function rewriteExpression(
   params: RewriteParams,
 ): ts.Expression | undefined {
   const inSafeContext = params.inSafeContext ?? false;
+  const reactiveContextKind = params.reactiveContextKind ?? "neutral";
   const emitterContext: EmitterContext = {
     rewriteChildren(node: ts.Expression): ts.Expression {
       return rewriteChildExpressions(
         node,
         params.context,
         params.analyze,
+        reactiveContextKind,
         inSafeContext,
       );
     },
     ...params,
     inSafeContext,
+    reactiveContextKind,
     dataFlows: normalizeDataFlows(
       params.analysis.graph,
       params.analysis.dataFlows,

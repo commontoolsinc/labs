@@ -1,48 +1,42 @@
 import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
-interface Item {
-    name: string;
-    active: boolean;
+import { computed, pattern } from "commontools";
+interface Preference {
+    ingredient: string;
+    preference: "liked" | "disliked";
 }
-interface State {
-    items: Item[];
-}
-// FIXTURE: computed-filter-map-chain
-// Verifies: .filter().map() chain inside computed() is NOT transformed
-// Context: Inside computed(), OpaqueRef auto-unwraps to plain values, so
-//   .filter() returns a plain JS array and .map() is Array.prototype.map.
-//   Neither should become WithPattern variants. Same logic as derive.
 export default pattern((state) => {
-    const names = __ctHelpers.derive({
+    // Inside computed(), OpaqueRef auto-unwraps to plain array.
+    // .filter() and .map() should NOT be transformed to *WithPattern.
+    const liked = __ctHelpers.derive({
         type: "object",
         properties: {
             state: {
                 type: "object",
                 properties: {
-                    items: {
+                    preferences: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Item"
+                            $ref: "#/$defs/Preference"
                         },
                         asOpaque: true
                     }
                 },
-                required: ["items"]
+                required: ["preferences"]
             }
         },
         required: ["state"],
         $defs: {
-            Item: {
+            Preference: {
                 type: "object",
                 properties: {
-                    name: {
+                    ingredient: {
                         type: "string"
                     },
-                    active: {
-                        type: "boolean"
+                    preference: {
+                        "enum": ["liked", "disliked"]
                     }
                 },
-                required: ["name", "active"]
+                required: ["ingredient", "preference"]
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -52,68 +46,51 @@ export default pattern((state) => {
             asOpaque: true
         }
     } as const satisfies __ctHelpers.JSONSchema, { state: {
-            items: state.items
-        } }, ({ state }) => state.items
-        .filter((item) => item.active)
-        .map((item) => item.name));
-    return {
-        [UI]: <div>{names}</div>,
-    };
+            preferences: state.key("preferences")
+        } }, ({ state }) => {
+        return state.preferences
+            .filter((p) => p.preference === "liked")
+            .map((p) => p.ingredient);
+    });
+    return { liked };
 }, {
     type: "object",
     properties: {
-        items: {
+        preferences: {
             type: "array",
             items: {
-                $ref: "#/$defs/Item"
+                $ref: "#/$defs/Preference"
             }
         }
     },
-    required: ["items"],
+    required: ["preferences"],
     $defs: {
-        Item: {
+        Preference: {
             type: "object",
             properties: {
-                name: {
+                ingredient: {
                     type: "string"
                 },
-                active: {
-                    type: "boolean"
+                preference: {
+                    "enum": ["liked", "disliked"]
                 }
             },
-            required: ["name", "active"]
+            required: ["ingredient", "preference"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
+        liked: {
+            type: "array",
+            items: {
+                type: "string",
+                asOpaque: true
+            },
+            asOpaque: true
         }
     },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
+    required: ["liked"]
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

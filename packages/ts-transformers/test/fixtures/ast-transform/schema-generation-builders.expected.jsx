@@ -32,11 +32,15 @@ const addTodo = handler({
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        <button type="button" onClick={addTodo({ items: state.items })}>
+        <button type="button" onClick={addTodo({ items: state.key("items") })}>
           Add
         </button>
         <ul>
-          {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: {} }) => <li key={index}>{item}</li>, {
+          {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const item = __ct_pattern_input.key("element");
+            const index = __ct_pattern_input.key("index");
+            return <li key={index}>{item}</li>;
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -44,13 +48,9 @@ export default pattern((state) => {
                 },
                 index: {
                     type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
                 }
             },
-            required: ["element", "params"]
+            required: ["element"]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"

@@ -1350,6 +1350,10 @@ export class Runner {
                 processCell,
               );
 
+              // NOTE: We intentionally do NOT cache or deduplicate the result
+              // pattern here (unlike the action handler path). Each handler
+              // invocation creates a new sub-pattern instance by design.
+
               // Create effect that re-runs when inputs change
               // (nothing else would read from it, otherwise)
               const readResultAction: Action = (tx) =>
@@ -1469,6 +1473,9 @@ export class Runner {
             tx,
           },
         );
+        // Store the frame on the action so the scheduler can attach it to
+        // errors created outside the action (e.g. "Too many iterations").
+        (action as Action & { lastFrame?: Frame }).lastFrame = frame;
 
         const handleErrorOutput = (error: unknown) => {
           if (
@@ -1598,6 +1605,17 @@ export class Runner {
                   resultCell,
                 );
                 addCancel(() => this.stop(resultCell));
+
+                // CT-1316: If the TX commit fails (e.g. session cancel,
+                // conflict), the sub-pattern's process cell data will be
+                // reverted. Stop the sub-pattern so its actions don't run
+                // with empty/stale data and create new commits that also
+                // get reverted — preventing an infinite cycle.
+                tx.addCommitCallback((_committedTx, result) => {
+                  if (result.error) {
+                    this.stop(resultCell);
+                  }
+                });
               }
 
               if (!previousResultCell) {

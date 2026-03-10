@@ -14,64 +14,68 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<span>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>
             {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                checkout: {
+                                    type: "object",
+                                    properties: {
+                                        discount: {
+                                            type: "number",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["discount"]
+                                },
+                                upsell: {
+                                    type: "object",
+                                    properties: {
+                                        discount: {
+                                            type: "number",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["discount"]
+                                }
+                            },
+                            required: ["checkout", "upsell"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            checkout: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["discount"]
-                            },
-                            upsell: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["discount"]
-                            }
+                        checkout: {
+                            discount: state.key("checkout").discount
                         },
-                        required: ["checkout", "upsell"]
+                        upsell: {
+                            discount: state.key("upsell").discount
+                        }
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    checkout: {
-                        discount: state.checkout.discount
-                    },
-                    upsell: {
-                        discount: state.upsell.discount
-                    }
-                }
-            }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
-          </span>), {
+                }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
+          </span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -141,10 +145,10 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     checkout: {
-                        discount: state.checkout.discount
+                        discount: state.key("checkout").discount
                     },
                     upsell: {
-                        discount: state.upsell.discount
+                        discount: state.key("upsell").discount
                     }
                 }
             })}

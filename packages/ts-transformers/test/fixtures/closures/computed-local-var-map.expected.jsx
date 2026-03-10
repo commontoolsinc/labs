@@ -11,7 +11,8 @@ interface Item {
     name: string;
     price: number;
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     const filtered = __ctHelpers.derive({
         type: "object",
         properties: {

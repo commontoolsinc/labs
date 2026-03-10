@@ -19,18 +19,17 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.filterWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.active, {
+        {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return item.key("active");
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",
@@ -51,43 +50,47 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean",
                 asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
               Total: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                taxRate: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["taxRate"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            taxRate: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["taxRate"]
+                        taxRate: state.key("taxRate")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    taxRate: state.taxRate
-                }
-            }, ({ item, state }) => item.price * (1 + state.taxRate))}
-            </div>), {
+                }, ({ item, state }) => item.price * (1 + state.taxRate))}
+            </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -152,7 +155,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    taxRate: state.taxRate
+                    taxRate: state.key("taxRate")
                 }
             })}
       </div>),

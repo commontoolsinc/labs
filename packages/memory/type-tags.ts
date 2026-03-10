@@ -3,6 +3,7 @@ import {
   StorableEpochNsec,
 } from "./storable-native-instances.ts";
 import { StorableContentId } from "./storable-content-id.ts";
+import { isStorableInstance } from "./storable-protocol.ts";
 
 /**
  * Canonical type tags for the `/<Type>@<Version>` wire format. Collected in a
@@ -70,6 +71,8 @@ export const NATIVE_TAGS = Object.freeze(
     EpochDays: "EpochDays",
     ContentId: "ContentId",
     HasToJSON: "HasToJSON",
+    StorableInstance: "StorableInstance",
+    Primitive: "Primitive",
   } as const,
 );
 
@@ -146,9 +149,10 @@ export function tagFromNativeClass(
 }
 
 /**
- * Canonical mapping from a native JS object value to its native-instance tag.
- * Returns the tag string if the value is a recognized convertible native
- * instance, or `null` otherwise.
+ * Canonical mapping from a JS value to its native-instance tag. Returns the
+ * tag string if the value is a recognized convertible native instance, or
+ * `null` otherwise. Non-object types (null, undefined, primitives) return
+ * `Primitive`.
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
  * Falls back to `Error.isError()` for exotic Error subclasses, `Array.isArray`
@@ -159,7 +163,10 @@ export function tagFromNativeClass(
  * `HasToJSON`. Dedicated types (Error, Date, Map, etc.) and `HasToJSON` from
  * `tagFromNativeClass` are returned as-is.
  */
-export function tagFromNativeValue(value: object): NativeTag | null {
+export function tagFromNativeValue(value: unknown): NativeTag | null {
+  if (value === null || typeof value !== "object") {
+    return NATIVE_TAGS.Primitive;
+  }
   // Guard: null-prototype objects or exotic objects may not have a function
   // constructor.
   const ctor = value.constructor;
@@ -182,6 +189,9 @@ export function tagFromNativeValue(value: object): NativeTag | null {
   if (tag === null) {
     // Exotic Error subclasses (e.g. DOMException).
     if (Error.isError(value)) return NATIVE_TAGS.Error;
+
+    // StorableInstance values (protocol types with [DECONSTRUCT]).
+    if (isStorableInstance(value)) return NATIVE_TAGS.StorableInstance;
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
