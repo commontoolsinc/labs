@@ -27,11 +27,13 @@ const liftSafeDefault = lift((fallback: number | null) =>
   typeof fallback === "number" ? fallback : 10
 );
 
-const liftSafeValue = lift((inputs: { value?: number; fallback?: number }) => {
-  if (typeof inputs.value === "number") return inputs.value;
-  if (typeof inputs.fallback === "number") return inputs.fallback;
-  return 10;
-});
+const liftSafeValue = lift(
+  (inputs: { value?: number | null; fallback?: number }) => {
+    if (typeof inputs.value === "number") return inputs.value;
+    if (typeof inputs.fallback === "number") return inputs.fallback;
+    return 10;
+  },
+);
 
 export const counterWithOptionalFallback = pattern<OptionalFallbackArgs>(
   ({ value, defaultValue }) => {

@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface DynamicHandlerArgs {
@@ -107,38 +107,32 @@ const liftAverage = lift((entries: number[] | undefined) => {
   const rawAverage = sum / list.length;
   return Math.round(rawAverage * 100) / 100;
 });
-const liftSlots = lift(
-  toSchema<
-    {
-      values: Cell<number[]>;
-      view: Cell<number[]>;
-      lastAdjustment: Cell<AdjustmentRecord>;
-      history: Cell<AdjustmentRecord[]>;
-      sequence: Cell<number>;
-    }
-  >(),
-  toSchema<unknown>(),
-  ({ values, view, lastAdjustment, history, sequence }) => {
-    const snapshot = view.get();
-    const list = Array.isArray(snapshot) ? snapshot : [];
-    return list.map((rawValue, index) => {
-      const value = toInteger(rawValue, 0);
-      const name = `Slot ${index + 1}`;
-      return {
-        index,
-        value,
-        label: `${name}: ${value}`,
-        adjust: adjustValue({
-          values,
-          slotIndex: index,
-          lastAdjustment,
-          history,
-          sequence,
-        }),
-      };
-    });
-  },
-);
+const liftSlots = lift<{
+  values: Writable<number[]>;
+  view: Writable<number[]>;
+  lastAdjustment: Writable<AdjustmentRecord>;
+  history: Writable<AdjustmentRecord[]>;
+  sequence: Writable<number>;
+}>(({ values, view, lastAdjustment, history, sequence }) => {
+  const snapshot = view.get();
+  const list = Array.isArray(snapshot) ? snapshot : [];
+  return list.map((rawValue, index) => {
+    const value = toInteger(rawValue, 0);
+    const name = `Slot ${index + 1}`;
+    return {
+      index,
+      value,
+      label: `${name}: ${value}`,
+      adjust: adjustValue({
+        values,
+        slotIndex: index,
+        lastAdjustment,
+        history,
+        sequence,
+      }),
+    };
+  });
+});
 const liftHandlers = lift((entries: { adjust: unknown }[] | undefined) => {
   if (!Array.isArray(entries)) return [] as unknown[];
   return entries.map((item: any) => item?.adjust);
