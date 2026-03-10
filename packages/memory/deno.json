@@ -44,7 +44,7 @@
     "./storable-value-modern": "./storable-value-modern.ts",
     "./schema": "./schema.ts",
     "./storable-value-legacy": "./storable-value-legacy.ts",
-    "./storable-value-dispatch": "./storable-value-dispatch.ts",
+    "./storable-value": "./storable-value.ts",
     "./storable-protocol": "./storable-protocol.ts",
     "./type-tags": "./type-tags.ts",
     "./json-encoding": "./json-encoding.ts",

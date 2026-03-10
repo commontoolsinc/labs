@@ -11,7 +11,7 @@ import {
 import {
   nativeFromStorableValue,
   storableFromNativeValue,
-} from "@commontools/memory/storable-value-dispatch";
+} from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";

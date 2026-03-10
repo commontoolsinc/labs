@@ -5,7 +5,7 @@ import {
   resetStorableValueConfig,
   setStorableValueConfig,
   storableFromNativeValue,
-} from "../storable-value-dispatch.ts";
+} from "../storable-value.ts";
 import type { StorableValue } from "../interface.ts";
 import { StorableError } from "../storable-native-instances.ts";
 

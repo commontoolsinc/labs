@@ -29,7 +29,7 @@ import {
 import {
   resetStorableValueConfig,
   setStorableValueConfig,
-} from "@commontools/memory/storable-value-dispatch";
+} from "@commontools/memory/storable-value";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
