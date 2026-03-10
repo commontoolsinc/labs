@@ -167,17 +167,12 @@ function transformActionCall(
     paramProperties.length > 0,
   );
 
-  // Preserve source positions for source map accuracy
-  ts.setTextRange(handlerCall, actionCall);
-
   // Build the final call: handler(...)({ captures })
   const finalCall = factory.createCallExpression(
     handlerCall,
     undefined,
     [paramsObject],
   );
-  // Preserve source position so source maps point to original action() call
-  ts.setTextRange(finalCall, actionCall);
 
   // Register the return type in the TypeRegistry for schema inference.
   // This enables SchemaInjectionTransformer to correctly infer the pattern's result type

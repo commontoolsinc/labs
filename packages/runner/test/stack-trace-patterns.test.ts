@@ -29,11 +29,9 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
     storageManager,
   });
 
-  // Pattern source: lift() call is on line 3, throw is on line 5.
-  // CTS transforms lift() into derive(), and setTextRange preserves the
-  // lift() call position (line 3) as the source map target for the
-  // entire transformed expression.
-  const LIFT_LINE = 3;
+  // Pattern source: throw is on line 5.
+  // Source maps correctly point to the original throw location.
+  const THROW_LINE = 5;
   const source = [
     "/// <cts-enable />", //                                  line 1
     'import { lift, pattern } from "commontools";', //        line 2
@@ -78,12 +76,12 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
 
-  // First frame must point to the lift() call in main.tsx
+  // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`main\\.tsx:${LIFT_LINE}:\\d+`),
-    `first frame should reference main.tsx:${LIFT_LINE}, got:\n${frames[0]}`,
+    new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
+    `first frame should reference main.tsx:${THROW_LINE}, got:\n${frames[0]}`,
   );
 
   await runtime.dispose();
@@ -97,10 +95,9 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
     storageManager,
   });
 
-  // Pattern source: handler() call is on line 3, throw is on line 6.
-  // CTS transforms handler() and setTextRange preserves the handler()
-  // call position (line 3) as the source map target.
-  const HANDLER_LINE = 3;
+  // Pattern source: throw is on line 6.
+  // Source maps correctly point to the original throw location.
+  const THROW_LINE = 6;
   const source = [
     "/// <cts-enable />", //                                          line 1
     'import { type Cell, handler, pattern } from "commontools";', //  line 2
@@ -152,12 +149,12 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
 
-  // First frame must point to the handler() call in main.tsx
+  // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`main\\.tsx:${HANDLER_LINE}:\\d+`),
-    `first frame should reference main.tsx:${HANDLER_LINE}, got:\n${frames[0]}`,
+    new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
+    `first frame should reference main.tsx:${THROW_LINE}, got:\n${frames[0]}`,
   );
 
   await runtime.dispose();
@@ -171,9 +168,9 @@ Deno.test("lift error stack has multiple frames with correct source line", async
     storageManager,
   });
 
-  // Pattern source: lift() call is on line 3.
-  // CTS transforms lift() into derive(), setTextRange preserves line 3.
-  const LIFT_LINE = 3;
+  // Pattern source: throw is on line 4.
+  // Source maps correctly point to the original throw location.
+  const THROW_LINE = 4;
   const source = [
     "/// <cts-enable />", //                                  line 1
     'import { lift, pattern } from "commontools";', //        line 2
@@ -213,12 +210,12 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: negative not supported");
 
-  // First frame points to the lift() call
+  // First frame points to the throw location
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
   assertMatch(
     frames[0],
-    new RegExp(`main\\.tsx:${LIFT_LINE}:\\d+`),
-    `first frame should reference main.tsx:${LIFT_LINE}, got:\n${frames[0]}`,
+    new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
+    `first frame should reference main.tsx:${THROW_LINE}, got:\n${frames[0]}`,
   );
 
   // Should have multiple frames

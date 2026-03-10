@@ -296,16 +296,12 @@ export function createComputedCallForExpression(
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     expression,
   );
-  // Preserve source position so TypeScript's emitter generates correct source map entries
-  ts.setTextRange(arrowFunction, expression);
 
   const computedCall = factory.createCallExpression(
     context.ctHelpers.getHelperExpr("computed"),
     undefined,
     [arrowFunction],
   );
-  // Preserve source position for the computed() wrapper call
-  ts.setTextRange(computedCall, expression);
 
   // Register types for both the TypeNode and the computed CallExpression
   if (resultTypeNode && resultType && context.options.typeRegistry) {

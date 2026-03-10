@@ -283,19 +283,16 @@ function rewriteCaptureReferences(
       const substituteName = substitutions.get(node.name.text);
       if (substituteName) {
         const newIdentifier = factory.createIdentifier(substituteName);
-        ts.setTextRange(newIdentifier, node.name);
         // Register with unwrapped type
         const unwrappedType = captureTypes.get(node.name.text);
         if (unwrappedType && typeRegistry) {
           typeRegistry.set(newIdentifier, unwrappedType);
         }
         // Expand shorthand into full property assignment
-        const assignment = factory.createPropertyAssignment(
+        return factory.createPropertyAssignment(
           node.name, // Property name stays the same
           newIdentifier, // Value uses renamed identifier
         );
-        ts.setTextRange(assignment, node);
-        return assignment;
       }
       // No substitution needed, keep as shorthand
       return node;
@@ -318,7 +315,6 @@ function rewriteCaptureReferences(
       const substituteName = substitutions.get(node.text);
       if (substituteName) {
         const newIdentifier = factory.createIdentifier(substituteName);
-        ts.setTextRange(newIdentifier, node);
         // Register with unwrapped type
         const unwrappedType = captureTypes.get(node.text);
         if (unwrappedType && typeRegistry) {
@@ -533,8 +529,6 @@ export function transformDeriveCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
     [mergedInput, newCallback],
   );
-  // Preserve source position so source maps point to original derive call
-  ts.setTextRange(newDeriveCall, deriveCall);
 
   // Register the type of the derive call expression itself
   if (options.typeRegistry) {

@@ -28,9 +28,13 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 // - [as identifier]: \[as \w+\] matches any identifier, not just "factory"
 const stackTracePattern =
   /at (?:async )?([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
-// V8 eval frames without a function name show the filename directly after "at":
+// V8 eval frames without a function name show the filename directly after "at".
+// When there is a nested position in parens, it is the more precise location:
 //   at recipe-abc.js, <anonymous>:14:15 (recipe-abc.js, <anonymous>:20:10)
 //   at recipe-abc.js, <anonymous>:14:15
+// The nested pattern matches the inner (more precise) position first.
+const evalFrameNestedPattern =
+  /at .+?, <anonymous>:\d+:\d+ \((.+?), <anonymous>:(\d+):(\d+)\)/;
 const evalFramePattern = /at (.+?), <anonymous>:(\d+):(\d+)/;
 const CT_INTERNAL = `    at <CT_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
@@ -64,7 +68,19 @@ export class SourceMapParser {
         return this.mapFrame(match[1], match[2], match[3], match[4], line);
       }
 
-      // Fallback: V8 eval frames without a function name
+      // V8 eval frames without a function name.
+      // Try the nested pattern first (inner position is more precise).
+      const nestedMatch = line.match(evalFrameNestedPattern);
+      if (nestedMatch) {
+        return this.mapFrame(
+          "",
+          nestedMatch[1],
+          nestedMatch[2],
+          nestedMatch[3],
+          line,
+        );
+      }
+
       const evalMatch = line.match(evalFramePattern);
       if (evalMatch) {
         return this.mapFrame(

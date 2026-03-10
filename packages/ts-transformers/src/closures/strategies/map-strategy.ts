@@ -674,8 +674,6 @@ function createPatternCallWithParams(
     mapCall.typeArguments,
     args,
   );
-  // Preserve source position so source maps point to original .map() call
-  ts.setTextRange(mapWithPatternCall, mapCall);
 
   // Register the result type for the mapWithPattern call so schema injection
   // can find it when this call is used inside ifElse branches
