@@ -255,9 +255,6 @@ export class Engine extends EventTarget implements Harness {
   // Returns the original stack if internals haven't been initialized.
   parseStack(stack: string): string {
     if (!this.internals) {
-      console.warn(
-        "[source-map] Engine.parseStack: internals not initialized, returning original stack",
-      );
       return stack;
     }
     return this.internals.isolate.parseStack(stack);

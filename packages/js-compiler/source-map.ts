@@ -52,27 +52,11 @@ export class SourceMapParser {
   // Fixes stack traces to use source map from eval. Strangely, both Deno and
   // Chrome at least only observe `sourceURL` but not the source map, so we can
   // use the former to find the right source map and then apply this.
-  parse(stack: string, debug = false): string {
-    // Always log loaded source maps for debugging
-    console.log(
-      "[source-map-debug] Loaded source maps:",
-      [...this.sourceMaps.keys()],
-    );
-    if (debug) {
-      logger.info(
-        "source-map",
-        `Loaded source maps: ${[...this.sourceMaps.keys()].join(", ")}`,
-      );
-    }
+  parse(stack: string): string {
     return stack.split("\n").map((line) => {
       const match = line.match(stackTracePattern);
 
       if (!match) {
-        if (debug) logger.info("source-map", `No regex match for: ${line}`);
-        // Log non-matching lines that look like stack frames
-        if (line.includes("at ")) {
-          console.log("[source-map-debug] No regex match for:", line);
-        }
         return line;
       }
       const fnName = match[1];
@@ -80,24 +64,8 @@ export class SourceMapParser {
       const lineNum = parseInt(match[3], 10);
       const columnNum = parseInt(match[4], 10);
 
-      console.log(
-        "[source-map-debug] Matched:",
-        { fnName, filename, lineNum, columnNum },
-      );
-
-      if (debug) {
-        logger.info(
-          "source-map",
-          `Matched: fn=${fnName}, file=${filename}, line=${lineNum}, col=${columnNum}`,
-        );
-      }
-
       const sourceMap = this.sourceMaps.get(filename);
-      if (!sourceMap) {
-        console.log("[source-map-debug] No source map for:", filename);
-        if (debug) logger.info("source-map", `No source map for: ${filename}`);
-        return line;
-      }
+      if (!sourceMap) return line;
 
       if (/AMDLoader/.test(fnName) && lineNum === 1) {
         return CT_INTERNAL;
@@ -110,21 +78,12 @@ export class SourceMapParser {
       });
 
       if (mapIsEmpty(originalPosition)) {
-        console.log("[source-map-debug] Empty mapping for:", {
-          filename,
-          lineNum,
-          columnNum,
-        });
         if (fnName === "eval") {
           return CT_INTERNAL;
         }
         return UNMAPPED;
       }
 
-      console.log("[source-map-debug] Successfully mapped:", {
-        from: { filename, lineNum, columnNum },
-        to: originalPosition,
-      });
       // Replace the original line with the mapped position information
       return `    at ${fnName} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
     }).join("\n");
