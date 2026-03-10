@@ -279,7 +279,7 @@ export class Runner {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.key("internal").getRaw({
+    const previousInternal = processCell.key("internal").getRawMutable({
       meta: ignoreReadForScheduling,
     });
     const internal = Object.assign(
@@ -292,11 +292,7 @@ export class Runner {
           ? pattern.initial.internal
           : {},
       ),
-      isRecord(previousInternal)
-        ? (this.runtime.experimental.richStorableValues
-          ? cellAwareDeepCopy(previousInternal)
-          : previousInternal)
-        : {},
+      isRecord(previousInternal) ? previousInternal : {},
     ) as StorableDatum;
 
     // Still necessary until we consistently use schema for defaults.
