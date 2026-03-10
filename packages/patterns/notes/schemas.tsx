@@ -5,16 +5,15 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import {
-  type Default,
-  NAME,
-  type Stream,
-  UI,
-  type VNode,
-  type Writable,
-} from "commontools";
+import { type Default, NAME, type Stream, type Writable } from "commontools";
 
 // ===== Core Entity Types =====
+//
+// IMPORTANT: Do NOT add [UI] to these entity types. Including [UI] in types
+// that are used as references (e.g. in arrays, backlinks, mentioned lists)
+// causes the runtime to deeply traverse and instantiate UI trees for every
+// referenced piece, making everything extremely slow. Only pattern Output
+// interfaces should declare [UI]. See NoteOutput, NotebookOutput, etc.
 
 /**
  * A piece that can be mentioned via [[wiki-links]] and appear in backlinks.
@@ -25,7 +24,6 @@ export interface MentionablePiece {
   isHidden?: boolean;
   mentioned: MentionablePiece[];
   backlinks: MentionablePiece[];
-  [UI]?: VNode;
 }
 
 /**
@@ -34,7 +32,6 @@ export interface MentionablePiece {
  */
 export interface MinimalPiece {
   [NAME]?: string;
-  [UI]?: VNode;
 }
 
 /**
@@ -49,7 +46,6 @@ export interface NotePiece {
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
-  [UI]?: VNode;
 }
 
 /**
@@ -70,7 +66,6 @@ export interface NotebookPiece {
     title: string;
     notesData?: Array<{ title: string; content: string }>;
   }>;
-  [UI]?: VNode;
 }
 
 /**
@@ -142,12 +137,8 @@ export const generateId = (): string =>
  * Get a comparable name from a piece.
  * Handles both local pieces (title) and wish("#default") pieces ([NAME]).
  */
-export const getPieceName = (piece: unknown): string => {
-  // First try [NAME] (works for wish("#default") pieces)
-  const symbolName = (piece as MinimalPiece)?.[NAME];
-  if (typeof symbolName === "string") return symbolName;
-  // Fallback to title (works for local pieces)
-  const titleProp = (piece as NotePiece)?.title;
-  if (typeof titleProp === "string") return titleProp;
-  return "";
+export const getPieceName = (
+  piece?: { [NAME]?: string; title?: string },
+): string => {
+  return piece?.[NAME] ?? piece?.title ?? "";
 };

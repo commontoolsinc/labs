@@ -71,7 +71,11 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -119,6 +123,7 @@ describe("scheduler", () => {
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
+      shallowReads: [],
       writes: [c.getAsNormalizedFullLink()],
     }, {});
     expect(runCount).toBe(0);
@@ -162,7 +167,11 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -219,6 +228,7 @@ describe("scheduler", () => {
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
+      shallowReads: [],
       writes: [c.getAsNormalizedFullLink()],
     }, {});
     expect(runCount).toBe(0);
@@ -289,9 +299,17 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder1, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder2, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
@@ -376,11 +394,23 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder1, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder2, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder3, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
 
     await e.pull();
@@ -417,7 +447,11 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(inc, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await counter.pull();
     expect(counter.get()).toBe(1);
     await counter.pull();
@@ -435,11 +469,244 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {
+    runtime.scheduler.subscribe(inc, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {
       isEffect: true,
     });
     await runtime.idle();
     expect(runs).toBe(1);
+  });
+
+  it("should track read without load for scheduling and still trigger on writes", async () => {
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "source-cell-for-track-without-load",
+      undefined,
+      tx,
+    );
+    sourceCell.set(1);
+
+    const resultCell = runtime.getCell<{ count: number; lastRead: unknown }>(
+      space,
+      "result-cell-for-track-without-load",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, lastRead: null });
+    tx.commit();
+    tx = runtime.edit();
+
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    const sourceAddress = {
+      space: sourceLink.space,
+      id: sourceLink.id,
+      type: sourceLink.type,
+      path: ["value", ...sourceLink.path],
+    };
+
+    let actionRunCount = 0;
+    const action: Action = (actionTx) => {
+      actionRunCount++;
+      const readResult = actionTx.read(sourceAddress, {
+        trackReadWithoutLoad: true,
+      });
+      // sourceCell has a value, but trackReadWithoutLoad should not fetch it.
+      expect(readResult.error).toBeUndefined();
+      expect(readResult.ok?.value).toBeUndefined();
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        lastRead: readResult.ok?.value,
+      });
+    };
+
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
+    await resultCell.pull();
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, lastRead: undefined });
+
+    // Write to the same address: tracked read should still invalidate.
+    sourceCell.withTx(tx).set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(2);
+    expect(resultCell.get()).toEqual({ count: 2, lastRead: undefined });
+  });
+
+  it("non-recursive read through link chain does not re-trigger on value update", async () => {
+    // docA holds a link to docB at path ["foo", "bar"]
+    // docB's root value is itself a link to docC
+    // docC holds { baz: 1 }
+    // Reading docA traverses docA → docB → docC and registers non-recursive
+    // reads at each link target.  Updating an existing key in docC must not
+    // trigger because the reads are non-recursive (only new keys trigger).
+    const docA = runtime.getCell<unknown>(
+      space,
+      "link-chain-docA",
+      undefined,
+      tx,
+    );
+    const docB = runtime.getCell<unknown>(
+      space,
+      "link-chain-docB",
+      undefined,
+      tx,
+    );
+    const docC = runtime.getCell<{ baz: number; newKey?: string }>(
+      space,
+      "link-chain-docC",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "link-chain-result",
+      undefined,
+      tx,
+    );
+
+    // docA links to docB at ["foo","bar"]
+    // docB.foo links to docC at []
+    // A read of docA will not cause us to react to a write of docC.baz
+    const docBDeepLink = docB.key("foo").key("bar").cellLink;
+    docA.withTx(tx).setRaw(docBDeepLink); // points to B.foo.bar (or C.bar)
+    docB.withTx(tx).setRaw({ foo: docC.cellLink }); // B.foo points to C
+    docC.withTx(tx).setRaw({ baz: 1, bar: 2 });
+    resultCell.withTx(tx).set(0);
+    tx.commit();
+    tx = runtime.edit();
+
+    const docALink = docA.getAsNormalizedFullLink();
+    const docBLink = docB.getAsNormalizedFullLink();
+    const docCLink = docC.getAsNormalizedFullLink();
+    const type = "application/json" as const;
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      // Mirror the non-recursive reads that followPointer (traverse.ts) registers
+      // when traversing docA → docB → docC through the link chain.
+      actionTx.read(
+        {
+          space: docALink.space,
+          id: docALink.id,
+          type,
+          path: ["value"],
+        },
+        { nonRecursive: true },
+      );
+      actionTx.read(
+        { space: docBLink.space, id: docBLink.id, type, path: ["value"] },
+        { nonRecursive: true },
+      );
+      // docC root: non-recursive and scheduling-only (value already loaded via
+      // the reads above; we just need to track the dependency).
+      actionTx.read(
+        { space: docCLink.space, id: docCLink.id, type, path: ["value"] },
+        { nonRecursive: true, trackReadWithoutLoad: true },
+      );
+      resultCell.withTx(actionTx).set(runCount);
+    };
+
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.baz (existing key, value change only) — must NOT trigger.
+    docC.withTx(tx).key("baz").set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Add a new direct key to docC — MUST trigger (non-recursive reads fire on key add).
+    docC.withTx(tx).key("fiz").set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(2);
+  });
+
+  it("cell.get on docA inside action does not add recursive scheduling deps for docC", async () => {
+    // Same link chain: docA → docB.foo.bar → docC
+    // The action only calls docA.get() — no manual actionTx.read calls.
+    // docA.get() should internally register only the reads it needs (non-recursive
+    // through the link chain) and must not add recursive deps on docC, so
+    // updating an existing key in docC must NOT re-trigger.
+    const docA = runtime.getCell<unknown>(
+      space,
+      "link-chain-get-docA",
+      undefined,
+      tx,
+    );
+    const docB = runtime.getCell<unknown>(
+      space,
+      "link-chain-get-docB",
+      undefined,
+      tx,
+    );
+    const docC = runtime.getCell<{ baz: number; newKey?: string }>(
+      space,
+      "link-chain-get-docC",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "link-chain-get-result",
+      undefined,
+      tx,
+    );
+
+    const docBDeepLink = docB.key("foo").key("bar").cellLink;
+    docA.withTx(tx).setRaw(docBDeepLink);
+    docB.withTx(tx).setRaw({ foo: docC.cellLink });
+    docC.withTx(tx).setRaw({ baz: 1, bar: 2 });
+    resultCell.withTx(tx).set(0);
+    tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      // Only cell.get — all scheduling deps come from this single call.
+      docA.withTx(actionTx).get();
+      resultCell.withTx(actionTx).set(runCount);
+    };
+
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.baz (existing key, value change only) — must NOT trigger.
+    docC.withTx(tx).key("baz").set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.bar (existing key, value change only) — must trigger.
+    docC.withTx(tx).key("bar").set(3);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(2);
   });
 });
 
@@ -633,7 +900,11 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await eventResultCell.pull();
 
     runtime.scheduler.addEventHandler(
@@ -778,7 +1049,7 @@ describe("reactive retries", () => {
       // Subscribe and run immediately
       runtime.scheduler.subscribe(
         reactiveAction,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         { isEffect: true },
       );
 
@@ -874,6 +1145,7 @@ describe("reactive retries", () => {
         action1,
         {
           reads: [source.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [intermediate.getAsNormalizedFullLink()],
         },
         {},
@@ -882,6 +1154,7 @@ describe("reactive retries", () => {
         action2,
         {
           reads: [intermediate.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
@@ -953,7 +1226,7 @@ describe("parent-child action ordering", () => {
       // Subscribe child action during parent execution
       runtime.scheduler.subscribe(
         childAction,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         { isEffect: true },
       );
 
@@ -967,7 +1240,7 @@ describe("parent-child action ordering", () => {
     // Subscribe parent
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -1006,7 +1279,7 @@ describe("parent-child action ordering", () => {
       if (shouldHaveChild && !childCanceler) {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           {},
         );
       } else if (!shouldHaveChild && childCanceler) {
@@ -1022,7 +1295,11 @@ describe("parent-child action ordering", () => {
     // Subscribe parent as an effect (so it re-runs when toggle changes)
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [toggle.getAsNormalizedFullLink()], writes: [] },
+      {
+        reads: [toggle.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
       { isEffect: true },
     );
     await runtime.idle();
@@ -1065,7 +1342,7 @@ describe("parent-child action ordering", () => {
         // Subscribe child as an effect too (so it re-runs when source changes)
         runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -1082,7 +1359,7 @@ describe("parent-child action ordering", () => {
     // Mark parent as effect so it re-runs when source changes
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -1125,7 +1402,7 @@ describe("parent-child action ordering", () => {
         // Subscribe parent as effect so it re-runs when source changes
         runtime.scheduler.subscribe(
           parentAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -1140,7 +1417,7 @@ describe("parent-child action ordering", () => {
         // Subscribe child as effect so it re-runs when source changes
         runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -1154,7 +1431,7 @@ describe("parent-child action ordering", () => {
     // Mark grandparent as effect so the chain re-runs when source changes
     runtime.scheduler.subscribe(
       grandparentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -1192,7 +1469,11 @@ describe("parent-child action ordering", () => {
       if (!childCanceler) {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
-          { reads: [source.getAsNormalizedFullLink()], writes: [] },
+          {
+            reads: [source.getAsNormalizedFullLink()],
+            shallowReads: [],
+            writes: [],
+          },
           {},
         );
       }
@@ -1205,7 +1486,11 @@ describe("parent-child action ordering", () => {
 
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
-      { reads: [source.getAsNormalizedFullLink()], writes: [] },
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
       { isEffect: true },
     );
     await runtime.idle();

@@ -198,6 +198,91 @@ await commontools.vdom.dump(document.querySelector('#my-container'))
 commontools.vdom.registry
 ```
 
+## Cell Inspection
+
+Read and subscribe to cell values directly from the console. These utilities
+use `CellHandle` under the hood, so they go through the same IPC path as the
+shell's own rendering. Useful for verifying what value is actually stored for
+a piece, debugging reactivity issues, or watching values change in real time.
+
+All three functions default `space` to the current shell space and `did` to
+the piece ID from the URL bar (`/<spaceName>/<pieceId>`). Override any default
+by passing an options object.
+
+### readCell
+
+Read the current value of a piece's output cell.
+
+```javascript
+// Read the full output of the current piece
+await commontools.readCell()
+
+// Read a nested path
+await commontools.readCell({ path: ["children", "1", "props", "variant"] })
+
+// Read a specific piece in a specific space
+await commontools.readCell({
+  space: "did:key:z6Mkm...",
+  did: "baedrei...",
+  path: ["$UI"]
+})
+```
+
+### readArgumentCell
+
+Same as `readCell` but automatically prepends `"argument"` to the path,
+reading from the piece's input/argument cell.
+
+```javascript
+// Read the piece's argument data
+await commontools.readArgumentCell()
+
+// Read a nested argument field
+await commontools.readArgumentCell({ path: ["name"] })
+```
+
+### subscribeToCell
+
+Subscribe to live updates on a cell. Logs timestamped values to the console
+on every change. Returns a cancel function.
+
+```javascript
+// Subscribe to the full output
+const cancel = commontools.subscribeToCell()
+// Console: [debug] cell update [2025-08-10T...]: { $NAME: "My Piece", ... }
+
+// Subscribe to a specific path (e.g. a variant prop deep in the vdom)
+const cancelVariant = commontools.subscribeToCell({
+  path: ["children", "1", "children", "0", "props", "variant"]
+})
+
+// Click buttons, observe updates...
+
+// Clean up
+cancelVariant()
+```
+
+### Agent-Browser Usage
+
+These utilities work well with `agent-browser eval` for automated debugging:
+
+```bash
+# Check if utils are available
+agent-browser eval "typeof commontools.readCell"
+
+# Read a cell (wrap in async IIFE since eval doesn't support top-level await)
+agent-browser eval "(async () => {
+  const v = await commontools.readCell();
+  return JSON.stringify(v).slice(0, 500);
+})()"
+
+# Subscribe, interact, check console
+agent-browser eval "window._cancel = commontools.subscribeToCell()"
+agent-browser click @e5
+agent-browser console  # Check for "[debug] cell update" entries
+agent-browser eval "window._cancel()"
+```
+
 ## Quick Reference
 
 | Command | Description |
@@ -228,5 +313,9 @@ commontools.vdom.registry
 | `commontools.vdom.stats()` | Node/listener counts per renderer |
 | `commontools.vdom.nodeForId(id, el?)` | Look up DOM node by ID |
 | `commontools.vdom.registry` | Raw active renders registry |
+| `commontools.readCell(opts?)` | Read piece output cell (async) |
+| `commontools.readArgumentCell(opts?)` | Read piece argument cell (async) |
+| `commontools.subscribeToCell(opts?)` | Subscribe to cell updates, returns cancel fn |
+| `commontools.space` | Current space DID |
 | `commontools.detectNonIdempotent(ms?)` | Run non-idempotent diagnosis (default 5s) |
 | `commontools.rt.detectNonIdempotent(ms?)` | Same, via RuntimeClient IPC |

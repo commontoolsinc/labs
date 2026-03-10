@@ -6,19 +6,18 @@ import {
   equals,
   generateText,
   handler,
-  NAME as NAME_TYPE,
+  NAME,
   navigateTo,
   pattern,
   patternTool,
   type PatternToolResult,
   SELF,
   type Stream,
-  UI as UI_TYPE,
+  UI,
   type VNode,
   wish,
   Writable,
 } from "commontools";
-import { NAME, UI } from "@commontools/runner";
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
@@ -33,9 +32,9 @@ export { NotePiece };
 // ===== Output Type =====
 
 /** Represents a small #note a user took to remember some text. */
-interface NoteOutput {
-  [NAME_TYPE]: string;
-  [UI_TYPE]: VNode;
+interface NoteOutput extends NotePiece {
+  [NAME]: string;
+  [UI]: VNode;
   title: string;
   content: string;
   summary: string;

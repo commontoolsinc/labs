@@ -64,7 +64,7 @@ describe("pull-based scheduling", () => {
 
     runtime.scheduler.subscribe(
       computation,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await result.pull();
@@ -119,6 +119,7 @@ describe("pull-based scheduling", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -173,6 +174,7 @@ describe("pull-based scheduling", () => {
       writer,
       {
         reads: [],
+        shallowReads: [],
         writes: [target.getAsNormalizedFullLink()],
       },
       {},
@@ -241,6 +243,7 @@ describe("pull-based scheduling", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
       {},
@@ -252,6 +255,7 @@ describe("pull-based scheduling", () => {
       effect,
       {
         reads: [intermediate.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -335,6 +339,7 @@ describe("pull-based scheduling", () => {
       computation1,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [intermediate1.getAsNormalizedFullLink()],
       },
       {},
@@ -345,6 +350,7 @@ describe("pull-based scheduling", () => {
       computation2,
       {
         reads: [intermediate1.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [intermediate2.getAsNormalizedFullLink()],
       },
       {},
@@ -355,6 +361,7 @@ describe("pull-based scheduling", () => {
       effect,
       {
         reads: [intermediate2.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -441,6 +448,7 @@ describe("pull-based scheduling", () => {
           selector.getAsNormalizedFullLink(),
           sourceA.getAsNormalizedFullLink(),
         ],
+        shallowReads: [],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
       {},
@@ -451,6 +459,7 @@ describe("pull-based scheduling", () => {
       effect,
       {
         reads: [intermediate.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -509,7 +518,11 @@ describe("pull-based scheduling", () => {
 
     runtime.scheduler.subscribe(
       computation,
-      { reads: [source.getAsNormalizedFullLink()], writes: [] },
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
       {},
     );
     runtime.scheduler.queueExecution();
@@ -645,6 +658,7 @@ describe("pull mode with references", () => {
       innerLift,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [innerOutput.getAsNormalizedFullLink()],
       },
       {},
@@ -655,6 +669,7 @@ describe("pull mode with references", () => {
       outerLift,
       {
         reads: [innerOutput.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [outerOutput.getAsNormalizedFullLink()],
       },
       {},
@@ -665,6 +680,7 @@ describe("pull mode with references", () => {
       effect,
       {
         reads: [outerOutput.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -775,6 +791,7 @@ describe("handler dependency pulling", () => {
       computedAction,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computedOutput.getAsNormalizedFullLink()],
       },
       {},
@@ -885,6 +902,7 @@ describe("handler dependency pulling", () => {
       computedAction,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [data.key("foo").getAsNormalizedFullLink()],
       },
       {},
@@ -997,6 +1015,7 @@ describe("handler dependency pulling", () => {
       computedAction1,
       {
         reads: [source1.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed1.getAsNormalizedFullLink()],
       },
       {},
@@ -1006,6 +1025,7 @@ describe("handler dependency pulling", () => {
       computedAction2,
       {
         reads: [source2.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed2.getAsNormalizedFullLink()],
       },
       {},
@@ -1133,6 +1153,7 @@ describe("handler dependency pulling", () => {
       computedAction1,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed1.getAsNormalizedFullLink()],
       },
       {},
@@ -1142,6 +1163,7 @@ describe("handler dependency pulling", () => {
       computedAction2,
       {
         reads: [computed1.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed2.getAsNormalizedFullLink()],
       },
       {},
@@ -1275,6 +1297,7 @@ describe("handler dependency pulling", () => {
     // Use resubscribe to set up triggers without scheduling immediate execution
     runtime.scheduler.resubscribe(liftAction, {
       reads: [liftInput.getAsNormalizedFullLink()],
+      shallowReads: [],
       writes: [liftOutput.getAsNormalizedFullLink()],
     });
 
@@ -1518,6 +1541,7 @@ describe("pull mode array reactivity", () => {
       filterAction,
       {
         reads: [sourceArray.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [filteredCell.getAsNormalizedFullLink()],
       },
       {},
@@ -1587,6 +1611,7 @@ describe("pull mode array reactivity", () => {
       transformAction,
       {
         reads: [sourceArray.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computedCell.getAsNormalizedFullLink()],
       },
       {},
@@ -1697,6 +1722,7 @@ describe("pull mode array reactivity", () => {
       computeVisiblePieces,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -1792,6 +1818,7 @@ describe("pull mode array reactivity", () => {
       countPieces,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [countCell.getAsNormalizedFullLink()],
       },
       {},
@@ -1888,6 +1915,7 @@ describe("pull mode array reactivity", () => {
       computeVisible,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -1988,6 +2016,7 @@ describe("pull mode array reactivity", () => {
       computeVisible,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -2020,6 +2049,7 @@ describe("pull mode array reactivity", () => {
       computeVisible,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -2098,6 +2128,7 @@ describe("pull mode array reactivity", () => {
       computeVisible1,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -2135,6 +2166,7 @@ describe("pull mode array reactivity", () => {
       computeVisible2,
       {
         reads: [allPiecesCell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
@@ -2180,7 +2212,7 @@ describe("pull mode array reactivity", () => {
       };
       runtime.scheduler.subscribe(
         accumulator,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         {},
       );
       await runtime.scheduler.idle();
@@ -2211,7 +2243,11 @@ describe("pull mode array reactivity", () => {
       const doubler: Action = (tx) => {
         output.withTx(tx).send(input.withTx(tx).get() * 2);
       };
-      runtime.scheduler.subscribe(doubler, { reads: [], writes: [] }, {});
+      runtime.scheduler.subscribe(doubler, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {});
       await runtime.scheduler.idle();
 
       const result = await runtime.scheduler.runIdempotencyCheck();
@@ -2242,7 +2278,7 @@ describe("pull mode array reactivity", () => {
       };
       runtime.scheduler.subscribe(
         randomWriter,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         {},
       );
       await runtime.scheduler.idle();
@@ -2294,7 +2330,7 @@ describe("push-triggered filtering", () => {
     // Run action
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -2324,7 +2360,11 @@ describe("push-triggered filtering", () => {
     // First run - writes only to cell1
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell1.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [cell1.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell1.pull();
@@ -2338,6 +2378,7 @@ describe("push-triggered filtering", () => {
       action,
       {
         reads: [],
+        shallowReads: [],
         writes: [
           cell1.getAsNormalizedFullLink(),
           cell2.getAsNormalizedFullLink(),
@@ -2366,7 +2407,7 @@ describe("push-triggered filtering", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await cell.pull();
@@ -2399,7 +2440,7 @@ describe("push-triggered filtering", () => {
     // First run with default scheduling should work
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -2435,6 +2476,7 @@ describe("push-triggered filtering", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -2480,7 +2522,7 @@ describe("push-triggered filtering", () => {
     // Run once to establish mightWrite
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -2491,7 +2533,7 @@ describe("push-triggered filtering", () => {
     // Run again with default scheduling - should bypass filter
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -2593,6 +2635,7 @@ describe("cycle convergence", () => {
       actionA,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -2602,6 +2645,7 @@ describe("cycle convergence", () => {
       actionB,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -2612,6 +2656,7 @@ describe("cycle convergence", () => {
       effect,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -2662,6 +2707,7 @@ describe("cycle convergence", () => {
       computation,
       {
         reads: [counter.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [doubled.getAsNormalizedFullLink()],
       },
       {},
@@ -2681,6 +2727,7 @@ describe("cycle convergence", () => {
       computation,
       {
         reads: [counter.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [doubled.getAsNormalizedFullLink()],
       },
       {},
@@ -2747,6 +2794,7 @@ describe("cycle convergence", () => {
       actionA,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -2756,6 +2804,7 @@ describe("cycle convergence", () => {
       actionB,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -2766,6 +2815,7 @@ describe("cycle convergence", () => {
       effect,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -2820,6 +2870,7 @@ describe("cycle convergence", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -2839,6 +2890,7 @@ describe("cycle convergence", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -2902,6 +2954,7 @@ describe("cycle convergence", () => {
       actionA,
       {
         reads: [cellC.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -2912,6 +2965,7 @@ describe("cycle convergence", () => {
       actionB,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -2922,6 +2976,7 @@ describe("cycle convergence", () => {
       actionC,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellC.getAsNormalizedFullLink()],
       },
       {},
@@ -2972,7 +3027,7 @@ describe("cycle convergence", () => {
     for (const action of [actionA, actionB, actionC, actionD]) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         {},
       );
       await cellD.pull();
@@ -3015,7 +3070,7 @@ describe("cycle convergence", () => {
 
     runtime.scheduler.subscribe(
       selfRefAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
 
@@ -3092,6 +3147,7 @@ describe("cycle convergence", () => {
       acyclicAction,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed.getAsNormalizedFullLink()],
       },
       {},
@@ -3102,6 +3158,7 @@ describe("cycle convergence", () => {
       cycleActionA,
       {
         reads: [cycleA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cycleB.getAsNormalizedFullLink()],
       },
       {},
@@ -3112,6 +3169,7 @@ describe("cycle convergence", () => {
       cycleActionB,
       {
         reads: [cycleB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cycleA.getAsNormalizedFullLink()],
       },
       {},

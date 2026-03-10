@@ -119,6 +119,57 @@ function getCtCommand(rootDir: string): string[] {
 }
 
 /**
+ * Finds all `.test.tsx` pattern tests that match the given filter (if any). A
+ * filter of the form `<chunk>/<total-chunks>` produces the indicated "chunk" of
+ * the tests, to allow for separate parallel tasks to handle all the chunks.
+ */
+async function findPatternTests(
+  rootDir: string,
+  patternsDir: string,
+  filter?: string,
+): Promise<string[]> {
+  const { chunkStr, totalChunksStr, nameFilter } = (filter ?? "")
+    .match(
+      /^(?:(?<chunkStr>[1-9][0-9]*)[/](?<totalChunksStr>[1-9][0-9]*)|(?<nameFilter>.+)|)$/,
+    )!
+    .groups as {
+      chunkStr?: string;
+      totalChunksStr?: string;
+      nameFilter?: string;
+    };
+
+  const chunk = chunkStr ? parseInt(chunkStr) : undefined;
+  const totalChunks = totalChunksStr ? parseInt(totalChunksStr) : undefined;
+
+  // Find all .test.tsx files
+  const testFiles: string[] = [];
+  for await (const entry of walkDir(patternsDir)) {
+    if (entry.endsWith(".test.tsx")) {
+      const relative = path.relative(rootDir, entry);
+      if (!nameFilter || relative.includes(nameFilter)) {
+        testFiles.push(relative);
+      }
+    }
+  }
+
+  testFiles.sort();
+
+  if (chunk && totalChunks) {
+    if (chunk > totalChunks) {
+      throw new Error(`Nonsensical chunk demand: ${chunk}/${totalChunks}`);
+    }
+    const perChunk = testFiles.length / totalChunks;
+    const first = Math.floor((chunk - 1) * perChunk);
+    const afterLast = Math.floor(chunk * perChunk);
+    console.log(`Testing pattern chunk ${chunk} of ${totalChunks}.`);
+    console.log(`${testFiles.length} tests in total across all chunks.`);
+    return testFiles.slice(first, afterLast);
+  } else {
+    return testFiles;
+  }
+}
+
+/**
  * Find and run all .test.tsx pattern tests via `ct test`.
  */
 async function runPatternTests(
@@ -127,19 +178,7 @@ async function runPatternTests(
 ): Promise<boolean> {
   const patternsDir = path.join(rootDir, "packages/patterns");
   const ctCmd = getCtCommand(rootDir);
-
-  // Find all .test.tsx files
-  const testFiles: string[] = [];
-  for await (const entry of walkDir(patternsDir)) {
-    if (entry.endsWith(".test.tsx")) {
-      const relative = path.relative(rootDir, entry);
-      if (!filter || relative.includes(filter)) {
-        testFiles.push(relative);
-      }
-    }
-  }
-
-  testFiles.sort();
+  const testFiles = await findPatternTests(rootDir, patternsDir, filter);
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");

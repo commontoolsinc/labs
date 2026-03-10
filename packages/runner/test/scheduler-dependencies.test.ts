@@ -53,7 +53,11 @@ describe("effect/computation tracking", () => {
     expect(stats1.effects).toBe(0);
 
     const action: Action = () => {};
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     runtime.scheduler.queueExecution();
     await runtime.idle();
 
@@ -81,7 +85,7 @@ describe("effect/computation tracking", () => {
     const action: Action = () => {};
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -109,12 +113,12 @@ describe("effect/computation tracking", () => {
 
     runtime.scheduler.subscribe(
       computation,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: false },
     );
     runtime.scheduler.subscribe(
       effect,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -208,6 +212,7 @@ describe("effect/computation tracking", () => {
 
     runtime.scheduler.subscribe(parentAction, {
       reads: [sourceCell.getAsNormalizedFullLink()],
+      shallowReads: [],
       writes: [],
     }, { isEffect: true }); // Mark as effect so it runs in pull mode
 
@@ -283,6 +288,7 @@ describe("effect/computation tracking", () => {
       action1,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
       {},
@@ -294,6 +300,7 @@ describe("effect/computation tracking", () => {
       action2,
       {
         reads: [intermediate.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       {},
@@ -330,7 +337,11 @@ describe("effect/computation tracking", () => {
     };
     runtime.scheduler.subscribe(
       computation,
-      { reads: [], writes: [data.key("foo").getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [data.key("foo").getAsNormalizedFullLink()],
+      },
       {},
     );
 
@@ -363,7 +374,11 @@ describe("effect/computation tracking", () => {
     };
     runtime.scheduler.subscribe(
       computation,
-      { reads: [], writes: [data.key("foo").getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [data.key("foo").getAsNormalizedFullLink()],
+      },
       {},
     );
 
@@ -372,6 +387,7 @@ describe("effect/computation tracking", () => {
 
     runtime.scheduler.resubscribe(computation, {
       reads: [],
+      shallowReads: [],
       writes: [
         data.key("foo").getAsNormalizedFullLink(),
         data.key("bar").getAsNormalizedFullLink(),
@@ -448,7 +464,7 @@ describe("dependency metadata", () => {
     // Run the action initially
     runtime.scheduler.subscribe(
       ignoredReadAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await resultCell.pull();
@@ -573,6 +589,28 @@ describe("dependency metadata", () => {
     // Should have reads but no potentialWrites
     expect(log.reads.length).toBeGreaterThanOrEqual(1);
     expect(log.potentialWrites).toBeUndefined();
+
+    await readTx.commit();
+  });
+
+  it("should track non-recursive reads separately in reactivity logs", async () => {
+    const testCell = runtime.getCell<{ value: { nested: number } }>(
+      space,
+      "non-recursive-log-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: { nested: 1 } });
+    tx.commit();
+    tx = runtime.edit();
+
+    const readTx = runtime.edit();
+    testCell.withTx(readTx).key("value").getRaw({ nonRecursive: true });
+
+    const log = txToReactivityLog(readTx);
+    expect(log.shallowReads.length).toBeGreaterThanOrEqual(1);
+    expect(log.shallowReads.some((addr) => addr.path[0] === "value"))
+      .toBe(true);
 
     await readTx.commit();
   });

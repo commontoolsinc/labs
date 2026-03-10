@@ -54,7 +54,7 @@ describe("inline idempotency check mode", () => {
     };
     runtime.scheduler.subscribe(
       accumulator,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await runtime.scheduler.idle();
@@ -86,7 +86,11 @@ describe("inline idempotency check mode", () => {
     const doubler: Action = (tx) => {
       output.withTx(tx).send(input.withTx(tx).get() * 2);
     };
-    runtime.scheduler.subscribe(doubler, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(doubler, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await runtime.scheduler.idle();
 
     // Filter for our specific action

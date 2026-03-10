@@ -44,7 +44,7 @@ export const styles = css`
 
   /* Match v2 component theming */
   .cm-editor {
-    font-size: 0.875rem;
+    font-size: var(--ct-theme-font-size, 0.875rem);
     font-family: var(--ct-theme-mono-font-family, monospace);
   }
 
@@ -72,7 +72,7 @@ export const styles = css`
         sans-serif
       )
     );
-    font-size: 1rem;
+    font-size: var(--ct-theme-font-size, 1rem);
   }
 
   :host([mode="prose"]) .cm-editor.cm-focused {

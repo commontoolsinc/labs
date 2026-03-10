@@ -1,37 +1,32 @@
-import { type JSONSchema, type Pattern } from "../builder/types.ts";
+import type { JSONSchema, Pattern } from "../builder/types.ts";
 
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import { type AddCancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import type { Action } from "../scheduler.ts";
+import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
- * Implementation of built-in map module. Unlike regular modules, this will be
- * called once at setup and thus sets up its own actions for the scheduler.
+ * Implementation of built-in flatMap module. Like map, this is called once at
+ * setup and manages its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Runs a pattern per element. If the result is an array, it is spread into
+ * the output (one level deep, consistent with Array.prototype.flatMap). If
+ * the result is a scalar, it is included directly. undefined results are
+ * skipped (see two-pass convergence below). Output is always dense.
  *
- * The goal is to keep the output array current without recomputing too much.
+ * Sub-arrays are iterated with forEach, which skips holes — so sparse
+ * per-element results are densified during flattening.
  *
- * Elements are tracked by the normalized link address of their cell (via
- * `getAsNormalizedFullLink()`). The `asSchema` traverse with `asCell: true`
- * already resolves cell links to target entities, so:
+ * Identity tracking and reconciliation are identical to map — see map.ts for
+ * the full explanation.
  *
- * - Cell links: `list[i]` resolves to a cell pointing at the target entity.
- *   Its normalized link is stable across position changes, enabling reuse.
- * - Inline values: `list[i]` resolves to a cell pointing at the array position.
- *   Its normalized link includes the positional index, so identity = position.
- *   Shifted inline values get new runs (acceptable trade-off).
- *
- * @param list - A doc containing an array of values to map over.
- * @param op - A pattern to apply to each value.
- * @param params - Optional object containing captured variables from outer scope (closure mode).
- * @returns A doc containing the mapped values.
+ * Two-pass convergence: same as filter. When a new element appears, its
+ * pattern hasn't run yet, so the result cell is undefined and the element
+ * contributes nothing to the output. The pattern then runs, updating its
+ * cell, which re-triggers this action.
  */
-export function map(
+export function flatMap(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
@@ -41,13 +36,12 @@ export function map(
   addCancel: AddCancel,
   cause: any,
   parentCell: Cell<any>,
-  runtime: Runtime, // Runtime will be injected by the registration function
+  runtime: Runtime,
 ): Action {
   let result: Cell<any[]> | undefined;
 
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
-  // for reuse across position changes. We pass list[i] directly each time, so
-  // there's no need to store the element cell separately.
+  // resultCell holds the per-element result array.
   const elementRuns = new Map<
     string,
     { resultCell: Cell<any>; lastIndex: number }
@@ -58,7 +52,7 @@ export function map(
       result = runtime.getCell<any[]>(
         parentCell.space,
         {
-          map: parentCell.entityId,
+          flatMap: parentCell.entityId,
           op: inputsCell.getAsQueryResult([], tx)?.op,
           cause,
         },
@@ -74,7 +68,6 @@ export function map(
       {
         type: "object",
         properties: {
-          // type: "unknown" is ignored by the asCell code path (no type validation)
           list: { type: "array", items: { asCell: true, type: "unknown" } },
           op: { asCell: true },
         },
@@ -82,17 +75,11 @@ export function map(
       } as const satisfies JSONSchema,
     ).withTx(tx).get();
 
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern
     const opPattern = op.getRaw();
 
-    // If the result's value is undefined, set it to the empty array.
     if (resultWithLog.get() === undefined) {
       resultWithLog.set([]);
     }
-    // If the list is undefined it means the input isn't available yet.
-    // Correspondingly, the result should be []. TODO: Maybe it's important to
-    // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       resultWithLog.set([]);
       for (const entry of elementRuns.values()) {
@@ -103,11 +90,11 @@ export function map(
     }
 
     if (!Array.isArray(list)) {
-      throw new Error("map currently only supports arrays");
+      throw new Error("flatMap currently only supports arrays");
     }
 
     const keyCounts = new Map<string, number>();
-    const newArrayValue = new Array<any>(list.length);
+    const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
@@ -135,11 +122,10 @@ export function map(
           );
           existing.lastIndex = i;
         }
-        newArrayValue[i] = existing.resultCell;
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
-          { map: result, elementKey },
+          { flatMap: result, elementKey },
           undefined,
           tx,
         );
@@ -158,17 +144,25 @@ export function map(
         resultCell.getSourceCell()!.setSourceCell(parentCell);
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
-        newArrayValue[i] = resultCell;
+      }
+
+      // Read per-element result and flatten one level into output.
+      // Matches JS flatMap semantics: arrays are spread, scalars are included
+      // directly. undefined is skipped (two-pass convergence: new elements
+      // have undefined result cells on the first pass before the pattern runs).
+      const elemResult = elementRuns.get(elementKey)!.resultCell.withTx(tx)
+        .get();
+      if (Array.isArray(elemResult)) {
+        // forEach skips holes in sub-arrays (sparse-safe)
+        elemResult.forEach((v) => {
+          newArrayValue.push(v);
+        });
+      } else if (elemResult !== undefined) {
+        newArrayValue.push(elemResult);
       }
     }
     resultWithLog.set(newArrayValue);
 
-    // NOTE: We leave prior results in elementRuns for now, so they reuse
-    // prior runs when items reappear. This means elementRuns grows
-    // unboundedly when elements are removed — the runner is stopped via
-    // addCancel when the parent is disposed, but the Map entries (and their
-    // resultCell references) are not pruned. TODO: Consider pruning entries
-    // not present in the current list if this becomes a problem for
-    // long-lived maps with high element churn.
+    // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.
   };
 }

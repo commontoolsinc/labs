@@ -38,7 +38,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { BaseMemoryAddress, MapSet, stableStringify } from "../traverse.ts";
+import { BaseMemoryAddress, MapSet, stableHash } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
   isPrimitiveCellLink,
@@ -72,6 +72,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { toDeepStorableValue } from "@commontools/memory/storable-value";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1937,19 +1938,17 @@ export class Provider implements IStorageProvider {
     // transaction
     const facts: Fact[] = [];
     for (const { uri, value } of batch) {
-      const content = value.value !== undefined
-        ? JSON.stringify({ value: value.value, source: value.source })
+      const newValue = value.value !== undefined
+        ? toDeepStorableValue({ value: value.value, source: value.source })
         : undefined;
 
       const current = workspace.get({ id: uri, type: this.the });
-      if (JSON.stringify(current?.is) !== content) {
-        if (content !== undefined) {
-          // ⚠️ We do JSON roundtrips to strip off the undefined values that
-          // cause problems with serialization.
+      if (!deepEqual(current?.is, newValue)) {
+        if (newValue !== undefined) {
           facts.push(assert({
             the,
             of: uri,
-            is: JSON.parse(content) as StorableDatum,
+            is: newValue as StorableDatum,
             // If fact has no `cause` it is unclaimed fact.
             cause: current?.cause ? current : null,
           }));
@@ -2242,7 +2241,7 @@ export class StorageManager implements IStorageManager {
   ): Promise<Cell<T>> {
     // Build cache key: data URI + schema hash + path + space
     const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? stableStringify(schema) : "";
+    const schemaStr = schema ? stableHash(schema) : "";
     const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
 
     const existing = _dataURISyncCache.get(cacheKey);
