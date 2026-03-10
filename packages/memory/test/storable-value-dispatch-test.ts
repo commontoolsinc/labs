@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  fromStorable,
+  nativeFromStorableValue,
   resetStorableValueConfig,
   setStorableValueConfig,
   storableFromNativeValue,
@@ -11,7 +11,7 @@ import { StorableError } from "../storable-native-instances.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: StorableValue): StorableValue {
-  return fromStorable(storableFromNativeValue(value));
+  return nativeFromStorableValue(storableFromNativeValue(value));
 }
 
 // ============================================================================
@@ -36,9 +36,9 @@ describe("storable-value-dispatch", () => {
       expect(stored).toEqual({ hello: "world" });
     });
 
-    it("fromStorable is identity passthrough", () => {
+    it("nativeFromStorableValue is identity passthrough", () => {
       const value = { hello: "world" } as StorableValue;
-      expect(fromStorable(value)).toBe(value);
+      expect(nativeFromStorableValue(value)).toBe(value);
     });
 
     it("storableFromNativeValue converts Error via legacy path", () => {
@@ -104,11 +104,11 @@ describe("storable-value-dispatch", () => {
       expect(stored).toBeInstanceOf(StorableError);
     });
 
-    it("fromStorable unwraps StorableError back to Error", () => {
+    it("nativeFromStorableValue unwraps StorableError back to Error", () => {
       setStorableValueConfig(true);
       const error = new Error("test error");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
-      const restored = fromStorable(stored);
+      const restored = nativeFromStorableValue(stored);
       expect(restored).toBeInstanceOf(Error);
       expect((restored as unknown as Error).message).toBe("test error");
     });

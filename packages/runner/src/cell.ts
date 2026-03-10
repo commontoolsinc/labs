@@ -9,7 +9,7 @@ import {
   toStorableValue,
 } from "@commontools/memory/storable-value";
 import {
-  fromStorable,
+  nativeFromStorableValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
@@ -1185,7 +1185,7 @@ export class CellImpl<T extends StorableValue>
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    return fromStorable(value as StorableValue) as
+    return nativeFromStorableValue(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
