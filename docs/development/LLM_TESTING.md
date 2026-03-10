@@ -126,7 +126,7 @@ Each entry can include an `assert` object to validate the request:
 | Field | Description |
 |-------|-------------|
 | `messageCount` | Request has exactly this many messages |
-| `messagesContain` | Some message content contains all listed strings |
+| `messagesContain` | Each string appears in at least one message (strings may match different messages) |
 | `lastMessageContains` | Last message content contains this string |
 | `hasTools` | Request includes these tool names |
 | `systemContains` | System prompt contains this string |

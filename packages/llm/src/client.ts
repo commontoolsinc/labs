@@ -256,7 +256,7 @@ export function addMockObjectResponse(
 export interface ConversationFixtureAssertions {
   /** Assert request has exactly this many messages */
   messageCount?: number;
-  /** Assert some message content contains all of these strings */
+  /** Assert each string appears in at least one message (strings may match different messages) */
   messagesContain?: string[];
   /** Assert the last message content contains this string */
   lastMessageContains?: string;
