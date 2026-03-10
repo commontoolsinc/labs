@@ -4,8 +4,6 @@ import type {
   StorableValue,
   StorableValueLayer,
 } from "./interface.ts";
-import { toRichStorableValue } from "./storable-value-modern.ts";
-import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 /**
  * Character code for digit `0`.
@@ -183,34 +181,15 @@ export function canBeStoredLegacy(
 }
 
 /**
- * Converts a value to a storable (JSON-encodable) form. JSON-encodable values
- * pass through as-is. Functions and instances (non-plain objects) are converted
- * via `toJSON()` if available. Throws on non-encodable primitives (`bigint`,
- * `symbol`) or if a function/instance can't be converted.
- *
- * **Note:** This function does _not_ recursively visit the inner contents of
- * values (that is, it doesn't iterate over array or object contents).
+ * Legacy implementation of `shallowStorableFromNativeValue()` for the
+ * JSON-only type system. Converts a value to storable form without recursing
+ * into nested values.
  *
  * @param value - The value to convert.
- * @param freeze - When `true` (default), freezes the result if it is an
- *   object or array. When `false`, wrapping and validation still occur but
- *   the result is left mutable. Only applies when `richStorableValues` is ON;
- *   the legacy path does not freeze.
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
-export function shallowStorableFromNativeValue(
-  value: unknown,
-  freeze = true,
-): StorableValueLayer {
-  if (getExperimentalStorableConfig().richStorableValues) {
-    return toRichStorableValue(value, freeze);
-  }
-  return shallowStorableFromNativeValueLegacy(value);
-}
-
-/** Legacy implementation of `shallowStorableFromNativeValue()` for the JSON-only type system. */
-function shallowStorableFromNativeValueLegacy(
+export function shallowStorableFromNativeValueLegacy(
   value: unknown,
 ): StorableValueLayer {
   switch (typeof value) {

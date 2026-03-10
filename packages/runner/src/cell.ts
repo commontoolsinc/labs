@@ -6,10 +6,10 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  shallowStorableFromNativeValue,
 } from "@commontools/memory/storable-value-legacy";
 import {
   nativeFromStorableValue,
+  shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";

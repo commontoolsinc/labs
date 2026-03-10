@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  isArrayIndexPropertyName,
-  shallowStorableFromNativeValue,
-} from "../storable-value-legacy.ts";
+import { isArrayIndexPropertyName } from "../storable-value-legacy.ts";
 import {
   isStorableValue,
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
+  shallowStorableFromNativeValue,
   toDeepStorableValue,
 } from "../storable-value.ts";
 import { StorableError } from "../storable-native-instances.ts";

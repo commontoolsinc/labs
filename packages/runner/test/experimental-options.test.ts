@@ -4,13 +4,11 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
-  shallowStorableFromNativeValue,
-} from "@commontools/memory/storable-value-legacy";
-import {
   getExperimentalStorableConfig,
   isStorableValue,
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
+  shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import { StorableError } from "@commontools/memory/storable-native-instances";

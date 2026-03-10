@@ -8,11 +8,13 @@ import {
   canBeStored as canBeStoredRich,
   isRichStorableValue,
   toDeepRichStorableValue,
+  toRichStorableValue,
 } from "./storable-value-modern.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
   isStorableValueLegacy,
+  shallowStorableFromNativeValueLegacy,
   toDeepStorableValueLegacy,
 } from "./storable-value-legacy.ts";
 
@@ -216,6 +218,34 @@ export function canBeStored(
     return canBeStoredRich(value);
   }
   return canBeStoredLegacy(value);
+}
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched shallow conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a value to storable form without recursing into nested values.
+ * JSON-encodable values pass through as-is. Functions and instances are
+ * converted via `toJSON()` if available.
+ *
+ * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
+ * `toRichStorableValue` which handles the extended type system.
+ *
+ * @param value - The value to convert.
+ * @param freeze - When `true` (default), freezes the result if it is an
+ *   object or array. Only applies when `richStorableValues` is ON.
+ * @returns The storable value (original or converted).
+ * @throws Error if the value can't be converted to storable form.
+ */
+export function shallowStorableFromNativeValue(
+  value: unknown,
+  freeze = true,
+): StorableValueLayer {
+  if (currentConfig.richStorableValues) {
+    return toRichStorableValue(value, freeze);
+  }
+  return shallowStorableFromNativeValueLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
