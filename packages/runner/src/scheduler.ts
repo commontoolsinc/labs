@@ -722,6 +722,12 @@ export class Scheduler {
 
     this.updateChangeGroup(action, options);
 
+    // Snapshot previous reads before setDependencies overwrites them.
+    // Used below to detect newly discovered dynamic dependencies for computations.
+    const previousReads = this.pullMode
+      ? this.dependencies.get(action)
+      : undefined;
+
     const { reads, shallowReads } = this.setDependencies(action, log);
 
     // Update reverse dependency graph
@@ -757,30 +763,34 @@ export class Scheduler {
 
     this.setCancelForEntities(action, entities);
 
-    // In pull mode: When an action resubscribes, check if any non-throttled dirty
-    // computations write to what it reads. If so, mark the action dirty so it can
+    // In pull mode: When an effect resubscribes, check if any non-throttled dirty
+    // computations write to what it reads. If so, mark the effect dirty so it can
     // pull those computations and see fresh data.
     //
-    // This applies to both effects AND computations. Within a settle iteration,
-    // actions run in topo order: if D runs before C and D's output is fresh,
-    // D's dirty flag is cleared before C resubscribes — so no false trigger.
-    // If D was re-dirtied (its own upstream was stale), D's dirty flag accurately
-    // signals that C should re-run too.
-    //
-    // The pendingDependencyCollection conservative path applies to all actions:
-    // when new child computations are created, their mightWrite isn't populated
-    // yet (collected at the start of the next settle iteration), so the explicit
-    // dirty-write overlap check can't find them.
+    // For computations, this check is restricted to NEWLY discovered reads — reads
+    // on entities not present in the previous subscription. When a computation
+    // discovers a new dynamic dependency (e.g., traversing a newly-created entity
+    // reference), it gets re-dirtied, and markComputationsDirty propagates the
+    // dirty flag to downstream computations. This "push dirty" propagation handles
+    // the cascading staleness case without needing to check all reads broadly.
     if (this.pullMode && this.dirty.size > 0) {
-      const actionReads = (log.shallowReads?.length ?? 0) > 0
+      const allReads = (log.shallowReads?.length ?? 0) > 0
         ? [...(log.reads ?? []), ...log.shallowReads]
         : (log.reads ?? []);
+      // Effects check all reads; computations check only NEW entity reads.
+      // markComputationsDirty propagates dirty through the dependency chain,
+      // so downstream computations (reading the same entities) get dirtied
+      // transitively without needing to check all their reads.
+      const actionReads = actionIsEffect
+        ? allReads
+        : this.computeNewReads(allReads, previousReads);
       let shouldMarkDirty = false;
 
       // If there are pending computations whose dependencies haven't been collected
-      // yet, we can't know what they write. Be conservative and assume they might
-      // affect this action.
-      if (this.pendingDependencyCollection.size > 0) {
+      // yet, we can't know what they write. Be conservative for effects (check all
+      // reads) or for computations with new entity reads (they might overlap with
+      // the uncollected actions).
+      if (this.pendingDependencyCollection.size > 0 && actionReads.length > 0) {
         shouldMarkDirty = true;
       }
 
@@ -816,12 +826,14 @@ export class Scheduler {
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
-        this.dirty.add(action);
         if (actionIsEffect) {
+          this.dirty.add(action);
           this.pending.add(action);
-        }
-        // For computations: propagate dirty to downstream effects so they get scheduled
-        if (!actionIsEffect) {
+        } else {
+          // Push dirty through dependent computations (but not effects,
+          // to avoid false cycle detection in the settle loop).
+          this.markComputationsDirty(action);
+          // Schedule downstream effects so they get pulled.
           this.scheduleAffectedEffects(action);
         }
         this.queueExecution();
@@ -832,7 +844,9 @@ export class Scheduler {
   unsubscribe(action: Action): void {
     this.cancels.get(action)?.();
     this.cancels.delete(action);
-    this.dependencies.delete(action);
+    // NOTE: we intentionally keep this.dependencies — it's a WeakMap so it
+    // won't leak, and resubscribe() uses the previous reads to detect newly
+    // discovered dynamic dependencies.
     this.actionChangeGroups.delete(action);
     this.pending.delete(action);
     const dependencies = this.reverseDependencies.get(action);
@@ -846,24 +860,36 @@ export class Scheduler {
       }
       this.reverseDependencies.delete(action);
     }
-    this.dependents.delete(action);
+    // NOTE: we intentionally keep this.dependents[action] (forward dependents).
+    // It's a WeakMap so it won't leak. During the settle loop, unsubscribe is
+    // called as a "reset before re-run" step — the forward dependents are still
+    // valid and needed for markComputationsDirty propagation when a computation
+    // discovers stale upstream data during resubscribe.
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
     // Clean up dirty tracking
     this.dirty.delete(action);
-    // Clean up writersByEntity index
-    const writeEntities = this.actionWriteEntities.get(action);
-    if (writeEntities) {
-      for (const entity of writeEntities) {
-        const writers = this.writersByEntity.get(entity);
-        writers?.delete(action);
-        if (writers && writers.size === 0) {
-          this.writersByEntity.delete(entity);
+    // NOTE: In pull mode, we intentionally keep writersByEntity intact during
+    // the settle loop. updateDependents uses writersByEntity to find upstream
+    // writers when rebuilding the dependency graph. If a downstream computation
+    // resubscribes before its upstream (due to topo sort ordering when they're
+    // not yet connected), clearing writersByEntity would prevent the dependency
+    // link from being established. mightWrite is already preserved, and
+    // writersByEntity is its index — they should stay consistent.
+    // In push mode, clean up normally.
+    if (!this.pullMode) {
+      const writeEntities = this.actionWriteEntities.get(action);
+      if (writeEntities) {
+        for (const entity of writeEntities) {
+          const writers = this.writersByEntity.get(entity);
+          writers?.delete(action);
+          if (writers && writers.size === 0) {
+            this.writersByEntity.delete(entity);
+          }
         }
+        this.actionWriteEntities.delete(action);
       }
-      // Clear actionWriteEntities so resubscribe will re-register the action
-      this.actionWriteEntities.delete(action);
     }
     // NOTE: We intentionally keep parent-child relationships intact.
     // They're needed for cycle detection (identifying obsolete children
@@ -1282,6 +1308,36 @@ export class Scheduler {
     this.scheduled = true;
   }
 
+  /**
+   * Returns reads from entities not present in the previous subscription.
+   * Used to detect newly discovered dynamic dependencies (e.g., a computation
+   * that now traverses a reference to a just-created entity).
+   */
+  private computeNewReads(
+    currentReads: IMemorySpaceAddress[],
+    previous: ReactivityLog | undefined,
+  ): IMemorySpaceAddress[] {
+    if (!previous) return currentReads; // First subscription — all reads are new
+
+    // Build set of previously-read entities (space + id)
+    const prevEntities = new Set<string>();
+    for (const r of previous.reads) {
+      prevEntities.add(`${r.space}\0${r.id}`);
+    }
+    for (const r of previous.shallowReads) {
+      prevEntities.add(`${r.space}\0${r.id}`);
+    }
+
+    // Return reads from entities not seen before
+    const newReads: IMemorySpaceAddress[] = [];
+    for (const read of currentReads) {
+      if (!prevEntities.has(`${read.space}\0${read.id}`)) {
+        newReads.push(read);
+      }
+    }
+    return newReads;
+  }
+
   private setDependencies(
     action: Action,
     log: ReactivityLog,
@@ -1617,15 +1673,18 @@ export class Scheduler {
         }
       }
     }
-    // For non-recursive reads, only same/ancestor path or direct child writes
-    // create a dependency. Deep descendant writes cannot affect shallow structure.
+    // For non-recursive reads, match on entity level (space + id) only.
+    // Path overlap checking is unreliable for shallow reads because the alias
+    // system creates indirection — a shallow read at "argument/events" may
+    // resolve via alias to "internal/sortedEvents". Since the paths look
+    // completely different, path-based matching misses the dependency.
+    // Entity-level matching is conservative but correct: any write to an entity
+    // that a computation reads shallowly is considered a potential dependency.
     for (const read of shallowReads) {
       for (const write of writes) {
         if (
           read.space === write.space &&
-          read.id === write.id &&
-          write.path.length <= read.path.length + 1 &&
-          arraysOverlap(write.path, read.path)
+          read.id === write.id
         ) {
           return true;
         }
@@ -1915,6 +1974,27 @@ export class Scheduler {
   }
 
   /**
+   * Like markDirty but only propagates through computations, stopping at effects.
+   * Used during the settle loop to push dirty flags through the dependency chain
+   * without triggering false cycle detection on effects (which clear their dirty
+   * flags at the start of each iteration).
+   */
+  private markComputationsDirty(action: Action): void {
+    if (this.dirty.has(action)) return;
+
+    this.dirty.add(action);
+
+    const deps = this.dependents.get(action);
+    if (deps) {
+      for (const dependent of deps) {
+        if (!this.effects.has(dependent)) {
+          this.markComputationsDirty(dependent);
+        }
+      }
+    }
+  }
+
+  /**
    * Returns whether an action is marked as dirty.
    */
   isDirty(action: Action): boolean {
@@ -1945,13 +2025,24 @@ export class Scheduler {
     // Add to collection stack before processing
     this.collectStack.add(action);
 
-    // Find dirty computations that write to entities this action reads
-    // Include both reads and shallowReads — shallowReads still represent
-    // dependencies that need to be pulled even though they don't trigger on
-    // child-level storage changes.
-    const allReads = log.shallowReads.length > 0
-      ? [...log.reads, ...log.shallowReads]
-      : log.reads;
+    // Use reverseDependencies graph to find dirty upstream computations.
+    // This is more reliable than re-checking write/read overlap because
+    // the graph is maintained by updateDependents during resubscribe.
+    const revDeps = this.reverseDependencies.get(action);
+    if (revDeps) {
+      for (const upstream of revDeps) {
+        if (workSet.has(upstream)) continue;
+        if (!this.dirty.has(upstream)) continue;
+        if (this.effects.has(upstream)) continue; // Only pull computations
+
+        workSet.add(upstream);
+        this.collectDirtyDependencies(upstream, workSet);
+      }
+    }
+
+    // Also check write/read overlap for dirty computations NOT in the
+    // dependency graph (e.g. newly created computations whose writes
+    // haven't been registered in dependents yet).
     for (const computation of this.dirty) {
       if (workSet.has(computation)) continue; // Already added
       if (computation === action) continue;
@@ -1959,23 +2050,12 @@ export class Scheduler {
       const computationWrites = this.mightWrite.get(computation) ?? [];
       if (computationWrites.length === 0) continue;
 
-      // Check if computation writes to something action reads (with path overlap)
-      let found = false;
-      for (const write of computationWrites) {
-        for (const read of allReads) {
-          if (
-            write.space === read.space &&
-            write.id === read.id &&
-            arraysOverlap(write.path, read.path)
-          ) {
-            workSet.add(computation);
-            // Recursively collect deps of this computation
-            this.collectDirtyDependencies(computation, workSet);
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
+      // Use readsOverlapWrites for consistent shallow read handling
+      if (
+        this.readsOverlapWrites(log.reads, log.shallowReads, computationWrites)
+      ) {
+        workSet.add(computation);
+        this.collectDirtyDependencies(computation, workSet);
       }
     }
 
