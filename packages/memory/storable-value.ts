@@ -148,33 +148,6 @@ function configureDispatch(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Flag-dispatched deep conversion
-// ---------------------------------------------------------------------------
-
-/**
- * Recursively converts a value to storable form (deep, recursive).
- *
- * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
- * storable wrappers and deep-freezes. When OFF, performs legacy deep
- * conversion via `toDeepStorableValueLegacy`.
- *
- * @param value - The value to convert.
- * @param freeze - When `true` (default), deep-freezes the result. Only
- *   applies when `richStorableValues` is ON; the legacy path does not freeze.
- * @returns The storable value (original or converted).
- * @throws Error if the value (or any nested value) can't be converted.
- */
-export function toDeepStorableValue(
-  value: unknown,
-  freeze = true,
-): StorableValue {
-  if (currentConfig.richStorableValues) {
-    return toDeepRichStorableValue(value, freeze);
-  }
-  return toDeepStorableValueLegacy(value);
-}
-
-// ---------------------------------------------------------------------------
 // Flag-dispatched type checks
 // ---------------------------------------------------------------------------
 
@@ -200,7 +173,7 @@ export function isStorableValue(
 }
 
 /**
- * Returns `true` if `toDeepStorableValue()` would succeed on the value.
+ * Returns `true` if `storableFromNativeValue()` would succeed on the value.
  * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
  * or a deep tree thereof.
  *
