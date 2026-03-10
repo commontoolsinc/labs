@@ -1,11 +1,11 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   DEFAULT_BRANCH,
+  isSourceLink,
   MEMORY_V2_PROTOCOL,
   toDocumentPath,
   toEntityDocument,
   toSourceLink,
-  isSourceLink,
 } from "../v2.ts";
 
 Deno.test("memory v2 exports the phase-1 protocol constants", () => {
