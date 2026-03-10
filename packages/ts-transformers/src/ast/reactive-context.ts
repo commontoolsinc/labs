@@ -295,6 +295,10 @@ export function isInsideRestrictedContext(
           // methods (Array.prototype.filter/map/flatMap) share the same
           // "array-map" call kind but should not create a restricted context.
           if (callKind.kind === "array-map") {
+            // Default to reactive (restricted). If we can't determine the
+            // receiver type (e.g. ElementAccessExpression like arr["filter"]),
+            // we conservatively treat it as restricted — this errs on the safe
+            // side (false positives, not false negatives).
             let isReactive = true;
             if (
               ts.isPropertyAccessExpression(functionParent.expression) ||

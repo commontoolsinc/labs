@@ -13,6 +13,9 @@ interface State {
 //   .map(fn)     → .mapWithPattern(pattern(...), {})
 // Context: flatMap expands each group into its members array, then map
 //   renders each. No captured outer variables — params objects are empty {}
+// Known limitation: the chained .map() element schema is `true` (any) because
+//   the compiler doesn't yet propagate output schemas through chained
+//   transforms. Once that's implemented, it should infer {type:"string"}.
 export default pattern((state) => {
     return {
         [UI]: (<ul>
