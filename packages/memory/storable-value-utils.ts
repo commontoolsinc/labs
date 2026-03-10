@@ -66,8 +66,8 @@ export function isArrayIndexPropertyName(name: string): boolean {
     num = (num * 10) + digit;
   }
 
-  // Only accept in-range values: 0 to 2^32 - 2 (0xFFFFFFFE) per the
-  // ECMAScript spec. The value 2^32 - 1 (4294967295) is reserved as
+  // Only accept in-range values: 0 to 0xFFFFFFFE (2^32 - 2) per the
+  // ECMAScript spec. The value 0xFFFFFFFF (2^32 - 1) is reserved as
   // `array.length` for a max-length array and is not a valid index.
   return (num <= 0xFFFFFFFE);
 }
