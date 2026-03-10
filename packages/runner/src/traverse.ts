@@ -1708,7 +1708,8 @@ function narrowSchema(
         "traverse",
         () => ["Mismatched paths", docPath, selector.path],
       );
-      return { path: [], schema: false };
+      // these paths should include value even if we failed to match
+      return { path: ["value"], schema: false };
     }
     pathIndex++;
   }
