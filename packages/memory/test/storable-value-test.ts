@@ -7,7 +7,7 @@ import {
   setExperimentalStorableConfig,
   shallowStorableFromNativeValue,
   toDeepStorableValue,
-} from "../storable-value.ts";
+} from "../storable-value-legacy.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
 describe("storable-value", () => {

@@ -43,7 +43,7 @@
     "./reference": "./reference.ts",
     "./rich-storable-value": "./rich-storable-value.ts",
     "./schema": "./schema.ts",
-    "./storable-value": "./storable-value.ts",
+    "./storable-value-legacy": "./storable-value-legacy.ts",
     "./storable-value-dispatch": "./storable-value-dispatch.ts",
     "./storable-protocol": "./storable-protocol.ts",
     "./type-tags": "./type-tags.ts",

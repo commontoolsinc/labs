@@ -1,7 +1,7 @@
 import type { StorableValue } from "./interface.ts";
 import { toDeepRichStorableValue } from "./rich-storable-value.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
-import { toDeepStorableValue } from "./storable-value.ts";
+import { toDeepStorableValue } from "./storable-value-legacy.ts";
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API

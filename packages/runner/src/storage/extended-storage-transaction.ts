@@ -29,7 +29,7 @@ import type {
 import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value-legacy";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,

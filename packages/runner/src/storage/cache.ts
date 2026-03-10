@@ -72,7 +72,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { toDeepStorableValue } from "@commontools/memory/storable-value-legacy";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {

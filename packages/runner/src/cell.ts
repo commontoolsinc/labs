@@ -7,7 +7,7 @@ import {
 import {
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
-} from "@commontools/memory/storable-value";
+} from "@commontools/memory/storable-value-legacy";
 import {
   nativeFromStorableValue,
   storableFromNativeValue,

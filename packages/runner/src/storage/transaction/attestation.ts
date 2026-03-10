@@ -1,6 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value-legacy";
 import type {
   StorableDatum,
   StorableObject,

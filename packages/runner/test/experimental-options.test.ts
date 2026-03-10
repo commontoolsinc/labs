@@ -10,7 +10,7 @@ import {
   setExperimentalStorableConfig,
   shallowStorableFromNativeValue,
   toDeepStorableValue,
-} from "@commontools/memory/storable-value";
+} from "@commontools/memory/storable-value-legacy";
 import { StorableError } from "@commontools/memory/storable-native-instances";
 import {
   refer,

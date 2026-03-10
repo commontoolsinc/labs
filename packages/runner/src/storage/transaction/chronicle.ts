@@ -1,6 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { toDeepStorableValue } from "@commontools/memory/storable-value-legacy";
 import type {
   Assertion,
   IAttestation,

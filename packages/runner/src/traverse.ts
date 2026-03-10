@@ -11,7 +11,7 @@ import type {
   Unit,
 } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value-legacy";
 // TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
 // but rollup has issues
 import {

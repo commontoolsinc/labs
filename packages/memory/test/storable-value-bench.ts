@@ -6,7 +6,7 @@
  * 2. Large numbers that require the numeric comparison path
  */
 
-import { isArrayIndexPropertyName } from "../storable-value.ts";
+import { isArrayIndexPropertyName } from "../storable-value-legacy.ts";
 
 // Pre-generate test data to avoid allocation during benchmarks
 

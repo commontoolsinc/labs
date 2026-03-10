@@ -26,7 +26,7 @@ import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
 import {
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
-} from "../storable-value.ts";
+} from "../storable-value-legacy.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {

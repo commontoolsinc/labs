@@ -1,5 +1,5 @@
 import { refer } from "@commontools/memory/reference";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { toDeepStorableValue } from "@commontools/memory/storable-value-legacy";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
