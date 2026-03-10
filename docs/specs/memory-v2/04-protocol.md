@@ -260,11 +260,14 @@ interface TransactCommand {
 // from §3.2 is a simplified form used for documentation; the wire format
 // always includes the `reads` field.
 //
+// Read dependencies are path-aware:
+//   { id, path: [], seq }
+//   { id, path: ["profile", "name"], localSeq }
+//
 // Wire operations are parent-free (UserOperation format):
 //   { op: "set", id, value }
 //   { op: "patch", id, patches }
 //   { op: "delete", id }
-//   { op: "claim", id }
 // The server resolves `parent` from its own head state when constructing
 // facts. This eliminates branded Reference objects from the wire protocol.
 
@@ -656,7 +659,7 @@ transaction is signed with the **space keypair** (not the user keypair):
     args: {
       localSeq: 1,
       reads: {
-        confirmed: [{ id: spaceDID, seq: 0 }],
+        confirmed: [{ id: spaceDID, path: [], seq: 0 }],
         pending: []
       },
       operations: [{

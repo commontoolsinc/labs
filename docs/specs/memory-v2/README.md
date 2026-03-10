@@ -143,7 +143,7 @@ type Fact = SetWrite | PatchWrite | Delete;
 interface SetOperation {
    op: "set";
    id: EntityId;
-   value: JSONValue;
+   value: JSONValue; // Root replacement; equivalent to replace at path []
 }
 interface PatchWriteOperation {
    op: "patch";
@@ -153,16 +153,12 @@ interface PatchWriteOperation {
 interface DeleteOperation {
    op: "delete";
    id: EntityId;
-}
-interface ClaimOperation {
-   op: "claim";
-   id: EntityId;
+   // Root delete; equivalent to remove at path []
 }
 type Operation =
    | SetOperation
    | PatchWriteOperation
-   | DeleteOperation
-   | ClaimOperation;
+   | DeleteOperation;
 
 // Transaction
 interface Transaction {
@@ -172,6 +168,17 @@ interface Transaction {
 }
 
 // Client commit with two-tier reads
+type ReadPath = readonly string[]; // Relative to EntityDocument.value; [] = root
+interface ConfirmedRead {
+   id: EntityId;
+   path: ReadPath;
+   seq: number;
+}
+interface PendingRead {
+   id: EntityId;
+   path: ReadPath;
+   localSeq: number;
+}
 interface ClientCommit {
    localSeq: number;
    reads: {
@@ -194,7 +201,8 @@ interface SourceLink {
 }
 
 // Validation rule (replaces strict CAS):
-//   For each entity read: read.seq >= server.head[entity].seq
+//   For each read (id, path, seq), there must be no later overlapping write
+//   on that entity/path on the target branch with seq > read.seq.
 ```
 
 Successful `/memory/transact` commands preserve two linked audit layers:

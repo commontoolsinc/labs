@@ -325,6 +325,7 @@ Pending reads use **local commit indices** (not hashes):
 ```typescript
 interface PendingRead {
   id: EntityId;
+  path: readonly string[]; // Relative to EntityDocument.value; [] = root
   localSeq: number; // Client-side commit sequence number
 }
 ```
@@ -345,7 +346,8 @@ rejected, all dependent commits are also rejected.
 
 **Yes.** The per-space global version counter (`seq`) is still needed for:
 
-1. **Confirmed read validation**: `read.seq >= server.head.seq`
+1. **Confirmed read validation**: `read.seq` anchors a scan for later
+   overlapping writes on the same entity/path
 2. **Subscription cursors**: "give me changes since seq N"
 3. **Point-in-time queries**: "entity state at seq N"
 4. **Cross-branch ordering**
@@ -379,7 +381,7 @@ which subscriptions should exist.
 
 ---
 
-## 7. Confirmed Reads: Version-Based Only
+## 7. Confirmed Reads: Path-Aware and Version-Based
 
 **Spec change**: Drop the `hash` field from `ConfirmedRead`:
 
@@ -394,14 +396,15 @@ interface ConfirmedRead {
 // After:
 interface ConfirmedRead {
   id: EntityId;
+  path: readonly string[]; // Relative to EntityDocument.value; [] = root
   seq: number; // Per-space global version counter
 }
 ```
 
-The server validates confirmed reads using `read.seq >= server.head.seq`. It
-never checks the hash. Dropping it simplifies the client (no need to track fact
-hashes in confirmed state) and avoids the `undefined`-in-hash class of bugs
-entirely.
+The server validates confirmed reads by looking for later writes whose
+footprints overlap `(id, path)` after `read.seq`. It never checks the hash.
+Dropping it simplifies the client (no need to track fact hashes in confirmed
+state) and avoids the `undefined`-in-hash class of bugs entirely.
 
 ### Writing to New Entities
 
@@ -409,7 +412,7 @@ When writing to an entity the client has never seen:
 
 ```typescript
 // "I believe this entity doesn't exist"
-reads.confirmed.push({ id: entityId, seq: 0 });
+reads.confirmed.push({ id: entityId, path: [], seq: 0 });
 ```
 
 This is a case-by-case choice. Some operations (like `Cell.set()` which always
@@ -441,12 +444,6 @@ interface PatchOperation {
 
 interface DeleteOperation {
   op: "delete";
-  id: EntityId;
-  // No parent
-}
-
-interface ClaimOperation {
-  op: "claim";
   id: EntityId;
   // No parent
 }
@@ -683,7 +680,7 @@ signed with the **space keypair** (not the user keypair):
   sub: spaceDID,
   cmd: "/memory/transact",
   args: {
-    reads: { confirmed: [{ id: spaceDID, seq: 0 }], pending: [] },
+    reads: { confirmed: [{ id: spaceDID, path: [], seq: 0 }], pending: [] },
     operations: [{
       op: "set",
       id: spaceDID,        // Entity ID = space DID
@@ -804,36 +801,36 @@ operations fail the entire patch atomically.
 
 ### Phasing
 
-Initially, `Cell.set()` continues to use `diffAndUpdate()` which produces full
-`set` operations (replacing the entire entity value). This creates claims (read
-dependencies) because `diffAndUpdate()` reads the current value to compute
-diffs.
+Initially, `Cell.set()` continues to use `diffAndUpdate()` which often produces
+full `set` operations (replacing the entire entity value). This creates
+path-aware read dependencies because `diffAndUpdate()` reads the current value
+to compute diffs.
 
 Later phases will optimize: `Cell.set()` can directly produce `patch`
 operations, and eventually `Cell.push()` / `Cell.remove()` can produce more
 targeted operations. But not all patches are equal:
 
 - **Position-independent patches** overwrite stable keys and are candidates for
-  future claim-free fast paths.
+  future read-free fast paths.
 - **State-dependent patches** depend on the current shape or ordering of the
   document. `splice`, positional array edits, and today's `remove` behavior are
   in this class and should retain read dependencies until we add stronger
   semantics.
 
-### Concurrent Patches Without Claims
+### Concurrent Patches Without Overlapping Reads
 
-Two patches to the same entity without read claims are treated as
+Two patches to the same entity without overlapping read dependencies are treated as
 last-writer-wins (LWW) **only when they are genuinely blind overwrites**:
 
 ```
-Client A: replace /name = "Alice" (no claims)
-Client B: replace /age = 30 (no claims)
+Client A: replace /name = "Alice" (no overlapping reads)
+Client B: replace /age = 30 (no overlapping reads)
 → Both succeed. Patches apply sequentially on the server.
 ```
 
 Do not generalize this to state-dependent operations like `splice` or today's
 `remove` behavior. Those depend on the current document shape and should keep
-claims until we introduce position-independent variants.
+read dependencies until we introduce position-independent variants.
 
 ---
 
@@ -1018,12 +1015,14 @@ Suggested order (server first, then client, then tests):
 ### `cell.set()` Is Not a Blind Write
 
 `cell.set(value)` calls `diffAndUpdate()`, which reads the current value to
-compute a diff. This read creates a claim (read dependency) in the transaction's
-history. Consequence: parallel `cell.set()` calls to the same entity always
-produce conflict detection — one succeeds, one fails.
+compute a diff. This read creates a path-aware read dependency in the
+transaction's history. Consequence: parallel `cell.set()` calls to the same
+entity often produce conflict detection, especially when they touch overlapping
+paths.
 
 This is the correct behavior during Phase 1. In Phase 2, when `Cell.set()`
-produces patch operations directly, the implicit claim goes away.
+produces patch operations directly, the implicit whole-entity read can narrow to
+the actual touched paths.
 
 ### Double-Notification Prevention
 
@@ -1076,9 +1075,9 @@ With seq-based confirmed reads and `localSeq`-based pending reads, routing is
 trivial:
 
 ```
-If entity value came from pending state → reads.pending with localSeq
-If entity value came from confirmed state → reads.confirmed with seq
-If entity has no local state → reads.confirmed with seq: 0
+If entity value came from pending state → reads.pending with { path, localSeq }
+If entity value came from confirmed state → reads.confirmed with { path, seq }
+If entity has no local state → reads.confirmed with { path, seq: 0 }
 ```
 
 No hash comparison needed. A complex hash comparison algorithm for this routing
@@ -1094,7 +1093,7 @@ marked with the spec section it affects.
 
 **Note:** All changes in this appendix have been applied to the spec documents.
 
-### A.1. Drop `hash` from `ConfirmedRead` (03-commit-model.md §3.4)
+### A.1. Make `ConfirmedRead` Path-Aware and Drop `hash` (03-commit-model.md §3.4)
 
 ```typescript
 // Before:
@@ -1107,6 +1106,7 @@ interface ConfirmedRead {
 // After:
 interface ConfirmedRead {
   id: EntityId;
+  path: readonly string[];
   seq: number;
 }
 ```
@@ -1126,6 +1126,7 @@ interface PendingRead {
 // After:
 interface PendingRead {
   id: EntityId;
+  path: readonly string[];
   localSeq: number;
 }
 ```
