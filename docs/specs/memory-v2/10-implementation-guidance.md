@@ -573,29 +573,35 @@ not depend on invocation 2. Batching optimizes signatures, not atomicity.
 
 ### Persist Invocation/Auth Separately from Commit Identity
 
-For every successful `/memory/transact`, persist three linked artifacts:
+For every successful **write-class** command (`/memory/transact`,
+`/memory/branch/create`, `/memory/branch/delete`), persist three linked
+artifacts:
 
-1. `ClientCommit` payload
+1. canonical write payload
 2. canonical UCAN invocation object
 3. verified authorization object
 
 Recommended normalization:
 
 ```typescript
+type BranchLifecycleWrite =
+  | { cmd: "/memory/branch/create"; args: { localSeq: number; name: string; fromBranch?: string; atSeq?: number } }
+  | { cmd: "/memory/branch/delete"; args: { localSeq: number; name: string } };
+
 type CommitRow = {
-  hash: Reference;             // refer(clientCommit)
+  hash: Reference;             // refer(canonical write payload)
   invocationRef: Reference;    // refer(invocation)
   authorizationRef: Reference; // refer(authorization)
-  original: ClientCommit;
+  original: ClientCommit | BranchLifecycleWrite;
   // ...
 };
 ```
 
 This split matters for two reasons:
 
-- **Stable semantic identity:** the same logical `ClientCommit` may be replayed
-  inside a fresh invocation or fresh authorization wrapper. `commit.hash` must
-  remain the hash of the semantic payload, not of the transport envelope.
+- **Stable semantic identity:** the same logical write may be replayed inside a
+  fresh invocation or fresh authorization wrapper. `commit.hash` must remain
+  the hash of the semantic payload, not of the transport envelope.
 - **Batch sharing:** one authorization may cover many invocation refs. Storing
   authorization separately avoids duplicating signatures and makes batch
   semantics explicit.
@@ -604,7 +610,8 @@ Persisting invocation/auth gives phase-1 v2 a durable record of:
 
 - **who** submitted the command (`invocation.iss`)
 - **where** it targeted (`invocation.sub`)
-- **what** code bundle was declared (`clientCommit.codeCID`, if present)
+- **what** code bundle was declared (`clientCommit.codeCID`, if present, for
+  `/memory/transact`)
 
 It does **not** by itself attest to a distinct provider/executor identity or to
 post-execution policy enforcement. Those belong in a later receipt/attestation
@@ -612,8 +619,8 @@ layer.
 
 Keep the commit hash even though runtime semantics move to `seq`:
 
-- **Commit hash** identifies the canonical `ClientCommit` payload and is the
-  stable dedupe key for replay.
+- **Commit hash** identifies the canonical write payload and is the stable
+  dedupe key for replay.
 - **`seq`** is the server's canonical ordering and the only identifier the read
   path, subscription path, and PIT logic should depend on.
 

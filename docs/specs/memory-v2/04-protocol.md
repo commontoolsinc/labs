@@ -142,10 +142,12 @@ interface Command<
 }
 ```
 
-For successful `/memory/transact` commands, the server MUST preserve both the
-canonical invocation object and the verified authorization object in storage and
-link the resulting commit record to them. This preserves signer/proof data for
-audit without folding transport-layer authorization into `commit.hash`.
+For successful **write-class** commands (`/memory/transact`,
+`/memory/branch/create`, `/memory/branch/delete`), the server MUST preserve
+both the canonical invocation object and the verified authorization object in
+storage and link the resulting commit record to them. This preserves
+signer/proof data for audit without folding transport-layer authorization into
+`commit.hash`.
 
 The **invocation ID** is computed as `job:<content-hash>` where the content hash
 is the merkle reference of the invocation object. This ID is deterministic and
@@ -221,9 +223,9 @@ interface BatchReceipt {
 - **Batching optimizes signatures, not atomicity.** If you need atomicity
   across multiple operations, put them in a single transaction (single
   invocation), not a batch of transactions.
-- For persistence/audit, each successful transact invocation produces its own
-  commit row and its own `invocation_ref`. Batched siblings MAY share a single
-  `authorization_ref`.
+- For persistence/audit, each successful write-class invocation produces its
+  own commit row and its own `invocation_ref`. Batched siblings MAY share a
+  single `authorization_ref`.
 - Any command type can be included in a batch (transact, query, subscribe,
   etc.), though the primary use case is batching transactions.
 - The server MUST verify the batch signature before processing any invocation.
@@ -454,6 +456,7 @@ interface CreateBranchCommand {
   cmd: "/memory/branch/create";
   sub: SpaceId;
   args: {
+    localSeq: number;            // Session-scoped idempotence key
     name: BranchName;            // Name for the new branch
     fromBranch?: BranchName;     // Branch to fork from (default branch if omitted)
     atSeq?: number;              // Seq to fork at (head if omitted)
@@ -465,6 +468,7 @@ interface CreateBranchResult {
     name: BranchName;
     forkedFrom: BranchName;
     atSeq: number;
+    seq: number;                 // Global seq assigned to this branch-lifecycle write
   };
 }
 
@@ -502,11 +506,16 @@ interface DeleteBranchCommand {
   cmd: "/memory/branch/delete";
   sub: SpaceId;
   args: {
+    localSeq: number;            // Session-scoped idempotence key
     name: BranchName;           // Branch to delete
   };
 }
 
-// Response: { ok: {} }
+interface DeleteBranchResult {
+  ok: {
+    seq: number;                 // Global seq assigned to this branch-lifecycle write
+  };
+}
 
 // List branches
 interface ListBranchesCommand {
@@ -525,11 +534,22 @@ interface ListBranchesResult {
 
 interface BranchInfo {
   name: BranchName;
+  parentBranch: BranchName;
+  forkSeq: number;
+  createdSeq: number;
   headSeq: number;
+  status: "active" | "deleted";
   createdAt: string;
   deletedAt?: string;
+  entityCount?: number;
 }
 ```
+
+`/memory/branch/create` and `/memory/branch/delete` are **write-class**
+commands. They are serialized with `/memory/transact`, consume `localSeq`, and
+append commit-log entries even though they do not produce entity facts.
+`/memory/branch/merge` is different: it is a prepare-only helper that returns a
+`MergeProposal` for a later `/memory/transact`.
 
 ---
 
@@ -719,6 +739,10 @@ interface SubscriptionUpdate {
 For schema-based subscriptions (`graph.query` with `subscribe: true`), the
 server also re-evaluates the schema graph to discover newly reachable entities
 and includes those in the update.
+
+If a subscription targets a deleted branch, the server returns the current
+historical result but MUST NOT keep the subscription live for future updates,
+because deleted branches cannot advance.
 
 ### 4.6.2 Cross-Session Delivery
 
