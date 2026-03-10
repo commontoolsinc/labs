@@ -91,6 +91,8 @@ export function transformHandlerJsxAttribute(
     [eventTypeNode, stateTypeNode],
     [handlerCallback],
   );
+  // Preserve source position so source maps point to original handler location
+  ts.setTextRange(handlerCall, attribute);
 
   const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
 
@@ -104,6 +106,8 @@ export function transformHandlerJsxAttribute(
     undefined,
     [paramsObject],
   );
+  // Preserve source position so source maps point to original handler location
+  ts.setTextRange(finalCall, attribute);
 
   const newInitializer = factory.createJsxExpression(
     initializer.dotDotDotToken,

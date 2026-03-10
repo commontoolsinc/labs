@@ -30,11 +30,14 @@ export function createIfElseCall(params: IfElseParams): ts.CallExpression {
     whenFalse = whenFalse.expression;
   }
 
-  return factory.createCallExpression(
+  const call = factory.createCallExpression(
     ifElseExpr,
     undefined,
     [predicate, whenTrue, whenFalse],
   );
+  // Preserve source position so source maps point to original ternary expression
+  ts.setTextRange(call, expression);
+  return call;
 }
 
 export interface WhenParams {
@@ -61,11 +64,14 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return factory.createCallExpression(
+  const call = factory.createCallExpression(
     whenExpr,
     undefined,
     [cond, val],
   );
+  // Preserve source position so source maps point to original && expression
+  ts.setTextRange(call, condition);
+  return call;
 }
 
 /**
@@ -85,9 +91,12 @@ export function createUnlessCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return factory.createCallExpression(
+  const call = factory.createCallExpression(
     unlessExpr,
     undefined,
     [cond, val],
   );
+  // Preserve source position so source maps point to original || expression
+  ts.setTextRange(call, condition);
+  return call;
 }

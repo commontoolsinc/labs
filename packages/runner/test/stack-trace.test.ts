@@ -5,9 +5,11 @@ import {
   InMemoryProgram,
   JsScript,
   TypeScriptCompiler,
+  type TypeScriptCompilerOptions,
 } from "@commontools/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commontools/static";
+import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -25,6 +27,7 @@ const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 function compile(
   files: Record<string, string>,
   filename = "pattern-test.js",
+  extraOptions: Partial<TypeScriptCompilerOptions> = {},
 ) {
   const compiler = new TypeScriptCompiler(types);
   const mainFile = Object.keys(files)[0];
@@ -32,6 +35,22 @@ function compile(
   return compiler.resolveAndCompile(program, {
     filename,
     bundleExportAll: true,
+    ...extraOptions,
+  });
+}
+
+function compileWithCTS(
+  files: Record<string, string>,
+  filename = "pattern-test.js",
+) {
+  return compile(files, filename, {
+    beforeTransformers: (program) => {
+      const pipeline = new CommonToolsTransformerPipeline();
+      return {
+        factories: pipeline.toFactories(program),
+        getDiagnostics: () => pipeline.getDiagnostics(),
+      };
+    },
   });
 }
 
@@ -240,5 +259,46 @@ describe("Stack trace source mapping", () => {
 
     const result = runtime.parseStack(stack);
     expect(result).toBe(stack);
+  });
+});
+
+describe("Stack trace source mapping with CTS transformer", () => {
+  // Full CTS pattern transformation + source map integration tests are in
+  // stack-trace-patterns.test.ts which uses /// <cts-enable /> to run through
+  // the real pattern compilation pipeline with full runtime types.
+
+  it("preserves source positions for non-reactive code through CTS pipeline", async () => {
+    // Even with CTS enabled, code that doesn't use reactive patterns
+    // should still have correct source maps (CTS is a no-op for this code).
+    const compiled = await compileWithCTS({
+      "/main.tsx": [
+        "export function validate(x: number): number {", // line 1
+        "  if (x < 0) {", // line 2
+        "    throw new Error('negative');", // line 3
+        "  }", // line 4
+        "  return x * 2;", // line 5
+        "}", // line 6
+        "export default { validate };", // line 7
+      ].join("\n"),
+    });
+
+    const { main, runtime } = execute(compiled);
+    const validate = (main as any).validate as (x: number) => number;
+
+    expect(validate(5)).toBe(10);
+
+    let thrown: Error | undefined;
+    try {
+      validate(-1);
+    } catch (e) {
+      thrown = e as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    const mapped = runtime.parseStack(thrown!.stack!);
+    const lines = mapped.split("\n");
+
+    expect(lines[0]).toBe("Error: negative");
+    expect(lines[1]).toBe("    at validate (main.tsx:3:10)");
   });
 });
