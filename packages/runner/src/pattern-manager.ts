@@ -147,11 +147,18 @@ export class PatternManager {
   ): Promise<PatternMeta> {
     const cell = this.getPatternMetaCell({ patternId, space });
     await cell.sync();
-    if (cell.get()?.id) return cell.get();
+    if (cell.get()?.id) {
+      // Cache so sync getPatternMeta({ patternId }) works afterward
+      this.patternMetaCellById.set(patternId, cell);
+      return cell.get();
+    }
 
     // Fall back to legacy {recipeId, type: "recipe"} cause
     const legacyCell = this.getLegacyRecipeMetaCell({ patternId, space });
     await legacyCell.sync();
+    if (legacyCell.get()?.id) {
+      this.patternMetaCellById.set(patternId, legacyCell);
+    }
     return legacyCell.get();
   }
 

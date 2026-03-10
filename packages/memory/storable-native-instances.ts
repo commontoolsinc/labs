@@ -171,7 +171,7 @@ export class StorableError extends StorableNativeWrapper<Error> {
    *
    * **Invariant**: By the time this method runs, `this.error.cause` and any
    * custom enumerable properties are already `StorableValue`. The conversion
-   * layer (`convertErrorInternals()` in `rich-storable-value.ts`) ensures
+   * layer (`convertErrorInternals()` in `storable-value-modern.ts`) ensures
    * this by recursively converting Error internals before wrapping in
    * `StorableError`. The `as StorableValue` casts below are therefore safe.
    */

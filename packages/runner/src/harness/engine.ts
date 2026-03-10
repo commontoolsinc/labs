@@ -1,6 +1,8 @@
 import { Pattern } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import {
+  type CompileResult,
+  type Exports,
   Harness,
   HarnessedFunction,
   RuntimeProgram,
@@ -37,8 +39,6 @@ const INJECTED_SCRIPT =
 declare global {
   var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
 }
-
-type Exports = Record<string, any>;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -143,14 +143,11 @@ export class Engine extends EventTarget implements Harness {
     return exports![exportName] as Pattern;
   }
 
-  // Compile and run a `Program` with options, returning the compiled
-  // result and evaluated exports.
-  async process(
+  // Compile source to JS without evaluation.
+  async compile(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<
-    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
-  > {
+  ): Promise<CompileResult> {
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
@@ -159,16 +156,14 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
 
-    const { compiler, isolate, runtimeExports, exportsCallback } = await this
-      .getInternals();
+    const { compiler } = await this.getInternals();
     const resolvedProgram = await this.resolve(resolver);
 
-    // Create diagnostic message transformer for clearer error messages
     const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
       verbose: options.verboseErrors,
     });
 
-    const output = await compiler.compile(resolvedProgram, {
+    const jsScript = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
@@ -185,41 +180,73 @@ export class Engine extends EventTarget implements Harness {
       },
     });
 
-    if (!options.noRun) {
-      const result = isolate.execute(output).invoke(runtimeExports)
-        .inner();
-      if (
-        result && typeof result === "object" && "main" in result &&
-        "exportMap" in result
-      ) {
-        const main = result.main as Exports;
-        const exportMap = result.exportMap as Record<string, Exports>;
+    return { id, jsScript };
+  }
 
-        // Create a map from exported values to `RuntimeProgram` that can
-        // generate them and pass to the callback from the exports.
-        const exportsByValue = new Map<any, RuntimeProgram>();
-        const prefix = `/${id}`;
-        for (let [fileName, exports] of Object.entries(exportMap)) {
-          if (fileName.startsWith(prefix)) {
-            fileName = fileName.substring(prefix.length);
-          }
-          for (const [exportName, exportValue] of Object.entries(exports)) {
-            exportsByValue.set(exportValue, {
-              main: fileName,
-              mainExport: exportName,
-              // TODO(seefeld): Sending all `program.files` is sub-optimal, as
-              // it is the super set of files actually needed by main. We should
-              // only send the files actually needed by main.
-              files: program.files,
-            });
-          }
+  // Evaluate pre-compiled JS, returning exports.
+  // `id` is the content-derived prefix from compile(); `files` are the
+  // original source files for the export map.
+  async evaluate(
+    id: string,
+    jsScript: JsScript,
+    files: Source[],
+  ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
+    const { isolate, runtimeExports, exportsCallback } = await this
+      .getInternals();
+
+    const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
+    if (
+      result && typeof result === "object" && "main" in result &&
+      "exportMap" in result
+    ) {
+      const main = result.main as Exports;
+      const exportMap = result.exportMap as Record<string, Exports>;
+
+      // Create a map from exported values to `RuntimeProgram` that can
+      // generate them and pass to the callback from the exports.
+      const exportsByValue = new Map<any, RuntimeProgram>();
+      const prefix = `/${id}`;
+      for (let [fileName, exports] of Object.entries(exportMap)) {
+        if (fileName.startsWith(prefix)) {
+          fileName = fileName.substring(prefix.length);
         }
-        exportsCallback(exportsByValue);
-
-        return { output, main, exportMap };
+        for (const [exportName, exportValue] of Object.entries(exports)) {
+          exportsByValue.set(exportValue, {
+            main: fileName,
+            mainExport: exportName,
+            // TODO(seefeld): Sending all `files` is sub-optimal, as
+            // it is the super set of files actually needed by main. We should
+            // only send the files actually needed by main.
+            files,
+          });
+        }
       }
+      exportsCallback(exportsByValue);
+
+      return { main, exportMap };
     }
-    return { output };
+    return {};
+  }
+
+  // Compile and run a `Program` with options, returning the compiled
+  // result and evaluated exports.
+  async process(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<
+    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
+  > {
+    const { jsScript, id } = await this.compile(program, options);
+
+    if (!options.noRun) {
+      const { main, exportMap } = await this.evaluate(
+        id,
+        jsScript,
+        program.files,
+      );
+      return { output: jsScript, main, exportMap };
+    }
+    return { output: jsScript };
   }
 
   // Invokes a function that should've came from this isolate (unverifiable).
@@ -254,7 +281,9 @@ export class Engine extends EventTarget implements Harness {
   // Parse an error stack trace, mapping all positions back to original sources.
   // Returns the original stack if internals haven't been initialized.
   parseStack(stack: string): string {
-    if (!this.internals) return stack;
+    if (!this.internals) {
+      return stack;
+    }
     return this.internals.isolate.parseStack(stack);
   }
 

@@ -2204,10 +2204,11 @@ export class StorageManager implements IStorageManager {
 
     // Recurse into object/array
     if (Array.isArray(value)) {
-      const itemSchema = schema && isObject(schema) && schema.items
-        ? schema.items as JSONSchema
-        : undefined;
-      for (const item of value) {
+      for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        const itemSchema = schema
+          ? cfc.getSchemaAtPath(schema, [String(i)])
+          : undefined;
         this.collectLinkedCellSyncs(
           item,
           base,

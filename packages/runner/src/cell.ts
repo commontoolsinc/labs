@@ -6,12 +6,10 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toStorableValue,
+  nativeFromStorableValue,
+  shallowStorableFromNativeValue,
+  storableFromNativeValue,
 } from "@commontools/memory/storable-value";
-import {
-  fromStorable,
-  toStorable,
-} from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -1185,7 +1183,7 @@ export class CellImpl<T extends StorableValue>
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    return fromStorable(value as StorableValue) as
+    return nativeFromStorableValue(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
@@ -1197,7 +1195,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toStorable(value);
+    value = storableFromNativeValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1899,7 +1897,7 @@ export function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Already seen, return previously annotated result. Check this before
-  // toStorableValue() to handle circular references properly.
+  // shallowStorableFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
 
   // Cell links pass through unchanged.
@@ -1912,7 +1910,7 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
-  const converted = toStorableValue(value);
+  const converted = shallowStorableFromNativeValue(value);
   const convertedIsRecord = isRecord(converted);
 
   // If conversion changed the value, cache the result so shared references
@@ -2014,11 +2012,11 @@ export function convertCellsToLinks(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  value = toStorableValue(value);
+  value = shallowStorableFromNativeValue(value);
 
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
-    // `toStorableValue()` converted this into a primitive value of some sort.
+    // `shallowStorableFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

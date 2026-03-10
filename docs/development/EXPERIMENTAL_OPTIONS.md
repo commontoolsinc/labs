@@ -62,7 +62,7 @@ Server Process (Deno)
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-                                    +-- setExperimentalStorableConfig(...)
+                                    +-- setStorableValueConfig(...)
                                     +-- setCanonicalHashConfig(...)
 ```
 
@@ -93,7 +93,7 @@ Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setExperimentalStorableConfig(...)
+              +-- setStorableValueConfig(...)
               |    +-- currentConfig.richStorableValues = true
               |         +-- toStorableValue() checks currentConfig
               +-- setCanonicalHashConfig(...)
@@ -108,7 +108,7 @@ Key points:
 2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
-4. The **Runtime constructor** calls `setExperimentalStorableConfig()`, which
+4. The **Runtime constructor** calls `setStorableValueConfig()`, which
    sets the module-level ambient config used by `toStorableValue()` and related
    functions.
 
@@ -169,7 +169,7 @@ with defaults (all `false`) and stores the resolved result as
 
 The memory layer uses module-level ambient config variables:
 `currentConfig` in `packages/memory/storable-value.ts` (set by
-`setExperimentalStorableConfig()`) and `canonicalHashingEnabled` in
+`setStorableValueConfig()`) and `canonicalHashingEnabled` in
 `packages/memory/reference.ts` (set by `setCanonicalHashConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
