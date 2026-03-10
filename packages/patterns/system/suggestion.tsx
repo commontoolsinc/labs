@@ -115,7 +115,7 @@ export default pattern<
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{
     entries: SummaryIndexEntry[];
-  }>({ query: "#summaryIndex" }).result;
+  }>({ query: "#summaryIndex" }).result!;
 
   const patternIndexUrl = wish<{ url: Writable<string> }>({
     query: "#pattern-index",

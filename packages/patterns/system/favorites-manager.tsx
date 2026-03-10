@@ -45,7 +45,7 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: "Favorites Manager",
     [UI]: (
       <ct-vstack gap="3">
-        {favorites.map((item) => (
+        {favorites!.map((item) => (
           <ct-cell-context $cell={item.cell}>
             <ct-vstack gap="2">
               <ct-hstack gap="2" align="center">
@@ -54,7 +54,7 @@ export default pattern<Record<string, never>>((_) => {
                   variant="destructive"
                   size="sm"
                   onClick={onRemoveFavorite({
-                    favorites,
+                    favorites: favorites!,
                     item: item.cell,
                   })}
                 >
@@ -68,7 +68,7 @@ export default pattern<Record<string, never>>((_) => {
             </ct-vstack>
           </ct-cell-context>
         ))}
-        {favorites.length === 0 && <ct-text>No favorites yet.</ct-text>}
+        {favorites!.length === 0 && <ct-text>No favorites yet.</ct-text>}
       </ct-vstack>
     ),
   };

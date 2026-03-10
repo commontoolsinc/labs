@@ -288,7 +288,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ householdMembers, overrideAuth }) => {
+  (({ householdMembers, overrideAuth }: any) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
@@ -416,7 +416,7 @@ IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritte
 If you cannot read the image clearly, make your best guess based on what you can see.`,
             },
           ];
-        }),
+        }) as any,
         schema: MAIL_ANALYSIS_SCHEMA,
         // IMPORTANT: Must specify model explicitly for generateObject with images
         model: "anthropic:claude-sonnet-4-5",
@@ -495,7 +495,7 @@ If you cannot read the image clearly, make your best guess based on what you can
 
     // Unconfirmed members count
     const unconfirmedCount = computed(
-      () => householdMembers?.filter((m) => !m.isConfirmed)?.length || 0,
+      () => householdMembers?.filter((m: any) => !m.isConfirmed)?.length || 0,
     );
 
     // Get top 3 categories for preview summary
@@ -907,7 +907,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       )
                       : null}
                     {/* Use .map() directly on cell array to get cell references */}
-                    {householdMembers.map((member) => (
+                    {householdMembers.map((member: any) => (
                       <div
                         style={{
                           display: "flex",
@@ -1243,5 +1243,5 @@ If you cannot read the image clearly, make your best guess based on what you can
         </ct-screen>
       ),
     };
-  },
+  }) as any,
 );

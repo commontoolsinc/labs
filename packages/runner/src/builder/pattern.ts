@@ -115,13 +115,13 @@ export function pattern<T, R>(
   // values.
   const frame = pushFrame();
 
-  const inputs = opaqueRef(
+  const inputs = opaqueRef<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
-  const selfRef = opaqueRef(
+  const selfRef = opaqueRef<R>(
     undefined,
     resultSchema as JSONSchema | undefined,
   );
@@ -131,7 +131,9 @@ export function pattern<T, R>(
 
   let result;
   try {
-    const outputs = fn!(inputs);
+    const outputs = fn!(
+      inputs as OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    );
 
     applyInputIfcToOutput(inputs, outputs);
 
@@ -149,22 +151,26 @@ export function pattern<T, R>(
 
 // Same as above, but assumes the caller manages the frame
 export function patternFromFrame<T, R>(
-  fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
-  const inputs = opaqueRef(
+  const inputs = opaqueRef<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
-  const selfRef = opaqueRef(undefined, resultSchema);
+  const selfRef = opaqueRef<R>(undefined, resultSchema);
 
   // Attach SELF to the underlying cell so the proxy can return it
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
-  const outputs = fn(inputs);
+  const outputs = fn(
+    inputs as OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+  );
   return factoryFromPattern<T, R>(
     argumentSchema,
     resultSchema,

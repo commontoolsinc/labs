@@ -156,8 +156,8 @@ export default pattern<ChatInput, ChatOutput>(
     const recentPieces =
       wish<{ [NAME]: string }[]>({ query: "#recent" }).result;
 
-    const latest = computed(() => recentPieces[0]);
-    const latestName = computed(() => recentPieces[0]?.[NAME] ?? "latest");
+    const latest = computed(() => recentPieces![0]);
+    const latestName = computed(() => recentPieces![0]?.[NAME] ?? "latest");
 
     const {
       addMessage,
@@ -177,7 +177,7 @@ export default pattern<ChatInput, ChatOutput>(
         model,
         context: computed(() => ({
           [latestName]: latest,
-        })),
+        })) as any,
       },
     );
 

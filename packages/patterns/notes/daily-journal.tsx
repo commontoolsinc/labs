@@ -186,7 +186,7 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
     // Access default-app for addPiece (global piece registration)
     const { addPiece } = wish<{
       addPiece: Stream<{ piece: MentionablePiece }>;
-    }>({ query: "#default" }).result;
+    }>({ query: "#default" }).result!;
 
     // UI state
     const showSettings = Writable.of(false);

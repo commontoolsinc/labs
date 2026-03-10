@@ -13,9 +13,11 @@ describe("OpaqueRef transformer (runtime-style API)", () => {
   describe("error mode", () => {
     it("reports errors instead of transforming", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const el = <div>{count + 1}</div>;
+import { pattern, h, UI } from "commontools";
+
+export default pattern<{ count: number }>((state) => {
+  return { [UI]: <div>{state.count + 1}</div> };
+});
 `;
       const { diagnostics } = await validateSource(source, {
         mode: "error",
@@ -31,16 +33,19 @@ const el = <div>{count + 1}</div>;
 
     it("reports multiple errors", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const isActive: OpaqueRef<boolean> = {} as any;
-const el = (
-  <div>
-    {count + 1}
-    {isActive ? 1 : 0}
-    {count * 2}
-  </div>
-);
+import { pattern, h, UI } from "commontools";
+
+export default pattern<{ count: number; isActive: boolean }>((state) => {
+  return {
+    [UI]: (
+      <div>
+        {state.count + 1}
+        {state.isActive ? 1 : 0}
+        {state.count * 2}
+      </div>
+    ),
+  };
+});
 `;
       const { diagnostics } = await validateSource(source, {
         mode: "error",
@@ -55,9 +60,11 @@ const el = (
     it("logs transformation details", async () => {
       const logs: string[] = [];
       const source = `/// <cts-enable />
-import { OpaqueRef, derive, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const el = <div>{count + 1}</div>;
+import { pattern, derive, h, UI } from "commontools";
+
+export default pattern<{ count: number }>((state) => {
+  return { [UI]: <div>{state.count + 1}</div> };
+});
 `;
 
       await transformSource(source, {
@@ -75,9 +82,11 @@ const el = <div>{count + 1}</div>;
   describe("checkWouldTransform", () => {
     it("returns true when transformation is needed", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const el = <div>{count + 1}</div>;
+import { pattern, h, UI } from "commontools";
+
+export default pattern<{ count: number }>((state) => {
+  return { [UI]: <div>{state.count + 1}</div> };
+});
 `;
       expect(await transformSource.checkWouldTransform(source, types)).toBe(
         true,

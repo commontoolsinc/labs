@@ -298,8 +298,62 @@ export default pattern((__ct_pattern_input) => {
                 }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const assignment = __ct_pattern_input.key("element");
                     return (<div>
-                  <span>{assignment.key("item", "name")}</span>
-                  <ct-checkbox $checked={assignment.key("item", "done")}/>
+                  <span>{__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            name: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["name"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                name: assignment.key("item").name
+                            }
+                        } }, ({ assignment }) => assignment.item.name)}</span>
+                  <ct-checkbox $checked={__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            done: {
+                                                type: "boolean",
+                                                asCell: true
+                                            }
+                                        },
+                                        required: ["done"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean",
+                        asCell: true
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                done: assignment.key("item").done
+                            }
+                        } }, ({ assignment }) => assignment.item.done)}/>
                 </div>);
                 }, {
                     type: "object",
@@ -340,10 +394,10 @@ export default pattern((__ct_pattern_input) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -413,10 +467,10 @@ export default pattern((__ct_pattern_input) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -473,10 +527,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

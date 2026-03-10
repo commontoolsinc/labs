@@ -52,7 +52,7 @@ const removeItem = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
-  const { result: items } = wish<Default<Item[], []>>({ query: "#items" });
+  const items = wish<Default<Item[], []>>({ query: "#items" }).result!;
 
   return {
     [NAME]: "Test",

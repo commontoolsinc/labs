@@ -451,7 +451,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
           const template = extractionPromptTemplate || "";
           if (!template) return undefined;
           return interpolateTemplate(template, email);
-        }),
+        }) as any,
         schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
       });

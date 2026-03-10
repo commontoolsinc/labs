@@ -20,7 +20,7 @@ export default pattern<
 >(() => {
   const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>({
     query: "#default",
-  }).result;
+  }).result!;
 
   // "idle" | "creating" | "done"
   const status = Writable.of<string>("idle");

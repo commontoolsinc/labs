@@ -120,7 +120,7 @@ export default pattern<OmniboxFABInput>(
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
-    }>({ query: "#summaryIndex" }).result;
+    }>({ query: "#summaryIndex" }).result!;
     const sandboxId = Writable.of(
       `omnibot-${Math.random().toString(36).slice(2, 10)}`,
     );
@@ -333,7 +333,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                         <ct-chat-message
                           role="assistant"
                           compact
-                          content={latestAssistantMessage}
+                          content={latestAssistantMessage ?? ""}
                           pending={omnibot.pending}
                         />
                       </ct-cell-context>

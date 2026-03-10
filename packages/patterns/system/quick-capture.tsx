@@ -128,7 +128,7 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
     const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
       query: "#summaryIndex",
-    }).result;
+    }).result!;
 
     // TODO(#1269): Add wish<{ text: string }>({ query: "#system" }) once #system wish resolution is stable.
     const profileWish = wish<string>({ query: "#profile" });

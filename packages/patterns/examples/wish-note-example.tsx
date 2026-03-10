@@ -9,7 +9,7 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: "Wish tester",
     [UI]: (
       <div>
-        <pre>{wishResult.result.content}</pre>
+        <pre>{wishResult.result!.content}</pre>
         <hr />
         {wishResult.result}
       </div>

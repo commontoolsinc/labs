@@ -330,7 +330,7 @@ export default pattern<PatternInput, PatternOutput>(
       const sourceType = computed(() => classifySource(email.from || ""));
 
       const analysis = generateObject<SchoolEventResult>({
-        prompt: computed(() => {
+        prompt: computed((): string | undefined => {
           if (!email?.markdownContent) {
             return undefined;
           }
@@ -360,7 +360,7 @@ Extract:
 6. Is Urgent: True if within 7 days, action required, or time-sensitive
 
 7. Summary: 1-2 sentences of what parents need to know`;
-        }),
+        }) as any,
         schema: SCHOOL_EVENT_SCHEMA,
         model: "anthropic:claude-haiku-4-5",
       });

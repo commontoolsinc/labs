@@ -161,7 +161,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Still need allPieces for write operations (push new notes, push backlinks)
     const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
-    ).result;
+    ).result!;
     const mentionable = wish<Default<MentionablePiece[], []>>(
       { query: "#mentionable", headless: true },
     ).result;
@@ -343,11 +343,14 @@ const Note = pattern<NoteInput, NoteOutput>(
     const editorUI = (
       <ct-code-editor
         $value={content}
-        $mentionable={mentionable}
+        $mentionable={mentionable!}
         $mentioned={mentioned}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
-        onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
+        onbacklink-create={handleNewBacklink({
+          mentionable: mentionable!,
+          allPieces,
+        })}
         language="text/markdown"
         mode="prose"
         wordWrap

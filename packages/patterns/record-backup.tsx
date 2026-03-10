@@ -609,7 +609,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
   const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
     query: "#default",
-  }).result;
+  }).result!;
 
   // Build export data
   const exportData = buildExportData({ allPieces });

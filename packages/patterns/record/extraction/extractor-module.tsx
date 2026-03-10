@@ -1784,7 +1784,7 @@ export const ExtractorModule = pattern<
         index: photo.index,
         ocr: generateText({
           system: OCR_SYSTEM_PROMPT,
-          prompt,
+          prompt: prompt as any,
           model: "anthropic:claude-sonnet-4-5",
         }),
       };
@@ -1890,7 +1890,7 @@ export const ExtractorModule = pattern<
     // Single extraction call for all sources combined
     const singleExtraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: combinedExtractionPrompt,
+      prompt: combinedExtractionPrompt as any,
       schema: RECOMMENDATIONS_SCHEMA,
       model: "anthropic:claude-haiku-4-5",
     });
