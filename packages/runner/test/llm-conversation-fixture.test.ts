@@ -55,6 +55,9 @@ describe("conversation fixtures", () => {
     typeof createBuilder
   >["commontools"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let generateObject: ReturnType<
+    typeof createBuilder
+  >["commontools"]["generateObject"];
   let llmDialog: ReturnType<typeof createBuilder>["commontools"]["llmDialog"];
 
   beforeEach(() => {
@@ -67,7 +70,7 @@ describe("conversation fixtures", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ pattern, llmDialog, Cell, patternTool } = commontools);
+    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commontools);
   });
 
   afterEach(async () => {
@@ -283,7 +286,6 @@ describe("conversation fixtures", () => {
 
     const testPattern = pattern(
       () => {
-        const { generateObject } = createBuilder().commontools;
         return generateObject({
           prompt: "Generate a title",
           schema: {
