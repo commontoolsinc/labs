@@ -254,6 +254,7 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 const cellMethods = new Set<
   | keyof ICell<unknown>
+  | "findIndex"
   | "filter"
   | "filterWithPattern"
   | "flatMap"
@@ -273,6 +274,7 @@ const cellMethods = new Set<
   "map",
   "mapWithPattern",
   "reduce",
+  "findIndex",
   "filter",
   "filterWithPattern",
   "flatMap",
@@ -1500,6 +1502,25 @@ export class CellImpl<T extends StorableValue>
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
+    })(this as unknown as OpaqueRef<any>);
+  }
+
+  /**
+   * Find the index of the first matching element in an array cell.
+   * Similar to Array.prototype.findIndex but reactive — re-runs when any
+   * element changes. Returns -1 if no match is found.
+   */
+  findIndex(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => boolean,
+  ): OpaqueRef<number> {
+    return lift((list: any[]) => {
+      if (!Array.isArray(list)) return -1;
+      return list.findIndex(fn);
     })(this as unknown as OpaqueRef<any>);
   }
 
