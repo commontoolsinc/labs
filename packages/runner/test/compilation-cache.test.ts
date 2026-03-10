@@ -1,3 +1,5 @@
+// Test-only polyfill: provides a global `indexedDB` for IDBCompilationCache tests.
+// Intentionally kept out of the package import map to prevent leaking into runtime.
 // deno-lint-ignore no-external-import
 import "npm:fake-indexeddb@6.0.0/auto";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
