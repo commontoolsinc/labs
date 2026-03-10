@@ -83,9 +83,11 @@ const enum TypeValidity {
   Unknown = 2,
 }
 
-type ValuePath = ["value", ...string[]];
-type IMemorySpaceValueAddress = IMemorySpaceAddress & { path: ValuePath };
-type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
+type ValuePath = readonly ["value", ...string[]];
+export type IMemorySpaceValueAddress = IMemorySpaceAddress & {
+  path: ValuePath;
+};
+export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
   address: IMemorySpaceValueAddress;
 };
 
@@ -1207,13 +1209,15 @@ function followPointer(
       let lastExisting: ValuePath = ["value"];
       // Never slice below "value" - it's the minimum valid path for getNormalizedLink
       if (lastPath.length > 1) {
+        // It's possible an error path may not have a value. If so, we throw.
         if (lastPath[0] !== "value") {
           logger.error(
             "traverse",
             () => ["Invalid path:", lastPath, error, valueEntry?.address],
           );
-          throw new Error("Invalid path ");
+          throw new Error("Invalid path (not a ValuePath)");
         }
+        // The last element in path wasn't found, so chop that off
         lastExisting = ["value", ...lastPath.slice(1, -1)];
       }
       const remaining = target.path.slice(lastExisting.length);
@@ -1981,7 +1985,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    *   the doc does not match the schema
    */
   traverseWithSchema(
-    doc: IMemorySpaceAttestation,
+    doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
@@ -3221,10 +3225,12 @@ function getNextCellLink(
   return getNormalizedLink(doc.address, schema);
 }
 
+// helper function - since path starts with value, the new array will too
 function appendToPath(path: ValuePath, part: string): ValuePath {
-  return [...path, part];
+  return [...path, part] as ValuePath;
 }
 
+// helper function - since path starts with value, the new array will too
 function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
-  return [...path, ...parts];
+  return [...path, ...parts] as ValuePath;
 }

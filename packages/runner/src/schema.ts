@@ -8,7 +8,10 @@ import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -19,6 +22,7 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
+  IMemorySpaceValueAddress,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
@@ -451,7 +455,12 @@ export function validateAndTransform(
 
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
-  const address = { space, id, type, path: ["value", ...path] };
+  const address: IMemorySpaceValueAddress = {
+    space,
+    id,
+    type,
+    path: ["value", ...path],
+  };
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
   const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
