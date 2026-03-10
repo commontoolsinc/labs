@@ -1,6 +1,7 @@
 /// <cts-enable />
 import { NAME, pattern, UI, type VNode } from "commontools";
 
+// deno-lint-ignore no-empty-interface
 interface CardStoryInput {}
 interface CardStoryOutput {
   [NAME]: string;

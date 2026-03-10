@@ -39,6 +39,7 @@ const selectItem = handler<
 export default pattern<SidebarInput, SidebarOutput>(
   ({ selected, categories: _categories }) => {
     const current = computed(() => selected.get());
+
     return {
       [NAME]: "Sidebar",
       [UI]: (
@@ -74,7 +75,7 @@ export default pattern<SidebarInput, SidebarOutput>(
             </div>
           </div>
 
-          {/* Category: Inputs */}
+          {/* Inputs */}
           <div style={{ marginBottom: "8px" }}>
             <div
               style={{
@@ -111,6 +112,23 @@ export default pattern<SidebarInput, SidebarOutput>(
                 margin: "1px 8px",
                 borderRadius: "4px",
                 fontSize: "13px",
+                color: current === "checkbox" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "checkbox"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "checkbox" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "checkbox", selected })}
+            >
+              Checkbox
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
                 color: current === "input" ? "#1ea7fd" : "#2e3438",
                 backgroundColor: current === "input"
                   ? "#e8f4fd"
@@ -122,9 +140,43 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               Input
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "select" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "select"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "select" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "select", selected })}
+            >
+              Select
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "switch" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "switch"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "switch" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "switch", selected })}
+            >
+              Switch
+            </div>
           </div>
 
-          {/* Category: Layout */}
+          {/* Layout */}
           <div style={{ marginBottom: "8px" }}>
             <div
               style={{
@@ -155,7 +207,40 @@ export default pattern<SidebarInput, SidebarOutput>(
             </div>
           </div>
 
-          {/* Category: Patterns */}
+          {/* Data Visualization */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Data Visualization
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "chart" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "chart"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "chart" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "chart", selected })}
+            >
+              Chart
+            </div>
+          </div>
+
+          {/* Patterns */}
           <div style={{ marginBottom: "8px" }}>
             <div
               style={{

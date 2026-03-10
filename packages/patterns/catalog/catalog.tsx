@@ -37,12 +37,19 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 name: "Inputs",
                 items: [
                   { id: "button", label: "Button" },
+                  { id: "checkbox", label: "Checkbox" },
                   { id: "input", label: "Input" },
+                  { id: "select", label: "Select" },
+                  { id: "switch", label: "Switch" },
                 ],
               },
               {
                 name: "Layout",
                 items: [{ id: "card", label: "Card" }],
+              },
+              {
+                name: "Data Visualization",
+                items: [{ id: "chart", label: "Chart" }],
               },
               {
                 name: "Patterns",
