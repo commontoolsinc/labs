@@ -4,9 +4,12 @@ interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
 }
+// FIXTURE: computed-filter-map-chain
+// Verifies: .filter() and .map() inside computed() are NOT transformed
+// Context: Inside computed(), OpaqueRef auto-unwraps to plain array, so
+//   .filter() and .map() are standard Array methods — they must remain
+//   untransformed. This is a negative test for the reactive method detection.
 export default pattern((state) => {
-    // Inside computed(), OpaqueRef auto-unwraps to plain array.
-    // .filter() and .map() should NOT be transformed to *WithPattern.
     const liked = __ctHelpers.derive({
         type: "object",
         properties: {

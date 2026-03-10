@@ -7,6 +7,10 @@ interface Item {
 interface State {
     items: Item[];
 }
+// FIXTURE: flatmap-basic
+// Verifies: .flatMap() on a reactive array is transformed
+//   .flatMap(fn) → .flatMapWithPattern(pattern(...), {})
+// Context: flatMap renders each item as JSX. No captured outer variables.
 export default pattern((state) => {
     return {
         [UI]: (<div>
