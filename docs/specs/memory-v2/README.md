@@ -81,7 +81,8 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 │                           │                                  │
 │  ┌────────────────────────▼────────────────────────────────┐ │
 │  │                   Storage (SQLite)                      │ │
-│  │  value | fact | head | commit | snapshot | branch       │ │
+│  │  value | fact | head | commit | invocation              │ │
+│  │  authorization | snapshot | branch                      │ │
 │  │  blob_store                                             │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │                                                              │
@@ -195,6 +196,15 @@ interface SourceLink {
 // Validation rule (replaces strict CAS):
 //   For each entity read: read.seq >= server.head[entity].seq
 ```
+
+Successful `/memory/transact` commands preserve two linked audit layers:
+
+- the semantic `ClientCommit` payload, hashed as `commit.hash`
+- the authenticated UCAN transport envelope (`invocation` + `authorization`),
+  persisted separately and referenced from the resulting commit record
+
+This keeps commit identity stable across replay or re-authorization while
+preserving signer/proof data needed for later audit and richer receipt designs.
 
 **Two kinds of "subscription"**: The v2 protocol defines _data subscriptions_
 (§04-05) — server-to-client streams of entity updates. Separately, the runner's

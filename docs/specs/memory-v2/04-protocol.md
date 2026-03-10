@@ -142,6 +142,11 @@ interface Command<
 }
 ```
 
+For successful `/memory/transact` commands, the server MUST preserve both the
+canonical invocation object and the verified authorization object in storage and
+link the resulting commit record to them. This preserves signer/proof data for
+audit without folding transport-layer authorization into `commit.hash`.
+
 The **invocation ID** is computed as `job:<content-hash>` where the content hash
 is the merkle reference of the invocation object. This ID is deterministic and
 used to correlate responses.
@@ -216,6 +221,9 @@ interface BatchReceipt {
 - **Batching optimizes signatures, not atomicity.** If you need atomicity
   across multiple operations, put them in a single transaction (single
   invocation), not a batch of transactions.
+- For persistence/audit, each successful transact invocation produces its own
+  commit row and its own `invocation_ref`. Batched siblings MAY share a single
+  `authorization_ref`.
 - Any command type can be included in a batch (transact, query, subscribe,
   etc.), though the primary use case is batching transactions.
 - The server MUST verify the batch signature before processing any invocation.
@@ -267,7 +275,9 @@ interface TransactSuccess {
 
 // Commit — the server's response after a successful transaction
 interface Commit {
-  hash: Reference;       // Content hash of the canonical client commit blob
+  hash: Reference;       // Content hash of the canonical ClientCommit payload
+  invocationRef: Reference;     // Persisted invocation that carried this commit
+  authorizationRef: Reference;  // Persisted auth blob that covered invocationRef
   seq: number;           // Server-assigned seq number
   branch: BranchId;      // Branch the commit was applied to
   facts: StoredFact[];   // Facts produced by this commit
@@ -282,9 +292,10 @@ type TransactError =
 ```
 
 The `Commit` in the success response includes the seq number, the facts
-produced, the stable commit hash, and the target branch. This gives the client
-everything it needs to move the affected entities from pending to confirmed and
-to deduplicate any later replay after reconnect.
+produced, the stable semantic commit hash, the persisted invocation/auth
+references, and the target branch. This gives the client everything it needs to
+move the affected entities from pending to confirmed and preserves stable audit
+pointers for later verification or richer receipt construction.
 
 ### 4.3.2 `query` — One-Shot Query (Deprecated)
 
