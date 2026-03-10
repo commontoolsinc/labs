@@ -23,7 +23,8 @@ interface PatternInput {
     items?: Cell<Default<Item[], [
     ]>>;
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     const hasItems = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -119,84 +120,31 @@ export default pattern(({ items }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
-              <strong>{item.label}</strong>
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const item = __ct_pattern_input.key("element");
+            return (<div>
+              <strong>{item.key("label")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.pattern(({ element: tag, index: i, params: { item } }) => (<li>
+                {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                    const tag = __ct_pattern_input.key("element");
+                    const i = __ct_pattern_input.key("index");
+                    const item = __ct_pattern_input.key("params", "item");
+                    return (<li>
                     {__ctHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                "enum": ["", "* "]
-            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    i: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    item: {
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        "enum": ["", "* "]
+                    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                         type: "object",
                         properties: {
-                            selectedIndex: {
+                            i: {
                                 type: "number",
                                 asOpaque: true
-                            }
-                        },
-                        required: ["selectedIndex"]
-                    }
-                },
-                required: ["i", "item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                i: i,
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            }, ({ i, item }) => __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    i: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    item: {
-                        type: "object",
-                        properties: {
-                            selectedIndex: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["selectedIndex"]
-                    }
-                },
-                required: ["i", "item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                i: i,
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            }, ({ i, item }) => i === item.selectedIndex)), "* ", "")}
-                    {tag.name}
-                  </li>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Tag"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
+                            },
                             item: {
                                 type: "object",
                                 properties: {
@@ -208,60 +156,117 @@ export default pattern(({ items }) => {
                                 required: ["selectedIndex"]
                             }
                         },
-                        required: ["item"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Tag: {
+                        required: ["i", "item"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        i: i,
+                        item: {
+                            selectedIndex: item.key("selectedIndex")
+                        }
+                    }, ({ i, item }) => __ctHelpers.derive({
                         type: "object",
                         properties: {
-                            name: {
-                                type: "string"
+                            i: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            item: {
+                                type: "object",
+                                properties: {
+                                    selectedIndex: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["selectedIndex"]
                             }
                         },
-                        required: ["name"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
+                        required: ["i", "item"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        i: i,
+                        item: {
+                            selectedIndex: item.selectedIndex
+                        }
+                    }, ({ i, item }) => i === item.selectedIndex)), "* ", "")}
+                    {tag.key("name")}
+                  </li>);
+                }, {
+                    type: "object",
+                    properties: {
+                        element: {
+                            $ref: "#/$defs/Tag"
                         },
-                        required: ["$UI"]
+                        index: {
+                            type: "number"
+                        },
+                        params: {
+                            type: "object",
+                            properties: {
+                                item: {
+                                    type: "object",
+                                    properties: {
+                                        selectedIndex: {
+                                            type: "number",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["selectedIndex"]
+                                }
+                            },
+                            required: ["item"]
+                        }
+                    },
+                    required: ["element", "params"],
+                    $defs: {
+                        Tag: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
                     }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            })}
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }, {
+                            $ref: "#/$defs/UIRenderable",
+                            asOpaque: true
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema), {
+                    item: {
+                        selectedIndex: item.key("selectedIndex")
+                    }
+                })}
               </ul>
-            </div>), {
+            </div>);
+        }, {
             type: "object",
             properties: {
                 element: {
                     $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
                 }
             },
-            required: ["element", "params"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",

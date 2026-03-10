@@ -29,7 +29,7 @@ export default pattern((config: {
     } as const satisfies __ctHelpers.JSONSchema, {
         value: value,
         config: {
-            multiplier: config.multiplier
+            multiplier: config.key("multiplier")
         }
     }, ({ value, config }) => value.get() * config.multiplier);
     return result;

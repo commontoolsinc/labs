@@ -13,6 +13,8 @@ import {
   Writable,
 } from "commontools";
 
+type Secret<T> = T;
+
 // Import trusted handlers from confirmation file (TRUST BOUNDARY)
 import {
   cancelAction,
@@ -96,9 +98,6 @@ interface GoogleComment {
 // =============================================================================
 // Types - Auth (from google-auth pattern)
 // =============================================================================
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
 
 type Auth = {
   token: Default<Secret<string>, "">;

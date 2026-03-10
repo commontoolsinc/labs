@@ -13,14 +13,14 @@ import {
   UI,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
+type Confidential<T> = T;
+
 import {
   createGoogleAuth,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
-type Confidential<T> = CFC<T, "confidential">;
 
 // This is used by the various Google tokens created with tokenToAuthData
 export type Auth = {

@@ -38,12 +38,13 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
+    const result = await engine.compile(program);
 
-    expect(jsScript).toBeDefined();
-    expect(jsScript.js).toBeDefined();
-    expect(typeof jsScript.js).toBe("string");
-    expect(jsScript.js.length).toBeGreaterThan(0);
+    expect(result.jsScript).toBeDefined();
+    expect(result.jsScript.js).toBeDefined();
+    expect(typeof result.jsScript.js).toBe("string");
+    expect(result.jsScript.js.length).toBeGreaterThan(0);
+    expect(result.id).toBeDefined();
   });
 
   it("compiles a multi-file program", async () => {
@@ -62,10 +63,10 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
+    const result = await engine.compile(program);
 
-    expect(jsScript).toBeDefined();
-    expect(jsScript.js).toContain("double");
+    expect(result.jsScript).toBeDefined();
+    expect(result.jsScript.js).toContain("double");
   });
 
   it("produces a source map", async () => {
@@ -79,7 +80,7 @@ describe("Engine.compile()", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
+    const { jsScript } = await engine.compile(program);
 
     expect(jsScript.sourceMap).toBeDefined();
     expect(jsScript.filename).toBeDefined();
@@ -99,7 +100,8 @@ describe("Engine.compile()", () => {
     const first = await engine.compile(program);
     const second = await engine.compile(program);
 
-    expect(first.js).toBe(second.js);
+    expect(first.jsScript.js).toBe(second.jsScript.js);
+    expect(first.id).toBe(second.id);
   });
 
   it("throws on compilation errors", async () => {
@@ -148,8 +150,8 @@ describe("Engine.evaluate()", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
-    const result = await engine.evaluate(program, jsScript);
+    const { jsScript, id } = await engine.compile(program);
+    const result = await engine.evaluate(id, jsScript, program.files);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBe(42);
@@ -173,8 +175,8 @@ describe("Engine.evaluate()", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
-    const result = await engine.evaluate(program, jsScript);
+    const { jsScript, id } = await engine.compile(program);
+    const result = await engine.evaluate(id, jsScript, program.files);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBe(42);
@@ -228,8 +230,8 @@ describe("Engine compile + evaluate equivalence with process", () => {
     const processResult = await engine.process(program);
 
     // Use compile() + evaluate() separately
-    const jsScript = await engine.compile(program);
-    const evalResult = await engine.evaluate(program, jsScript);
+    const { jsScript, id } = await engine.compile(program);
+    const evalResult = await engine.evaluate(id, jsScript, program.files);
 
     // The JS output from compile should match process
     expect(jsScript.js).toBe(processResult.output.js);
@@ -255,8 +257,8 @@ describe("Engine compile + evaluate equivalence with process", () => {
       ],
     };
 
-    const jsScript = await engine.compile(program);
-    const result = await engine.evaluate(program, jsScript);
+    const { jsScript, id } = await engine.compile(program);
+    const result = await engine.evaluate(id, jsScript, program.files);
 
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBeDefined();
@@ -274,11 +276,11 @@ describe("Engine compile + evaluate equivalence with process", () => {
     };
 
     // compile() should not execute the JS
-    const jsScript = await engine.compile(program);
+    const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toBeDefined();
 
     // evaluate() should execute it
-    const result = await engine.evaluate(program, jsScript);
+    const result = await engine.evaluate(id, jsScript, program.files);
     expect(result.main!["default"]).toBe("hello");
   });
 

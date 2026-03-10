@@ -17,7 +17,8 @@ const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.values.push(Math.random().toString(36).substring(2, 15));
 });
-export default pattern(({ values }) => {
+export default pattern((__ct_pattern_input) => {
+    const values = __ct_pattern_input.key("values");
     derive({
         type: "array",
         items: {
@@ -27,13 +28,17 @@ export default pattern(({ values }) => {
         console.log("values#", values?.length);
     });
     return {
-        [NAME]: str `Simple Value: ${values.length || 0}`,
+        [NAME]: str `Simple Value: ${values.key("length") || 0}`,
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.mapWithPattern(__ctHelpers.pattern(({ element: value, index, params: {} }) => (<div>
+            {values.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const value = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                return (<div>
                 {index}: {value}
-              </div>), {
+              </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -41,13 +46,9 @@ export default pattern(({ values }) => {
                     },
                     index: {
                         type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

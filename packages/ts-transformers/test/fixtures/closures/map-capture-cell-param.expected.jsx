@@ -37,14 +37,20 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<ul>
-          {items.mapWithPattern(__ctHelpers.pattern(({ element: _, index, params: { items } }) => (<li key={index}>
+          {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const _ = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const items = __ct_pattern_input.key("params", "items");
+                return (<li key={index}>
               <ct-button onClick={removeItem({ items, index })}>
                 Remove
               </ct-button>
-            </li>), {
+            </li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

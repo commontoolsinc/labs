@@ -16,12 +16,11 @@
  */
 import { Default, handler, Writable } from "commontools";
 
+type Secret<T> = T;
+
 // =============================================================================
 // Types - Exported for orchestrator
 // =============================================================================
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
 
 export type Auth = {
   token: Default<Secret<string>, "">;

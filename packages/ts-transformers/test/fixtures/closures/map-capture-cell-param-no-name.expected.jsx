@@ -37,41 +37,81 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
-export default pattern(({ items }: InputSchema) => {
+export default pattern((__ct_pattern_input: InputSchema) => {
+    const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<ul>
-          {items.map((_, index) => (<li key={index}>
+          {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const _ = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const items = __ct_pattern_input.key("params", "items");
+                return (<li key={index}>
               <ct-button onClick={removeItem({ items, index })}>
                 Remove
               </ct-button>
-            </li>))}
+            </li>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            items: {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/Item"
+                                }
+                            }
+                        },
+                        required: ["items"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            text: {
+                                type: "string",
+                                "default": ""
+                            }
+                        },
+                        required: ["text"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                items: items
+            })}
         </ul>),
     };
-}, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            "default": []
-        }
-    },
-    required: ["items"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string",
-                    "default": ""
-                }
-            },
-            required: ["text"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {

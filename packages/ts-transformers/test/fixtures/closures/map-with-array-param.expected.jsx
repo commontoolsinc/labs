@@ -9,9 +9,14 @@ export default pattern((_state) => {
     } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, array, params: {} }) => (<div>
-            Item {item} at index {index} of {array.length} total items
-          </div>), {
+        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const array = __ct_pattern_input.key("array");
+                return (<div>
+            Item {item} at index {index} of {array.key("length")} total items
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -25,13 +30,9 @@ export default pattern((_state) => {
                         items: {
                             type: "number"
                         }
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

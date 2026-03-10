@@ -1,6 +1,7 @@
 import { Pattern } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import {
+  type CompileResult,
   type Exports,
   Harness,
   HarnessedFunction,
@@ -146,7 +147,7 @@ export class Engine extends EventTarget implements Harness {
   async compile(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<JsScript> {
+  ): Promise<CompileResult> {
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
@@ -162,7 +163,7 @@ export class Engine extends EventTarget implements Harness {
       verbose: options.verboseErrors,
     });
 
-    return compiler.compile(resolvedProgram, {
+    const jsScript = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
@@ -178,17 +179,18 @@ export class Engine extends EventTarget implements Harness {
         };
       },
     });
+
+    return { id, jsScript };
   }
 
   // Evaluate pre-compiled JS, returning exports.
+  // `id` is the content-derived prefix from compile(); `files` are the
+  // original source files for the export map.
   async evaluate(
-    program: RuntimeProgram,
+    id: string,
     jsScript: JsScript,
-    options: TypeScriptHarnessProcessOptions = {},
+    files: Source[],
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
-    // Recompute id from program — deterministic, same as compile() produces.
-    // Needed to strip the /${id} prefix from export filenames in the export map.
-    const id = options.identifier ?? computeId(program);
     const { isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
 
@@ -212,10 +214,10 @@ export class Engine extends EventTarget implements Harness {
           exportsByValue.set(exportValue, {
             main: fileName,
             mainExport: exportName,
-            // TODO(seefeld): Sending all `program.files` is sub-optimal, as
+            // TODO(seefeld): Sending all `files` is sub-optimal, as
             // it is the super set of files actually needed by main. We should
             // only send the files actually needed by main.
-            files: program.files,
+            files,
           });
         }
       }
@@ -234,17 +236,17 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
   > {
-    const output = await this.compile(program, options);
+    const { jsScript, id } = await this.compile(program, options);
 
     if (!options.noRun) {
       const { main, exportMap } = await this.evaluate(
-        program,
-        output,
-        options,
+        id,
+        jsScript,
+        program.files,
       );
-      return { output, main, exportMap };
+      return { output: jsScript, main, exportMap };
     }
-    return { output };
+    return { output: jsScript };
   }
 
   // Invokes a function that should've came from this isolate (unverifiable).

@@ -29,10 +29,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "@commontools/runner";
-import {
-  IMemorySpaceAddress,
-  IMemorySpaceAttestation,
-} from "../src/storage/interface.ts";
+import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
 function getTraverser(
@@ -608,13 +605,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docAFoo = {
+          const docAFoo: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "foo"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.foo as StorableDatum,
           };
           const docASelector = {
@@ -675,13 +672,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = { path: ["value", "current"], schema: true };
@@ -743,13 +740,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = {
@@ -825,7 +822,7 @@ for (const canonicalHashing of [false, true]) {
         const cfc = new ContextualFlowControl();
         const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
 
-        const doc: IMemorySpaceAttestation = {
+        const doc: IMemorySpaceValueAttestation = {
           address: {
             space: "did:null:null",
             id: docUri,
@@ -2977,6 +2974,69 @@ describe("SchemaObjectTraverser unknown type handling", () => {
         att.address.id === redirectTestDataUri
       ),
     ).toBe(true);
+  });
+
+  it("treats inline asCell object properties as opaque when traverseCells=false", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const targetUri = "of:doc-ascell-inline-target" as URI;
+    const outerUri = "of:doc-ascell-inline-outer" as URI;
+
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { shouldNotLoad: true } },
+      cause: refer({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+
+    const outerValue = {
+      inner: {
+        ref: { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
+        local: 123,
+      },
+    };
+    store.set(`${outerUri}/${type}`, {
+      the: type,
+      of: outerUri as Entity,
+      is: { value: outerValue },
+      cause: refer({ the: type, of: outerUri as Entity }),
+      since: 2,
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        inner: { type: "object", asCell: true },
+      },
+      required: ["inner"],
+      additionalProperties: false,
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      { path: ["value"], schema },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: outerUri, type, path: ["value"] },
+      value: outerValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({ inner: undefined });
+    expect(
+      [...manager.getReadDocs()].some((att) => att.address.id === targetUri),
+    )
+      .toBe(false);
   });
 
   it("type union [unknown, string] treats object value as opaque", () => {

@@ -746,7 +746,7 @@ for (const canonicalHashing of [false, true]) {
       const v1 = Fact.assert({
         the: "application/json",
         of: doc,
-        is: { v: 1 },
+        is: { value: { v: 1 } },
       });
 
       const v1_label = Fact.assert({
@@ -782,7 +782,7 @@ for (const canonicalHashing of [false, true]) {
       const v1 = Fact.assert({
         the: "application/json",
         of: doc,
-        is: { v: 1 },
+        is: { value: { v: 1 } },
       });
 
       const v1_label = Fact.assert({
@@ -1153,7 +1153,7 @@ for (const canonicalHashing of [false, true]) {
         const v1 = Fact.assert({
           the: "application/json",
           of: doc,
-          is: { v: 1 },
+          is: { value: { v: 1 } },
         });
 
         const v1_label = Fact.assert({
@@ -1186,7 +1186,7 @@ for (const canonicalHashing of [false, true]) {
         const v2 = Fact.assert({
           the: "application/json",
           of: doc,
-          is: { v: 2 },
+          is: { value: { v: 2 } },
           cause: v1,
         });
 
@@ -1322,7 +1322,7 @@ for (const canonicalHashing of [false, true]) {
       const v2 = Fact.assert({
         the: "application/json",
         of: doc,
-        is: { v: 2 },
+        is: { value: { v: 2 } },
         cause: v1,
       });
 

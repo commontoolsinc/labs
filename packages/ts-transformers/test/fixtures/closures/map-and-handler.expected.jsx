@@ -10,70 +10,75 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: { state } }) => (<div>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             <span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
                     item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["price"]
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["discount"]
+                        discount: state.key("discount")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount
-                }
-            }, ({ item, state }) => item.price * state.discount)}</span>
+                }, ({ item, state }) => item.price * state.discount)}</span>
             <button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            selectedIndex: {
-                                type: "number",
-                                asCell: true
-                            }
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                selectedIndex: {
+                                    type: "number",
+                                    asCell: true
+                                }
+                            },
+                            required: ["selectedIndex"]
                         },
-                        required: ["selectedIndex"]
+                        index: {
+                            type: "number",
+                            asOpaque: true
+                        }
                     },
-                    index: {
-                        type: "number",
-                        asOpaque: true
-                    }
-                },
-                required: ["state", "index"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
-                state: {
-                    selectedIndex: state.selectedIndex
-                },
-                index: index
-            })}>
+                    required: ["state", "index"]
+                } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
+                    state: {
+                        selectedIndex: state.key("selectedIndex")
+                    },
+                    index: index
+                })}>
               Select
             </button>
-          </div>), {
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -133,8 +138,8 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    discount: state.discount,
-                    selectedIndex: state.selectedIndex
+                    discount: state.key("discount"),
+                    selectedIndex: state.key("selectedIndex")
                 }
             })}
         <div>
@@ -169,9 +174,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                selectedIndex: state.selectedIndex
-            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.discount} ={" "}
+                items: state.key("items"),
+                selectedIndex: state.key("selectedIndex")
+            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.key("discount")} ={" "}
           {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -207,9 +212,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                selectedIndex: state.selectedIndex,
-                discount: state.discount
+                items: state.key("items"),
+                selectedIndex: state.key("selectedIndex"),
+                discount: state.key("discount")
             } }, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)}
         </div>
       </div>),

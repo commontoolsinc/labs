@@ -37,8 +37,8 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, state.isEditing, <div>Editing</div>, <div>
-            <span>{state.card.title}</span>
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
+            <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
             {__ctHelpers.derive({
@@ -78,7 +78,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, { state: {
-                    isEditing: state.isEditing
+                    isEditing: state.key("isEditing")
                 } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
                 type: "object",
                 properties: {
@@ -101,7 +101,7 @@ export default pattern((state) => {
             })}>Edit</ct-button>))}
           </div>)}
       </ct-card>),
-        card: state.card,
+        card: state.key("card"),
     };
 }, {
     type: "object",

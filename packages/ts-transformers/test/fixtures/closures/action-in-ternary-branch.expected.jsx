@@ -15,7 +15,8 @@ interface Card {
 interface Input {
     card: Card;
 }
-export default pattern(({ card }) => {
+export default pattern((__ct_pattern_input) => {
+    const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -51,7 +52,7 @@ export default pattern(({ card }) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, { card: {
-            description: card.description
+            description: card.key("description")
         } }, ({ card }) => {
         const desc = card.description;
         return desc && desc.length > 0;
@@ -125,8 +126,8 @@ export default pattern(({ card }) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, {
             card: {
-                title: card.title,
-                description: card.description
+                title: card.key("title"),
+                description: card.key("description")
             },
             hasDescription: hasDescription,
             startEditing: startEditing

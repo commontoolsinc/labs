@@ -13,113 +13,54 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
+        {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return item.key("active");
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["element"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
                             },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
+                            price: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
                         },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "price", "active"]
+                        required: ["id", "price", "active"]
+                    }
                 }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item",
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean",
                 asOpaque: true
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
-            } }, ({ state }) => state.items
-            .filter((item) => item.active)).mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
               Total: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                item: {
                     type: "object",
                     properties: {
-                        price: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["price"]
-                },
-                state: {
-                    type: "object",
-                    properties: {
-                        taxRate: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["taxRate"]
-                }
-            },
-            required: ["item", "state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            item: {
-                price: item.price
-            },
-            state: {
-                taxRate: state.taxRate
-            }
-        }, ({ item, state }) => item.price * (1 + state.taxRate))}
-            </div>), {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
+                        },
                         state: {
                             type: "object",
                             properties: {
@@ -131,53 +72,86 @@ export default pattern((state) => {
                             required: ["taxRate"]
                         }
                     },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
-                    required: ["id", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
+                    state: {
+                        taxRate: state.key("taxRate")
+                    }
+                }, ({ item, state }) => item.price * (1 + state.taxRate))}
+            </div>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item",
+                        asOpaque: true
                     },
-                    required: ["$UI"]
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    taxRate: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["taxRate"]
+                            }
+                        },
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            price: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "price", "active"]
+                    }
                 }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                taxRate: state.taxRate
-            }
-        })}
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    taxRate: state.key("taxRate")
+                }
+            })}
       </div>),
     };
 }, {

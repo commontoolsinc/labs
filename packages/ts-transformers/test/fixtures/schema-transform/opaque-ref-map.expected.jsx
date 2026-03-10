@@ -4,20 +4,20 @@ interface TodoItem {
     title: string;
     done: boolean;
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     // Map on opaque ref arrays should be transformed to mapWithPattern
-    const mapped = items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.title, {
+    const mapped = items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        const item = __ct_pattern_input.key("element");
+        return item.key("title");
+    }, {
         type: "object",
         properties: {
             element: {
                 $ref: "#/$defs/TodoItem"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             TodoItem: {
                 type: "object",
@@ -37,11 +37,15 @@ export default pattern(({ items }) => {
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema), {});
     // This should also be transformed
-    const filtered = items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: {} }) => ({
-        title: item.title,
-        done: item.done,
-        position: index,
-    }), {
+    const filtered = items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        const item = __ct_pattern_input.key("element");
+        const index = __ct_pattern_input.key("index");
+        return ({
+            title: item.key("title"),
+            done: item.key("done"),
+            position: index,
+        });
+    }, {
         type: "object",
         properties: {
             element: {
@@ -49,13 +53,9 @@ export default pattern(({ items }) => {
             },
             index: {
                 type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             TodoItem: {
                 type: "object",

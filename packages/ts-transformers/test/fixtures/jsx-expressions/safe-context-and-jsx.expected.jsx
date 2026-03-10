@@ -89,19 +89,7 @@ const MyHandler = handler({
     },
     required: ["show"]
 } as const satisfies __ctHelpers.JSONSchema, (_event, { show }) => {
-    return <div>{__ctHelpers.when({
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+    return <div>{__ctHelpers.derive({
         type: "object",
         properties: {
             show: {
@@ -111,7 +99,7 @@ const MyHandler = handler({
         required: ["show"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { show: show }, ({ show }) => show), <span>Content</span>)}</div>;
+    } as const satisfies __ctHelpers.JSONSchema, { show: show }, ({ show }) => show) && <span>Content</span>}</div>;
 });
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
@@ -205,23 +193,7 @@ const MyHandler2 = handler({
     },
     required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, (_event, { value }) => {
-    return <div>{__ctHelpers.unless({
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+    return <div>{__ctHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -239,7 +211,7 @@ const MyHandler2 = handler({
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, { value: value }, ({ value }) => value), <span>Fallback</span>)}</div>;
+    } as const satisfies __ctHelpers.JSONSchema, { value: value }, ({ value }) => value) || <span>Fallback</span>}</div>;
 });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

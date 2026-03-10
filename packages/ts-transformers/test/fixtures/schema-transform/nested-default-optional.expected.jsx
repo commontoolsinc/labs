@@ -60,7 +60,8 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     const counter = (branch.counter ?? 0) + 1;
     context.state.set({ nested: { branch: { counter } } });
 });
-export default pattern(({ state }) => {
+export default pattern((__ct_pattern_input) => {
+    const state = __ct_pattern_input.key("state");
     return {
         state,
         increment: increment({ state }),

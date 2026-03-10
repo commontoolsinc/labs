@@ -12,20 +12,20 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with array destructured parameter */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: {} }) => (<div>
+        {state.key("pizzas").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const date = __ct_pattern_input.key("element", "0");
+                const pizza = __ct_pattern_input.key("element", "1");
+                return (<div>
             {date}: {pizza}
-          </div>), {
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/PizzaEntry"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     PizzaEntry: {
                         type: "array",
@@ -58,9 +58,14 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Map with array destructured parameter and capture */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: { state } }) => (<div>
-            {date}: {pizza} (scale: {state.scale})
-          </div>), {
+        {state.key("pizzas").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const date = __ct_pattern_input.key("element", "0");
+                const pizza = __ct_pattern_input.key("element", "1");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
+            {date}: {pizza} (scale: {state.key("scale")})
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -115,7 +120,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    scale: state.scale
+                    scale: state.key("scale")
                 }
             })}
       </div>),

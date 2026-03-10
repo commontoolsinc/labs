@@ -17,8 +17,10 @@ import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
 import {
   detectWrapperViaNode,
   getNamedTypeKey,
+  getPropertyNameText,
   isDefaultTypeRef,
   safeGetIndexTypeOfType,
+  safeGetNodeText,
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
 import { extractDocFromType } from "./doc-utils.ts";
@@ -232,7 +234,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         // Create a more specific key that includes type argument info to
         // avoid false cycles
         const argTexts = typeNode.typeArguments
-          ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+          ? typeNode.typeArguments.map((arg) => safeGetNodeText(arg)).join(",")
           : "";
         // Include a source location hash to further distinguish instances
         const locationHash = typeNode.getSourceFile?.()?.fileName || "";
@@ -251,7 +253,8 @@ export class SchemaGenerator implements ISchemaGenerator {
         const wrapperKind = detectWrapperViaNode(typeNode, checker);
         if (wrapperKind) {
           const argTexts = typeNode.typeArguments
-            ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+            ? typeNode.typeArguments.map((arg) => safeGetNodeText(arg))
+              .join(",")
             : "";
           const locationHash = typeNode.getSourceFile?.()?.fileName || "";
           const position = typeNode.pos || 0;
@@ -645,13 +648,11 @@ export class SchemaGenerator implements ISchemaGenerator {
       const required: string[] = [];
 
       for (const member of typeNode.members) {
-        if (
-          ts.isPropertySignature(member) &&
-          member.name &&
-          ts.isIdentifier(member.name) &&
-          member.type
-        ) {
-          const propName = member.name.text;
+        if (ts.isPropertySignature(member) && member.name && member.type) {
+          const propName = getPropertyNameText(member.name);
+          if (!propName) {
+            continue;
+          }
 
           // Get the property type - check typeRegistry first, then resolve from node
           let propType: ts.Type;
@@ -701,6 +702,37 @@ export class SchemaGenerator implements ISchemaGenerator {
       return { type: "array", items };
     }
 
+    // Handle unions in synthetic nodes. Keep all members including undefined
+    // to match the type-based UnionFormatter which emits { type: "undefined" }
+    // explicitly. Keyword types (string, number, boolean, undefined, null) are
+    // resolved directly by the switch below, so they never cause widening.
+    if (ts.isUnionTypeNode(typeNode)) {
+      const memberSchemas = typeNode.types.map((member) =>
+        this.analyzeTypeNodeStructure(member, checker, context)
+      );
+      if (memberSchemas.some((schema) => schema === true)) {
+        return true as SchemaDefinition;
+      }
+      if (memberSchemas.length === 1) {
+        return memberSchemas[0]!;
+      }
+      return { anyOf: memberSchemas as Exclude<SchemaDefinition, boolean>[] };
+    }
+
+    // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
+    // Resolve by name from source scope as a fallback (e.g., CharmEntry in
+    // Cell<CharmEntry[]>).
+    if (ts.isTypeReferenceNode(typeNode)) {
+      const resolved = this.resolveTypeReferenceFromScope(
+        typeNode,
+        checker,
+        context,
+      );
+      if (resolved) {
+        return this.formatChildType(resolved, context, typeNode);
+      }
+    }
+
     // Handle keyword types (string, number, boolean, etc.)
     switch (typeNode.kind) {
       case ts.SyntaxKind.StringKeyword:
@@ -733,6 +765,40 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Fallback: accept any value
     return true as SchemaDefinition;
+  }
+
+  private resolveTypeReferenceFromScope(
+    typeNode: ts.TypeReferenceNode,
+    checker: ts.TypeChecker,
+    context: GenerationContext,
+  ): ts.Type | undefined {
+    if (!ts.isIdentifier(typeNode.typeName)) {
+      return undefined;
+    }
+    const typeName = typeNode.typeName.text;
+    const symbolAtNode = checker.getSymbolAtLocation(typeNode.typeName);
+    if (symbolAtNode) {
+      const declared = checker.getDeclaredTypeOfSymbol(symbolAtNode);
+      if (declared && !(declared.flags & ts.TypeFlags.Any)) {
+        return declared;
+      }
+    }
+
+    const scopeNode = context.typeNode?.getSourceFile?.() ??
+      typeNode.getSourceFile?.();
+    if (!scopeNode) return undefined;
+
+    const candidates = checker.getSymbolsInScope(
+      scopeNode,
+      ts.SymbolFlags.Type,
+    );
+    const symbol = candidates.find((candidate) => candidate.name === typeName);
+    if (!symbol) return undefined;
+    const declared = checker.getDeclaredTypeOfSymbol(symbol);
+    if (!declared || (declared.flags & ts.TypeFlags.Any)) {
+      return undefined;
+    }
+    return declared;
   }
 
   /**

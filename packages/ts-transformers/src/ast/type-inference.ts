@@ -469,16 +469,103 @@ function findOpaqueRefInUnion(
   return undefined;
 }
 
+function combineExtractedElementTypes(
+  extracted: ts.Type[],
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (extracted.length === 0) return undefined;
+  if (extracted.length === 1) return extracted[0];
+
+  const seen = new Set<number>();
+  const unique: ts.Type[] = [];
+  for (const candidate of extracted) {
+    const id = (candidate as { id?: number }).id ?? -1;
+    if (!seen.has(id)) {
+      seen.add(id);
+      unique.push(candidate);
+    }
+  }
+
+  if (unique.length === 1) {
+    return unique[0];
+  }
+
+  const getUnionType = (checker as ts.TypeChecker & {
+    getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+  }).getUnionType;
+  if (getUnionType) {
+    return getUnionType(unique);
+  }
+  // Cannot construct union without internal API; signal failure so callers
+  // can fall back to alternative type extraction strategies.
+  return undefined;
+}
+
 /**
- * Extract element type from an array type (T[] → T)
+ * Extract element type from array-like types (T[] -> T), including unions,
+ * intersections, and wrapped/reference forms used by reactive cell types.
  */
 function extractElementFromArrayType(
   type: ts.Type,
   checker: ts.TypeChecker,
+  seen = new Set<ts.Type>(),
 ): ts.Type | undefined {
-  if (checker.isArrayType(type)) {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+
+  if (checker.isArrayType(type) || checker.isTupleType(type)) {
     return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   }
+
+  if (type.flags & ts.TypeFlags.Union) {
+    const extracted = (type as ts.UnionType).types
+      .filter((member) => !(member.flags & ts.TypeFlags.Undefined))
+      .map((member) => extractElementFromArrayType(member, checker, seen))
+      .filter((member): member is ts.Type => !!member);
+    return combineExtractedElementTypes(extracted, checker);
+  }
+
+  if (type.flags & ts.TypeFlags.Intersection) {
+    const extracted = (type as ts.IntersectionType).types
+      .map((member) => extractElementFromArrayType(member, checker, seen))
+      .filter((member): member is ts.Type => !!member);
+    return combineExtractedElementTypes(extracted, checker);
+  }
+
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const ref = objectType as ts.TypeReference;
+      const typeArgs = checker.getTypeArguments(ref);
+      const innerType = typeArgs[0];
+      if (innerType) {
+        const extractedInner = extractElementFromArrayType(
+          innerType,
+          checker,
+          seen,
+        );
+        if (extractedInner) {
+          return extractedInner;
+        }
+
+        const innerAlias = innerType as {
+          aliasSymbol?: ts.Symbol;
+          aliasTypeArguments?: readonly ts.Type[];
+        };
+        if (
+          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          innerAlias.aliasTypeArguments?.[0]
+        ) {
+          return extractElementFromArrayType(
+            innerAlias.aliasTypeArguments[0],
+            checker,
+            seen,
+          );
+        }
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -777,23 +864,26 @@ export function isDeriveCall(expr: ts.Expression): boolean {
   return false;
 }
 
+const REACTIVE_ARRAY_METHODS = new Set(["map", "filter", "flatMap"]);
+
 /**
- * Checks if a call expression is a .map() call on a reactive array (OpaqueRef<T[]> or Cell<T[]>).
- * This is used to determine if the map will be transformed to mapWithPattern.
+ * Checks if a call expression is a .map()/.filter()/.flatMap() call on a reactive array
+ * (OpaqueRef<T[]> or Cell<T[]>). Used to determine if the call will be transformed to
+ * mapWithPattern/filterWithPattern/flatMapWithPattern.
  *
  * Used by both:
- * - ClosureTransformer to decide whether to transform map to mapWithPattern
- * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping (since mapWithPattern is already reactive)
+ * - ClosureTransformer to decide whether to transform to *WithPattern
+ * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping
  */
-export function isReactiveArrayMapCall(
+export function isReactiveArrayMethodCall(
   node: ts.CallExpression,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): boolean {
-  // Check if this is a property access expression with name "map"
+  // Check if this is a property access expression with a reactive array method name
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (node.expression.name.text !== "map") return false;
+  if (!REACTIVE_ARRAY_METHODS.has(node.expression.name.text)) return false;
 
   // Get the type of the target (what we're calling .map on)
   const target = node.expression.expression;
@@ -819,3 +909,6 @@ export function isReactiveArrayMapCall(
   return isOpaqueRefType(targetType, checker) &&
     hasArrayTypeArgument(targetType, checker);
 }
+
+/** @deprecated Use isReactiveArrayMethodCall */
+export const isReactiveArrayMapCall = isReactiveArrayMethodCall;

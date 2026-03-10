@@ -10,7 +10,8 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element, params: {} }) => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const element = __ct_pattern_input.key("element");
                 const __ct_amount_key = nextKey();
                 const amount = __ctHelpers.derive({
                     type: "object",
@@ -40,13 +41,9 @@ export default pattern((state) => {
                         additionalProperties: {
                             type: "number"
                         }
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

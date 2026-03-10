@@ -91,7 +91,12 @@ function attachCfcToOutputs<T, R>(
       ...outpuSchemaObj,
       ifc,
     };
-    outputs.setSchema(cfcSchema);
+    try {
+      outputs.setSchema(cfcSchema);
+    } catch {
+      // Cell already has a cause (computed/derived output) — its schema was
+      // set during construction, so we cannot override it here.
+    }
     return;
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays

@@ -388,7 +388,21 @@ export class Runtime {
   > {
     const tx = this.edit();
     tx.tx.immediate = true;
-    const result = fn(tx);
+    let result: T;
+    try {
+      result = fn(tx);
+    } catch (error) {
+      // fn(tx) threw before commit -- abort the transaction so it isn't
+      // orphaned, and surface the error as a Result instead of a rejection.
+      tx.abort(error);
+      return Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: `editWithRetry action threw: ${error}`,
+          reason: error,
+        },
+      });
+    }
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
@@ -398,6 +412,14 @@ export class Runtime {
         }
       }
       return { ok: result };
+    }).catch((error) => {
+      return {
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: `editWithRetry commit rejected: ${error}`,
+          reason: error,
+        },
+      };
     });
   }
 

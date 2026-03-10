@@ -115,8 +115,18 @@ export const read = (
         ...address,
         space,
         meta: options?.meta ?? {},
+        ...(options?.nonRecursive === true && { nonRecursive: true }),
       },
     });
+
+    if (options?.trackReadWithoutLoad === true) {
+      return {
+        ok: {
+          address,
+          value: undefined,
+        },
+      };
+    }
 
     const result = branch.read(address, options);
     if (result.error) {

@@ -16,7 +16,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
-        <p>Total items: {state.items.length}</p>
+        <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
           {__ctHelpers.derive({
@@ -64,98 +64,156 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
+                items: state.key("items"),
+                filter: state.key("filter")
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return i.name.includes(state.key("filter"));
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                filter: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["filter"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "name", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
                 filter: state.filter
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            }
+        }).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<li key={item.id}>
-              <span>{item.name}</span>
-              <span>- Original: ${item.price}</span>
+          {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<li key={item.key("id")}>
+              <span>{item.key("name")}</span>
+              <span>- Original: ${item.key("price")}</span>
               <span>
                 - Discounted: ${__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["discount"]
+                        discount: state.key("discount")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount
-                }
-            }, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))}
+                }, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))}
               </span>
               <span>
                 - With tax:
                 ${__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                },
+                                taxRate: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount", "taxRate"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            },
-                            taxRate: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["discount", "taxRate"]
+                        discount: state.key("discount"),
+                        taxRate: state.key("taxRate")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount,
-                    taxRate: state.taxRate
-                }
-            }, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
-                .toFixed(2))}
+                }, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
+                    .toFixed(2))}
               </span>
-            </li>), {
+            </li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -226,14 +284,14 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    discount: state.discount,
-                    taxRate: state.taxRate
+                    discount: state.key("discount"),
+                    taxRate: state.key("taxRate")
                 }
             })}
         </ul>
 
         <h3>Array Methods</h3>
-        <p>Item count: {state.items.length}</p>
+        <p>Item count: {state.key("items", "length")}</p>
         <p>Active items: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -275,8 +333,42 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
-            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
+                items: state.key("items")
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            return i.key("active");
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "name", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({
@@ -297,7 +389,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                discount: state.discount
+                discount: state.key("discount")
             } }, ({ state }) => state.discount * 100)}%</p>
         <p>Tax percent: {__ctHelpers.derive({
             type: "object",
@@ -317,7 +409,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                taxRate: state.taxRate
+                taxRate: state.key("taxRate")
             } }, ({ state }) => state.taxRate * 100)}%</p>
 
         <h3>Array Predicates</h3>
@@ -370,7 +462,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
         <p>Any active: {__ctHelpers.ifElse({
             type: "boolean"
@@ -421,7 +513,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
@@ -474,12 +566,12 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.items.length} data-has-filter={__ctHelpers.derive({
+        <div data-item-count={state.key("items", "length")} data-has-filter={__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -503,9 +595,9 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 filter: {
-                    length: state.filter.length
+                    length: state.key("filter").length
                 }
-            } }, ({ state }) => state.filter.length > 0)} data-discount={state.discount}>
+            } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
           Object attributes
         </div>
       </div>),

@@ -10,6 +10,7 @@ import {
   createSchemaMemo,
   getAtPath,
   type IAttestation,
+  IMemorySpaceValueAttestation,
   loadSource,
   ManagedStorageTransaction,
   MapSet,
@@ -55,7 +56,6 @@ import {
   toSelection,
 } from "./space.ts";
 import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
-import { IMemorySpaceAttestation } from "../runner/src/storage/interface.ts";
 
 export type * from "./interface.ts";
 
@@ -470,17 +470,21 @@ function loadFactsForDoc(
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     if (selector.schema !== false) {
-      const factValue: IMemorySpaceAttestation = {
-        address: { ...fact.address, space: space },
-        value: (fact.value as Immutable<JSONObject>),
-      };
       if (fact.address.path.length > 0) {
         throw new Error("Invalid fact.address.path (must be empty)");
+      } else if (!isObject(fact.value) || !("value" in fact.value)) {
+        throw new Error("Invalid fact.value with no value");
+      } else if (selector.path.length < 1 || selector.path[0] !== "value") {
+        throw new Error("Invalid selector path with no value");
       }
+      const factValue: IMemorySpaceValueAttestation = {
+        address: { ...fact.address, space, path: ["value"] },
+        value: fact.value.value as Immutable<JSONObject>,
+      };
       const [newDoc, newSelector] = getAtPath(
         tx,
         factValue,
-        selector.path,
+        selector.path.slice(1),
         tracker,
         cfc,
         schemaTracker,

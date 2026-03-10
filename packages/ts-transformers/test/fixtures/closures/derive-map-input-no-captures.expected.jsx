@@ -17,7 +17,8 @@ interface Item {
     id: number;
     value: string;
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     // items.map() will be transformed to items.mapWithPattern()
     // derive has NO captures, so it won't be transformed by ClosureTransformer
     // The callback param has NO explicit type annotation
@@ -28,18 +29,17 @@ export default pattern(({ items }) => {
         }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.value, {
+    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        const item = __ct_pattern_input.key("element");
+        return item.key("value");
+    }, {
         type: "object",
         properties: {
             element: {
                 $ref: "#/$defs/Item"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             Item: {
                 type: "object",

@@ -123,8 +123,10 @@ const addItem = handler // <
 }) => {
     items.push({ text: event.detail.message });
 });
-export default pattern(({ title, items }) => {
-    const items_count = items.length;
+export default pattern((__ct_pattern_input) => {
+    const title = __ct_pattern_input.key("title");
+    const items = __ct_pattern_input.key("items");
+    const items_count = items.key("length");
     return {
         [NAME]: title,
         [UI]: (<div>
@@ -132,7 +134,11 @@ export default pattern(({ title, items }) => {
         <p>Basic pattern</p>
         <p>Items count: {items_count}</p>
         <ul>
-          {items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: {} }) => (<li key={index}>{item.text}</li>), {
+          {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                return (<li key={index}>{item.key("text")}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -140,13 +146,9 @@ export default pattern(({ title, items }) => {
                     },
                     index: {
                         type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

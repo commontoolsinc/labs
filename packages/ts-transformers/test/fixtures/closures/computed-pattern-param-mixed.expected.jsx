@@ -44,8 +44,8 @@ export default pattern((config: {
     } as const satisfies __ctHelpers.JSONSchema, {
         value: value,
         config: {
-            base: config.base,
-            multiplier: config.multiplier
+            base: config.key("base"),
+            multiplier: config.key("multiplier")
         },
         offset: offset,
         threshold: threshold

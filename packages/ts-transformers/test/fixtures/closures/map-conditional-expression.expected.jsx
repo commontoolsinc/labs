@@ -13,86 +13,90 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             Price: ${__ctHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                threshold: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["threshold"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            threshold: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["threshold"]
+                        threshold: state.key("threshold")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    threshold: state.threshold
-                }
-            }, ({ item, state }) => item.price > state.threshold), __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
+                }, ({ item, state }) => item.price > state.threshold), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price"]
                         },
-                        required: ["price"]
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
                     },
                     state: {
-                        type: "object",
-                        properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["discount"]
+                        discount: state.key("discount")
                     }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount
-                }
-            }, ({ item, state }) => item.price * (1 - state.discount)), item.price)}
-          </div>), {
+                }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -157,8 +161,8 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    threshold: state.threshold,
-                    discount: state.discount
+                    threshold: state.key("threshold"),
+                    discount: state.key("discount")
                 }
             })}
       </div>),

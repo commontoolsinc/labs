@@ -24,7 +24,6 @@ export class CTHGroup extends BaseElement {
   static override styles = css`
     :host {
       display: inline-flex;
-      container-type: inline-size;
     }
 
     .group {
