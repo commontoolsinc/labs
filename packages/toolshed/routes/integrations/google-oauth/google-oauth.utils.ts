@@ -257,8 +257,186 @@ export function createCallbackResponse(
   });
 }
 
-// Store code verifiers (could be moved to a more persistent storage in production)
-export const codeVerifiers = new Map<string, string>();
+// ---------------------------------------------------------------------------
+// Server-side code verifier storage
+// Stores PKCE code verifiers keyed by a random nonce so they are never exposed
+// to the client. Entries are cleaned up on retrieval. This is an in-memory
+// store and will be lost on process restart, which is acceptable because OAuth
+// flows are short-lived (enforced by STATE_MAX_AGE_MS below).
+// ---------------------------------------------------------------------------
+export const codeVerifiers = new Map<
+  string,
+  { codeVerifier: string; createdAt: number }
+>();
+
+/** Maximum age of an OAuth state parameter (10 minutes). */
+const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// HMAC signing helpers for OAuth state parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-process HMAC key used to sign OAuth state payloads. Generated once at
+ * startup via Web Crypto. A per-process secret is sufficient because OAuth
+ * flows complete within minutes — well within a single process lifetime.
+ */
+let _hmacKey: CryptoKey | null = null;
+
+async function getHmacKey(): Promise<CryptoKey> {
+  if (!_hmacKey) {
+    _hmacKey = await crypto.subtle.generateKey(
+      { name: "HMAC", hash: "SHA-256" },
+      false, // not extractable
+      ["sign", "verify"],
+    );
+  }
+  return _hmacKey;
+}
+
+function bufToHex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Timing-safe comparison of two hex strings. */
+function timingSafeEqual(a: string, b: string): boolean {
+  const bufA = new TextEncoder().encode(a);
+  const bufB = new TextEncoder().encode(b);
+  if (bufA.length !== bufB.length) return false;
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
+export interface OAuthStatePayload {
+  authCellId: string;
+  integrationPieceId: string;
+  /** Random nonce used to look up the code verifier from server-side storage. */
+  codeVerifierNonce: string;
+  scopes?: string[];
+  /** Unix epoch ms when the state was created. */
+  timestamp: number;
+}
+
+/**
+ * Creates a signed OAuth state parameter.
+ *
+ * The code verifier is stored server-side keyed by a random nonce. The state
+ * payload is HMAC-SHA256 signed so it cannot be forged or tampered with.
+ *
+ * Returns a base64-encoded JSON string of `{ payload, signature }`.
+ */
+export async function createSignedState(params: {
+  authCellId: string;
+  integrationPieceId: string;
+  codeVerifier: string;
+  scopes?: string[];
+}): Promise<string> {
+  // Generate a random nonce for server-side code verifier storage
+  const nonce = crypto.randomUUID();
+
+  // Store code verifier server-side, keyed by nonce
+  codeVerifiers.set(nonce, {
+    codeVerifier: params.codeVerifier,
+    createdAt: Date.now(),
+  });
+
+  // Prune expired entries on every create to prevent unbounded growth
+  pruneExpiredCodeVerifiers();
+
+  const payload: OAuthStatePayload = {
+    authCellId: params.authCellId,
+    integrationPieceId: params.integrationPieceId,
+    codeVerifierNonce: nonce,
+    scopes: params.scopes,
+    timestamp: Date.now(),
+  };
+
+  const payloadJson = JSON.stringify(payload);
+  const key = await getHmacKey();
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payloadJson),
+  );
+  const signature = bufToHex(sig);
+
+  return btoa(JSON.stringify({ payload, signature }));
+}
+
+/**
+ * Verifies and decodes a signed OAuth state parameter.
+ *
+ * Returns the payload and the server-side code verifier on success.
+ * Throws an error describing the failure on verification failure.
+ */
+export async function verifySignedState(state: string): Promise<{
+  payload: OAuthStatePayload;
+  codeVerifier: string;
+}> {
+  let parsed: { payload: OAuthStatePayload; signature: string };
+  try {
+    parsed = JSON.parse(atob(state));
+  } catch {
+    throw new Error("Invalid state parameter format");
+  }
+
+  if (!parsed.payload || !parsed.signature) {
+    throw new Error("Malformed state parameter: missing payload or signature");
+  }
+
+  // Verify HMAC signature
+  const key = await getHmacKey();
+  const payloadJson = JSON.stringify(parsed.payload);
+  const expectedSig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payloadJson),
+  );
+  const expectedHex = bufToHex(expectedSig);
+
+  if (!timingSafeEqual(parsed.signature, expectedHex)) {
+    throw new Error("Invalid state parameter: signature verification failed");
+  }
+
+  // Check expiration
+  const age = Date.now() - parsed.payload.timestamp;
+  if (age > STATE_MAX_AGE_MS) {
+    throw new Error(
+      "OAuth state parameter has expired (older than 10 minutes)",
+    );
+  }
+
+  // Retrieve and consume the code verifier from server-side storage
+  const nonce = parsed.payload.codeVerifierNonce;
+  const stored = codeVerifiers.get(nonce);
+  if (!stored) {
+    throw new Error(
+      "Invalid state parameter: code verifier not found (may have expired or already been used)",
+    );
+  }
+  // Delete after retrieval so it cannot be reused
+  codeVerifiers.delete(nonce);
+
+  return {
+    payload: parsed.payload,
+    codeVerifier: stored.codeVerifier,
+  };
+}
+
+/** Remove expired entries from the code verifier store. */
+function pruneExpiredCodeVerifiers(): void {
+  const now = Date.now();
+  for (const [nonce, entry] of codeVerifiers) {
+    if (now - entry.createdAt > STATE_MAX_AGE_MS) {
+      codeVerifiers.delete(nonce);
+    }
+  }
+}
 
 // Type-safe response helpers for route handlers
 export function createLoginSuccessResponse(c: any, url: string) {
