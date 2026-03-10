@@ -108,6 +108,8 @@ type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
  */
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
+  /** Reads that should not invalidate on child writes unless they add a new key */
+  shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
@@ -176,6 +178,10 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private nonRecursiveTriggers = new Map<
+    SpaceAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
@@ -659,9 +665,16 @@ export class Scheduler {
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
     if (immediateLog) {
-      const reads = this.setDependencies(action, immediateLog);
+      const { reads, shallowReads } = this.setDependencies(
+        action,
+        immediateLog,
+      );
       this.updateDependents(action, immediateLog);
-      const { entities } = this.addTriggerPaths(action, reads);
+      const { entities } = this.addTriggerPaths(
+        action,
+        reads,
+        shallowReads,
+      );
 
       // Register the cancel function for the latest trigger set.
       this.setCancelForEntities(action, entities);
@@ -709,7 +722,7 @@ export class Scheduler {
 
     this.updateChangeGroup(action, options);
 
-    const reads = this.setDependencies(action, log);
+    const { reads, shallowReads } = this.setDependencies(action, log);
 
     // Update reverse dependency graph
     if (this.pullMode) this.updateDependents(action, log);
@@ -726,6 +739,7 @@ export class Scheduler {
     const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
       action,
       reads,
+      shallowReads,
     );
 
     logger.debug("schedule-resubscribe", () => [
@@ -916,6 +930,12 @@ export class Scheduler {
               // Clear retries after successful commit.
               this.retries.delete(action);
             }
+          }).catch((error) => {
+            logger.error(
+              "schedule-error",
+              "Commit promise rejected in finalizeAction:",
+              error,
+            );
           });
           const log = txToReactivityLog(tx);
 
@@ -1125,18 +1145,44 @@ export class Scheduler {
 
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
+            const nonRecursivePaths = this.nonRecursiveTriggers.get(
+              spaceAndURI,
+            );
 
-            if (paths) {
+            if (paths || nonRecursivePaths) {
               logger.debug("schedule-change-match", () => [
-                `Change #${changeIndex} found ${paths.size} registered actions for ${spaceAndURI}`,
+                `Change #${changeIndex} found ${
+                  (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
+                } registered actions for ${spaceAndURI}`,
               ]);
 
-              const triggeredActions = determineTriggeredActions(
-                paths,
-                change.before,
-                change.after,
-                change.address.path,
-              );
+              const triggeredActionSet = new Set<Action>();
+              if (paths) {
+                for (
+                  const action of determineTriggeredActions(
+                    paths,
+                    change.before,
+                    change.after,
+                    change.address.path,
+                  )
+                ) {
+                  triggeredActionSet.add(action);
+                }
+              }
+              if (nonRecursivePaths) {
+                for (
+                  const action of determineTriggeredActions(
+                    nonRecursivePaths,
+                    change.before,
+                    change.after,
+                    change.address.path,
+                    { nonRecursive: true },
+                  )
+                ) {
+                  triggeredActionSet.add(action);
+                }
+              }
+              const triggeredActions = [...triggeredActionSet];
 
               logger.debug("schedule-change-trigger", () => [
                 `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
@@ -1221,10 +1267,14 @@ export class Scheduler {
   private setDependencies(
     action: Action,
     log: ReactivityLog,
-  ): IMemorySpaceAddress[] {
+  ): {
+    reads: IMemorySpaceAddress[];
+    shallowReads: IMemorySpaceAddress[];
+  } {
     const reads = sortAndCompactPaths(log.reads);
+    const shallowReads = sortAndCompactPaths(log.shallowReads, false);
     const writes = sortAndCompactPaths(log.writes);
-    this.dependencies.set(action, { reads, writes });
+    this.dependencies.set(action, { reads, shallowReads, writes });
 
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
@@ -1276,18 +1326,22 @@ export class Scheduler {
       this.backfillDependentsForNewWrites(action, addedWrites);
     }
 
-    return reads;
+    return { reads, shallowReads };
   }
 
   private addTriggerPaths(
     action: Action,
     reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
   ): {
     entities: Set<SpaceAndURI>;
     pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
+    const nonRecursivePathsByEntity = addressesToPathByEntity(
+      shallowReads,
+    );
     const entities = new Set<SpaceAndURI>();
     const pathsWithValuesByEntity = new Map<
       SpaceAndURI,
@@ -1307,6 +1361,19 @@ export class Scheduler {
       );
       this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
       pathsWithValuesByEntity.set(spaceAndURI, pathsWithValues);
+    }
+    for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
+      entities.add(spaceAndURI);
+      if (!this.nonRecursiveTriggers.has(spaceAndURI)) {
+        this.nonRecursiveTriggers.set(spaceAndURI, new Map());
+      }
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, pathsWithValues);
     }
 
     return { entities, pathsWithValuesByEntity };
@@ -1332,6 +1399,7 @@ export class Scheduler {
       ]);
       for (const spaceAndURI of entities) {
         this.triggers.get(spaceAndURI)?.delete(action);
+        this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
       }
     });
   }
@@ -1362,13 +1430,20 @@ export class Scheduler {
       log = populateDependencies;
     }
 
-    const reads = this.setDependencies(action, log);
+    const { reads, shallowReads } = this.setDependencies(action, log);
     if (options.updateDependents ?? true) {
       this.updateDependents(action, log);
     }
 
     const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
-    const { entities } = this.addTriggerPaths(action, readsForTriggers);
+    const shallowReadsForTriggers = options.useRawReadsForTriggers
+      ? log.shallowReads
+      : shallowReads;
+    const { entities } = this.addTriggerPaths(
+      action,
+      readsForTriggers,
+      shallowReadsForTriggers,
+    );
     this.setCancelForEntities(action, entities);
 
     return { log, entities };
@@ -1391,12 +1466,11 @@ export class Scheduler {
       this.reverseDependencies.delete(action);
     }
 
-    const reads = log.reads;
     const newDependencies = new Set<Action>();
 
     // Group reads by entity for efficient lookup
     const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-    for (const read of reads) {
+    for (const read of log.reads) {
       const entity: SpaceAndURI = `${read.space}/${read.id}`;
       let entityReads = readsByEntity.get(entity);
       if (!entityReads) {
@@ -1405,11 +1479,28 @@ export class Scheduler {
       }
       entityReads.push(read);
     }
+    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    for (const read of log.shallowReads) {
+      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      let entityReads = nonRecursiveByEntity.get(entity);
+      if (!entityReads) {
+        entityReads = [];
+        nonRecursiveByEntity.set(entity, entityReads);
+      }
+      entityReads.push(read);
+    }
+    const allEntities = new Set([
+      ...readsByEntity.keys(),
+      ...nonRecursiveByEntity.keys(),
+    ]);
 
     // For each entity we read from, find actions that write to it
-    for (const [entity, entityReads] of readsByEntity) {
+    for (const entity of allEntities) {
       const writers = this.writersByEntity.get(entity);
       if (!writers) continue;
+
+      const entityReads = readsByEntity.get(entity) ?? [];
+      const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
 
       for (const otherAction of writers) {
         if (otherAction === action) continue;
@@ -1419,25 +1510,21 @@ export class Scheduler {
         // Get paths this action writes to
         const otherWrites = this.mightWrite.get(otherAction) ?? [];
 
-        // Check if any write path overlaps with any read path
-        outer: for (const read of entityReads) {
-          for (const write of otherWrites) {
-            if (
-              read.space === write.space &&
-              read.id === write.id &&
-              arraysOverlap(write.path, read.path)
-            ) {
-              // otherAction writes → this action reads, so this action depends on otherAction
-              let deps = this.dependents.get(otherAction);
-              if (!deps) {
-                deps = new Set();
-                this.dependents.set(otherAction, deps);
-              }
-              deps.add(action);
-              newDependencies.add(otherAction);
-              break outer; // Found a match, no need to check more paths
-            }
+        if (
+          this.readsOverlapWrites(
+            entityReads,
+            entityNonRecursiveReads,
+            otherWrites,
+          )
+        ) {
+          // otherAction writes → this action reads, so this action depends on otherAction
+          let deps = this.dependents.get(otherAction);
+          if (!deps) {
+            deps = new Set();
+            this.dependents.set(otherAction, deps);
           }
+          deps.add(action);
+          newDependencies.add(otherAction);
         }
       }
     }
@@ -1451,7 +1538,9 @@ export class Scheduler {
     this.runtime.telemetry.submit({
       type: "scheduler.dependencies.update",
       actionId,
-      reads: log.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`),
+      reads: [...log.reads, ...log.shallowReads].map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      ),
       writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
     });
   }
@@ -1483,8 +1572,10 @@ export class Scheduler {
     const scanAction = (action: Action) => {
       if (action === writer) return;
       const log = this.dependencies.get(action);
-      if (!log?.reads?.length) return;
-      if (!this.readsOverlapWrites(log.reads, writes)) return;
+      if (!log?.reads?.length && !log?.shallowReads.length) return;
+      if (
+        !this.readsOverlapWrites(log.reads, log.shallowReads, writes)
+      ) return;
       this.registerDependentEdge(writer, action);
     };
 
@@ -1494,6 +1585,7 @@ export class Scheduler {
 
   private readsOverlapWrites(
     reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
     writes: IMemorySpaceAddress[],
   ): boolean {
     for (const read of reads) {
@@ -1501,6 +1593,20 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          arraysOverlap(write.path, read.path)
+        ) {
+          return true;
+        }
+      }
+    }
+    // For non-recursive reads, only same/ancestor path or direct child writes
+    // create a dependency. Deep descendant writes cannot affect shallow structure.
+    for (const read of shallowReads) {
+      for (const write of writes) {
+        if (
+          read.space === write.space &&
+          read.id === write.id &&
+          write.path.length <= read.path.length + 1 &&
           arraysOverlap(write.path, read.path)
         ) {
           return true;
@@ -2690,6 +2796,12 @@ export class Scheduler {
                   }
                 }
               }
+            }).catch((error) => {
+              logger.error(
+                "schedule-error",
+                "Event handler commit promise rejected:",
+                error,
+              );
             });
           }
         };
@@ -2946,14 +3058,18 @@ export class Scheduler {
         // Track runs for cycle-aware debounce
         this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-          this.handleError(
-            new Error(
-              `Too many iterations: ${this.loopCounter.get(fn)} ${
-                this.getActionId(fn)
-              }`,
-            ),
-            fn,
+          const error = new Error(
+            `Too many iterations: ${this.loopCounter.get(fn)} ${
+              this.getActionId(fn)
+            }`,
           );
+          // Attach the last frame from the action so handleError can
+          // extract piece/spell metadata (CT-1316: fixes message:null).
+          const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
+          if (lastFrame) {
+            (error as Error & { frame?: Frame }).frame = lastFrame;
+          }
+          this.handleError(error, fn);
         } else {
           await this.run(fn);
         }
@@ -3286,7 +3402,7 @@ function topologicalSort(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
-  const log: ReactivityLog = { reads: [], writes: [] };
+  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
       if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
@@ -3296,7 +3412,11 @@ export function txToReactivityLog(
         type: activity.read.type,
         path: activity.read.path.slice(1), // Remove the "value" prefix
       };
-      log.reads.push(address);
+      if (activity.read.nonRecursive === true) {
+        log.shallowReads.push(address);
+      } else {
+        log.reads.push(address);
+      }
       // If marked as potential write, also add to potentialWrites
       if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
         if (!log.potentialWrites) {

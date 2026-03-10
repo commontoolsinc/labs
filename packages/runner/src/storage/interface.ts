@@ -65,6 +65,19 @@ export interface Metadata extends Record<PropertyKey, unknown> {}
  */
 export interface IReadOptions {
   meta?: Metadata;
+  /**
+   * When true, register the read in transaction activity but skip loading
+   * from storage. Use when caller already has the value and only needs
+   * dependency tracking.
+   */
+  trackReadWithoutLoad?: boolean;
+  /**
+   * When true, the read is tracked as non-recursive for scheduler invalidation:
+   * parent/same-path writes invalidate, child writes invalidate only on key
+   * add, since those modify the keys that were read from the object.
+   * We also invalidate if we set the length of an array.
+   */
+  nonRecursive?: boolean;
 }
 
 // This type is used to tag a document with any important metadata.
@@ -557,7 +570,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void;
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -918,6 +936,7 @@ export type Activity = Variant<{
 
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
+  nonRecursive?: boolean;
 }
 
 /**

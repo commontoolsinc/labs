@@ -1,7 +1,8 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { arrayEqual } from "./path-utils.ts";
 import type { StorableValue } from "@commontools/memory/interface";
+import { isPrimitiveCellLink } from "./link-utils.ts";
+import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
@@ -11,19 +12,29 @@ import type {
 export type SortedAndCompactPaths = Array<
   readonly MemoryAddressPathComponent[]
 >;
+export interface DetermineTriggeredActionsOptions {
+  /**
+   * Non-recursive reads are invalidated by parent/same-path writes only.
+   * Child-path writes invalidate only if they add a new direct child key.
+   */
+  nonRecursive?: boolean;
+}
 
 type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
 
 /**
  * Sorts and compactifies the paths.
  *
- * Compactifies by removing any entries that have another as a prefix.
+ * Compactifies by removing any duplicate entries, and potentially entries
+ * that have another as a prefix.
  *
  * @param paths - The paths to sort and compactify.
+ * @param compactifyChildren - whether to remove entries that have the same prefix
  * @returns The sorted and compactified paths.
  */
 export function sortAndCompactPaths(
   unsorted: IMemorySpaceAddress[],
+  compactifyChildren = true,
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
@@ -46,15 +57,18 @@ export function sortAndCompactPaths(
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
-      sorted[i].space !== previous.space ||
-      sorted[i].id !== previous.id ||
-      sorted[i].type !== previous.type ||
+      sorted[i].space === previous.space &&
+      sorted[i].id === previous.id &&
+      sorted[i].type === previous.type &&
       // Is the previous path a prefix of the current path?
-      !previous.path.every((value, index) => value === sorted[i].path[index])
+      previous.path.every((value, index) => value === sorted[i].path[index]) &&
+      // If we compactifyChildren, or the paths are identical, skip this
+      (compactifyChildren || previous.path.length === sorted[i].path.length)
     ) {
-      result.push(sorted[i]);
-      previous = sorted[i];
+      continue;
     }
+    result.push(sorted[i]);
+    previous = sorted[i];
   }
   return result;
 }
@@ -95,6 +109,7 @@ export function determineTriggeredActions(
   before: StorableValue,
   after: StorableValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
+  options?: DetermineTriggeredActionsOptions,
 ): Action[] {
   const triggeredActions: Action[] = [];
 
@@ -164,7 +179,7 @@ export function determineTriggeredActions(
     const beforeCanReach = beforeLastObject + 1 >= targetPath.length;
     const afterCanReach = afterLastObject + 1 >= targetPath.length;
 
-    // Determine if there was a change. We need to trigger if:
+    // Determine if there was a change. For recursive reads, trigger if:
     // 1. Both paths are reachable and the values differ
     // 2. Reachability changed (one can reach, the other can't)
     // 3. Neither can reach, but the depth of reachability changed
@@ -172,10 +187,17 @@ export function determineTriggeredActions(
     let hasChanged: boolean;
     if (beforeCanReach && afterCanReach) {
       // Both reachable - compare actual values
-      hasChanged = !deepEqual(
-        beforeValues[targetPath.length],
-        afterValues[targetPath.length],
-      );
+      if (options?.nonRecursive) {
+        hasChanged = !shallowEqual(
+          beforeValues[targetPath.length],
+          afterValues[targetPath.length],
+        );
+      } else {
+        hasChanged = !deepEqual(
+          beforeValues[targetPath.length],
+          afterValues[targetPath.length],
+        );
+      }
     } else if (beforeCanReach !== afterCanReach) {
       // Reachability changed - definitely a structural change
       hasChanged = true;
@@ -229,6 +251,42 @@ function commonPrefixLength(
     }
   }
   return Math.min(a.length, b.length);
+}
+
+/**
+ * Returns true if the SHALLOW structure of `before` and `after` are the same.
+ *
+ * For non-recursive reads, only structural changes at the target level
+ * (key additions/removals, type changes, link identity changes) should
+ * trigger re-evaluation. Deep value changes inside existing keys should not.
+ *
+ * - Links: compared by identity (deepEqual), since a link IS the pointer.
+ * - Objects: changed iff the key set changed (not the values).
+ * - Arrays: changed iff the key set changed (not the values).
+ * - Primitives: changed iff the value changed.
+ */
+function shallowEqual(
+  before: StorableValue,
+  after: StorableValue,
+): boolean {
+  // Links compare by full identity — a different link target matters.
+  if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
+    return deepEqual(before, after);
+  }
+
+  if (isRecord(before) && isRecord(after)) {
+    const beforeKeys = Object.keys(before);
+    const afterKeys = Object.keys(after);
+    if (beforeKeys.length !== afterKeys.length) return false;
+    // if one is an array, both must be
+    if (Array.isArray(before) != Array.isArray(after)) return false;
+    // if our array length changed, we've changed
+    if (Array.isArray(before) && before.length !== after.length) return false;
+    return beforeKeys.every((k) => Object.hasOwn(after, k));
+  }
+
+  // Primitives (null, number, string, boolean, undefined)
+  return deepEqual(before, after);
 }
 
 function comparePaths(

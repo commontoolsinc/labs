@@ -196,6 +196,9 @@ This covers:
 - New untracked files → included in dirty hash → cache invalidated.
 - Deleted files → path included in hash → cache invalidated.
 - Clean working tree → fingerprint = hash(HEAD) → stable across restarts.
+- **Library dependencies**: `deno.lock` is committed to the repo, so any
+  dependency version change (add, update, or remove) changes either HEAD or the
+  dirty file set — no special handling needed.
 
 Computed once at process startup. Cost is negligible: one `git` invocation plus
 reading a handful of dirty files (typically 0-5 in practice).
