@@ -45,7 +45,14 @@ describe("Provider Subscriptions", () => {
       await tx.commit();
       await runtime.storageManager.synced();
 
-      expect(provider.get(uri)).toEqual({ value: 1 });
+      const readTx = runtime.edit();
+      const { ok: entry } = readTx.read({
+        space,
+        type: "application/json",
+        id: uri,
+        path: ["value"],
+      });
+      expect(entry?.value).toBe(1);
 
       let s1Count = 0;
 

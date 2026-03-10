@@ -1,6 +1,5 @@
 import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
-import type { Cancel } from "../cancel.ts";
 import type {
   Assertion,
   AuthorizationError as IAuthorizationError,
@@ -172,16 +171,6 @@ export interface LocalStorageOptions {
 
 export interface IStorageProvider {
   /**
-   * Send a value to storage.
-   *
-   * @param batch - Batch of entity uri & values to send.
-   * @returns Promise that resolves when the value is sent.
-   */
-  send<T extends StorableValue = StorableValue>(
-    batch: { uri: URI; value: StorageValue<T> }[],
-  ): Promise<Result<Unit, Error>>;
-
-  /**
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
    * @param uri - uri of the entity to sync.
@@ -200,28 +189,6 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
-
-  /**
-   * Get a value from the local cache reflecting storage. Call `sync()` first.
-   *
-   * @param uri - uri of the entity to get the value for.
-   * @returns Value or undefined if the value is not in storage.
-   */
-  get<T extends StorableValue = StorableValue>(
-    uri: URI,
-  ): OptStorageValue<T>;
-
-  /**
-   * Subscribe to storage updates.
-   *
-   * @param uri - uri of the entity to subscribe to.
-   * @param callback - Callback function.
-   * @returns Cancel function to stop the subscription.
-   */
-  sink<T extends StorableValue = StorableValue>(
-    uri: URI,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.

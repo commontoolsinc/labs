@@ -84,9 +84,12 @@ describe("Storage", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const entry = storageManager.open(space).get(
-        refCell.getAsNormalizedFullLink().id,
-      );
+      const { ok: entry } = tx.read({
+        space,
+        type: "application/json",
+        id: refCell.getAsNormalizedFullLink().id,
+        path: ["value"],
+      });
       expect(entry?.value).toEqual("hello");
     });
 
@@ -110,8 +113,12 @@ describe("Storage", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const refCellURI = refCell.getAsNormalizedFullLink().id;
-      const entry = storageManager.open(space).get(refCellURI);
+      const { ok: entry } = tx.read({
+        space,
+        type: "application/json",
+        id: refCell.getAsNormalizedFullLink().id,
+        path: ["value"],
+      });
       expect(entry?.value).toEqual("hello");
     });
   });
