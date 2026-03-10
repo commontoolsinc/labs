@@ -241,13 +241,13 @@ export interface ConversationFixtureAssertions {
 export type ConversationFixtureEntry =
   | {
     type: "sendRequest";
+    expectRequest?: ConversationFixtureAssertions;
     response: LLMResponse;
-    assert?: ConversationFixtureAssertions;
   }
   | {
     type: "generateObject";
+    expectRequest?: ConversationFixtureAssertions;
     response: LLMGenerateObjectResponse;
-    assert?: ConversationFixtureAssertions;
   };
 
 /**
@@ -364,7 +364,7 @@ export function loadConversationFixture(fixture: ConversationFixture): void {
     const entryIndex = i;
 
     if (entry.type === "sendRequest") {
-      const assertions = entry.assert;
+      const assertions = entry.expectRequest;
       mockCatalog.addResponse(
         (request) => {
           if (assertions) {
@@ -375,7 +375,7 @@ export function loadConversationFixture(fixture: ConversationFixture): void {
         entry.response,
       );
     } else if (entry.type === "generateObject") {
-      const assertions = entry.assert;
+      const assertions = entry.expectRequest;
       mockCatalog.addObjectResponse(
         (request) => {
           if (assertions) {

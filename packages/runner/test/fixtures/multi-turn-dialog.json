@@ -3,18 +3,23 @@
   "responses": [
     {
       "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello"],
+        "messageCount": 1
+      },
       "response": {
         "role": "assistant",
         "content": "Hi there! How can I help you today?",
         "id": "turn-1"
-      },
-      "assert": {
-        "messagesContain": ["Hello"],
-        "messageCount": 1
       }
     },
     {
       "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello", "weather in San Francisco"],
+        "messageCount": 3,
+        "hasTools": ["getWeather"]
+      },
       "response": {
         "role": "assistant",
         "content": [
@@ -26,22 +31,17 @@
           }
         ],
         "id": "turn-2-tool-call"
-      },
-      "assert": {
-        "messagesContain": ["Hello", "weather in San Francisco"],
-        "messageCount": 3,
-        "hasTools": ["getWeather"]
       }
     },
     {
       "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 5
+      },
       "response": {
         "role": "assistant",
         "content": "The weather in San Francisco is sunny and 72°F. Anything else?",
         "id": "turn-2-final"
-      },
-      "assert": {
-        "messageCount": 5
       }
     }
   ]

@@ -220,13 +220,13 @@ describe("conversation fixtures", () => {
       responses: [
         {
           type: "sendRequest",
+          expectRequest: {
+            messagesContain: ["meaning of life"],
+          },
           response: {
             role: "assistant",
             content: "The answer is 42.",
             id: "inline-1",
-          },
-          assert: {
-            messagesContain: ["meaning of life"],
           },
         },
       ],

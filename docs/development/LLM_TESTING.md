@@ -77,14 +77,14 @@ inline `addMockResponse()` calls.
   "responses": [
     {
       "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["hi"],
+        "messageCount": 1
+      },
       "response": {
         "role": "assistant",
         "content": "Hello!",
         "id": "turn-1"
-      },
-      "assert": {
-        "messagesContain": ["hi"],
-        "messageCount": 1
       }
     },
     {
@@ -101,7 +101,7 @@ inline `addMockResponse()` calls.
         ],
         "id": "turn-2-tool"
       },
-      "assert": {
+      "expectRequest": {
         "hasTools": ["lookup"]
       }
     },
@@ -121,7 +121,7 @@ Supported entry types: `"sendRequest"` and `"generateObject"`.
 
 ### Optional assertions
 
-Each entry can include an `assert` object to validate the request:
+Each entry can include an `expectRequest` object to validate the request:
 
 | Field | Description |
 |-------|-------------|

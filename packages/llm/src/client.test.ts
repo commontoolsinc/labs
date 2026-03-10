@@ -185,12 +185,12 @@ describe("LLMClient test-environment guard", () => {
       responses: [
         {
           type: "sendRequest",
-          response: { role: "assistant", content: "ok", id: "assert-1" },
-          assert: {
+          expectRequest: {
             messageCount: 1,
             messagesContain: ["hello"],
             lastMessageContains: "hello",
           },
+          response: { role: "assistant", content: "ok", id: "assert-1" },
         },
       ],
     });
@@ -213,10 +213,10 @@ describe("LLMClient test-environment guard", () => {
       responses: [
         {
           type: "sendRequest",
-          response: { role: "assistant", content: "ok", id: "assert-2" },
-          assert: {
+          expectRequest: {
             messagesContain: ["expected-keyword"],
           },
+          response: { role: "assistant", content: "ok", id: "assert-2" },
         },
       ],
     });
@@ -241,10 +241,10 @@ describe("LLMClient test-environment guard", () => {
       responses: [
         {
           type: "sendRequest",
-          response: { role: "assistant", content: "ok", id: "tools-1" },
-          assert: {
+          expectRequest: {
             hasTools: ["search", "calculate"],
           },
+          response: { role: "assistant", content: "ok", id: "tools-1" },
         },
       ],
     });
@@ -277,10 +277,10 @@ describe("LLMClient test-environment guard", () => {
       responses: [
         {
           type: "sendRequest",
-          response: { role: "assistant", content: "ok", id: "sys-1" },
-          assert: {
+          expectRequest: {
             systemContains: "helpful assistant",
           },
+          response: { role: "assistant", content: "ok", id: "sys-1" },
         },
       ],
     });
