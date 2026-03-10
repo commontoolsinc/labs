@@ -708,6 +708,9 @@ read performance. See §6.3 for the compaction query.
   retention window are never collected.
 - **Default policy: retain all** (no automatic GC). GC must be explicitly
   enabled per space.
+- Deletion changes reachability; it does not rewrite metadata. Any future
+  label/policy metadata carried by surviving records must remain attached to
+  those records until they themselves become unreachable and GC removes them.
 
 ---
 
@@ -914,6 +917,9 @@ urn:blob-meta:<blob_hash>
 ```
 
 Reading and writing blob metadata uses the standard entity read/write paths.
+Deleting an entity that references a blob does not delete this metadata entity;
+only ordinary entity deletion of `urn:blob-meta:<hash>` or later GC of
+unreachable records can remove it.
 
 ---
 
