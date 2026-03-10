@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 
 interface State {
   text: string;
@@ -71,7 +71,7 @@ export default pattern<State>((state) => {
         {/* String methods with reactive args */}
         <p>
           Starts with:{" "}
-          {state.names.filter((n) => n.startsWith(state.prefix)).join(", ")}
+          {computed(() => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}

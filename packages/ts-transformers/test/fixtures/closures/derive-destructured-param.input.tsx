@@ -1,14 +1,14 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
 interface Point {
   x: number;
   y: number;
 }
 
-export default function TestDerive() {
-  const point = cell({ x: 10, y: 20 } as Point);
-  const multiplier = cell(2);
+export default pattern(() => {
+  const point = Writable.of({ x: 10, y: 20 } as Point);
+  const multiplier = Writable.of(2);
 
   // Destructuring requires .get() first since derive doesn't unwrap Cell
   const result = derive(point, (p) => {
@@ -17,4 +17,4 @@ export default function TestDerive() {
   });
 
   return result;
-}
+});

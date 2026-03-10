@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
-export default function TestDeriveCollisionShorthand() {
-  const multiplier = cell(2);
+export default pattern(() => {
+  const multiplier = Writable.of(2);
 
   // Input name 'multiplier' collides with captured variable 'multiplier'
   // The callback uses shorthand property { multiplier }
@@ -13,4 +13,4 @@ export default function TestDeriveCollisionShorthand() {
   }));
 
   return result;
-}
+});

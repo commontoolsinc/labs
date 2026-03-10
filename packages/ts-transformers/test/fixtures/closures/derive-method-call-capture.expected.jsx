@@ -1,12 +1,12 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 interface State {
     counter: {
         value: number;
     };
 }
-export default function TestDerive(state: State) {
-    const value = cell(10, {
+export default pattern((state: State) => {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Capture property before method call
@@ -40,12 +40,29 @@ export default function TestDerive(state: State) {
         value,
         state: {
             counter: {
-                value: state.counter.value
+                value: state.key("counter").value
             }
         }
     }, ({ value: v, state }) => v.get() + state.counter.value);
     return result;
-}
+}, {
+    type: "object",
+    properties: {
+        counter: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["counter"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -32,15 +32,6 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
     state.value.set(state.value.get() - 1);
 });
 export default pattern((state) => {
-    // These should NOT be transformed (statement context)
-    const next = state.key("value") + 1;
-    const previous = state.key("value") - 1;
-    const doubled = state.key("value") * 2;
-    const _isHigh = state.key("value") > 10;
-    // This should NOT be transformed (statement context)
-    if (state.key("value") > 100) {
-        console.log("Too high!");
-    }
     return {
         // This template literal SHOULD be transformed (builder function context)
         [NAME]: str `Simple counter: ${state.key("value")}`,
@@ -146,12 +137,6 @@ export default pattern((state) => {
       </div>),
         // Direct property access - no transformation needed
         value: state.key("value"),
-        // These should NOT be transformed (object literal in statement context)
-        metadata: {
-            next: next,
-            previous: previous,
-            doubled: doubled,
-        },
     };
 }, {
     type: "object",
@@ -174,24 +159,9 @@ export default pattern((state) => {
         value: {
             type: "number",
             asOpaque: true
-        },
-        metadata: {
-            type: "object",
-            properties: {
-                next: {
-                    type: "number"
-                },
-                previous: {
-                    type: "number"
-                },
-                doubled: {
-                    type: "number"
-                }
-            },
-            required: ["next", "previous", "doubled"]
         }
     },
-    required: ["$NAME", "$UI", "value", "metadata"],
+    required: ["$NAME", "$UI", "value"],
     $defs: {
         JSXElement: {
             anyOf: [{

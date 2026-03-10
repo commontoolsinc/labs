@@ -1,15 +1,15 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { Writable, pattern } from "commontools";
 
-export default function TestCollectionsEmpty() {
+export default pattern(() => {
   // Empty array
-  const _emptyArray = cell([]);
+  const _emptyArray = Writable.of<string[]>([]);
 
   // Empty object
-  const _emptyObject = cell({});
+  const _emptyObject = Writable.of({});
 
   return {
     emptyArray: _emptyArray,
     emptyObject: _emptyObject,
   };
-}
+});

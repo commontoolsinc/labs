@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 export default pattern(() => {
-    const a = cell(10, {
+    const a = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const b = cell(20, {
+    const b = Writable.of(20, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const sum = __ctHelpers.derive({

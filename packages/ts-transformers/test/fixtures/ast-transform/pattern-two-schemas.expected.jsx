@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { pattern, type JSONSchema } from "commontools";
+import { computed, pattern, type JSONSchema } from "commontools";
 import "commontools/schema";
 // Test that pattern with both schemas already present is not transformed
 interface Input {
@@ -11,7 +11,18 @@ interface Result {
 export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     return {
-        doubled: count * 2
+        doubled: __ctHelpers.derive({
+            type: "object",
+            properties: {
+                count: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["count"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)
     };
 }, {
     type: "object",

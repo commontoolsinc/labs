@@ -28,7 +28,7 @@ export default pattern((__ct_pattern_input) => {
         console.log("values#", values?.length);
     });
     return {
-        [NAME]: str `Simple Value: ${values.key("length") || 0}`,
+        [NAME]: str `Simple Value: ${values.key("length")}`,
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>

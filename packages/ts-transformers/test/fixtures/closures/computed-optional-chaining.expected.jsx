@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed } from "commontools";
-export default function TestComputeOptionalChaining() {
-    const config = cell<{
+import { Writable, computed, pattern } from "commontools";
+export default pattern(() => {
+    const config = Writable.of<{
         multiplier?: number;
     } | null>({ multiplier: 2 }, {
         anyOf: [{
@@ -15,7 +15,7 @@ export default function TestComputeOptionalChaining() {
                 type: "null"
             }]
     } as const satisfies __ctHelpers.JSONSchema);
-    const value = cell(10, {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
@@ -47,7 +47,10 @@ export default function TestComputeOptionalChaining() {
         config: config
     }, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1));
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

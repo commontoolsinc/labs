@@ -1,15 +1,15 @@
 /// <cts-enable />
-import { cell, computed } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 
-export default function TestComputeConditionalExpression() {
-  const value = cell(10);
-  const threshold = cell(5);
-  const a = cell(100);
-  const b = cell(200);
+export default pattern(() => {
+  const value = Writable.of(10);
+  const threshold = Writable.of(5);
+  const a = Writable.of(100);
+  const b = Writable.of(200);
 
   const result = computed(() =>
     value.get() > threshold.get() ? a.get() : b.get()
   );
 
   return result;
-}
+});

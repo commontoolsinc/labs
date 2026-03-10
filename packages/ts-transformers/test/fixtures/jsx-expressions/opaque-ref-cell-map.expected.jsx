@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, pattern, UI, } from "commontools";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
@@ -132,10 +132,9 @@ export default pattern(() => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema),
         storedCellRef: cell(),
-    });
-    // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
-    // Without this, TypeScript infers `any` and the closure transformer won't detect it
-    const typedCellRef = cellRef as OpaqueRef<any[]>;
+    }) as {
+        cellRef: any[];
+    };
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
@@ -166,87 +165,41 @@ export default pattern(() => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                typedCellRef: {
-                    type: "array",
-                    items: true,
-                    asOpaque: true
-                }
-            },
-            required: ["typedCellRef"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
-            {typedCellRef.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const charm = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                return (<li>
+        } as const satisfies __ctHelpers.JSONSchema, !cellRef?.length, <div>No charms created yet</div>, <ul>
+            {cellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
-                </ct-button>
-                <span>Charm {__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["index"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.unless(true as const satisfies __ctHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        charm: true
-                    },
-                    required: ["charm"]
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
-              </li>);
-            }, {
                 type: "object",
                 properties: {
-                    element: true,
                     index: {
                         type: "number"
                     }
                 },
-                required: ["element"]
+                required: ["index"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
+                </ct-button>
+                <span>Charm {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
                     }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.unless(true as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
+              </li>))}
           </ul>)}
 
         <ct-button onClick={createSimplePattern({ cellRef })}>
@@ -264,7 +217,10 @@ export default pattern(() => {
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
-        cellRef: true
+        cellRef: {
+            type: "array",
+            items: true
+        }
     },
     required: ["$NAME", "$UI", "cellRef"],
     $defs: {

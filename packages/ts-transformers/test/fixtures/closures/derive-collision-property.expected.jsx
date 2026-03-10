@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
-export default function TestDeriveCollisionProperty() {
-    const multiplier = cell(2, {
+import { Writable, derive, pattern } from "commontools";
+export default pattern(() => {
+    const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Input name 'multiplier' collides with captured variable 'multiplier'
@@ -39,7 +39,19 @@ export default function TestDeriveCollisionProperty() {
         value: m.get() * 3,
     }));
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        multiplier: {
+            type: "number"
+        },
+        value: {
+            type: "number"
+        }
+    },
+    required: ["multiplier", "value"],
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

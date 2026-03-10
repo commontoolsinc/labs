@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { cell, computed } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 
-export default function TestComputedWithClosedOverCellMap() {
-  const numbers = cell([1, 2, 3]);
-  const multiplier = cell(2);
+export default pattern(() => {
+  const numbers = Writable.of([1, 2, 3]);
+  const multiplier = Writable.of(2);
 
   // Inside computed, we close over numbers (a Cell)
   // The computed gets transformed to derive({}, () => numbers.map(...))
@@ -12,4 +12,4 @@ export default function TestComputedWithClosedOverCellMap() {
   const doubled = computed(() => numbers.map(n => n * multiplier.get()));
 
   return doubled;
-}
+});

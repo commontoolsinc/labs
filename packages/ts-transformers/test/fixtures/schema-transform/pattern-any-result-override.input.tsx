@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  computed,
   pattern,
   UI,
   VNode,
@@ -11,7 +12,7 @@ declare function fetchAny(): any;
 // Case 1: Explicit Output type overrides inferred `any` return
 export const TypedFromAny = pattern<{ prompt: string }, string>(({ prompt }) => {
   const result = fetchAny();
-  return result?.title || prompt || "Untitled";
+  return computed(() => result?.title || prompt || "Untitled");
 });
 
 // Case 2: { [UI]: VNode } Output type instead of { [UI]: any }

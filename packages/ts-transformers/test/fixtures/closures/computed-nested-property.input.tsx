@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { cell, computed } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 
-export default function TestComputeNestedProperty() {
-  const counter = cell({ count: 0 });
+export default pattern(() => {
+  const counter = Writable.of({ count: 0 });
 
   const doubled = computed(() => {
     const current = counter.get();
@@ -10,4 +10,4 @@ export default function TestComputeNestedProperty() {
   });
 
   return doubled;
-}
+});
