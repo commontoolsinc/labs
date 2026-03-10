@@ -7,19 +7,27 @@ import { toDeepStorableValue } from "./storable-value.ts";
 // Flag-dispatched public API
 //
 // These two symbols are reassigned by `configureDispatch()` whenever the
-// storable value conversion flag changes. When OFF (default), `toStorable`
-// routes through `toDeepStorableValue` (legacy conversion) and `fromStorable`
-// is an identity passthrough. When ON, they route through the rich storable
-// value conversion functions.
+// storable value conversion flag changes. When OFF (default),
+// `storableFromNativeValue` routes through `toDeepStorableValue` (legacy
+// conversion) and `fromStorable` is an identity passthrough. When ON, they
+// route through the rich storable value conversion functions.
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a native JS value to storable form. When the flag is ON,
- * wraps native types (Error, Date, RegExp, etc.) into storable wrappers
- * and deep-freezes. When OFF, performs legacy deep conversion via
- * `toDeepStorableValue`.
+ * Convert a native JS value to storable form (deep, recursive).
+ *
+ * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
+ * storable wrappers and deep-freezes. When OFF, performs legacy deep
+ * conversion via `toDeepStorableValue`.
+ *
+ * @param freeze - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path does not
+ *   freeze.
  */
-export let toStorable: (value: StorableValue) => StorableValue;
+export let storableFromNativeValue: (
+  value: StorableValue,
+  freeze?: boolean,
+) => StorableValue;
 
 /**
  * Convert a storable value back to native form. When the flag is ON,
@@ -48,8 +56,11 @@ function configureDispatch(): void {
   if (storableValueEnabled) {
     // ----- Rich storable value implementations -----
 
-    toStorable = (value: StorableValue): StorableValue => {
-      return toDeepRichStorableValue(value);
+    storableFromNativeValue = (
+      value: StorableValue,
+      freeze = true,
+    ): StorableValue => {
+      return toDeepRichStorableValue(value, freeze);
     };
 
     fromStorable = (value: StorableValue): StorableValue => {
@@ -58,7 +69,7 @@ function configureDispatch(): void {
   } else {
     // ----- Legacy conversion (flag OFF) -----
 
-    toStorable = (value: StorableValue): StorableValue => {
+    storableFromNativeValue = (value: StorableValue): StorableValue => {
       return toDeepStorableValue(value);
     };
 

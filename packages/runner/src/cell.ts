@@ -10,7 +10,7 @@ import {
 } from "@commontools/memory/storable-value";
 import {
   fromStorable,
-  toStorable,
+  storableFromNativeValue,
 } from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -1197,7 +1197,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toStorable(value);
+    value = storableFromNativeValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
