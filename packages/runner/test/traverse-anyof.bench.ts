@@ -7,12 +7,14 @@ import type {
   StorableDatum,
   URI,
 } from "@commontools/memory/interface";
-import { SchemaObjectTraverser } from "../src/traverse.ts";
+import {
+  IMemorySpaceValueAttestation,
+  SchemaObjectTraverser,
+} from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ManagedStorageTransaction } from "../src/traverse.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema, JSONSchemaTypes } from "../src/builder/types.ts";
-import type { IMemorySpaceAttestation } from "../src/storage/interface.ts";
 
 function getTraverser(
   store: Map<string, Revision<State>>,
@@ -28,7 +30,7 @@ function makeDoc(
   store: Map<string, Revision<State>>,
   uri: string,
   value: StorableDatum,
-): IMemorySpaceAttestation {
+): IMemorySpaceValueAttestation {
   const type = "application/json" as const;
   const entity = uri as Entity;
   const revision: Revision<State> = {
