@@ -203,7 +203,7 @@ const sorted = computed(() => {
 });
 
 // ✅ RIGHT - computed for derivation, action for side-effects
-const sorted = computed(() => allItems.get().sort(compareFn));
+const sorted = computed(() => [...allItems.get()].sort(compareFn));
 const updateStatus = action(() => statusMessage.set(`${allItems.get().length} items`));
 ```
 
