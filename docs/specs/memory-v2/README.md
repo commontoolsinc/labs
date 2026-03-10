@@ -171,6 +171,7 @@ interface Transaction {
 type ReadPath = readonly string[]; // Relative to EntityDocument.value; [] = root
 interface ConfirmedRead {
    id: EntityId;
+   branch?: string; // Defaults to commit.branch; merge proposals set this explicitly
    path: ReadPath;
    seq: number;
 }
@@ -188,7 +189,7 @@ interface ClientCommit {
    operations: Operation[];
    codeCID?: Reference;
    branch?: string;
-   merge?: { sourceBranch: string; sourceSeq: number; baseSeq: number };
+   merge?: { sourceBranch: string; sourceSeq: number; baseBranch: string; baseSeq: number };
 }
 
 // Entity values are stored in an envelope (not bare JSON)

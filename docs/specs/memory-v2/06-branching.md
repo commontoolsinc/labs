@@ -272,6 +272,7 @@ interface MergeResult {
   merged?: number;                // Number of entities to materialize
   conflicts?: BranchConflict[];   // Conflicting entities (on conflict)
   sourceSeq: number;
+  baseBranch: BranchName;
   baseSeq: number;
 }
 ```
@@ -316,6 +317,7 @@ merge(source, target):
       status: "conflict",
       conflicts,
       sourceSeq: source.headSeq,
+      baseBranch: base.branch,
       baseSeq,
     }
 
@@ -325,6 +327,7 @@ merge(source, target):
     proposal,
     merged: fastForwards.length,
     sourceSeq: source.headSeq,
+    baseBranch: base.branch,
     baseSeq,
   }
 ```
@@ -362,14 +365,21 @@ next `localSeq` and submits the resulting `ClientCommit` via `/memory/transact`.
 The prepared `MergeProposal` carries:
 
 - `branch = target`
-- `merge = { sourceBranch, sourceSeq, baseSeq }`
-- Confirmed reads for the source/target/base heads used to compute the merge
+- `merge = { sourceBranch, sourceSeq, baseBranch, baseSeq }`
+- Confirmed reads for the source/target/base heads used to compute the merge,
+  with each read's optional `branch` field set explicitly to the branch where
+  that observation was made
 - `pending = []` because the proposal is computed against confirmed branch state
 - One ordinary `set`/`delete` operation per merged entity
 
 There are no special non-transaction commits for merge. The resulting commit is
 signed, hashed, sequenced, stored, and replayed through the same path as any
 other client transaction.
+
+At apply time, the server re-validates those branch-scoped confirmed reads on
+their original branches. This means the proposal becomes stale if the source
+branch, target branch, or merge-base branch observation it depended on has
+changed since the proposal was prepared.
 
 Clients SHOULD request merge when they do not have outstanding local pending
 writes on the source or target branch. If a caller needs to stack a merge on top

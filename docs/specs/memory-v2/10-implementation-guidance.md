@@ -221,9 +221,10 @@ The promise returned by `commit()` resolves when the server responds:
   notification already informed the scheduler.
 
 - **Rejection**: Roll back pending state. Fire `"revert"` notification for any
-  entities that are STILL in pending state (not already superseded by an
-  `"integrate"` notification — see [section 5](#5-notification-model)). The
-  commit callback fires. Promise resolves with `{ error: ... }`.
+  entities/paths whose **visible local state** changes when the rejected pending
+  entries are removed. If a later pending local state still shadows the same
+  entity/path, there is nothing to notify for that path. The commit callback
+  fires. Promise resolves with `{ error: ... }`.
 
 The `"revert"` notification MUST fire before the promise resolves, so that by
 the time the caller's `await` resumes, storage already reflects the server's
@@ -276,15 +277,17 @@ commit() called → "commit" fires → ... → "revert" fires → promise resolv
 
 ```
 commit() called → "commit" fires → server subscription delivers other-client's write
-  → "integrate" fires (entity now has newer server value)
+  → NO "integrate" yet (local pending state is still the visible state)
   → our commit promise resolves with conflict error
-  → NO "revert" for entities already updated by "integrate"
+  → "revert" fires if removing the rejected pending write changes visible state
 ```
 
-The key rule: on rejection, `"revert"` only fires for entities that are STILL in
-pending state — entities already superseded by `"integrate"` are skipped. This
-means `"revert"` can be a partial notification covering a subset of the original
-commit's entities.
+The key rule: external changes may be merged into a shadow confirmed/heap tier,
+but `"integrate"` only fires when they become the **visible** current state.
+While a more advanced local pending state is still visible for an entity/path,
+the scheduler must not be notified about the external change. This matches the
+current v1 nursery/heap behavior in `packages/runner/src/storage/cache.ts`
+(`updateLocalFacts()` + nursery-first reads).
 
 ### Ordering Guarantee
 
@@ -381,7 +384,7 @@ which subscriptions should exist.
 
 ---
 
-## 7. Confirmed Reads: Path-Aware and Version-Based
+## 7. Confirmed Reads: Path-Aware, Branch-Scoped, and Version-Based
 
 **Spec change**: Drop the `hash` field from `ConfirmedRead`:
 
@@ -396,13 +399,15 @@ interface ConfirmedRead {
 // After:
 interface ConfirmedRead {
   id: EntityId;
+  branch?: BranchId; // Defaults to commit.branch; merge proposals set this when needed
   path: readonly string[]; // Relative to EntityDocument.value; [] = root
   seq: number; // Per-space global version counter
 }
 ```
 
 The server validates confirmed reads by looking for later writes whose
-footprints overlap `(id, path)` after `read.seq`. It never checks the hash.
+footprints overlap `(id, path)` after `read.seq` on `read.branch ??
+commit.branch`. It never checks the hash.
 Dropping it simplifies the client (no need to track fact hashes in confirmed
 state) and avoids the `undefined`-in-hash class of bugs entirely.
 
@@ -665,9 +670,9 @@ Capability hierarchy: `READ < WRITE < OWNER`.
 
 Command requirements:
 
-- `/memory/transact` requires `WRITE`
-- `/memory/query/subscribe`, `/memory/graph/query` require `READ` (`/memory/query` compatibility-only)
-- All other commands require `OWNER`
+- `/memory/transact`, `/memory/branch/create`, `/memory/branch/merge`, and `/memory/branch/delete` require `WRITE`
+- `/memory/session/open`, `/memory/query/subscribe`, `/memory/graph/query`, `/memory/query` (compatibility-only), and `/memory/branch/list` require `READ`
+- ACL modifications require `OWNER`
 
 ### Space Initialization (Bootstrap Transaction)
 
@@ -1033,10 +1038,13 @@ once from the subscription update and once from the commit response.
 
 Prevention strategy:
 
-1. In the subscription update handler, filter out entities that are in pending
-   state before calling `integrate()`
-2. In the commit response handler, skip entities in pending state from
-   notification
+1. In the subscription update handler, suppress notifications for entities/paths
+   whose visible state is still provided by pending local writes. It is fine to
+   merge the server revision into a shadow confirmed/heap tier.
+2. In the commit response handler, compute notifications from the resulting
+   **visible** state transition after removing the resolved/rejected pending
+   entries. If a later pending value is still current, do not emit a notification
+   for that entity/path.
 
 ### Self-Referential Thenable OOM
 
@@ -1093,7 +1101,7 @@ marked with the spec section it affects.
 
 **Note:** All changes in this appendix have been applied to the spec documents.
 
-### A.1. Make `ConfirmedRead` Path-Aware and Drop `hash` (03-commit-model.md §3.4)
+### A.1. Make `ConfirmedRead` Path-Aware, Branch-Scoped, and Drop `hash` (03-commit-model.md §3.4)
 
 ```typescript
 // Before:
@@ -1106,12 +1114,15 @@ interface ConfirmedRead {
 // After:
 interface ConfirmedRead {
   id: EntityId;
+  branch?: BranchId;
   path: readonly string[];
   seq: number;
 }
 ```
 
-Rename `version` → `seq` throughout the spec for consistency.
+Rename `version` → `seq` throughout the spec for consistency. Confirmed reads
+default to `commit.branch`, but merge proposals can override `branch` per read
+when validating source or merge-base observations.
 
 ### A.2. Replace `PendingRead` with `localSeq` (03-commit-model.md §3.4)
 
