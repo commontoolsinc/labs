@@ -8,6 +8,14 @@ export const from = <
   Out extends string | Uint8Array | Blob,
 >(
   socket: WebSocket,
+): TransformStream<Out, In> => fromWithPrefix(socket, []);
+
+export const fromWithPrefix = <
+  In extends string | Uint8Array | Blob,
+  Out extends string | Uint8Array | Blob,
+>(
+  socket: WebSocket,
+  prefix: readonly In[],
 ): TransformStream<Out, In> => {
   return traceSync("socket.create", (span) => {
     let ready = false;
@@ -19,6 +27,9 @@ export const from = <
     const result: TransformStream<Out, In> = {
       readable: new ReadableStream({
         start(controller) {
+          for (const item of prefix) {
+            controller.enqueue(item);
+          }
           socket.onmessage = (event) => {
             try {
               messageCount++;
