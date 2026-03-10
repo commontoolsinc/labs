@@ -8,6 +8,10 @@ import { action, pattern, UI, Writable } from "commontools";
 interface State {
     label: string;
 }
+// FIXTURE: action-result-not-opaque
+// Verifies: action() results used as JSX event handlers are not marked asOpaque in the output
+//   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
+// Context: action() is an opaque origin, but handler results are used directly (no property access)
 export default pattern((__ct_pattern_input) => {
     const label = __ct_pattern_input.key("label");
     const count = Writable.of(0, {

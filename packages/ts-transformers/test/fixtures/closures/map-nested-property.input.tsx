@@ -16,6 +16,10 @@ interface State {
   currentUser: User;
 }
 
+// FIXTURE: map-nested-property
+// Verifies: .map() on reactive array captures nested property access on state
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {currentUser: {firstName, lastName}}})
+// Context: Captures state.currentUser.firstName and state.currentUser.lastName as nested property paths
 export default pattern<State>((state) => {
   return {
     [UI]: (

@@ -4,8 +4,10 @@ interface State {
     selectedValue: Cell<string>;
     changeCount: Cell<number>;
 }
-// Test typed event handler: ct-select has onct-change?: EventHandler<{ items: ...; value: ... }>
-// The handler receives { detail: { items: [...], value: ... } }
+// FIXTURE: handler-event-param
+// Verifies: inline handler with a named event parameter generates event + capture schemas
+//   onct-change={(event) => ...} → handler(event schema with detail.value, capture schema, (event, { state }) => ...)({ state })
+// Context: Typed ct-select event; event param is not destructured, used as event.detail.value
 export default pattern((state) => {
     return {
         [UI]: (<ct-select $value={state.key("selectedValue")} items={[

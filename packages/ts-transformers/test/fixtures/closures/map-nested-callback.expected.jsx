@@ -13,6 +13,11 @@ interface State {
     items: Item[];
     prefix: string;
 }
+// FIXTURE: map-nested-callback
+// Verifies: nested .map() calls on reactive arrays are each transformed independently
+//   outer .map(fn) → .mapWithPattern(pattern(...), {state: {prefix}})
+//   inner .map(fn) → .mapWithPattern(pattern(...), {item: {name}})
+// Context: Inner map captures item.name from the outer map callback scope
 export default pattern((state) => {
     return {
         [UI]: (<div>

@@ -28,6 +28,10 @@ interface State {
     items: Item[];
     count: Cell<number>;
 }
+// FIXTURE: map-handler-reference-no-name
+// Verifies: .map() transform works when pattern has inline type annotation instead of type arg
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {count: ...}})
+// Context: pattern((state: State) => ...) form without <State> generic; handler not captured
 export default pattern((state: State) => {
     return {
         [UI]: (<div>

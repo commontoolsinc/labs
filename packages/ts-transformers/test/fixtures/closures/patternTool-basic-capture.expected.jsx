@@ -8,6 +8,12 @@ type Output = {
         content: string;
     }>;
 };
+// FIXTURE: patternTool-basic-capture
+// Verifies: patternTool captures a module-scoped cell as an extraParam
+//   patternTool(fn, { content }) → patternTool(fn, { content }) (content passed through)
+//   derive({ query }, ...) inside tool → derive({ input: { query }, content }, ...) with content captured
+// Context: Module-scoped `content` cell is referenced inside the patternTool
+//   callback. The transformer threads it through the existing extraParams object.
 export default pattern(() => {
     const grepTool = patternTool(({ query, content }: {
         query: string;

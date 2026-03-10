@@ -7,6 +7,10 @@ type Row = [
 interface State {
     rows: Row[];
 }
+// FIXTURE: map-array-destructure-lowering
+// Verifies: array destructuring in .map() callback is lowered to index-based key access
+//   .map(([left, right]) => ...) → .mapWithPattern(pattern(...), {})
+//   [left, right] → key("element", "0"), key("element", "1")
 export default pattern((state) => {
     return {
         [UI]: (<div>

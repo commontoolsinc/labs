@@ -18,6 +18,11 @@ interface Input {
   card: Card;
 }
 
+// FIXTURE: action-in-ternary-branch
+// Verifies: action() result used in a ternary branch alongside computed() is captured in the derive wrapper
+//   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
+//   ternary with computed → ifElse(...) with inner derive() capturing { card, hasDescription, startEditing }
+// Context: Regression -- action results were previously skipped by CaptureCollector as "function declarations"
 export default pattern<Input>(({ card }) => {
   const isEditing = Cell.of(false);
 

@@ -8,6 +8,11 @@ interface State {
     points: Point[];
     scale: number;
 }
+// FIXTURE: map-destructured-param
+// Verifies: object destructuring in .map() param is lowered to key() calls on each property
+//   .map(({ x, y }) => ...) → key("element", "x"), key("element", "y")
+//   x * state.scale, y * state.scale → derive() calls with captured state
+// Context: Captures state.scale from outer scope; destructured element properties used in expressions
 export default pattern((state) => {
     return {
         [UI]: (<div>

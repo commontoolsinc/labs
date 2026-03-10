@@ -10,6 +10,11 @@ interface Message {
 interface Input {
     messages: Message[];
 }
+// FIXTURE: map-computed-fallback-alias
+// Verifies: computed() inside a map callback creates a derive() and nested map is also transformed
+//   computed(() => (msg.reactions ?? [])) → derive() with msg.reactions as input
+//   messageReactions.map(fn) → nested .mapWithPattern(pattern(...), { msg: { id: msg.key("id") } })
+// Context: Nested map — outer maps messages, inner maps computed reactions; inner captures msg.id
 export default pattern((__ct_pattern_input) => {
     const messages = __ct_pattern_input.key("messages");
     return {

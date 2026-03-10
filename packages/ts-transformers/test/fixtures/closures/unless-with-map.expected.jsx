@@ -15,6 +15,13 @@ interface PatternInput {
     items: Cell<Default<Item[], [
     ]>>;
 }
+// FIXTURE: unless-with-map
+// Verifies: || operator becomes unless() with reactive map as fallback
+//   customContent || items.map(...) → unless(customContent, items.mapWithPattern(...))
+//   items.map((item) => ...) → items.mapWithPattern(pattern(...))
+// Context: unless(condition, fallback) returns condition if truthy, else fallback.
+//   The fallback branch contains a reactive .map() that must be transformed to
+//   mapWithPattern with proper schema injection.
 export default pattern((__ct_pattern_input) => {
     const customContent = __ct_pattern_input.key("customContent");
     const items = __ct_pattern_input.key("items");

@@ -3,6 +3,9 @@ import { Cell, pattern, action } from "commontools";
 interface State {
     count: Cell<number>;
 }
+// FIXTURE: action-basic
+// Verifies: action() callback is extracted into a handler with captured state
+//   action(() => count.set(...)) → handler(eventSchema, captureSchema, (_, { count }) => count.set(...))({ count })
 export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     return {

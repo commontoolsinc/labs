@@ -10,6 +10,11 @@ interface TestOutput {
     title: string;
     count: number;
 }
+// FIXTURE: action-self-closure
+// Verifies: action() closing over SELF captures self properties in the handler
+//   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })
+//   action(() => { self; count.set(...) }) → handler(eventSchema, { self: TestOutput, count: asCell }, ...)({ self, count })
+// Context: SELF reference requires Default<> inputs so output schema is always satisfied
 export default pattern((__ct_pattern_input) => {
     const title = __ct_pattern_input.key("title");
     const self = __ct_pattern_input[__ctHelpers.SELF];

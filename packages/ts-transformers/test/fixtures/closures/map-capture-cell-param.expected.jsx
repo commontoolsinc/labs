@@ -37,6 +37,11 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
+// FIXTURE: map-capture-cell-param
+// Verifies: destructured pattern param closed over in .map() is captured as opaque
+//   .map(fn) → .mapWithPattern(pattern(...), { items: items })
+//   items (from pattern destructuring) → params.items with asOpaque: true
+// Context: Captures the parent array as opaque to pass to a handler alongside the map index
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     return {

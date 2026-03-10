@@ -6,7 +6,10 @@ interface State {
   lastItems: Cell<string>;
 }
 
-// Test destructured event handler params with typed ct-select onct-change
+// FIXTURE: handler-destructured-params
+// Verifies: destructured event parameter in inline handler is preserved and schema-typed
+//   onct-change={({ detail: { value, items } }) => ...} → handler(event schema with detail.value + detail.items, capture schema, ({ detail: { value, items } }, { state }) => ...)({ state })
+// Context: Destructured event params retain structure; event schema reflects the destructured shape
 export default pattern<State>((state) => {
   return {
     [UI]: (

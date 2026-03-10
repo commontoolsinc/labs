@@ -14,6 +14,11 @@ interface Card {
 interface Input {
     card: Card;
 }
+// FIXTURE: action-in-ternary-with-explicit-computed
+// Verifies: action() referenced inside an explicit computed() in JSX is captured in the derive wrapper
+//   action(() => ...) → handler(...)({ isEditing })
+//   computed(() => JSX with action ref) → derive(captureSchema, ..., { card, startEditing }, fn)
+// Context: Action referenced inside computed expression must appear in the derive's capture object
 export default pattern((__ct_pattern_input) => {
     const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {

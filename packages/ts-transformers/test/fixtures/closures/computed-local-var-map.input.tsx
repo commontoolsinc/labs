@@ -13,6 +13,12 @@ interface Item {
   price: number;
 }
 
+// FIXTURE: computed-local-var-map
+// Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
+//   computed(() => { const localVar = filtered; return localVar.map(fn) }) → derive(..., ({ filtered }) => { const localVar = filtered; return localVar.map(fn) })
+// Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
+//   so `localVar` is a plain array. The .map() must remain untransformed.
+//   This is a negative test for reactive .map() detection on local aliases.
 export default pattern<{ items: Item[] }>(({ items }) => {
   const filtered = computed(() => items.filter((i) => i.price > 100));
 

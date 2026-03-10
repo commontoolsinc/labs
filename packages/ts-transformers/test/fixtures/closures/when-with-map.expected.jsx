@@ -15,6 +15,13 @@ interface PatternInput {
     items: Cell<Default<Item[], [
     ]>>;
 }
+// FIXTURE: when-with-map
+// Verifies: && operator becomes when() with reactive map as the value
+//   showItems && items.map(...) → when(showItems, items.mapWithPattern(...))
+//   items.map((item) => ...) → items.mapWithPattern(pattern(...))
+// Context: when(condition, value) returns value if condition is truthy, else
+//   condition. The value branch contains a reactive .map() that must be
+//   transformed to mapWithPattern with proper schema injection.
 export default pattern((__ct_pattern_input) => {
     const showItems = __ct_pattern_input.key("showItems");
     const items = __ct_pattern_input.key("items");

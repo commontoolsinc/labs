@@ -16,6 +16,10 @@ interface State {
     card: Card;
     isEditing: Cell<boolean>;
 }
+// FIXTURE: inline-action-in-ternary-branch
+// Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
+//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
+// Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern((state) => {
     return {
         [UI]: (<ct-card>

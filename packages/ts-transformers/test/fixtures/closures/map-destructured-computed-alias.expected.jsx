@@ -8,6 +8,11 @@ interface Item {
 interface State {
     items: Item[];
 }
+// FIXTURE: map-destructured-computed-alias
+// Verifies: computed property key with a const-asserted identifier is lowered via derive()
+//   { [dynamicKey]: val } → __ct_val_key = dynamicKey; derive(...element[__ct_val_key])
+//   .map(fn) → .mapWithPattern(pattern(...), {})
+// Context: dynamicKey is a const-asserted string, not a function call — still uses derive() pattern
 export default pattern((state) => {
     return {
         [UI]: (<div>

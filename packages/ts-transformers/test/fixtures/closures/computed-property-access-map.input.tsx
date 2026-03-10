@@ -13,6 +13,13 @@ interface Item {
   done: boolean;
 }
 
+// FIXTURE: computed-property-access-map
+// Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
+//   computed(() => result.tasks.map(fn)) → derive(..., { result: { tasks: result.key("tasks") } }, ({ result }) => result.tasks.map(fn))
+// Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
+//   so `result.tasks` is a plain array. The .map() must remain untransformed.
+//   This is a negative test for reactive .map() detection on property access paths.
+//   Note the captures use result.key("tasks") to extract the needed sub-property.
 export default pattern<{ items: Item[] }>(({ items }) => {
   const result = computed(() => ({
     tasks: items.filter((i) => !i.done),
