@@ -8,8 +8,8 @@ import {
   isStorableValue,
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
+  shallowStorableFromNativeValue,
   toDeepStorableValue,
-  toStorableValue,
 } from "@commontools/memory/storable-value";
 import { StorableError } from "@commontools/memory/storable-native-instances";
 import {
@@ -23,7 +23,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
  * Runtime construction/disposal correctly propagates flags to the ambient
- * storable-value config, and that `toStorableValue`/`toDeepStorableValue`
+ * storable-value config, and that `shallowStorableFromNativeValue`/`toDeepStorableValue`
  * respect the `richStorableValues` gate.
  */
 describe("ExperimentalOptions", () => {
@@ -70,20 +70,20 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("toStorableValue with richStorableValues flag", () => {
+  describe("shallowStorableFromNativeValue with richStorableValues flag", () => {
     it("works normally when flag is OFF", () => {
       setExperimentalStorableConfig({ richStorableValues: false });
-      expect(toStorableValue("hello")).toBe("hello");
-      expect(toStorableValue(42)).toBe(42);
-      expect(toStorableValue(null)).toBe(null);
-      expect(toStorableValue(true)).toBe(true);
-      expect(toStorableValue({ a: 1 })).toEqual({ a: 1 });
+      expect(shallowStorableFromNativeValue("hello")).toBe("hello");
+      expect(shallowStorableFromNativeValue(42)).toBe(42);
+      expect(shallowStorableFromNativeValue(null)).toBe(null);
+      expect(shallowStorableFromNativeValue(true)).toBe(true);
+      expect(shallowStorableFromNativeValue({ a: 1 })).toEqual({ a: 1 });
     });
 
     it("converts Error to @Error object when flag is OFF", () => {
       setExperimentalStorableConfig({ richStorableValues: false });
       const err = new Error("test error");
-      const result = toStorableValue(err);
+      const result = shallowStorableFromNativeValue(err);
       expect(result).toEqual({
         "@Error": {
           name: "Error",
@@ -96,14 +96,14 @@ describe("ExperimentalOptions", () => {
 
     it("converts undefined in arrays to null when flag is OFF", () => {
       setExperimentalStorableConfig({ richStorableValues: false });
-      const result = toStorableValue([1, undefined, 3]);
+      const result = shallowStorableFromNativeValue([1, undefined, 3]);
       expect(result).toEqual([1, null, 3]);
     });
 
     it("wraps Error in StorableError when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const err = new Error("test error");
-      const result = toStorableValue(err);
+      const result = shallowStorableFromNativeValue(err);
       expect(result).toBeInstanceOf(StorableError);
       expect((result as StorableError).error.message).toBe("test error");
     });
@@ -111,7 +111,7 @@ describe("ExperimentalOptions", () => {
     it("preserves undefined in arrays when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const arr = [1, undefined, 3];
-      const result = toStorableValue(arr);
+      const result = shallowStorableFromNativeValue(arr);
       expect(result).toEqual(arr);
       expect((result as unknown[])[1]).toBe(undefined);
     });
@@ -120,7 +120,7 @@ describe("ExperimentalOptions", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       resetExperimentalStorableConfig();
       const err = new Error("test");
-      const result = toStorableValue(err);
+      const result = shallowStorableFromNativeValue(err);
       expect(result).toHaveProperty("@Error");
     });
   });

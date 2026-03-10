@@ -114,7 +114,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * the result if it is an object or array. If the value is already a frozen
  * `StorableValue`, returns it as-is (identity optimization).
  *
- * This function is self-contained (does not delegate back to `toStorableValue`)
+ * This function is self-contained (does not delegate back to `shallowStorableFromNativeValue`)
  * to avoid circular dispatch when the `richStorableValues` flag is ON.
  *
  * Used when the `richStorableValues` flag is ON.

@@ -20,7 +20,7 @@ import {
  * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
  */
 export interface ExperimentalStorableConfig {
-  /** When `true`, `toStorableValue` and `toDeepStorableValue` use the
+  /** When `true`, `shallowStorableFromNativeValue` and `toDeepStorableValue` use the
    *  extended type system (bigint, Map, Set, Uint8Array, Date, etc.). */
   richStorableValues: boolean;
 }
@@ -201,7 +201,7 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
 
     case "number": {
       // Finite numbers are storable. Note: `-0` is accepted because it gets
-      // normalized to `0` during conversion (see `toStorableValue()`).
+      // normalized to `0` during conversion (see `shallowStorableFromNativeValue()`).
       // `NaN` and `Infinity` are not JSON-encodable and thus not storable.
       return Number.isFinite(value);
     }
@@ -269,18 +269,20 @@ export function canBeStored(
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
-export function toStorableValue(
+export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
   if (currentConfig.richStorableValues) {
     return toRichStorableValue(value, freeze);
   }
-  return toStorableValueLegacy(value);
+  return shallowStorableFromNativeValueLegacy(value);
 }
 
-/** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
-function toStorableValueLegacy(value: unknown): StorableValueLayer {
+/** Legacy implementation of `shallowStorableFromNativeValue()` for the JSON-only type system. */
+function shallowStorableFromNativeValueLegacy(
+  value: unknown,
+): StorableValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -371,7 +373,7 @@ const PROCESSING = Symbol("PROCESSING");
 
 /**
  * Recursively converts a value to storable (JSON-encodable) form. Like
- * `toStorableValue()` but also recursively processes array elements and object
+ * `shallowStorableFromNativeValue()` but also recursively processes array elements and object
  * properties.
  *
  * @param value - The value to convert.
@@ -410,7 +412,7 @@ function toDeepStorableValueInternal(
   inArray: boolean,
 ): StorableValue | typeof OMIT {
   // Track the original value for cycle detection and caching. This is important
-  // because `toStorableValue()` may return a different object (e.g., for sparse
+  // because `shallowStorableFromNativeValue()` may return a different object (e.g., for sparse
   // arrays or values with `toJSON()`), but circular references and shared
   // references point to the original.
   const isOriginalRecord = isRecord(original);
@@ -449,7 +451,7 @@ function toDeepStorableValueInternal(
   // directly since toDeepStorableValueInternal is part of the legacy path.
   let value: StorableValueLayer;
   try {
-    value = toStorableValueLegacy(original);
+    value = shallowStorableFromNativeValueLegacy(original);
   } catch (e) {
     // Clean up converted map before propagating error.
     if (isOriginalRecord) {

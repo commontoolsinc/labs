@@ -153,7 +153,7 @@ for (const canonicalHashing of [false, true]) {
 
     describe("SchemaObjectTraverser missing value handling", () => {
       // Missing values are handled consistently with other value transforms
-      // (toJSON, toStorableValue, etc.):
+      // (toJSON, shallowStorableFromNativeValue, etc.):
       // - Arrays: null is inserted for missing elements
       // - Objects: undefined is assigned for missing properties
 
@@ -196,7 +196,7 @@ for (const canonicalHashing of [false, true]) {
           value: docValue,
         });
 
-        // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+        // Missing elements become null (consistent with toJSON, shallowStorableFromNativeValue, etc.)
         expect(result).toEqual(["present", null, "also-present"]);
       });
 
@@ -343,7 +343,7 @@ for (const canonicalHashing of [false, true]) {
           value: docValue,
         });
 
-        // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+        // Missing elements become null (consistent with toJSON, shallowStorableFromNativeValue, etc.)
         expect(result).toEqual(["present", null, "also-present"]);
       });
 

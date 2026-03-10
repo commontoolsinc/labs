@@ -5,8 +5,8 @@ import {
   isStorableValue,
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
+  shallowStorableFromNativeValue,
   toDeepStorableValue,
-  toStorableValue,
 } from "../storable-value.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
@@ -220,47 +220,47 @@ describe("storable-value", () => {
     });
   });
 
-  describe("toStorableValue", () => {
+  describe("shallowStorableFromNativeValue", () => {
     describe("passes through JSON-encodable values", () => {
       it("passes through booleans", () => {
-        expect(toStorableValue(true)).toBe(true);
-        expect(toStorableValue(false)).toBe(false);
+        expect(shallowStorableFromNativeValue(true)).toBe(true);
+        expect(shallowStorableFromNativeValue(false)).toBe(false);
       });
 
       it("passes through strings", () => {
-        expect(toStorableValue("hello")).toBe("hello");
-        expect(toStorableValue("")).toBe("");
+        expect(shallowStorableFromNativeValue("hello")).toBe("hello");
+        expect(shallowStorableFromNativeValue("")).toBe("");
       });
 
       it("passes through finite numbers", () => {
-        expect(toStorableValue(42)).toBe(42);
-        expect(toStorableValue(-3.14)).toBe(-3.14);
-        expect(toStorableValue(0)).toBe(0);
+        expect(shallowStorableFromNativeValue(42)).toBe(42);
+        expect(shallowStorableFromNativeValue(-3.14)).toBe(-3.14);
+        expect(shallowStorableFromNativeValue(0)).toBe(0);
       });
 
       it("converts negative zero to positive zero", () => {
-        const result = toStorableValue(-0);
+        const result = shallowStorableFromNativeValue(-0);
         expect(result).toBe(0);
         expect(Object.is(result, -0)).toBe(false);
         expect(Object.is(result, 0)).toBe(true);
       });
 
       it("passes through null", () => {
-        expect(toStorableValue(null)).toBe(null);
+        expect(shallowStorableFromNativeValue(null)).toBe(null);
       });
 
       it("passes through plain objects", () => {
         const obj = { a: 1, b: "two" };
-        expect(toStorableValue(obj)).toBe(obj);
+        expect(shallowStorableFromNativeValue(obj)).toBe(obj);
       });
 
       it("passes through dense arrays", () => {
         const arr = [1, 2, 3];
-        expect(toStorableValue(arr)).toBe(arr);
+        expect(shallowStorableFromNativeValue(arr)).toBe(arr);
       });
 
       it("passes through undefined", () => {
-        expect(toStorableValue(undefined)).toBe(undefined);
+        expect(shallowStorableFromNativeValue(undefined)).toBe(undefined);
       });
     });
 
@@ -269,7 +269,7 @@ describe("storable-value", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
-        const result = toStorableValue(sparse) as unknown[];
+        const result = shallowStorableFromNativeValue(sparse) as unknown[];
         expect(result).toBe(sparse); // sparse arrays pass through as-is
         expect(result[0]).toBe(1);
         expect(1 in result).toBe(false); // hole preserved
@@ -282,7 +282,7 @@ describe("storable-value", () => {
         sparse[0] = "a";
         sparse[3] = "b"; // holes at indices 1 and 2
         sparse[5] = "c"; // hole at index 4
-        const result = toStorableValue(sparse) as unknown[];
+        const result = shallowStorableFromNativeValue(sparse) as unknown[];
         expect(result[0]).toBe("a");
         expect(1 in result).toBe(false);
         expect(2 in result).toBe(false);
@@ -293,14 +293,14 @@ describe("storable-value", () => {
       });
 
       it("converts undefined elements to null", () => {
-        const result = toStorableValue([1, undefined, 3]);
+        const result = shallowStorableFromNativeValue([1, undefined, 3]);
         expect(result).toEqual([1, null, 3]);
       });
 
       it("throws for arrays with named properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
-        expect(() => toStorableValue(arr)).toThrow(
+        expect(() => shallowStorableFromNativeValue(arr)).toThrow(
           "Cannot store array with enumerable named properties",
         );
       });
@@ -311,7 +311,7 @@ describe("storable-value", () => {
         sparse[0] = 1;
         sparse[2] = 3;
         sparse.foo = "bar";
-        expect(() => toStorableValue(sparse)).toThrow(
+        expect(() => shallowStorableFromNativeValue(sparse)).toThrow(
           "Cannot store array with enumerable named properties",
         );
       });
@@ -319,41 +319,41 @@ describe("storable-value", () => {
 
     describe("throws for non-convertible values", () => {
       it("throws for NaN", () => {
-        expect(() => toStorableValue(NaN)).toThrow(
+        expect(() => shallowStorableFromNativeValue(NaN)).toThrow(
           "Cannot store non-finite number",
         );
       });
 
       it("throws for Infinity", () => {
-        expect(() => toStorableValue(Infinity)).toThrow(
+        expect(() => shallowStorableFromNativeValue(Infinity)).toThrow(
           "Cannot store non-finite number",
         );
-        expect(() => toStorableValue(-Infinity)).toThrow(
+        expect(() => shallowStorableFromNativeValue(-Infinity)).toThrow(
           "Cannot store non-finite number",
         );
       });
 
       it("throws for bigint", () => {
-        expect(() => toStorableValue(BigInt(123))).toThrow(
+        expect(() => shallowStorableFromNativeValue(BigInt(123))).toThrow(
           "Cannot store bigint",
         );
       });
 
       it("throws for symbol", () => {
-        expect(() => toStorableValue(Symbol("test"))).toThrow(
+        expect(() => shallowStorableFromNativeValue(Symbol("test"))).toThrow(
           "Cannot store symbol",
         );
       });
 
       it("throws for functions without toJSON", () => {
-        expect(() => toStorableValue(() => {})).toThrow(
+        expect(() => shallowStorableFromNativeValue(() => {})).toThrow(
           "Cannot store function per se",
         );
       });
 
       it("throws for class instances without toJSON", () => {
         class NoToJSON {}
-        expect(() => toStorableValue(new NoToJSON())).toThrow(
+        expect(() => shallowStorableFromNativeValue(new NoToJSON())).toThrow(
           "Cannot store instance per se",
         );
       });
@@ -362,7 +362,7 @@ describe("storable-value", () => {
     describe("converts Error instances to @Error wrapper", () => {
       it("converts basic Error with name, message, and stack", () => {
         const error = new Error("test message");
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
@@ -374,7 +374,7 @@ describe("storable-value", () => {
 
       it("preserves Error subclass name", () => {
         const error = new TypeError("type error message");
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
@@ -389,7 +389,7 @@ describe("storable-value", () => {
         };
         error.code = 404;
         error.detail = "Not Found";
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
@@ -400,7 +400,7 @@ describe("storable-value", () => {
 
       it("converts RangeError", () => {
         const error = new RangeError("out of range");
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
@@ -410,7 +410,7 @@ describe("storable-value", () => {
 
       it("converts SyntaxError", () => {
         const error = new SyntaxError("invalid syntax");
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
@@ -421,12 +421,12 @@ describe("storable-value", () => {
       it("preserves cause property from Error constructor (ES2022)", () => {
         const cause = new Error("root cause");
         const error = new Error("wrapper", { cause });
-        const result = toStorableValue(error) as {
+        const result = shallowStorableFromNativeValue(error) as {
           "@Error": Record<string, unknown>;
         };
 
         expect(result["@Error"].message).toBe("wrapper");
-        // cause is captured but not recursively converted by toStorableValue
+        // cause is captured but not recursively converted by shallowStorableFromNativeValue
         // (shallow conversion) - the cause is still a raw Error here
         expect(result["@Error"].cause).toBe(cause);
       });
@@ -436,7 +436,7 @@ describe("storable-value", () => {
       it("converts functions with toJSON", () => {
         const fn = () => {};
         (fn as any).toJSON = () => "converted function";
-        expect(toStorableValue(fn)).toBe("converted function");
+        expect(shallowStorableFromNativeValue(fn)).toBe("converted function");
       });
 
       it("converts class instances with toJSON", () => {
@@ -445,13 +445,15 @@ describe("storable-value", () => {
             return { converted: true };
           }
         }
-        const result = toStorableValue(new WithToJSON());
+        const result = shallowStorableFromNativeValue(new WithToJSON());
         expect(result).toEqual({ converted: true });
       });
 
       it("converts Date instances (which have toJSON)", () => {
         const date = new Date("2024-01-15T12:00:00.000Z");
-        expect(toStorableValue(date)).toBe("2024-01-15T12:00:00.000Z");
+        expect(shallowStorableFromNativeValue(date)).toBe(
+          "2024-01-15T12:00:00.000Z",
+        );
       });
 
       it("converts regular objects with toJSON", () => {
@@ -461,14 +463,14 @@ describe("storable-value", () => {
             return { exposed: true };
           },
         };
-        const result = toStorableValue(obj);
+        const result = shallowStorableFromNativeValue(obj);
         expect(result).toEqual({ exposed: true });
       });
 
       it("converts arrays with toJSON", () => {
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
-        expect(toStorableValue(arr)).toBe("custom array");
+        expect(shallowStorableFromNativeValue(arr)).toBe("custom array");
       });
 
       it("throws if toJSON returns a non-storable value", () => {
@@ -477,7 +479,7 @@ describe("storable-value", () => {
             return Symbol("bad");
           }
         }
-        expect(() => toStorableValue(new BadToJSON())).toThrow(
+        expect(() => shallowStorableFromNativeValue(new BadToJSON())).toThrow(
           "`toJSON()` on object returned something other than a storable value",
         );
       });
@@ -488,9 +490,10 @@ describe("storable-value", () => {
             return () => {};
           }
         }
-        expect(() => toStorableValue(new ReturnsFunction())).toThrow(
-          "`toJSON()` on object returned something other than a storable value",
-        );
+        expect(() => shallowStorableFromNativeValue(new ReturnsFunction()))
+          .toThrow(
+            "`toJSON()` on object returned something other than a storable value",
+          );
       });
 
       it("throws if toJSON returns another instance", () => {
@@ -499,9 +502,10 @@ describe("storable-value", () => {
             return new Map();
           }
         }
-        expect(() => toStorableValue(new ReturnsInstance())).toThrow(
-          "`toJSON()` on object returned something other than a storable value",
-        );
+        expect(() => shallowStorableFromNativeValue(new ReturnsInstance()))
+          .toThrow(
+            "`toJSON()` on object returned something other than a storable value",
+          );
       });
     });
   });
@@ -922,65 +926,69 @@ describe("storable-value", () => {
       resetExperimentalStorableConfig();
     });
 
-    describe("toStorableValue", () => {
+    describe("shallowStorableFromNativeValue", () => {
       it("freezes plain objects by default", () => {
-        const result = toStorableValue({ a: 1 });
+        const result = shallowStorableFromNativeValue({ a: 1 });
         expect(Object.isFrozen(result)).toBe(true);
       });
 
       it("freezes arrays by default", () => {
-        const result = toStorableValue([1, 2, 3]);
+        const result = shallowStorableFromNativeValue([1, 2, 3]);
         expect(Object.isFrozen(result)).toBe(true);
       });
 
       it("does not freeze plain objects when freeze=false", () => {
-        const result = toStorableValue({ a: 1 }, false);
+        const result = shallowStorableFromNativeValue({ a: 1 }, false);
         expect(Object.isFrozen(result)).toBe(false);
       });
 
       it("does not freeze arrays when freeze=false", () => {
-        const result = toStorableValue([1, 2, 3], false);
+        const result = shallowStorableFromNativeValue([1, 2, 3], false);
         expect(Object.isFrozen(result)).toBe(false);
       });
 
       it("wraps Error even when freeze=false", () => {
         const error = new Error("test");
-        const result = toStorableValue(error, false);
+        const result = shallowStorableFromNativeValue(error, false);
         expect(result).not.toBe(error);
         expect(Object.isFrozen(result)).toBe(false);
       });
 
       it("primitives are unaffected by freeze parameter", () => {
-        expect(toStorableValue(42, false)).toBe(42);
-        expect(toStorableValue("hello", false)).toBe("hello");
-        expect(toStorableValue(true, false)).toBe(true);
-        expect(toStorableValue(null, false)).toBe(null);
-        expect(toStorableValue(undefined, false)).toBe(undefined);
-        expect(toStorableValue(BigInt(42), false)).toBe(BigInt(42));
+        expect(shallowStorableFromNativeValue(42, false)).toBe(42);
+        expect(shallowStorableFromNativeValue("hello", false)).toBe("hello");
+        expect(shallowStorableFromNativeValue(true, false)).toBe(true);
+        expect(shallowStorableFromNativeValue(null, false)).toBe(null);
+        expect(shallowStorableFromNativeValue(undefined, false)).toBe(
+          undefined,
+        );
+        expect(shallowStorableFromNativeValue(BigInt(42), false)).toBe(
+          BigInt(42),
+        );
       });
 
       it("does not freeze the original array", () => {
         const arr = [1, 2, 3];
-        toStorableValue(arr, true);
+        shallowStorableFromNativeValue(arr, true);
         expect(Object.isFrozen(arr)).toBe(false);
       });
 
       it("does not freeze the original plain object", () => {
         const obj = { a: 1, b: 2 };
-        toStorableValue(obj, true);
+        shallowStorableFromNativeValue(obj, true);
         expect(Object.isFrozen(obj)).toBe(false);
       });
 
       it("returns a frozen copy for arrays when freeze=true", () => {
         const arr = [1, 2, 3];
-        const result = toStorableValue(arr, true);
+        const result = shallowStorableFromNativeValue(arr, true);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result).not.toBe(arr);
       });
 
       it("returns a frozen copy for plain objects when freeze=true", () => {
         const obj = { a: 1, b: 2 };
-        const result = toStorableValue(obj, true);
+        const result = shallowStorableFromNativeValue(obj, true);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result).not.toBe(obj);
       });
@@ -989,12 +997,12 @@ describe("storable-value", () => {
         const fn = () => {};
         (fn as unknown as { toJSON: () => string }).toJSON = () =>
           "converted fn";
-        expect(toStorableValue(fn)).toBe("converted fn");
+        expect(shallowStorableFromNativeValue(fn)).toBe("converted fn");
       });
 
       it("returns mutable shallow copy of frozen plain object when freeze=false", () => {
         const frozen = Object.freeze({ a: 1, b: "two" });
-        const result = toStorableValue(frozen, false) as Record<
+        const result = shallowStorableFromNativeValue(frozen, false) as Record<
           string,
           unknown
         >;
@@ -1008,7 +1016,10 @@ describe("storable-value", () => {
 
       it("returns mutable shallow copy of frozen array when freeze=false", () => {
         const frozen = Object.freeze([1, 2, 3]);
-        const result = toStorableValue(frozen, false) as unknown[];
+        const result = shallowStorableFromNativeValue(
+          frozen,
+          false,
+        ) as unknown[];
         expect(Object.isFrozen(result)).toBe(false);
         expect(result).not.toBe(frozen);
         expect(Array.isArray(result)).toBe(true);
@@ -1021,7 +1032,7 @@ describe("storable-value", () => {
       it("preserves sparse holes in frozen array copy when freeze=false", () => {
         const arr = [1, , 3]; // sparse array with hole at index 1
         Object.freeze(arr);
-        const result = toStorableValue(arr, false) as unknown[];
+        const result = shallowStorableFromNativeValue(arr, false) as unknown[];
         expect(Object.isFrozen(result)).toBe(false);
         expect(result.length).toBe(3);
         expect(0 in result).toBe(true);
@@ -1031,7 +1042,7 @@ describe("storable-value", () => {
 
       it("returns frozen shallow copy of mutable plain object when freeze=true", () => {
         const mutable = { x: 1, y: 2 };
-        const result = toStorableValue(mutable, true);
+        const result = shallowStorableFromNativeValue(mutable, true);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result).not.toBe(mutable);
         // Original stays mutable.
@@ -1040,7 +1051,7 @@ describe("storable-value", () => {
 
       it("returns frozen shallow copy of mutable array when freeze=true", () => {
         const mutable = [10, 20, 30];
-        const result = toStorableValue(mutable, true);
+        const result = shallowStorableFromNativeValue(mutable, true);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result).not.toBe(mutable);
         expect(Object.isFrozen(mutable)).toBe(false);
@@ -1048,25 +1059,25 @@ describe("storable-value", () => {
 
       it("returns already-frozen object as-is when freeze=true", () => {
         const frozen = Object.freeze({ a: 1 });
-        const result = toStorableValue(frozen, true);
+        const result = shallowStorableFromNativeValue(frozen, true);
         expect(result).toBe(frozen); // identity -- no copy needed
       });
 
       it("returns already-frozen array as-is when freeze=true", () => {
         const frozen = Object.freeze([1, 2]);
-        const result = toStorableValue(frozen, true);
+        const result = shallowStorableFromNativeValue(frozen, true);
         expect(result).toBe(frozen); // identity -- no copy needed
       });
 
       it("returns mutable object as-is when freeze=false", () => {
         const mutable = { a: 1 };
-        const result = toStorableValue(mutable, false);
+        const result = shallowStorableFromNativeValue(mutable, false);
         expect(result).toBe(mutable); // identity -- no copy needed
       });
 
       it("returns mutable array as-is when freeze=false", () => {
         const mutable = [1, 2];
-        const result = toStorableValue(mutable, false);
+        const result = shallowStorableFromNativeValue(mutable, false);
         expect(result).toBe(mutable); // identity -- no copy needed
       });
     });
