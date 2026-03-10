@@ -163,6 +163,36 @@ describe("Pattern Runner - findIndex", () => {
     expect((value as any).idx).toBe(1); // items[1] === 5
   });
 
+  it("should throw TypeError on non-array input", async () => {
+    // The throw surfaces as a scheduler error log (not a rejected promise),
+    // so we verify the pattern fails to produce a result.
+    const findPattern = pattern<{ items: any }>(
+      ({ items }) => {
+        const idx = (items as any).findIndex((x: number) => x > 0);
+        return { idx };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "findindex-non-array",
+      {
+        type: "object",
+        properties: { idx: { type: "number" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    runtime.run(tx, findPattern, {
+      items: 42 as any,
+    }, resultCell);
+    tx.commit();
+
+    // The pattern errors out — idx is never set
+    const value = resultCell.get();
+    expect((value as any)?.idx).toBeUndefined();
+  });
+
   it("should find first match in objects", async () => {
     interface Item {
       name: string;

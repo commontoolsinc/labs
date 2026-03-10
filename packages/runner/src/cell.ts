@@ -1525,7 +1525,9 @@ export class CellImpl<T extends StorableValue>
     // so normal JS comparisons work. Tradeoff: reruns the full search on any
     // array change. For per-element reactivity, use filter(pred)[0] instead.
     return lift((list: any[]) => {
-      if (!Array.isArray(list)) return -1;
+      if (!Array.isArray(list)) {
+        throw new TypeError("findIndex called on non-array value");
+      }
       return list.findIndex(fn);
     })(this as unknown as OpaqueRef<any>);
   }
