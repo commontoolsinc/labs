@@ -1304,7 +1304,7 @@ describe("data-updating", () => {
       cell.withTx(tx).setRaw({ value: 42 });
       const raw = cell.withTx(tx).getRaw();
       expect(raw?.value).toBe(42);
-      cell.withTx(tx).setRawStorable(raw);
+      cell.withTx(tx).setRawUntyped(raw);
       expect(cell.withTx(tx).get().value).toBe(42);
     });
   });

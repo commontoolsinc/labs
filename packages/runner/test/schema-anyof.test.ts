@@ -462,7 +462,7 @@ describe("Schema - AnyOf Support", () => {
           undefined,
           tx,
         );
-        withLinks.setRawStorable({
+        withLinks.setRawUntyped({
           type: "vnode",
           name: "div",
           props: {

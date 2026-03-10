@@ -46,7 +46,7 @@ describe("Multi-space Runtime", () => {
       undefined,
       tx2,
     );
-    b.setRawStorable(a.getAsLink());
+    b.setRawUntyped(a.getAsLink());
     tx1.commit();
     tx2.commit();
     await runtime.idle();

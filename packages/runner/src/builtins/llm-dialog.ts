@@ -1989,8 +1989,8 @@ export function llmDialog(
       // We are carrying the existing pending state over, in case the result
       // cell was already loaded. We don't want to overwrite it.
       // Stream markers ({$stream: true}) don't match the schema type, so use
-      // setRawStorable to bypass T.
-      result.setRawStorable({
+      // setRawUntyped to bypass T.
+      result.setRawUntyped({
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },

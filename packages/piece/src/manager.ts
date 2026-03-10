@@ -920,7 +920,7 @@ export class PieceManager {
         targetInputCell = sourceCell.key("argument");
       }
 
-      targetInputCell.key(...targetPath).resolveAsCell().setRawStorable(
+      targetInputCell.key(...targetPath).resolveAsCell().setRawUntyped(
         linkCell.getAsLink({
           base: targetInputCell,
           includeSchema: true,

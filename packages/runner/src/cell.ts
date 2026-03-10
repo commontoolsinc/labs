@@ -188,9 +188,15 @@ declare module "@commontools/api" {
     /** Read the cell's raw storable value as a mutable deep copy. */
     getRawMutable(options?: IReadOptions): T | undefined;
     setRaw(value: T & StorableValue): void;
-    /** Write a raw StorableValue that may not match T (e.g., links, stream
-     *  markers). Use `setRaw` when the value matches the cell's schema type. */
-    setRawStorable(value: StorableValue): void;
+    /**
+     * Sets the raw cell value to any `StorableValue`, bypassing the cell's
+     * type parameter `T`. Use this when writing pre-formed storable data
+     * (e.g., `SigilLink` references, stream markers) that is valid at the
+     * storage layer but does not conform to the cell's schema type.
+     *
+     * Prefer `setRaw()` when the value matches `T`.
+     */
+    setRawUntyped(value: StorableValue): void;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -296,7 +302,7 @@ const cellMethods = new Set<
   "getRaw",
   "getRawMutable",
   "setRaw",
-  "setRawStorable",
+  "setRawUntyped",
   "getSourceCell",
   "setSourceCell",
   "getArgumentCell",
@@ -1204,10 +1210,10 @@ export class CellImpl<T extends StorableValue>
   }
 
   setRaw(value: T & StorableValue): void {
-    this.setRawStorable(value);
+    this.setRawUntyped(value);
   }
 
-  setRawStorable(value: StorableValue): void {
+  setRawUntyped(value: StorableValue): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to

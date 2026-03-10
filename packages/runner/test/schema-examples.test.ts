@@ -138,7 +138,7 @@ describe("Schema - Examples", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      cell.withTx(tx).setRawStorable({
+      cell.withTx(tx).setRawUntyped({
         value: "root",
         current: innerCell.getAsLink(),
       } as StorableValue);

@@ -851,7 +851,7 @@ describe("Cell success callbacks", () => {
           schema,
           tx,
         );
-        arrayCell.setRawStorable([target.getAsLink()]);
+        arrayCell.setRawUntyped([target.getAsLink()]);
 
         const result = arrayCell.get();
         const first = result[0] as unknown as Writable<{ foo: number }>;

@@ -33,6 +33,6 @@ export function unless(
       ? inputsWithLog.key("condition").getAsLink({ base: result })
       : inputsWithLog.key("fallback").getAsLink({ base: result });
 
-    resultWithLog.setRawStorable(ref);
+    resultWithLog.setRawUntyped(ref);
   };
 }
