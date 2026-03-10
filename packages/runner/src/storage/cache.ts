@@ -52,6 +52,8 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
+  MemoryVersion,
+  OptStorageValue,
   PullError,
   Retract,
   StorageValue,
@@ -1947,12 +1949,30 @@ export interface Options {
    * (Temporary) Space identity.
    */
   spaceIdentity?: Signer;
+
+  /**
+   * Storage implementation selection during the v1/v2 cutover.
+   */
+  memoryVersion?: MemoryVersion;
 }
+
+const assertV1StorageActive = (
+  memoryVersion: MemoryVersion,
+  context: string,
+): void => {
+  if (memoryVersion === "v2") {
+    throw new Error(
+      `v1 storage code path reached with memoryVersion="v2": ${context}. ` +
+        "V2 storage wiring is not implemented yet.",
+    );
+  }
+};
 
 export class StorageManager implements IStorageManager {
   address: URL;
   as: Signer;
   id: string;
+  readonly memoryVersion: MemoryVersion;
   settings: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
@@ -1974,6 +1994,7 @@ export class StorageManager implements IStorageManager {
       address,
       as,
       id = crypto.randomUUID(),
+      memoryVersion = "v1",
       settings = defaultSettings,
       spaceIdentity,
     }: Options,
@@ -1982,6 +2003,7 @@ export class StorageManager implements IStorageManager {
     this.settings = settings;
     this.as = as;
     this.id = id;
+    this.memoryVersion = memoryVersion;
     this.spaceIdentity = spaceIdentity;
   }
 
@@ -1991,6 +2013,7 @@ export class StorageManager implements IStorageManager {
    * in order to cluster connections for the space in the same group.
    */
   open(space: MemorySpace) {
+    assertV1StorageActive(this.memoryVersion, "StorageManager.open");
     const provider = this.#providers.get(space);
     if (!provider) {
       const provider = this.connect(space);
@@ -2001,6 +2024,7 @@ export class StorageManager implements IStorageManager {
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
+    assertV1StorageActive(this.memoryVersion, "StorageManager.connect");
     const { id, address, as, settings } = this;
 
     // Determine the correct spaceIdentity for this space
@@ -2036,6 +2060,7 @@ export class StorageManager implements IStorageManager {
    * multiple spaces but writing only to one space.
    */
   edit(): IStorageTransaction {
+    assertV1StorageActive(this.memoryVersion, "StorageManager.edit");
     return Transaction.create(this);
   }
 

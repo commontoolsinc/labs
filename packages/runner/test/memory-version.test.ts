@@ -3,9 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import {
-  type IStorageNotification,
-} from "../src/storage/interface.ts";
+import { type IStorageNotification } from "../src/storage/interface.ts";
 import {
   createStorageNotificationRelay,
   StorageNotificationRelay,

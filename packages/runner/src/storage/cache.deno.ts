@@ -10,6 +10,18 @@ import type { MemorySpace } from "@commontools/memory/interface";
 import type { IStorageSubscription } from "./interface.ts";
 export * from "./cache.ts";
 
+const assertV1StorageActive = (
+  memoryVersion: "v1" | "v2",
+  context: string,
+): void => {
+  if (memoryVersion === "v2") {
+    throw new Error(
+      `v1 storage code path reached with memoryVersion="v2": ${context}. ` +
+        "V2 storage wiring is not implemented yet.",
+    );
+  }
+};
+
 export class StorageManagerEmulator extends BaseStorageManager {
   #session?: Consumer.MemoryConsumer<MemorySpace>;
   #subscription = StorageSubscription.create();
@@ -18,6 +30,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
   #providers: Map<string, Provider> = new Map();
 
   session() {
+    assertV1StorageActive(this.memoryVersion, "StorageManagerEmulator.session");
     if (!this.#session) {
       this.#memoryProvider = MemoryProvider.emulate({
         serviceDid: this.as.did(),
@@ -30,6 +43,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
     return this.#session;
   }
   override connect(space: MemorySpace) {
+    assertV1StorageActive(this.memoryVersion, "StorageManagerEmulator.connect");
     return Provider.open({
       space,
       session: this.session(),
@@ -38,6 +52,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
   }
 
   mount(space: MemorySpace) {
+    assertV1StorageActive(this.memoryVersion, "StorageManagerEmulator.mount");
     return this.session().mount(space);
   }
 
