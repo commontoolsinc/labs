@@ -6,6 +6,7 @@ import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
 export type { JSONValue };
+export type MemoryVersion = "v1" | "v2";
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;

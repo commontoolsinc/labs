@@ -19,6 +19,7 @@ import type {
   Unit,
   URI,
   Variant,
+  MemoryVersion,
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
@@ -30,6 +31,7 @@ export type {
   Fact,
   IClaim,
   MediaType,
+  MemoryVersion,
   MemorySpace,
   Result,
   SchemaPathSelector,
@@ -40,7 +42,6 @@ export type {
 };
 
 export type ChangeGroup = unknown;
-export type MemoryVersion = "v1" | "v2";
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
