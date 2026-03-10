@@ -13,8 +13,8 @@ server-side validation, conflict handling, and the two-tier client state model
 
 ## 3.1 Operations
 
-An **Operation** describes a single intended mutation (or read assertion) within
-a transaction. Every operation targets an entity by its `id`.
+An **Operation** describes a single intended mutation within a transaction.
+Every operation targets an entity by its `id`.
 
 Operations do **not** include a `parent` field. The server resolves parent
 references from its own head state when constructing facts (see §3.7). This
@@ -22,7 +22,7 @@ eliminates branded Reference objects from the client-side wire format and
 removes a class of bugs (wrong parent hash, stale parent).
 
 ```typescript
-// Full replacement — set the entity to a new value
+// Full replacement at the entity root
 interface SetOperation {
   op: "set";
   id: EntityId;
@@ -36,24 +36,18 @@ interface PatchWriteOperation {
   patches: PatchOp[];  // Ordered list of patch operations
 }
 
-// Tombstone — mark the entity as deleted
+// Tombstone at the entity root
 interface DeleteOperation {
   op: "delete";
   id: EntityId;
 }
 
-// Read assertion — declare a read dependency without mutating
-interface ClaimOperation {
-  op: "claim";
-  id: EntityId;
-}
-
-type Operation = SetOperation | PatchWriteOperation | DeleteOperation | ClaimOperation;
+type Operation = SetOperation | PatchWriteOperation | DeleteOperation;
 ```
 
 **`set`** replaces the entity's entire value. The stored fact records the
-complete new state. This is the simplest mutation and the only one required for
-a minimal implementation.
+complete new state. In path terms, `set` is equivalent to a `replace` at the
+entity root (`path: []`).
 
 **`patch`** applies an ordered list of incremental operations to the entity's
 current state (`PatchWriteOperation`). The stored fact records the patch ops
@@ -71,13 +65,14 @@ type PatchOp =
 ```
 
 **`delete`** tombstones the entity. The resulting fact has no `value`. A deleted
-entity can be written to again.
+entity can be written to again. In path terms, `delete` is equivalent to a
+`remove` at the entity root (`path: []`).
 
-**`claim`** does not mutate state. It declares that the transaction read the
-entity and depends on it being at the stated seq. If the entity has changed
-since the claimed seq, the transaction is rejected. This enables
-STM-style (Software Transactional Memory) read validation: list every entity
-you read to ensure none have changed.
+Phase 1 keeps `set` and `delete` as first-class root operations because they map
+directly to stored `SetWrite` / `Delete` facts and simplify reconstruction,
+point-in-time reads, and merge materialization. Higher-level client APIs MAY
+expose only path-based helpers and normalize root `replace` / `remove`
+operations into these wire forms before signing the commit.
 
 ---
 
@@ -180,8 +175,8 @@ returns confirmed state when a pending write exists, pipelined transactions
 will read stale data and produce false conflicts when the server validates them.
 
 ```
-Read(Entity A):
-  1. Check pending commits (newest first) for writes to A
+Read(Entity A, path ["profile", "name"]):
+  1. Check pending commits (newest first) for writes to A that overlap that path
   2. If found → return pending value (provisional)
   3. If not found → return confirmed value (authoritative)
 ```
@@ -198,9 +193,9 @@ Transaction C1 (pending, localSeq 1):
 Transaction C2 (built while C1 is pending):
   - Reads Entity A → MUST return "new" (from C1's pending write)
   - If it returned "old" (confirmed), C2's reads would contain
-    { id: A, seq: 5 } — a confirmed read that may conflict with C1
+    { id: A, path: [], seq: 5 } — a confirmed read that may conflict with C1
   - By returning "new" (pending), C2's reads contain
-    { id: A, localSeq: 1 } — a pending read that the server
+    { id: A, path: [], localSeq: 1 } — a pending read that the server
     resolves once C1 is confirmed
 ```
 
@@ -220,6 +215,8 @@ interface MergeContext {
   sourceSeq: number;
   baseSeq: number;
 }
+
+type ReadPath = readonly string[];  // Relative to EntityDocument.value; [] = root
 
 interface ClientCommit {
   // Client-assigned pending commit index (monotonic per resumable session,
@@ -259,18 +256,26 @@ interface MergeProposal {
 // Version-based only — no hash comparison needed.
 interface ConfirmedRead {
   id: EntityId;          // Entity that was read
-  seq: number;           // Seq number of the confirmed fact that was read
+  path: ReadPath;        // Relative to EntityDocument.value; [] = root
+  seq: number;           // Seq number at which that path was observed
 }
 
 // A read from another pending (unconfirmed) commit's writes.
 // Uses client-local commit indices instead of hashes.
 interface PendingRead {
   id: EntityId;          // Entity that was read
+  path: ReadPath;        // Relative to EntityDocument.value; [] = root
   localSeq: number;      // Client-local index of the pending commit that
                          // produced this write (monotonically increasing per
                          // client session, starting at 1)
 }
 ```
+
+Read paths are relative to the entity's `value` payload, not the enclosing
+`EntityDocument`. A root read is therefore `path: []`, while a read of
+`entity.value.profile.name` is recorded as `path: ["profile", "name"]`. The
+server re-roots these paths under `"value"` internally when it walks the stored
+document.
 
 **Why separate confirmed and pending reads?** The server needs to know which
 reads are against confirmed state (so it can validate freshness using seq
@@ -297,11 +302,11 @@ prior commit C1. This is called **stacking** — C2 is stacked on C1.
 Timeline:
 
 C1 submitted (pending, localSeq 1):
-  - Reads Entity A from confirmed (seq 5)
+  - Reads Entity A at path [] from confirmed (seq 5)
   - Writes Entity A = new value
 
 C2 submitted (pending, localSeq 2):
-  - Reads Entity A from C1's pending write (localSeq: 1)
+  - Reads Entity A at path [] from C1's pending write (localSeq: 1)
   - Writes Entity B based on A's new value
 
 Server confirms C1 → C1 moves to confirmed
@@ -343,19 +348,38 @@ inner payload described here.
 
 ```
 For each confirmed read in the commit:
-  commit.reads.confirmed[i].seq >= server.head[entity].seq
+  there MUST NOT exist a later visible fact on the target branch
+  whose write footprint overlaps (read.id, read.path)
+  and whose seq is > read.seq
 ```
 
-In prose: the commit's confirmed reads must be **at least as fresh** as the
-server's current head for each entity. This is strictly weaker than CAS (which
-requires exact hash match) — it allows concurrent non-conflicting writes to
-proceed.
+In prose: the commit's confirmed reads must be **at least as fresh as the latest
+overlapping write** on the target branch. A later write to some unrelated path
+of the same entity does not invalidate the read.
 
 **Why seq-based instead of hash-based?** Strict CAS rejects a commit if
 *any* concurrent write touches the same entity, even if the concurrent write
-doesn't conflict semantically. Seq-based validation allows more
-concurrency: as long as your read is not stale (no newer seq exists), your
-commit is valid.
+doesn't conflict semantically. Path-aware seq-based validation allows more
+concurrency: as long as no newer **overlapping** write exists, your commit is
+valid.
+
+### 3.6.1.1 Write-Footprint Overlap
+
+Validation is based on **overlap**, not just entity identity. A later fact
+overlaps a read when it could change the value observed at that read path.
+
+Conservative overlap rules:
+
+- A `set` overlaps **every** read path on the same entity.
+- A `delete` overlaps **every** read path on the same entity.
+- A `patch` overlaps when any contained patch op touches the read path, an
+  ancestor of the read path, or a descendant of the read path.
+- Structural patch ops (`add`, `remove`, `move`, `splice`) on a collection
+  ancestor MAY be treated conservatively as overlapping the entire collection
+  subtree for phase 1.
+
+Implementations MAY use more precise overlap analysis, but they MUST NOT miss a
+real overlap. False positives are acceptable; false negatives are not.
 
 ### 3.6.2 Validation Algorithm
 
@@ -367,15 +391,14 @@ function validate(
 ): ValidationResult {
   // 1. Validate confirmed reads
   for (const read of commit.reads.confirmed) {
-    const head = serverState.head(read.id, commit.branch);
-    if (head === null) {
-      // Entity doesn't exist on server — valid only if read was Empty
-      if (read.seq !== 0) {
-        return conflict(read.id, read, head);
-      }
-    } else if (read.seq < head.seq) {
-      // Client's read is stale — a newer seq exists
-      return conflict(read.id, read, head);
+    const overlappingWrite = serverState.findLatestOverlappingWrite({
+      branch: commit.branch,
+      id: read.id,
+      path: read.path,
+      afterSeq: read.seq,
+    });
+    if (overlappingWrite !== null) {
+      return conflict(read.id, read.path, read, overlappingWrite);
     }
   }
 
@@ -420,6 +443,9 @@ interface ConflictError extends Error {
 interface ConflictDetail {
   // Entity where the conflict occurred
   id: EntityId;
+
+  // Specific value-relative path that conflicted
+  path: ReadPath;
 
   // What the client thought the current seq was
   expected: {
@@ -741,9 +767,9 @@ v2 model described in this section.
 |------------|------------|-------|
 | `cause` (hash-based CAS) | Server-side `parent` + seq-based validation | Relaxed from strict CAS to seq comparison; client doesn't send parent |
 | `Changes` (nested `of/the/cause` map) | `Operation[]` (flat list) | Simpler, typed, extensible |
-| `Assert { is: value }` | `SetOperation` | Same semantics, cleaner type |
-| `Retract { is?: void }` | `DeleteOperation` | Same semantics |
-| `Claim = true` | `ClaimOperation` | Same semantics, explicit type |
+| `Assert { is: value }` | `SetOperation` | Same semantics, now explicitly the root write form |
+| `Retract { is?: void }` | `DeleteOperation` | Same semantics, now explicitly the root delete form |
+| `Claim = true` | `reads.confirmed` / `reads.pending` | Read dependencies moved out of `operations` and now carry paths |
 | *(no equivalent)* | `PatchWriteOperation` | New in v2 |
 | Heap | Confirmed | Same concept, standard name |
 | Nursery | Pending | Same concept, standard name |

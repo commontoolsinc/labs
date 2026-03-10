@@ -452,7 +452,7 @@ Not all patches have the same concurrency behavior:
 
 - **Position-independent patches** target stable keys and overwrite content
   without depending on collection ordering. Example: replacing `/profile/name`.
-  These are the best candidates for future claim-free fast paths.
+  These are the best candidates for future read-free fast paths.
 - **State-dependent patches** depend on the current shape or ordering of the
   document. `remove`, `move`, and `splice` are in this class, and `add` can be
   as well when it targets positional array locations. These should continue to
