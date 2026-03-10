@@ -200,16 +200,8 @@ const GoogleContactsImporter = pattern<GoogleContactsImporterInput, Output>(
     const hasLinkedAuth = computed(() => !!(overrideAuth?.token));
     const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
 
-    // Use overrideAuth if provided, otherwise use wished auth
-    const overrideAuthCell = Writable.of<Auth | null>(null);
-    computed(() => {
-      if (overrideAuth?.token) {
-        overrideAuthCell.set(overrideAuth as any);
-      }
-    });
-
     // Choose auth source based on overrideAuth availability
-    const auth = ifElse(hasLinkedAuth, overrideAuthCell, wishedAuth) as any;
+    const auth = ifElse(hasLinkedAuth, overrideAuth, wishedAuth) as any;
     const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
     const currentEmail = ifElse(
       hasLinkedAuth,
