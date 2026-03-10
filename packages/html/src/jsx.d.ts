@@ -3770,7 +3770,7 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "pattern"?: any;
   "wordWrap"?: boolean;
   "lineNumbers"?: boolean;
-  "maxLineWidth"?: number;
+  "maxLineWidth"?: number | string;
   "tabSize"?: number;
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
