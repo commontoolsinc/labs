@@ -1,18 +1,18 @@
 /**
- * BDD tests for frozen-object mutation fixes.
+ * Contract tests for frozen-object safety.
  *
  * When `richStorableValues` is ON, `toDeepRichStorableValue()` deep-freezes all
- * stored objects at commit time. Several code paths read these frozen objects
- * from storage and then try to mutate them, causing TypeErrors.
+ * stored objects at commit time. Code paths that read these frozen objects from
+ * storage must clone before mutating.
  *
- * Fix 1 uses a two-transaction pattern to exercise the real freeze:
+ * The writeOrThrow tests use a two-transaction pattern to exercise the real
+ * freeze:
  * - tx1: write data and commit (toDeepStorableValue freezes the objects)
  * - tx2: read the frozen data and exercise the code path under test
  *
- * Fix 2 and Fix 3 are defensive fixes whose exact code paths are deep in the
- * runtime pipeline (setupInternal, schema traversal). These tests verify the
- * vulnerability pattern directly: frozen nested references propagate through
- * Object.assign and cause TypeErrors when mutated.
+ * The remaining tests verify the defensive cloning contracts directly: that
+ * Object.assign propagates frozen nested references, and that deep/shallow
+ * cloning produces mutable results.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -42,8 +42,8 @@ function resetAllConfigs() {
   resetStorableValueConfig();
 }
 
-describe("frozen-object mutation fixes", () => {
-  describe("Fix 1: writeOrThrow with frozen parent object", () => {
+describe("frozen-object safety contracts", () => {
+  describe("writeOrThrow clones frozen parents before mutation", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
 
@@ -65,7 +65,7 @@ describe("frozen-object mutation fixes", () => {
       resetAllConfigs();
     });
 
-    it("should write through a frozen parent when intermediate path is missing", async () => {
+    it("writes through a frozen parent when intermediate path is missing", async () => {
       // tx1: write {value: {existing: "data"}} and commit. The commit
       // freezes the value object via toDeepRichStorableValue.
       const tx1 = runtime.edit();
@@ -79,10 +79,8 @@ describe("frozen-object mutation fixes", () => {
 
       // tx2: writeOrThrow to ["value", "newParent", "child"].
       // "newParent" doesn't exist, so tx.write returns NotFoundError.
-      // writeOrThrow reads frozen parent at ["value"] and tries to set
-      // nextValue["newParent"] = {} on it.
-      // Without the fix: TypeError "Cannot add property, object is not extensible"
-      // With the fix: shallow-clones the frozen parent before mutation.
+      // writeOrThrow reads frozen parent at ["value"] and must clone it
+      // before setting nextValue["newParent"] = {}.
       const tx2 = runtime.edit();
       const extTx2 = new ExtendedStorageTransaction(tx2.tx);
 
@@ -116,7 +114,7 @@ describe("frozen-object mutation fixes", () => {
       await tx2.commit();
     });
 
-    it("should write multiple levels through frozen parents", async () => {
+    it("writes multiple levels through frozen parents", async () => {
       const tx1 = runtime.edit();
       tx1.writeOrThrow({
         space,
@@ -144,15 +142,13 @@ describe("frozen-object mutation fixes", () => {
     });
   });
 
-  describe("Fix 2: setupInternal frozen previousInternal (defensive)", () => {
+  describe("setupInternal deep-copies frozen previousInternal", () => {
     // setupInternal uses Object.assign({}, deepCopy(defaults), deepCopy(initial),
     // previousInternal) to merge internal state. When richStorableValues is ON,
     // previousInternal (read from storage) may be deep-frozen. Object.assign
     // copies properties shallowly, so frozen nested references propagate into
-    // the mutable result. Downstream code that mutates internal.nested would throw.
-    //
-    // The fix wraps previousInternal in cellAwareDeepCopy when richStorableValues
-    // is ON. This test verifies the vulnerability pattern directly.
+    // the mutable result. Deep-copying previousInternal ensures the merged
+    // object is fully mutable.
 
     it("Object.assign propagates frozen nested references", () => {
       const frozen = Object.freeze({
@@ -173,8 +169,8 @@ describe("frozen-object mutation fixes", () => {
     });
 
     it("deep copy of frozen object produces fully mutable result", () => {
-      // The fix uses cellAwareDeepCopy which deep-clones the frozen structure.
-      // Import not needed -- we just verify the pattern with structuredClone.
+      // cellAwareDeepCopy deep-clones the frozen structure, yielding a fully
+      // mutable result. Verified here with structuredClone as a stand-in.
       const frozen = Object.freeze({
         counter: 0,
         nested: Object.freeze({ items: Object.freeze([1, 2, 3]) }),
@@ -190,18 +186,13 @@ describe("frozen-object mutation fixes", () => {
     });
   });
 
-  describe("Fix 3: schema default injection on frozen objects (defensive)", () => {
-    // The traversal currently creates fresh mutable objects before passing
-    // them to createObject, so the frozen mutation path in schema.ts:583
-    // is not reachable through the standard pipeline. This fix is defensive:
-    // it ensures createObject is safe for any caller, including future code
-    // paths that might pass frozen values.
-    //
-    // This test verifies the vulnerability directly: mutating a frozen object
-    // throws TypeError, and the Object.isFrozen guard prevents it.
+  describe("createObject clones frozen values before injecting defaults", () => {
+    // createObject (schema.ts) injects missing default properties into objects.
+    // When the input object is frozen, it must be cloned first. These tests
+    // verify the defensive cloning contract.
 
     it("frozen objects throw TypeError on property assignment", () => {
-      // Baseline: verify that frozen object mutation is the actual hazard.
+      // Baseline: frozen object mutation is the hazard being guarded against.
       const frozen = Object.freeze({ name: "Alice" });
       expect(() => {
         (frozen as Record<string, unknown>).age = 30;
@@ -209,7 +200,7 @@ describe("frozen-object mutation fixes", () => {
     });
 
     it("shallow clone of frozen object is mutable", () => {
-      // The fix pattern: clone before mutation.
+      // The cloning contract: clone before mutation.
       const frozen = Object.freeze({ name: "Alice" });
       const cloned: Record<string, unknown> = { ...frozen };
       expect(Object.isFrozen(cloned)).toBe(false);
