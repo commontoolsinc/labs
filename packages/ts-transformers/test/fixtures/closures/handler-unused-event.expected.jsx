@@ -5,7 +5,13 @@ interface State {
 }
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, {
+        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+            type: "object",
+            properties: {
+                detail: true
+            },
+            required: ["detail"]
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 state: {
