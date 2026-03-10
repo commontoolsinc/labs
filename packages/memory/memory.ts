@@ -23,6 +23,7 @@ import {
   SystemError,
   Transaction,
   TransactionResult,
+  type MemoryVersion,
 } from "./interface.ts";
 export * from "./interface.ts";
 import { type DID } from "@commontools/identity";
@@ -32,6 +33,7 @@ type MountedSpace = Space.SpaceInstance<Subject>;
 
 interface Session {
   store: URL;
+  memoryVersion: MemoryVersion;
   subscribers: Set<Subscriber>;
   spaces: Map<string, MountedSpace>;
 }
@@ -47,12 +49,18 @@ export class Memory implements Session, MemorySession {
     public spaces: Map<Subject, MountedSpace> = new Map(),
   ) {
     this.store = options.store;
+    this.memoryVersion = options.memoryVersion ?? "v1";
     this.ready = Promise.resolve();
     this.#serviceDid = options.serviceDid;
   }
+  memoryVersion: MemoryVersion;
   clone() {
     return new Memory(
-      { store: this.store, serviceDid: this.serviceDid() },
+      {
+        store: this.store,
+        serviceDid: this.serviceDid(),
+        memoryVersion: this.memoryVersion,
+      },
       new Set(this.subscribers),
       new Map(this.spaces),
     );
@@ -271,15 +279,11 @@ export const mount = async (
       return { ok: space };
     } else {
       span.setAttribute("memory.mount.cache", "miss");
-
-      // Detect if store path is a file (has extension) or directory
-      const isFile = Path.extname(session.store.pathname) !== "";
-
-      // If store is a file: use it directly (e.g., /data/spaces/xyz/5/space.db)
-      // If store is a directory: create per-space files (e.g., /cache/memory/did:key:z6Mkr4....sqlite)
-      const spaceUrl = isFile
-        ? session.store
-        : new URL(`./${subject}.sqlite`, session.store);
+      const spaceUrl = resolveSpaceStoreUrl(
+        session.store,
+        subject,
+        session.memoryVersion,
+      );
 
       const result = await Space.open({
         url: spaceUrl,
@@ -299,11 +303,38 @@ export const mount = async (
 
 export interface ServiceOptions {
   serviceDid: DID;
+  memoryVersion?: MemoryVersion;
 }
 
 export interface Options extends ServiceOptions {
   store: URL;
 }
+
+export const resolveSpaceStoreUrl = (
+  store: URL,
+  subject: Subject,
+  memoryVersion: MemoryVersion = "v1",
+): URL => {
+  const isFile = Path.extname(store.pathname) !== "";
+
+  if (!isFile) {
+    if (memoryVersion === "v2") {
+      return new URL(`./v2/${subject}.sqlite`, store);
+    }
+
+    return new URL(`./${subject}.sqlite`, store);
+  }
+
+  if (memoryVersion === "v2") {
+    const ext = Path.extname(store.pathname);
+    const stem = ext === ""
+      ? store.pathname
+      : store.pathname.slice(0, -ext.length);
+    return new URL(`${stem}.v2${ext}`, store);
+  }
+
+  return store;
+};
 
 export const open = async (
   options: Options,

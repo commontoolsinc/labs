@@ -21,6 +21,7 @@ import type {
   Unit,
   URI,
   Variant,
+  MemoryVersion,
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
@@ -31,6 +32,7 @@ export type {
   Fact,
   IClaim,
   MediaType,
+  MemoryVersion,
   MemorySpace,
   Result,
   SchemaPathSelector,
@@ -41,7 +43,6 @@ export type {
 };
 
 export type ChangeGroup = unknown;
-export type MemoryVersion = "v1" | "v2";
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
