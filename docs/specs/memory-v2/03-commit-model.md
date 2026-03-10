@@ -526,6 +526,8 @@ Each committed transaction has two identifiers with different roles:
 - **`hash`** — the content hash of the canonical `ClientCommit` blob. This is
   stable across retransmission and is the identifier that corresponds to what
   the client signed.
+- **`(sessionId, localSeq)`** — the logical idempotence key for replay and
+  pending-read resolution.
 - **`seq`** — the server-assigned canonical ordering position used by queries,
   subscriptions, and point-in-time reads.
 
@@ -533,7 +535,9 @@ The server verifies the client's signature before accepting a commit, computes
 the canonical commit hash from the original `ClientCommit`, and stores both the
 original payload and the resolved `{ hash, seq }` translation. If a client
 replays the same commit after reconnecting, the server SHOULD deduplicate by
-`hash` and return the existing result instead of applying the transaction twice.
+`(sessionId, localSeq)` and verify that the replayed `hash` matches the stored
+row before returning the existing result. A mismatched hash for the same
+`(sessionId, localSeq)` is a protocol error.
 
 ### 3.7.5 Session Identity and Reconnect
 

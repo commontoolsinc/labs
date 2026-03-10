@@ -5,8 +5,10 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 
 ## Design Goals
 
-1. **Clean break** — No backward compatibility with the v1 database, protocol,
-   or client code. Fresh start.
+1. **Clean break in storage semantics** — No backward compatibility with the v1
+   database or internal storage model. During migration, high-level cutover
+   interfaces may remain stable while the implementation underneath them is
+   replaced.
 2. **Boring nomenclature** — Replace the cute v1 terms (`the`, `of`, `since`,
    `cause`) with standard ones (`id`, `seq`, `parent`). Drop the `the` dimension
    entirely (it was always `application/json`).
@@ -178,6 +180,7 @@ interface ClientCommit {
    operations: Operation[];
    codeCID?: Reference;
    branch?: string;
+   merge?: { sourceBranch: string; sourceSeq: number; baseSeq: number };
 }
 
 // Entity values are stored in an envelope (not bare JSON)

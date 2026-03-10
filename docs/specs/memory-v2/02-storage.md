@@ -184,8 +184,8 @@ were applied atomically.
 
 ```sql
 CREATE TABLE commit (
-  hash        TEXT    NOT NULL PRIMARY KEY,  -- Content hash of the canonical client commit blob
-  seq         INTEGER NOT NULL,              -- Lamport clock (same as facts in this commit)
+  seq         INTEGER NOT NULL PRIMARY KEY,  -- Lamport clock (same as facts in this commit)
+  hash        TEXT    NOT NULL,              -- Content hash of the canonical client commit blob
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this commit was applied to
   session_id  TEXT    NOT NULL,              -- Server-assigned session identifier
   local_seq   INTEGER NOT NULL,              -- Client-local pending index on that session
@@ -194,8 +194,8 @@ CREATE TABLE commit (
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))  -- Wall-clock timestamp
 );
 
--- Query commits by seq (for log traversal)
-CREATE INDEX idx_commit_seq ON commit (seq);
+-- Query commits by hash (for audit/replay lookups)
+CREATE INDEX idx_commit_hash ON commit (hash);
 
 -- Query commits by branch (for branch history)
 CREATE INDEX idx_commit_branch ON commit (branch);
@@ -209,11 +209,11 @@ CREATE UNIQUE INDEX idx_commit_session_local_seq
 
 | Column | Description |
 |--------|-------------|
-| `hash` | Content hash of the canonical client commit blob. |
-| `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. |
+| `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. Also serves as the commit log's primary key. |
+| `hash` | Content hash of the canonical client commit blob. Stable across retransmission, but not globally unique across sessions. |
 | `branch` | Which branch this commit targets. |
 | `session_id` | Identifies the logical client session that submitted the commit. Pending-read resolution is session-scoped and survives reconnects. |
-| `local_seq` | The client-local pending index on that session. Every committed mutation is an ordinary client transaction, including merges. |
+| `local_seq` | The client-local pending index on that session. Combined with `session_id`, this is the idempotent replay key. Every committed mutation is an ordinary client transaction, including merges. |
 | `original` | The canonical `ClientCommit` payload, preserved for audit, replay, and commit-hash verification. |
 | `resolution` | Server-side resolution metadata, including the assigned `seq` and the resolved `{ localSeq, hash, seq }` mapping for any pending-read dependencies. |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
@@ -297,8 +297,8 @@ CREATE TABLE IF NOT EXISTS value (
 INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
 CREATE TABLE IF NOT EXISTS commit (
-  hash        TEXT    NOT NULL PRIMARY KEY,
-  seq         INTEGER NOT NULL,
+  seq         INTEGER NOT NULL PRIMARY KEY,
+  hash        TEXT    NOT NULL,
   branch      TEXT    NOT NULL DEFAULT '',
   session_id  TEXT    NOT NULL,
   local_seq   INTEGER NOT NULL,
@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS commit (
   resolution  JSON    NOT NULL,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_commit_seq ON commit (seq);
+CREATE INDEX IF NOT EXISTS idx_commit_hash ON commit (hash);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON commit (branch);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
   ON commit (session_id, local_seq);
@@ -766,8 +766,13 @@ VALUES (
 ```
 
 If a client replays a previously accepted transaction after reconnecting, the
-server can detect it by `commit.hash` and return the already-recorded result
-instead of applying the transaction twice.
+server resolves idempotence by `(session_id, local_seq)`. If a row already
+exists for that pair:
+
+- If the stored `hash` matches the replayed commit hash, return the existing
+  recorded result.
+- If the stored `hash` differs, reject the replay as a protocol error (the
+  client reused a local sequence number for different logical content).
 
 ### 8.3 Branch Seq Numbering
 

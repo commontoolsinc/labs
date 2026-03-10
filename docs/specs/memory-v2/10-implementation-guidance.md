@@ -149,6 +149,10 @@ The cutover should happen at high-level storage interfaces such as
 `IExtendedStorageTransaction` and `IStorageProvider`. Keep those public-facing
 contracts stable while swapping the implementation underneath them.
 
+In particular, if existing public interfaces still expose classification / label
+fields, keep them for compatibility in phase 1 but treat them as ignored inputs
+until the redesigned metadata model lands.
+
 ### Test Selection
 
 Only `StorageManager.emulate()` accepts a version parameter, and only for tests

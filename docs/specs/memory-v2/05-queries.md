@@ -525,7 +525,9 @@ Authorization is enforced only by space-level ACLs (see `04-protocol.md`).
 Classification labels and redacted query delivery will return in a later
 revision once the label/metadata model is redesigned. Until then:
 
-- Query commands do not accept classification claims.
+- The v2 query semantics do not depend on classification claims.
+- Existing compatibility fields at the cutover boundary may still accept a
+  classification parameter, but phase-1 v2 ignores it.
 - Subscription payloads are not partially redacted.
 - There is no special label entity type in the phase-1 protocol surface.
 
