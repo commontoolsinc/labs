@@ -15,7 +15,15 @@ const _p = pattern((__ct_pattern_input) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "string"
+        }
+    },
+    required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

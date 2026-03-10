@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, type JSONSchema } from "commontools";
+import { computed, pattern, type JSONSchema } from "commontools";
 import "commontools/schema";
 
 // Test that pattern with both schemas already present is not transformed
@@ -9,7 +9,7 @@ interface Result { doubled: number }
 export default pattern<Input, Result>(
   ({ count }) => {
     return {
-      doubled: count * 2
+      doubled: computed(() => count * 2)
     };
   },
   {

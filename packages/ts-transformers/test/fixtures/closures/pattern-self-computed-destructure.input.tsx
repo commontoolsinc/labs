@@ -5,4 +5,4 @@ interface Input {
   value: string;
 }
 
-const _p = pattern<Input>(({ [SELF]: self, value: _value }) => self);
+const _p = pattern<Input, Input>(({ [SELF]: self, value: _value }) => self);

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -23,7 +23,7 @@ export default pattern<State>((state) => {
         <p>Total items: {state.items.length}</p>
         <p>
           Filtered count:{" "}
-          {state.items.filter((i) => i.name.includes(state.filter)).length}
+          {computed(() => state.items.filter((i) => i.name.includes(state.filter)).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>

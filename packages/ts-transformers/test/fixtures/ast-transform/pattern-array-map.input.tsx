@@ -11,7 +11,7 @@ export default pattern<{ values: string[] }>(
       console.log("values#", values?.length);
     });
     return {
-      [NAME]: str`Simple Value: ${values.length || 0}`,
+      [NAME]: str`Simple Value: ${values.length}`,
       [UI]: (
         <div>
           <button type="button" onClick={adder({ values })}>Add Value</button>

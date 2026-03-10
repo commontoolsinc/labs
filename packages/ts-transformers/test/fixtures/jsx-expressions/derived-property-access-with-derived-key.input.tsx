@@ -51,7 +51,7 @@ export default pattern<{ items: Item[] }>(
           {aisleNames.map((aisleName) => (
             <div>
               <h3>{aisleName}</h3>
-              {(groupedByAisle[aisleName]! ?? []).map((assignment) => (
+              {groupedByAisle[aisleName]!.map((assignment) => (
                 <div>
                   <span>{assignment.item.name}</span>
                   <ct-checkbox $checked={assignment.item.done} />

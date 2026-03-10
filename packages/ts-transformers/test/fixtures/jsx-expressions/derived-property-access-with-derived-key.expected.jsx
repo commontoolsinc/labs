@@ -221,7 +221,7 @@ export default pattern((__ct_pattern_input) => {
                 const groupedByAisle = __ct_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
-              {(__ctHelpers.derive({
+              {__ctHelpers.derive({
                     type: "object",
                     properties: {
                         groupedByAisle: {
@@ -269,11 +269,15 @@ export default pattern((__ct_pattern_input) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Assignment"
-                    },
-                    asOpaque: true,
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Assignment"
+                            },
+                            asOpaque: true
+                        }],
                     $defs: {
                         Assignment: {
                             type: "object",
@@ -304,7 +308,7 @@ export default pattern((__ct_pattern_input) => {
                 } as const satisfies __ctHelpers.JSONSchema, {
                     groupedByAisle: groupedByAisle,
                     aisleName: aisleName
-                }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const assignment = __ct_pattern_input.key("element");
                     return (<div>
                   <span>{assignment.key("item", "name")}</span>
