@@ -56,104 +56,76 @@ export const setLLMUrl = (toolshedUrl: string) => {
 type MockResponseMatcher = (request: LLMRequest) => boolean;
 type MockObjectResponseMatcher = (request: LLMGenerateObjectRequest) => boolean;
 
-interface MockResponse {
-  matcher: MockResponseMatcher;
-  response: LLMResponse;
-}
-
-interface MockObjectResponse {
-  matcher: MockObjectResponseMatcher;
-  response: LLMGenerateObjectResponse;
-}
+type MockEntry =
+  | { type: "sendRequest"; matcher: MockResponseMatcher; response: LLMResponse }
+  | {
+    type: "generateObject";
+    matcher: MockObjectResponseMatcher;
+    response: LLMGenerateObjectResponse;
+  };
 
 class MockCatalog {
-  private mockResponses: MockResponse[] = [];
-  private mockObjectResponses: MockObjectResponse[] = [];
+  private mocks: MockEntry[] = [];
   private enabled = false;
 
-  /**
-   * Enable mock mode - all LLM requests will be intercepted and matched
-   * against registered mock responses instead of hitting the API.
-   */
   enable(): void {
     this.enabled = true;
   }
 
-  /**
-   * Disable mock mode - requests will go to the real API.
-   */
   disable(): void {
     this.enabled = false;
   }
 
-  /**
-   * Clear all registered mock responses.
-   */
   clear(): void {
-    this.mockResponses = [];
-    this.mockObjectResponses = [];
+    this.mocks = [];
   }
 
-  /**
-   * Reset mock mode - disable and clear all responses.
-   */
   reset(): void {
     this.disable();
     this.clear();
   }
 
-  /**
-   * Check if mock mode is currently enabled.
-   */
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  /**
-   * Register a mock response for sendRequest calls.
-   * The matcher function should return true if this mock should be used for the given request.
-   */
   addResponse(matcher: MockResponseMatcher, response: LLMResponse): void {
-    this.mockResponses.push({ matcher, response });
+    this.mocks.push({ type: "sendRequest", matcher, response });
   }
 
-  /**
-   * Register a mock response for generateObject calls.
-   */
   addObjectResponse(
     matcher: MockObjectResponseMatcher,
     response: LLMGenerateObjectResponse,
   ): void {
-    this.mockObjectResponses.push({ matcher, response });
+    this.mocks.push({ type: "generateObject", matcher, response });
   }
 
   /**
-   * Find a matching mock response for the given request.
-   * Returns undefined if no match is found.
-   * Removes the matched mock from the catalog after finding it (one-time use).
+   * Find a matching sendRequest mock. Skips generateObject entries.
+   * Removes the matched mock (one-time use).
    */
   findResponse(request: LLMRequest): LLMResponse | undefined {
-    const index = this.mockResponses.findIndex((m) => m.matcher(request));
+    const index = this.mocks.findIndex((m) =>
+      m.type === "sendRequest" && m.matcher(request)
+    );
     if (index === -1) return undefined;
-
-    // Remove and return the matched mock (one-time use)
-    const [mock] = this.mockResponses.splice(index, 1);
-    return mock.response;
+    const [mock] = this.mocks.splice(index, 1);
+    return (mock as MockEntry & { type: "sendRequest" }).response;
   }
 
   /**
-   * Find a matching mock object response for the given request.
-   * Removes the matched mock from the catalog after finding it (one-time use).
+   * Find a matching generateObject mock. Skips sendRequest entries.
+   * Removes the matched mock (one-time use).
    */
   findObjectResponse(
     request: LLMGenerateObjectRequest,
   ): LLMGenerateObjectResponse | undefined {
-    const index = this.mockObjectResponses.findIndex((m) => m.matcher(request));
+    const index = this.mocks.findIndex((m) =>
+      m.type === "generateObject" && m.matcher(request)
+    );
     if (index === -1) return undefined;
-
-    // Remove and return the matched mock (one-time use)
-    const [mock] = this.mockObjectResponses.splice(index, 1);
-    return mock.response;
+    const [mock] = this.mocks.splice(index, 1);
+    return (mock as MockEntry & { type: "generateObject" }).response;
   }
 }
 
