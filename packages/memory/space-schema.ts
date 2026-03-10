@@ -483,7 +483,7 @@ function loadFactsForDoc(
       };
       const [newDoc, newSelector] = getAtPath(
         tx,
-        factValue as IMemorySpaceValueAttestation,
+        factValue,
         selector.path.slice(1),
         tracker,
         cfc,
