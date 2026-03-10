@@ -125,6 +125,24 @@ interface Delete {
 }
 ```
 
+### 2.2.1 Entity Delete Semantics
+
+A `Delete` fact changes the entity's **current binding** (its visible head on a
+branch). It does **not** retroactively rewrite earlier facts, referenced blob
+payloads, or any separate metadata entities that may exist beside the value.
+
+Deletion is therefore a **reachability change**, not a metadata rewrite:
+
+- Earlier facts remain part of history until retention/GC policy says otherwise.
+- A delete of one entity MUST NOT implicitly delete or rewrite any other entity,
+  including `urn:blob-meta:<hash>` entities.
+- If a future extension attaches label/policy metadata directly to a surviving
+  tombstone fact, that metadata should default from the deleted head's effective
+  metadata unless a higher-layer API explicitly supplies replacement metadata.
+
+This keeps delete semantics simple: remove the current value, preserve history,
+and leave any future metadata rules to explicit higher-layer writes.
+
 ### 2.3 Fact (union)
 
 ```typescript
@@ -326,6 +344,32 @@ branch isolation.
 Phase 1 only requires the split between immutable blob payload and mutable blob
 metadata. Label/classification semantics are deferred until the metadata model
 is reintroduced.
+
+### 5.1 Blob Payload and Metadata GC Semantics
+
+Blob payloads and blob metadata follow different lifecycles:
+
+- The blob payload in `blob_store` is immutable content-addressed storage.
+- The blob metadata entity `urn:blob-meta:<hash>` is ordinary entity state with
+  normal history, branching, and deletion semantics.
+
+Deleting an entity that references a blob removes only **that entity binding**.
+It does **not** by itself delete the blob payload or rewrite blob metadata.
+
+More precisely:
+
+- Deleting one reference to a blob MUST NOT implicitly delete or rewrite label /
+  policy metadata for the blob or for any other reference to the same blob.
+- If the blob payload remains reachable through any surviving entity or metadata
+  record, it remains stored.
+- If the blob payload and its associated metadata records both become
+  unreachable, later garbage collection MAY reclaim them.
+- Garbage collection removes unreachable storage; it does not reinterpret,
+  weaken, or partially merge metadata.
+
+In other words, deleting a name or entity that points at content is a
+reachability update. The payload and any separate metadata survive until they
+become unreachable and GC reclaims them.
 
 ---
 
