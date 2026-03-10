@@ -8,9 +8,6 @@
     },
     "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts"
   },
-  "imports": {
-    "fake-indexeddb": "npm:fake-indexeddb@6.0.0"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared.ts",

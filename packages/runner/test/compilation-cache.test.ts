@@ -1,4 +1,5 @@
-import "fake-indexeddb/auto";
+// deno-lint-ignore no-external-import
+import "npm:fake-indexeddb@6.0.0/auto";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

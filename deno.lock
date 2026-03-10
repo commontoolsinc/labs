@@ -1969,11 +1969,6 @@
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },
-      "packages/runner": {
-        "dependencies": [
-          "npm:fake-indexeddb@6.0.0"
-        ]
-      },
       "packages/schema-generator": {
         "dependencies": [
           "npm:typescript@*"
