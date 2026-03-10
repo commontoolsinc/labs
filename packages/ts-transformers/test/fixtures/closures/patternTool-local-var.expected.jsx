@@ -47,15 +47,13 @@ export default pattern(() => {
                     type: "object",
                     properties: {
                         pending: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         },
                         result: {
                             anyOf: [{
                                     type: "undefined"
                                 }, {
-                                    type: ["string", "undefined"],
-                                    asOpaque: true
+                                    type: ["string", "undefined"]
                                 }]
                         }
                     },
@@ -67,8 +65,7 @@ export default pattern(() => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: ["string", "undefined"],
-                    asOpaque: true
+                    type: ["string", "undefined"]
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { genResult: {
                 pending: genResult.pending,

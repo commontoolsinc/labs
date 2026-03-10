@@ -23,8 +23,7 @@ const SimplePattern = pattern(() => ({
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {
@@ -154,7 +153,6 @@ export default pattern(() => {
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
             $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -171,8 +169,7 @@ export default pattern(() => {
             properties: {
                 typedCellRef: {
                     type: "array",
-                    items: true,
-                    asOpaque: true
+                    items: true
                 }
             },
             required: ["typedCellRef"]
@@ -232,8 +229,7 @@ export default pattern(() => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -275,8 +271,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

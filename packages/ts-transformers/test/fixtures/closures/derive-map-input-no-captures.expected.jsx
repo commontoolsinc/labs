@@ -55,8 +55,7 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema), {}), (arr) => arr.length);
     return { count };
 }, {
@@ -89,8 +88,7 @@ export default pattern((__ct_pattern_input) => {
     type: "object",
     properties: {
         count: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["count"]

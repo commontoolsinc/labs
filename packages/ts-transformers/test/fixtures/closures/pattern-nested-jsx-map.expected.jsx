@@ -72,14 +72,12 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {
                 $ref: "#/$defs/UIRenderable"
             },
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -106,8 +104,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {
                         $ref: "#/$defs/UIRenderable"
-                    },
-                    asOpaque: true
+                    }
                 }],
             $defs: {
                 UIRenderable: {
@@ -142,15 +139,13 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             i: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             },
                             item: {
                                 type: "object",
                                 properties: {
                                     selectedIndex: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["selectedIndex"]
@@ -168,15 +163,13 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             i: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             },
                             item: {
                                 type: "object",
                                 properties: {
                                     selectedIndex: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["selectedIndex"]
@@ -209,8 +202,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "object",
                                     properties: {
                                         selectedIndex: {
-                                            type: "number",
-                                            asOpaque: true
+                                            type: "number"
                                         }
                                     },
                                     required: ["selectedIndex"]
@@ -238,8 +230,7 @@ export default pattern((__ct_pattern_input) => {
                             type: "object",
                             properties: {}
                         }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
+                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -303,8 +294,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -377,8 +367,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

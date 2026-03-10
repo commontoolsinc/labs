@@ -31,8 +31,7 @@ export default function TestDerive() {
         type: "array",
         items: {
             type: "number"
-        },
-        asOpaque: true
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier

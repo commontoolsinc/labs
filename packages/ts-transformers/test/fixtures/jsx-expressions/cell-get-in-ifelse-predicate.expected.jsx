@@ -23,7 +23,6 @@ export default pattern((__ct_pattern_input) => {
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
             $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -39,12 +38,10 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 showHistory: {
-                    type: "boolean",
-                    asOpaque: true
+                    type: "boolean"
                 },
                 messageCount: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 dismissedIndex: {
                     type: "number",
@@ -92,8 +89,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

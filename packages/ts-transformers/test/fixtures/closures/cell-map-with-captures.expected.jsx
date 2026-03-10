@@ -16,15 +16,13 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         state: {
                             type: "object",
                             properties: {
                                 multiplier: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["multiplier"]
@@ -52,8 +50,7 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     multiplier: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["multiplier"]
@@ -70,8 +67,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -121,8 +117,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

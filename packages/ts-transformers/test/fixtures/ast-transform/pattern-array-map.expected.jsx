@@ -56,8 +56,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -90,8 +89,7 @@ export default pattern((__ct_pattern_input) => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -100,8 +98,7 @@ export default pattern((__ct_pattern_input) => {
             type: "array",
             items: {
                 type: "string"
-            },
-            asOpaque: true
+            }
         }
     },
     required: ["$NAME", "$UI", "values"],
@@ -113,8 +110,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

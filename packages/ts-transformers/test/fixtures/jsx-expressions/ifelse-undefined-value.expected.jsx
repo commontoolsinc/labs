@@ -16,9 +16,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
-            result: {
-                asOpaque: true
-            }
+            result: true
         },
         required: ["result"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -27,23 +25,17 @@ export default pattern(() => {
             }, {
                 type: "object",
                 properties: {
-                    result: {
-                        asOpaque: true
-                    }
+                    result: true
                 },
                 required: ["result"]
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             pending: {
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             },
-            result: {
-                asOpaque: true
-            }
+            result: true
         },
         required: ["pending", "result"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -58,9 +50,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
-            data: {
-                asOpaque: true
-            }
+            data: true
         },
         required: ["data"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -71,19 +61,14 @@ export default pattern(() => {
             }, {
                 type: "object",
                 properties: {
-                    data: {
-                        asOpaque: true
-                    }
+                    data: true
                 },
                 required: ["data"]
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
-            result: {
-                asOpaque: true
-            }
+            result: true
         },
         required: ["result"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -115,8 +100,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

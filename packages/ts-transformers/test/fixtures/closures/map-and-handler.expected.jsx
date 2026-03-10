@@ -22,8 +22,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -32,8 +31,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount"]
@@ -64,8 +62,7 @@ export default pattern((state) => {
                             required: ["selectedIndex"]
                         },
                         index: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["state", "index"]
@@ -100,8 +97,7 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     selectedIndex: {
                                         type: "number",
@@ -122,8 +118,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -159,8 +154,7 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["price"]
-                            },
-                            asOpaque: true
+                            }
                         },
                         selectedIndex: {
                             type: "number",
@@ -193,16 +187,14 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["price"]
-                            },
-                            asOpaque: true
+                            }
                         },
                         selectedIndex: {
                             type: "number",
                             asCell: true
                         },
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "selectedIndex", "discount"]
@@ -259,8 +251,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

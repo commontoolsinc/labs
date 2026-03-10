@@ -22,8 +22,7 @@ export default pattern((state) => {
                     },
                     required: ["element", "__ct_val_key"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_val_key: __ct_val_key
@@ -58,8 +57,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -116,8 +114,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

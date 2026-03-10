@@ -30,8 +30,7 @@ const _p = pattern((__ct_pattern_input) => {
             },
             required: ["element"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema), {});
     }, {
         type: "object",
@@ -65,8 +64,7 @@ const _p = pattern((__ct_pattern_input) => {
         type: "array",
         items: {
             type: "string"
-        },
-        asOpaque: true
+        }
     } as const satisfies __ctHelpers.JSONSchema), {});
 }, {
     type: "object",
@@ -106,8 +104,7 @@ const _p = pattern((__ct_pattern_input) => {
         items: {
             type: "string"
         }
-    },
-    asOpaque: true
+    }
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

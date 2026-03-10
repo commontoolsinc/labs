@@ -22,15 +22,13 @@ export default pattern((state) => {
                                     properties: {},
                                     additionalProperties: {
                                         type: "number"
-                                    },
-                                    asOpaque: true
+                                    }
                                 }
                             },
                             required: ["tagCounts"]
                         },
                         tag: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["state", "tag"]
@@ -38,8 +36,7 @@ export default pattern((state) => {
                     anyOf: [{
                             type: "undefined"
                         }, {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     state: {
@@ -65,8 +62,7 @@ export default pattern((state) => {
                                         properties: {},
                                         additionalProperties: {
                                             type: "number"
-                                        },
-                                        asOpaque: true
+                                        }
                                     }
                                 },
                                 required: ["tagCounts"]
@@ -83,8 +79,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -138,8 +133,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

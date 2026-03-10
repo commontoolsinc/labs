@@ -20,8 +20,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "array",
                 items: {
                     $ref: "#/$defs/Item"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"],
@@ -45,8 +44,7 @@ export default pattern((__ct_pattern_input) => {
             tasks: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
+                    $ref: "#/$defs/Item"
                 }
             },
             view: {
@@ -83,16 +81,14 @@ export default pattern((__ct_pattern_input) => {
                             tasks: {
                                 type: "array",
                                 items: {
-                                    $ref: "#/$defs/Item",
-                                    asOpaque: true
+                                    $ref: "#/$defs/Item"
                                 }
                             },
                             view: {
                                 type: "string"
                             }
                         },
-                        required: ["tasks", "view"],
-                        asOpaque: true
+                        required: ["tasks", "view"]
                     }
                 },
                 required: ["result"],
@@ -115,7 +111,6 @@ export default pattern((__ct_pattern_input) => {
                 items: {
                     $ref: "#/$defs/UIRenderable"
                 },
-                asOpaque: true,
                 $defs: {
                     UIRenderable: {
                         type: "object",
@@ -174,8 +169,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

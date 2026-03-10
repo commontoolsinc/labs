@@ -22,14 +22,12 @@ export default pattern((__ct_pattern_input) => {
         [UI]: (<div>
         {/* when(condition, value) where value is a reactive map */}
         {__ctHelpers.when({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {
                 $ref: "#/$defs/UIRenderable"
             },
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -46,7 +44,6 @@ export default pattern((__ct_pattern_input) => {
             items: {
                 $ref: "#/$defs/UIRenderable"
             },
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -87,8 +84,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -147,8 +143,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

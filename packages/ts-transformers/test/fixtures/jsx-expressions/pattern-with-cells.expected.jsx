@@ -11,8 +11,7 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -31,8 +30,7 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -62,8 +60,7 @@ export default pattern((cell) => {
             $ref: "#/$defs/JSXElement"
         },
         value: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["$UI", "value"],
@@ -75,8 +72,7 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

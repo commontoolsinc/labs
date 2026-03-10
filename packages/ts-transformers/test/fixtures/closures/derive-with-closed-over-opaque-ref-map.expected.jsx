@@ -11,8 +11,7 @@ export default function TestDeriveWithClosedOverOpaqueRefMap() {
                 type: "array",
                 items: {
                     type: "number"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"]
@@ -20,8 +19,7 @@ export default function TestDeriveWithClosedOverOpaqueRefMap() {
         type: "array",
         items: {
             type: "number"
-        },
-        asOpaque: true
+        }
     } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map(n => n * 2));
     return doubled;
 }

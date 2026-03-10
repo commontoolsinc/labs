@@ -13,8 +13,7 @@ export default pattern((state) => {
         [UI]: (<div>
         <h3>Basic Ternary</h3>
         <span>{__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -23,8 +22,7 @@ export default pattern((state) => {
             "enum": ["Active", "Inactive"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), "Active", "Inactive")}</span>
         <span>{__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -49,8 +47,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -77,8 +74,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         score: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["score"]
@@ -96,8 +92,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         score: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["score"]
@@ -125,8 +120,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -144,8 +138,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -164,8 +157,7 @@ export default pattern((state) => {
         <h3>Nested Ternary</h3>
         <span>
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Premium Active", "Regular Active"]
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -179,8 +171,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         isPremium: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         }
                     },
                     required: ["isPremium"]
@@ -209,8 +200,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         userType: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["userType"]
@@ -228,8 +218,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         userType: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["userType"]
@@ -248,8 +237,7 @@ export default pattern((state) => {
         <h3>Complex Conditions</h3>
         <span>
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -263,12 +251,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         isActive: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         },
                         hasPermission: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         }
                     },
                     required: ["isActive", "hasPermission"]
@@ -276,8 +262,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 isActive: state.key("isActive"),
                 hasPermission: state.key("hasPermission")
@@ -299,8 +284,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -329,12 +313,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         isPremium: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         },
                         score: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["isPremium", "score"]
@@ -351,8 +333,7 @@ export default pattern((state) => {
 
         <h3>IfElse Component</h3>
         {ifElse({
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
@@ -365,7 +346,6 @@ export default pattern((state) => {
                     }]
             } as const satisfies __ctHelpers.JSONSchema, {
                 $ref: "#/$defs/UIRenderable",
-                asOpaque: true,
                 $defs: {
                     UIRenderable: {
                         type: "object",
@@ -393,7 +373,6 @@ export default pattern((state) => {
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
             $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -412,8 +391,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -468,8 +446,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

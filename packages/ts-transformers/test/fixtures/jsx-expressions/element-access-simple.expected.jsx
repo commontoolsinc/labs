@@ -22,12 +22,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         },
                         index: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "index"]
@@ -38,8 +36,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
@@ -57,8 +54,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -69,8 +65,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
@@ -90,16 +85,13 @@ export default pattern((state) => {
                                 items: {
                                     type: "number"
                                 }
-                            },
-                            asOpaque: true
+                            }
                         },
                         row: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         col: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["matrix", "row", "col"]
@@ -110,8 +102,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
@@ -165,8 +156,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -20,12 +20,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         b: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a", "b"]
@@ -45,8 +43,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a"]
@@ -65,12 +62,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         b: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a", "b"]
@@ -90,8 +85,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -110,8 +104,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -130,8 +123,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -150,8 +142,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a"]
@@ -172,8 +163,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         name: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["name"]
@@ -192,8 +182,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         name: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["name"]
@@ -212,8 +201,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text"]
@@ -232,8 +220,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text"]
@@ -260,8 +247,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text"]
@@ -288,8 +274,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         name: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["name"]
@@ -310,8 +295,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -330,8 +314,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -352,8 +335,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         float: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["float"]
@@ -372,8 +354,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         float: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["float"]
@@ -397,8 +378,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["values"]
@@ -406,8 +386,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 values: state.key("values")
             } }, ({ state }) => state.values.reduce((a, b) => a + b, 0))}</p>
@@ -421,8 +400,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["values"]
@@ -444,8 +422,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["values"]
@@ -466,8 +443,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a"]
@@ -486,8 +462,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a"]
@@ -506,8 +481,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         name: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["name"]
@@ -526,12 +500,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         a: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         b: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["a", "b"]
@@ -591,8 +563,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

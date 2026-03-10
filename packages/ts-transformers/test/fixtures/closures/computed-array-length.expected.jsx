@@ -116,8 +116,7 @@ export default pattern(() => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -138,8 +137,7 @@ export default pattern(() => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -154,8 +152,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

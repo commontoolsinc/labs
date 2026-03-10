@@ -32,8 +32,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -64,8 +63,7 @@ export default pattern((state) => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
@@ -80,8 +78,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

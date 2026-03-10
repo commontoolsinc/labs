@@ -36,20 +36,16 @@ const _summary = derive({
     type: "object",
     properties: {
         stage: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         attempts: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         },
         accepted: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         },
         rejected: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["stage", "attempts", "accepted", "rejected"]

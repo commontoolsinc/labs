@@ -13,18 +13,15 @@ export default pattern((__ct_pattern_input) => {
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
     return {
         [NAME]: "unless schema test",
@@ -64,8 +61,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

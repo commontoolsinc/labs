@@ -35,7 +35,6 @@ export default pattern((input: Writable<State>) => {
     };
 }, {
     $ref: "#/$defs/State",
-    asOpaque: true,
     $defs: {
         State: {
             type: "object",
@@ -66,8 +65,7 @@ export default pattern((input: Writable<State>) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

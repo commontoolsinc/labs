@@ -23,8 +23,7 @@
   },
   "properties": {
     "state": {
-      "$ref": "#/$defs/LLMState",
-      "asOpaque": true
+      "$ref": "#/$defs/LLMState"
     }
   },
   "required": [

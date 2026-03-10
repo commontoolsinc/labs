@@ -22,8 +22,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -41,8 +40,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -84,8 +82,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

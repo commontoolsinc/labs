@@ -28,8 +28,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "object",
                 properties: {
                     title: {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     }
                 },
                 required: ["title"]
@@ -52,8 +51,7 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             self: {
-                $ref: "#/$defs/TestOutput",
-                asOpaque: true
+                $ref: "#/$defs/TestOutput"
             },
             count: {
                 type: "number",

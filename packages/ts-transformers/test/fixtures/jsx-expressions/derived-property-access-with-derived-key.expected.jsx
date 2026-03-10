@@ -21,8 +21,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "array",
                 items: {
                     $ref: "#/$defs/Item"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"],
@@ -50,13 +49,11 @@ export default pattern((__ct_pattern_input) => {
                     type: "string"
                 },
                 item: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
+                    $ref: "#/$defs/Item"
                 }
             },
             required: ["aisle", "item"]
         },
-        asOpaque: true,
         $defs: {
             Item: {
                 type: "object",
@@ -89,13 +86,11 @@ export default pattern((__ct_pattern_input) => {
                             type: "string"
                         },
                         item: {
-                            $ref: "#/$defs/Item",
-                            asOpaque: true
+                            $ref: "#/$defs/Item"
                         }
                     },
                     required: ["aisle", "item"]
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["itemsWithAisles"],
@@ -172,8 +167,7 @@ export default pattern((__ct_pattern_input) => {
                     items: {
                         $ref: "#/$defs/Assignment"
                     }
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["groupedByAisle"],
@@ -232,12 +226,10 @@ export default pattern((__ct_pattern_input) => {
                                 items: {
                                     $ref: "#/$defs/Assignment"
                                 }
-                            },
-                            asOpaque: true
+                            }
                         },
                         aisleName: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["groupedByAisle", "aisleName"],
@@ -273,7 +265,6 @@ export default pattern((__ct_pattern_input) => {
                     items: {
                         $ref: "#/$defs/Assignment"
                     },
-                    asOpaque: true,
                     $defs: {
                         Assignment: {
                             type: "object",
@@ -352,8 +343,7 @@ export default pattern((__ct_pattern_input) => {
                             type: "object",
                             properties: {}
                         }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
+                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -385,8 +375,7 @@ export default pattern((__ct_pattern_input) => {
                                     items: {
                                         $ref: "#/$defs/Assignment"
                                     }
-                                },
-                                asOpaque: true
+                                }
                             }
                         },
                         required: ["groupedByAisle"]
@@ -427,8 +416,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -488,8 +476,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -29,12 +29,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         },
                         filter: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["items", "filter"]
@@ -83,8 +81,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 filter: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["filter"]
@@ -139,8 +136,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -149,8 +145,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount"]
@@ -177,8 +172,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -187,12 +181,10 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 },
                                 taxRate: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount", "taxRate"]
@@ -226,12 +218,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     taxRate: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["discount", "taxRate"]
@@ -268,8 +258,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -302,8 +291,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -366,8 +354,7 @@ export default pattern((state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
 
         <h3>Simple Operations</h3>
@@ -378,8 +365,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["discount"]
@@ -398,8 +384,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         taxRate: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["taxRate"]
@@ -431,8 +416,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -482,8 +466,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -535,8 +518,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -658,8 +640,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {
