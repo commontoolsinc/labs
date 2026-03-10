@@ -112,6 +112,48 @@ const EnvSchema = z.object({
   AIRTABLE_CLIENT_SECRET: z.string().default(""),
 
   // ===========================================================================
+  // GitHub Integration
+  //   * /routes/integrations/github-oauth
+  // ===========================================================================
+  GITHUB_CLIENT_ID: z.string().default(""),
+  GITHUB_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
+  // Notion Integration
+  //   * /routes/integrations/notion-oauth
+  // ===========================================================================
+  NOTION_CLIENT_ID: z.string().default(""),
+  NOTION_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
+  // Linear Integration
+  //   * /routes/integrations/linear-oauth
+  // ===========================================================================
+  LINEAR_CLIENT_ID: z.string().default(""),
+  LINEAR_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
+  // Spotify Integration
+  //   * /routes/integrations/spotify-oauth
+  // ===========================================================================
+  SPOTIFY_CLIENT_ID: z.string().default(""),
+  SPOTIFY_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
+  // Discord OAuth Integration
+  //   * /routes/integrations/discord-oauth
+  // ===========================================================================
+  DISCORD_CLIENT_ID: z.string().default(""),
+  DISCORD_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
+  // Strava Integration
+  //   * /routes/integrations/strava-oauth
+  // ===========================================================================
+  STRAVA_CLIENT_ID: z.string().default(""),
+  STRAVA_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
   // Plaid Integration
   //   * /routes/integrations/plaid-oauth
   // ===========================================================================
