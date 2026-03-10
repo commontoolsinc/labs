@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed } from "commontools";
-export default function TestComputeNestedProperty() {
-    const counter = cell({ count: 0 }, {
+import { Writable, computed, pattern } from "commontools";
+export default pattern(() => {
+    const counter = Writable.of({ count: 0 }, {
         type: "object",
         properties: {
             count: {
@@ -32,7 +32,10 @@ export default function TestComputeNestedProperty() {
         return current.count * 2;
     });
     return doubled;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

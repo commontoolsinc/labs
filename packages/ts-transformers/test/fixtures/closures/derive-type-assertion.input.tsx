@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
-export default function TestDerive() {
-  const value = cell(10);
-  const multiplier = cell(2);
+export default pattern(() => {
+  const value = Writable.of(10);
+  const multiplier = Writable.of(2);
 
   const result = derive(value, (v) => (v.get() * multiplier.get()) as number);
 
   return result;
-}
+});

@@ -1,8 +1,8 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
-export default function TestDerive() {
+import { Writable, derive, pattern } from "commontools";
+export default pattern(() => {
     const value = 5;
-    const multiplier = cell(2, {
+    const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Test parameter with default value
@@ -25,7 +25,10 @@ export default function TestDerive() {
         multiplier: multiplier
     }, ({ value: v = 10, multiplier }) => v * multiplier.get());
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
-export default function TestDerive() {
+export default pattern(() => {
   const value = 5;
-  const multiplier = cell(2);
+  const multiplier = Writable.of(2);
 
   // Test parameter with default value
   const result = derive(value, (v = 10) => v * multiplier.get());
 
   return result;
-}
+});

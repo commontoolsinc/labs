@@ -1,8 +1,8 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 export default pattern((__ct_pattern_input) => {
     const multiplier = __ct_pattern_input.key("multiplier");
-    const value = cell(10, {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({

@@ -20,6 +20,8 @@ export interface TransformOptions {
   logger?: (message: string) => void;
   typeCheck?: boolean;
   precomputedDiagnostics?: ts.Diagnostic[];
+  /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
+  pipelineDiagnostics?: TransformationDiagnostic[];
 }
 
 export interface BatchTypeCheckResult {
@@ -545,6 +547,9 @@ export async function transformFiles(
     }
 
     out[fileName] = output;
+  }
+  if (options.pipelineDiagnostics) {
+    options.pipelineDiagnostics.push(...pipeline.getDiagnostics());
   }
   return out;
 }

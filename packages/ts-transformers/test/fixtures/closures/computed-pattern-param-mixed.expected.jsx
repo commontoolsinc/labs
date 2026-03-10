@@ -1,14 +1,14 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 export default pattern((config: {
     base: number;
     multiplier: number;
 }) => {
-    const value = cell(10, {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const offset = 5; // non-cell local
-    const threshold = cell(15, {
+    const threshold = Writable.of(15, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema); // cell local
     const result = __ctHelpers.derive({

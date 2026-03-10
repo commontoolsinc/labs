@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
 // Test that all literal types are widened in closure captures
-export default function TestAllLiteralWidening() {
-  const value = cell(10);
+export default pattern(() => {
+  const value = Writable.of(10);
 
   // All literal types that should be widened
   const numLiteral = 42;
@@ -18,4 +18,4 @@ export default function TestAllLiteralWidening() {
   });
 
   return result;
-}
+});

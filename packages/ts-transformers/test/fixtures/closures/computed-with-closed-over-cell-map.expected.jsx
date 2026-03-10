@@ -1,13 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed } from "commontools";
-export default function TestComputedWithClosedOverCellMap() {
-    const numbers = cell([1, 2, 3], {
+import { Writable, computed, pattern } from "commontools";
+export default pattern(() => {
+    const numbers = Writable.of([1, 2, 3], {
         type: "array",
         items: {
             type: "number"
         }
     } as const satisfies __ctHelpers.JSONSchema);
-    const multiplier = cell(2, {
+    const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Inside computed, we close over numbers (a Cell)
@@ -67,7 +67,13 @@ export default function TestComputedWithClosedOverCellMap() {
         multiplier: multiplier
     }));
     return doubled;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

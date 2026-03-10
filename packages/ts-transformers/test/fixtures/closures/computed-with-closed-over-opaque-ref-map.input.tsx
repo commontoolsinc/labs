@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { computed, OpaqueRef } from "commontools";
+import { OpaqueRef, computed, pattern } from "commontools";
 
-export default function TestComputedWithClosedOverOpaqueRefMap() {
+export default pattern(() => {
   const items = [1, 2, 3] as OpaqueRef<number[]>;
 
   // Inside computed, we close over items (an OpaqueRef)
@@ -11,4 +11,4 @@ export default function TestComputedWithClosedOverOpaqueRefMap() {
   const doubled = computed(() => items.map(n => n * 2));
 
   return doubled;
-}
+});

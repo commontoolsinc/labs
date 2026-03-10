@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { cell, derive, type JSONSchema } from "commontools";
+import { Writable, derive, pattern, type JSONSchema } from "commontools";
 import "commontools/schema";
 
-export default function TestDerive() {
-  const value = cell(10);
-  const multiplier = cell(2);
+export default pattern(() => {
+  const value = Writable.of(10);
+  const multiplier = Writable.of(2);
 
   // Explicit 4-arg form with schemas - should still transform captures
   const result = derive(
@@ -15,4 +15,4 @@ export default function TestDerive() {
   );
 
   return result;
-}
+});

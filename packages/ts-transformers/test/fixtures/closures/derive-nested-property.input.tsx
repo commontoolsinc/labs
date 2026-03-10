@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
 interface State {
   config: {
@@ -7,10 +7,10 @@ interface State {
   };
 }
 
-export default function TestDerive(state: State) {
-  const value = cell(10);
+export default pattern((state: State) => {
+  const value = Writable.of(10);
 
   const result = derive(value, (v) => v.get() * state.config.multiplier);
 
   return result;
-}
+});

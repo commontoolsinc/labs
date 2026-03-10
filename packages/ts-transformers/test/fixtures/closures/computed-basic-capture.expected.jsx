@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed } from "commontools";
-export default function TestCompute() {
-    const value = cell(10, {
+import { Writable, computed, pattern } from "commontools";
+export default pattern(() => {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const multiplier = cell(2, {
+    const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
@@ -27,7 +27,10 @@ export default function TestCompute() {
         multiplier: multiplier
     }, ({ value, multiplier }) => value.get() * multiplier.get());
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

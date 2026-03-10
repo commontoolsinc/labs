@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
-import { computed, OpaqueRef } from "commontools";
-export default function TestComputedWithClosedOverOpaqueRefMap() {
+import { OpaqueRef, computed, pattern } from "commontools";
+export default pattern(() => {
     const items = [1, 2, 3] as OpaqueRef<number[]>;
     // Inside computed, we close over items (an OpaqueRef)
     // The computed gets transformed to derive({}, () => items.map(...))
@@ -26,7 +26,13 @@ export default function TestComputedWithClosedOverOpaqueRefMap() {
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map(n => n * 2));
     return doubled;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
