@@ -7,6 +7,9 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
   constructor(private cacheDir: string) {}
 
   private path(programHash: string): string {
+    if (/[\/\\]|\.\./.test(programHash)) {
+      throw new Error(`Invalid programHash: ${programHash}`);
+    }
     return `${this.cacheDir}/${programHash}.json`;
   }
 

@@ -311,7 +311,7 @@ describe("CachedCompiler", () => {
     await smallCompiler.set("hash4", testJsScript2);
 
     // Should have evicted down to 2
-    expect(await storage.count()).toBeLessThanOrEqual(2);
+    expect(await storage.count()).toBe(2);
 
     const stats = smallCompiler.getStats();
     expect(stats.countEvictions).toBeGreaterThan(0);

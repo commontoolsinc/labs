@@ -18,6 +18,7 @@ export async function computeGitFingerprint(): Promise<string | undefined> {
       "ls-files",
       "--others",
       "--exclude-standard",
+      "--full-name",
     ]);
 
     const dirtyFiles = [...dirty.split("\n"), ...untracked.split("\n")]
