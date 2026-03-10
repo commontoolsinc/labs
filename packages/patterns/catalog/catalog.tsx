@@ -44,6 +44,10 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 name: "Layout",
                 items: [{ id: "card", label: "Card" }],
               },
+              {
+                name: "Patterns",
+                items: [{ id: "note", label: "Note" }],
+              },
             ]}
           />
 

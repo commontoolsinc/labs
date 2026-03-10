@@ -4,6 +4,7 @@ import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
 import ButtonStory from "../stories/ct-button-story.tsx";
 import InputStory from "../stories/ct-input-story.tsx";
 import CardStory from "../stories/ct-card-story.tsx";
+import NoteStory from "../stories/note-story.tsx";
 
 interface StoryRendererInput {
   selected: Writable<string>;
@@ -21,6 +22,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     const buttonStory = ButtonStory({});
     const inputStory = InputStory({});
     const cardStory = CardStory({});
+    const noteStory = NoteStory({});
 
     return {
       [NAME]: "StoryRenderer",
@@ -29,6 +31,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           {s === "button" ? buttonStory : null}
           {s === "input" ? inputStory : null}
           {s === "card" ? cardStory : null}
+          {s === "note" ? noteStory : null}
         </>
       ),
       controls: (
@@ -36,6 +39,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           {s === "button" ? buttonStory.controls : null}
           {s === "input" ? inputStory.controls : null}
           {s === "card" ? cardStory.controls : null}
+          {s === "note" ? noteStory.controls : null}
         </>
       ),
     };
