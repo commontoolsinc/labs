@@ -19,12 +19,23 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 // at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
 // at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)
 // at eval (recipe-abc.js, <anonymous>:17:10)
+// at async Scheduler.execute (http://localhost:8000/scripts/worker-runtime.js:241550:11)
+// at GmailClient.googleRequest (somefile.js:24414:23)
 /// ```
 // Pattern breakdown:
+// - Optional "async " prefix for async stack frames
 // - Function name: [\w\.$<>]* allows alphanumeric, underscore, dot, $, and <> (for <anonymous>)
 // - [as identifier]: \[as \w+\] matches any identifier, not just "factory"
 const stackTracePattern =
-  /at ([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
+  /at (?:async )?([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
+// V8 eval frames without a function name show the filename directly after "at".
+// When there is a nested position in parens, it is the more precise location:
+//   at recipe-abc.js, <anonymous>:14:15 (recipe-abc.js, <anonymous>:20:10)
+//   at recipe-abc.js, <anonymous>:14:15
+// The nested pattern matches the inner (more precise) position first.
+const evalFrameNestedPattern =
+  /at .+?, <anonymous>:\d+:\d+ \((.+?), <anonymous>:(\d+):(\d+)\)/;
+const evalFramePattern = /at (.+?), <anonymous>:(\d+):(\d+)/;
 const CT_INTERNAL = `    at <CT_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
@@ -53,37 +64,70 @@ export class SourceMapParser {
     return stack.split("\n").map((line) => {
       const match = line.match(stackTracePattern);
 
-      if (!match) {
-        return line;
+      if (match) {
+        return this.mapFrame(match[1], match[2], match[3], match[4], line);
       }
-      const fnName = match[1];
-      const filename = match[2];
-      const lineNum = parseInt(match[3], 10);
-      const columnNum = parseInt(match[4], 10);
 
-      const sourceMap = this.sourceMaps.get(filename);
-      if (!sourceMap) return line;
+      // V8 eval frames without a function name.
+      // Try the nested pattern first (inner position is more precise).
+      const nestedMatch = line.match(evalFrameNestedPattern);
+      if (nestedMatch) {
+        return this.mapFrame(
+          "",
+          nestedMatch[1],
+          nestedMatch[2],
+          nestedMatch[3],
+          line,
+        );
+      }
 
-      if (/AMDLoader/.test(fnName) && lineNum === 1) {
+      const evalMatch = line.match(evalFramePattern);
+      if (evalMatch) {
+        return this.mapFrame(
+          "",
+          evalMatch[1],
+          evalMatch[2],
+          evalMatch[3],
+          line,
+        );
+      }
+
+      return line;
+    }).join("\n");
+  }
+
+  private mapFrame(
+    fnName: string,
+    filename: string,
+    lineStr: string,
+    colStr: string,
+    originalLine: string,
+  ): string {
+    const lineNum = parseInt(lineStr, 10);
+    const columnNum = parseInt(colStr, 10);
+
+    const sourceMap = this.sourceMaps.get(filename);
+    if (!sourceMap) return originalLine;
+
+    if (/AMDLoader/.test(fnName) && lineNum === 1) {
+      return CT_INTERNAL;
+    }
+
+    const consumer = this.getConsumer(sourceMap);
+    const originalPosition = consumer.originalPositionFor({
+      line: lineNum,
+      column: columnNum,
+    });
+
+    if (mapIsEmpty(originalPosition)) {
+      if (fnName === "eval" || fnName === "") {
         return CT_INTERNAL;
       }
+      return UNMAPPED;
+    }
 
-      const consumer = this.getConsumer(sourceMap);
-      const originalPosition = consumer.originalPositionFor({
-        line: lineNum,
-        column: columnNum,
-      });
-
-      if (mapIsEmpty(originalPosition)) {
-        if (fnName === "eval") {
-          return CT_INTERNAL;
-        }
-        return UNMAPPED;
-      }
-
-      // Replace the original line with the mapped position information
-      return `    at ${fnName} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
-    }).join("\n");
+    const name = fnName || originalPosition.name || "<anonymous>";
+    return `    at ${name} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
   }
 
   // Map a single position to its original source location.
