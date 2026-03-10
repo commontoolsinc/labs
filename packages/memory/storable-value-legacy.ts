@@ -10,7 +10,7 @@ import {
   isRichStorableValue,
   toDeepRichStorableValue,
   toRichStorableValue,
-} from "./rich-storable-value.ts";
+} from "./storable-value-modern.ts";
 
 /**
  * Configuration for experimental storable-value features gated behind

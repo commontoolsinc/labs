@@ -1,5 +1,5 @@
 import type { StorableValue } from "./interface.ts";
-import { toDeepRichStorableValue } from "./rich-storable-value.ts";
+import { toDeepRichStorableValue } from "./storable-value-modern.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
 import { toDeepStorableValue } from "./storable-value-legacy.ts";
 

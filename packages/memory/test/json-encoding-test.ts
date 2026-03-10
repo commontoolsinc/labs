@@ -22,7 +22,7 @@ import {
   StorableSet,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
+import { canBeStored, toRichStorableValue } from "../storable-value-modern.ts";
 import {
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,

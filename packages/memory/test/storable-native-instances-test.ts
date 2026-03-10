@@ -21,7 +21,7 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { toRichStorableValue } from "../rich-storable-value.ts";
+import { toRichStorableValue } from "../storable-value-modern.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,

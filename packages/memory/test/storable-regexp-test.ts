@@ -13,7 +13,7 @@ import {
   StorableNativeWrapper,
   StorableRegExp,
 } from "../storable-native-instances.ts";
-import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
+import { canBeStored, toRichStorableValue } from "../storable-value-modern.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
