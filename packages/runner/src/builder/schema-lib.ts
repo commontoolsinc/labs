@@ -31,7 +31,7 @@ export const AuthSchema = {
   },
 } as const satisfies JSONSchema;
 
-// More general OAuth2 Token
+// More general OAuth2 Token (used by Airtable and future OAuth2 providers)
 export const OAuth2TokenSchema = {
   type: "object",
   properties: {
@@ -43,10 +43,19 @@ export const OAuth2TokenSchema = {
     tokenType: { type: "string", default: "" },
     scope: { type: "array", items: { type: "string" }, default: [] },
     expiresIn: { type: "number", default: 0 },
+    expiresAt: { type: "number", default: 0 },
     refreshToken: {
       type: "string",
       default: "",
       ifc: { classification: [ClassificationSecret] },
+    },
+    user: {
+      type: "object",
+      properties: {
+        email: { type: "string", default: "" },
+        name: { type: "string", default: "" },
+        picture: { type: "string", default: "" },
+      },
     },
   },
   required: ["accessToken", "tokenType"],

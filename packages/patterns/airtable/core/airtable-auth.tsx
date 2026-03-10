@@ -21,76 +21,52 @@ import {
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
-  getScopeSummary,
+  getScopeSummary as getScopeSummaryGeneric,
   getSelectedScopeSummary,
   STATUS_CONFIG,
 } from "../../auth/auth-ui-helpers.tsx";
 
-// Scope mapping for Google APIs
+// Airtable scope descriptions
 const SCOPE_MAP = {
-  gmail: "https://www.googleapis.com/auth/gmail.readonly",
-  gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-  calendar: "https://www.googleapis.com/auth/calendar.readonly",
-  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-  drive: "https://www.googleapis.com/auth/drive",
-  docs: "https://www.googleapis.com/auth/documents.readonly",
-  contacts: "https://www.googleapis.com/auth/contacts.readonly",
+  "data.records:read": "Read records",
+  "data.records:write": "Write records",
+  "data.recordComments:read": "Read record comments",
+  "data.recordComments:write": "Write record comments",
+  "schema.bases:read": "Read base schemas",
+  "schema.bases:write": "Write base schemas",
+  "webhook:manage": "Manage webhooks",
 } as const;
 
-const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
-
-// Short names for scope summary display in previewUI
+// Short names for scope summary in previewUI
 const SCOPE_SHORT_NAMES: Record<string, string> = {
-  "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
-  "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
-  "https://www.googleapis.com/auth/gmail.modify": "Gmail",
-  "https://www.googleapis.com/auth/calendar.readonly": "Calendar",
-  "https://www.googleapis.com/auth/calendar.events": "Calendar",
-  "https://www.googleapis.com/auth/drive": "Drive",
-  "https://www.googleapis.com/auth/documents.readonly": "Docs",
-  "https://www.googleapis.com/auth/contacts.readonly": "Contacts",
+  "data.records:read": "Records (R)",
+  "data.records:write": "Records (W)",
+  "data.recordComments:read": "Comments (R)",
+  "data.recordComments:write": "Comments (W)",
+  "schema.bases:read": "Schema (R)",
+  "schema.bases:write": "Schema (W)",
+  "webhook:manage": "Webhooks",
 };
 
-// Short names for scope keys (for configured scopes summary)
-const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
-  gmail: "Gmail",
-  gmailSend: "Gmail",
-  gmailModify: "Gmail",
-  calendar: "Calendar",
-  calendarWrite: "Calendar",
-  drive: "Drive",
-  docs: "Docs",
-  contacts: "Contacts",
-};
+/** Get scope summary from granted scope strings */
+export function getScopeSummary(grantedScopes: string[]): string {
+  return getScopeSummaryGeneric(grantedScopes, SCOPE_SHORT_NAMES);
+}
 
 /**
  * Helper to create preview UI for picker display.
- * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
- *
- * NOTE: Date.now() is captured at call time. This is intentional — the preview
- * is a snapshot shown in the picker card, not a live-updating display. The main
- * pattern UI has its own reactive clock for real-time expiry tracking.
  */
 export function createPreviewUI(
-  auth: Auth | undefined,
+  auth: AirtableAuth | undefined,
   selectedScopes: Record<string, boolean>,
-  badge?: { text: string; color: string },
 ): JSX.Element {
   const email = auth?.user?.email;
-  const picture = auth?.user?.picture;
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
+  // Date.now() capture is intentional — createPreviewUI produces a static
+  // snapshot for picker display, not a live-updating component. The main
+  // pattern UI uses a reactive clock (startReactiveClock) separately.
   const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
@@ -106,8 +82,8 @@ export function createPreviewUI(
     : "ready";
 
   const scopeSummary = isAuthenticated
-    ? getScopeSummary(auth?.scope || [], SCOPE_SHORT_NAMES)
-    : getSelectedScopeSummary(selectedScopes, SCOPE_KEY_SHORT_NAMES);
+    ? getScopeSummary(auth?.scope || [])
+    : getSelectedScopeSummary(selectedScopes, SCOPE_SHORT_NAMES);
 
   return (
     <div
@@ -120,42 +96,30 @@ export function createPreviewUI(
         borderRadius: "8px",
       }}
     >
-      {/* Avatar with status dot overlay */}
       <div style={{ position: "relative", flexShrink: 0 }}>
-        {picture
-          ? (
-            <img
-              src={picture}
-              alt=""
-              style={{ width: "36px", height: "36px", borderRadius: "50%" }}
-            />
-          )
-          : (
-            <div
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            borderRadius: "50%",
+            backgroundColor: isAuthenticated ? "#18BFFF" : "#e5e7eb",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isAuthenticated && (
+            <span
               style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "50%",
-                backgroundColor: isAuthenticated ? "#10b981" : "#e5e7eb",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                color: "white",
+                fontSize: "14px",
+                fontWeight: "600",
               }}
             >
-              {isAuthenticated && (
-                <span
-                  style={{
-                    color: "white",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
-                  {(name || email || "?")[0]?.toUpperCase()}
-                </span>
-              )}
-            </div>
+              {(name || email || "?")[0]?.toUpperCase()}
+            </span>
           )}
-        {/* Status dot */}
+        </div>
         <div
           style={{
             position: "absolute",
@@ -170,24 +134,6 @@ export function createPreviewUI(
         />
       </div>
 
-      {/* Optional badge */}
-      {badge && (
-        <span
-          style={{
-            background: badge.color,
-            color: "white",
-            padding: "2px 6px",
-            borderRadius: "4px",
-            fontSize: "10px",
-            fontWeight: "600",
-            flexShrink: 0,
-          }}
-        >
-          {badge.text}
-        </span>
-      )}
-
-      {/* User info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 500, fontSize: "14px" }}>
           {isAuthenticated ? name || email : "Sign in required"}
@@ -208,13 +154,15 @@ export function createPreviewUI(
 }
 
 /**
- * Auth data structure for Google OAuth tokens.
+ * Airtable OAuth token data.
  *
- * ⚠️ CRITICAL: When consuming this auth from another pattern, DO NOT use derive()!
- * Use direct property access: `googleAuthPiece.auth`
+ * Uses `accessToken` field (OAuth2TokenSchema convention).
+ *
+ * CRITICAL: When consuming from another pattern, DO NOT use derive()!
+ * Use direct property access: `airtableAuthPiece.auth`
  */
-export type Auth = {
-  token: Default<Secret<string>, "">;
+export type AirtableAuth = {
+  accessToken: Default<Secret<string>, "">;
   tokenType: Default<string, "">;
   scope: Default<string[], []>;
   expiresIn: Default<number, 0>;
@@ -227,31 +175,29 @@ export type Auth = {
   }, { email: ""; name: ""; picture: "" }>;
 };
 
-// Selected scopes configuration - exported for wrapper patterns
+// Selected scopes configuration
 export type SelectedScopes = {
-  gmail: Default<boolean, false>;
-  gmailSend: Default<boolean, false>;
-  gmailModify: Default<boolean, false>;
-  calendar: Default<boolean, false>;
-  calendarWrite: Default<boolean, false>;
-  drive: Default<boolean, false>;
-  docs: Default<boolean, false>;
-  contacts: Default<boolean, false>;
+  "data.records:read": Default<boolean, true>;
+  "data.records:write": Default<boolean, false>;
+  "data.recordComments:read": Default<boolean, false>;
+  "data.recordComments:write": Default<boolean, false>;
+  "schema.bases:read": Default<boolean, true>;
+  "schema.bases:write": Default<boolean, false>;
+  "webhook:manage": Default<boolean, false>;
 };
 
 interface Input {
   selectedScopes: Default<SelectedScopes, {
-    gmail: true;
-    gmailSend: true;
-    gmailModify: true;
-    calendar: true;
-    calendarWrite: true;
-    drive: true;
-    docs: true;
-    contacts: true;
+    "data.records:read": true;
+    "data.records:write": false;
+    "data.recordComments:read": false;
+    "data.recordComments:write": false;
+    "schema.bases:read": true;
+    "schema.bases:write": false;
+    "webhook:manage": false;
   }>;
-  auth: Default<Auth, {
-    token: "";
+  auth: Default<AirtableAuth, {
+    accessToken: "";
     tokenType: "";
     scope: [];
     expiresIn: 0;
@@ -261,36 +207,34 @@ interface Input {
   }>;
 }
 
-/** Google OAuth authentication for Google APIs. #googleAuth */
+/** Airtable OAuth authentication for Airtable APIs. #airtableAuth */
 interface Output {
-  auth: Auth;
+  auth: AirtableAuth;
   scopes: string[];
   selectedScopes: SelectedScopes;
-  /** Compact user display with avatar, name, and email */
+  /** Compact user display */
   userChip: unknown;
-  /** Minimal preview for picker display with scope summary */
+  /** Minimal preview for picker display */
   previewUI: unknown;
-  /**
-   * Refresh the OAuth token. Call this from other pieces when the token expires.
-   */
+  /** Refresh the OAuth token from other pieces */
   refreshToken: Stream<Record<string, never>>;
-  /** Background updater for proactive token refresh via background-charm-service */
+  /** Background updater for proactive token refresh */
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Create guarded refresh function for Google OAuth.
-// Module-scope singleton is intentional: google-auth is loaded once per provider
-// (google-auth-personal and google-auth-work are separate modules that compose
-// this one, so each provider gets its own guard instance).
+// Module-scope singleton refresh guard for Airtable OAuth.
+// This is intentional: all instances of this auth pattern share one guard,
+// preventing concurrent refresh requests. This is correct because each
+// provider (e.g. Airtable, Google) has its own module with its own guard.
 const refreshAuthToken = createRefreshFunction(
-  "/api/integrations/google-oauth/refresh",
+  "/api/integrations/airtable-oauth/refresh",
 );
 
-// Handler for refreshing OAuth tokens from UI button
+// Handler for refreshing tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
-    auth: Writable<Auth>;
+    auth: Writable<AirtableAuth>;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
@@ -310,20 +254,10 @@ const handleRefresh = handler<
   },
 );
 
-// Helper function to get friendly scope name
-const getScopeFriendlyName = (scope: string): string => {
-  const friendly = Object.entries(SCOPE_MAP).find(
-    ([, url]) => url === scope,
-  );
-  return friendly
-    ? SCOPE_DESCRIPTIONS[friendly[0] as keyof typeof SCOPE_DESCRIPTIONS]
-    : scope;
-};
-
-// Handler for refreshing tokens from other pieces (cross-piece calling)
+// Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
+  { auth: Writable<AirtableAuth> }
 >(async (_event, { auth }) => {
   await refreshAuthToken(auth);
 });
@@ -331,11 +265,11 @@ const refreshTokenHandler = handler<
 // Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
-  { auth: Writable<Auth> }
+  { auth: Writable<AirtableAuth> }
 >(
   async (_event, { auth }) => {
     const currentAuth = auth.get();
-    if (!currentAuth?.token || !currentAuth?.refreshToken) return;
+    if (!currentAuth?.accessToken || !currentAuth?.refreshToken) return;
 
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
@@ -343,21 +277,23 @@ const bgRefreshHandler = handler<
     const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
-    console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
+    console.log(
+      "[airtable-auth bgUpdater] Token expiring soon, refreshing...",
+    );
 
     try {
       await refreshAuthToken(auth);
-      console.log("[google-auth bgUpdater] Token refreshed successfully");
+      console.log("[airtable-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
       const status = (e as { status?: number }).status;
       const msg = e instanceof Error ? e.message : String(e);
       if (status === 400 || status === 401 || status === 403) {
         console.error(
-          "[google-auth bgUpdater] Permanent refresh failure, clearing auth:",
+          "[airtable-auth bgUpdater] Permanent refresh failure, clearing auth:",
           msg,
         );
         auth.set({
-          token: "",
+          accessToken: "",
           tokenType: "",
           scope: [],
           expiresIn: 0,
@@ -367,7 +303,7 @@ const bgRefreshHandler = handler<
         });
       } else {
         console.error(
-          "[google-auth bgUpdater] Transient refresh failure:",
+          "[airtable-auth bgUpdater] Transient refresh failure:",
           msg,
         );
       }
@@ -377,12 +313,13 @@ const bgRefreshHandler = handler<
 
 export default pattern<Input, Output>(
   ({ auth, selectedScopes }) => {
-    // Compute active scopes based on selection
+    // Compute active scopes based on selection.
+    // Always include user.email:read so the whoami endpoint returns the email.
     const scopes = computed(() => {
-      const base = ["email", "profile"];
+      const base: string[] = ["user.email:read"];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
-        if (enabled && SCOPE_MAP[key as keyof typeof SCOPE_MAP]) {
-          base.push(SCOPE_MAP[key as keyof typeof SCOPE_MAP]);
+        if (enabled) {
+          base.push(key);
         }
       }
       return base;
@@ -392,13 +329,12 @@ export default pattern<Input, Output>(
       Object.values(selectedScopes).some(Boolean)
     );
 
-    // Check if re-auth is needed (selected scopes differ from granted scopes)
+    // Check if re-auth is needed (selected scopes differ from granted)
     const needsReauth = computed(() => {
-      if (!auth?.token) return false;
+      if (!auth?.accessToken) return false;
       const grantedScopes: string[] = auth?.scope || [];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
-        const scopeUrl = SCOPE_MAP[key as keyof typeof SCOPE_MAP];
-        if (enabled && scopeUrl && !grantedScopes.includes(scopeUrl)) {
+        if (enabled && !grantedScopes.includes(key)) {
           return true;
         }
       }
@@ -409,7 +345,7 @@ export default pattern<Input, Output>(
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
-      if (!auth?.token || !auth?.expiresAt) return false;
+      if (!auth?.accessToken || !auth?.expiresAt) return false;
       return auth.expiresAt < now.get();
     });
 
@@ -417,111 +353,82 @@ export default pattern<Input, Output>(
       formatTokenExpiry(auth?.expiresAt || 0, now.get())
     );
 
-    // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
-    const checkboxesDisabled = computed(() => !!auth?.user?.email);
+    const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    // Compact user chip for display in other patterns
     const hasEmail = computed(() => !!auth?.user?.email);
-    const hasPicture = computed(() => !!auth?.user?.picture);
     const hasUserName = computed(() => !!auth?.user?.name);
 
-    const userChipAvatar = ifElse(
-      hasPicture,
-      <img
-        src={auth.user.picture}
-        alt=""
-        style={{ width: "24px", height: "24px", borderRadius: "50%" }}
-      />,
-      <span
-        style={{
-          width: "24px",
-          height: "24px",
-          borderRadius: "50%",
-          backgroundColor: "#10b981",
-          display: "inline-block",
-        }}
-      />,
+    // Data-only computed for previewUI — resolves reactive values to plain scalars
+    const previewState = computed(() => {
+      const email = auth?.user?.email || "";
+      const name = auth?.user?.name || "";
+      const isAuthenticated = !!email;
+      const now = Date.now();
+      const expiresAt = auth?.expiresAt || 0;
+      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
+        expiresAt - now < 10 * 60 * 1000;
+      const status: AuthStatus = !isAuthenticated
+        ? "needs-login"
+        : isExpired
+        ? "expired"
+        : isWarning
+        ? "warning"
+        : "ready";
+      const scopeSummary = isAuthenticated
+        ? getScopeSummary(auth?.scope || [])
+        : getSelectedScopeSummary({
+          "data.records:read": !!selectedScopes["data.records:read"],
+          "data.records:write": !!selectedScopes["data.records:write"],
+          "data.recordComments:read":
+            !!selectedScopes["data.recordComments:read"],
+          "data.recordComments:write":
+            !!selectedScopes["data.recordComments:write"],
+          "schema.bases:read": !!selectedScopes["schema.bases:read"],
+          "schema.bases:write": !!selectedScopes["schema.bases:write"],
+          "webhook:manage": !!selectedScopes["webhook:manage"],
+        }, SCOPE_SHORT_NAMES);
+      const initial = (name || email || "?")[0]?.toUpperCase() || "";
+      const bgColor = STATUS_CONFIG[status].bg;
+      const dotColor = STATUS_CONFIG[status].dot;
+      return {
+        email,
+        name,
+        isAuthenticated,
+        bgColor,
+        dotColor,
+        scopeSummary,
+        initial,
+      };
+    });
+
+    const loggedIn = computed(() => !!auth?.accessToken);
+    const notLoggedInWithScopes = computed(() =>
+      !loggedIn && hasSelectedScopes
     );
-
-    const userChipEmailLine = ifElse(
-      hasUserName,
-      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-        {auth.user.email}
-      </div>,
-      null,
-    );
-
-    const userChip = ifElse(
-      hasEmail,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        {userChipAvatar}
-        <div>
-          <div style={{ fontWeight: 500, fontSize: "14px" }}>
-            {auth.user.name || auth.user.email}
-          </div>
-          {userChipEmailLine}
-        </div>
-      </div>,
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span
-          style={{
-            width: "24px",
-            height: "24px",
-            borderRadius: "50%",
-            backgroundColor: "#e5e7eb",
-            display: "inline-block",
-          }}
-        />
-        <span style={{ color: "#6b7280" }}>Not signed in</span>
-      </div>,
-    );
-
-    // Minimal preview chip for picker display using shared helper
-    const previewUI = computed(() =>
-      createPreviewUI(auth, {
-        gmail: selectedScopes.gmail,
-        gmailSend: selectedScopes.gmailSend,
-        gmailModify: selectedScopes.gmailModify,
-        calendar: selectedScopes.calendar,
-        calendarWrite: selectedScopes.calendarWrite,
-        drive: selectedScopes.drive,
-        docs: selectedScopes.docs,
-        contacts: selectedScopes.contacts,
-      })
-    );
-
-    const loggedIn = computed(() => !!auth?.user?.email);
-
-    // Compound conditions for ifElse in JSX
-    const showScopePreview = computed(() => !loggedIn && hasSelectedScopes);
     const showTokenStatus = computed(() =>
       !!auth?.user?.email && !isTokenExpired
     );
 
-    const grantedScopesUI = computed(() => {
-      const scopes = auth.scope;
-      if (!scopes || scopes.length === 0) {
-        return <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }} />;
-      }
-      const friendlyScopes = scopes.map(getScopeFriendlyName) as string[];
-      return (
-        <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-          {friendlyScopes.map((scope) => <li>{scope}</li>)}
-        </ul>
+    // Data-only computed for granted scopes
+    const grantedScopesList = computed(() => {
+      const scopeList: string[] = auth?.scope || [];
+      return scopeList.map(
+        (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
       );
     });
 
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return `Google Auth (${auth.user.email})`;
+          return `Airtable Auth (${auth.user.email})`;
         }
-        return "Google Auth";
+        return "Airtable Auth";
       }),
       [UI]: (
         <div
@@ -534,7 +441,7 @@ export default pattern<Input, Output>(
           }}
         >
           <h2 style={{ fontSize: "24px", fontWeight: "bold", margin: "0" }}>
-            Google Authentication
+            Airtable Authentication
           </h2>
 
           <div
@@ -560,7 +467,7 @@ export default pattern<Input, Output>(
                 </p>
               </div>,
               <p style={{ color: "#666" }}>
-                Select permissions below and authenticate with Google
+                Select permissions below and authenticate with Airtable
               </p>,
             )}
           </div>
@@ -595,7 +502,7 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
+              {Object.entries(SCOPE_MAP).map(([key, description]) => (
                 <label
                   style={{
                     display: "flex",
@@ -629,8 +536,8 @@ export default pattern<Input, Output>(
               }}
             >
               <strong>Note:</strong>{" "}
-              You've selected new permissions. Click "Sign in with Google" below
-              to grant access.
+              You've selected new permissions. Click "Authenticate with
+              Airtable" below to grant access.
             </div>,
             null,
           )}
@@ -648,24 +555,24 @@ export default pattern<Input, Output>(
               }}
             >
               <strong>Tip:</strong>{" "}
-              Favorite this piece (click ⭐) to share your Google auth across
-              all your patterns. Any pattern using{" "}
-              <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
+              Favorite this piece to share your Airtable auth across all your
+              patterns. Any pattern using{" "}
+              <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
               will automatically find and use it.
             </div>,
             null,
           )}
 
-          {/* Show selected scopes if no auth yet */}
+          {/* Show selected scopes */}
           {ifElse(
-            showScopePreview,
+            notLoggedInWithScopes,
             <div style={{ fontSize: "14px", color: "#666" }}>
               Will request: {scopesDisplay}
             </div>,
             null,
           )}
 
-          {/* Token expired warning with refresh button */}
+          {/* Token expired warning */}
           {ifElse(
             isTokenExpired,
             <div
@@ -693,8 +600,7 @@ export default pattern<Input, Output>(
                   color: "#4b5563",
                 }}
               >
-                Your Google token has expired. Click below to refresh it
-                automatically.
+                Your Airtable token has expired. Click below to refresh it.
               </p>
               <button
                 type="button"
@@ -731,12 +637,17 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-google-oauth
+          <ct-oauth
             $auth={auth}
             scopes={scopes}
+            provider="airtable"
+            providerLabel="Airtable"
+            brandColor="#18BFFF"
+            loginEndpoint="/api/integrations/airtable-oauth/login"
+            tokenField="accessToken"
           />
 
-          {/* Show granted scopes if authenticated */}
+          {/* Show granted scopes */}
           {ifElse(
             loggedIn,
             <div
@@ -748,12 +659,14 @@ export default pattern<Input, Output>(
               }}
             >
               <strong>Granted Scopes:</strong>
-              {grantedScopesUI}
+              <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                {grantedScopesList.map((scope) => <li>{scope}</li>)}
+              </ul>
             </div>,
             null,
           )}
 
-          {/* Manual token refresh section - visible when authenticated and NOT expired */}
+          {/* Token status when authenticated and NOT expired */}
           {ifElse(
             showTokenStatus,
             <div
@@ -824,9 +737,8 @@ export default pattern<Input, Output>(
             }}
           >
             <strong>Usage:</strong>{" "}
-            This piece provides unified Google OAuth authentication. Link its
-            {" "}
-            <code>auth</code> output to any Google importer piece's{" "}
+            This piece provides Airtable OAuth authentication. Link its{" "}
+            <code>auth</code> output to any Airtable importer piece's{" "}
             <code>auth</code> input, or favorite it for automatic discovery.
           </div>
         </div>
@@ -834,8 +746,128 @@ export default pattern<Input, Output>(
       auth,
       scopes,
       selectedScopes,
-      userChip,
-      previewUI,
+      userChip: ifElse(
+        hasEmail,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#18BFFF",
+              display: "inline-block",
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+            </div>
+            {ifElse(
+              hasUserName,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {auth.user.email}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#e5e7eb",
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "#6b7280" }}>Not signed in</span>
+        </div>,
+      ),
+      previewUI: (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            padding: "12px 16px",
+            backgroundColor: previewState.bgColor,
+            borderRadius: "8px",
+          }}
+        >
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "50%",
+                backgroundColor: previewState.isAuthenticated
+                  ? "#18BFFF"
+                  : "#e5e7eb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {ifElse(
+                previewState.isAuthenticated,
+                <span
+                  style={{
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                  }}
+                >
+                  {previewState.initial}
+                </span>,
+                null,
+              )}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-2px",
+                right: "-2px",
+                width: "12px",
+                height: "12px",
+                borderRadius: "50%",
+                backgroundColor: previewState.dotColor,
+                border: "2px solid white",
+              }}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(
+                previewState.isAuthenticated,
+                <span>{previewState.name || previewState.email}</span>,
+                <span>Sign in required</span>,
+              )}
+            </div>
+            {ifElse(
+              previewState.isAuthenticated && !!previewState.name &&
+                !!previewState.email,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {previewState.email}
+              </div>,
+              null,
+            )}
+            {ifElse(
+              !!previewState.scopeSummary,
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#6b7280",
+                  marginTop: "2px",
+                }}
+              >
+                {previewState.scopeSummary}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>
+      ),
       refreshToken: refreshTokenHandler({ auth }),
       bgUpdater: bgRefreshHandler({ auth }),
     };

@@ -2917,6 +2917,7 @@ interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CTFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
 interface CTGoogleOAuthElement extends CTHTMLElement {}
+interface CTOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
@@ -3000,6 +3001,16 @@ interface CTPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
 interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
+}
+
+interface CTOAuthAttributes<T> extends CTHTMLAttributes<T> {
+  "$auth"?: any;
+  "scopes"?: string[];
+  "provider"?: string;
+  "providerLabel"?: string;
+  "brandColor"?: string;
+  "loginEndpoint"?: string;
+  "tokenField"?: string;
 }
 
 interface CTWebhookAttributes<T> extends CTHTMLAttributes<T> {
@@ -4817,6 +4828,10 @@ declare global {
       "ct-google-oauth": CTDOM.DetailedHTMLProps<
         CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
         CTGoogleOAuthElement
+      >;
+      "ct-oauth": CTDOM.DetailedHTMLProps<
+        CTOAuthAttributes<CTOAuthElement>,
+        CTOAuthElement
       >;
       "ct-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,

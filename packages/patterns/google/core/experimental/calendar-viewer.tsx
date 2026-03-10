@@ -19,8 +19,7 @@ import {
   Writable,
 } from "commontools";
 
-type CFC<T, C extends string> = T;
-type Confidential<T> = CFC<T, "confidential">;
+type Confidential<T> = T;
 
 /**
  * A calendar event

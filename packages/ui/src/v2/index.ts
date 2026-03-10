@@ -48,6 +48,7 @@ export * from "./components/ct-file-input/index.ts";
 export * from "./components/form/index.ts";
 export * from "./components/ct-fragment/index.ts";
 export * from "./components/ct-google-oauth/index.ts";
+export * from "./components/ct-oauth/index.ts";
 export * from "./components/ct-grid/index.ts";
 export * from "./components/ct-hgroup/index.ts";
 export * from "./components/ct-hscroll/index.ts";
