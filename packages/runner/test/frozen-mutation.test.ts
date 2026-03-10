@@ -21,25 +21,19 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import {
-  resetExperimentalStorableConfig,
-} from "@commontools/memory/storable-value";
+import { resetStorableValueConfig } from "@commontools/memory/storable-value";
 import { resetCanonicalHashConfig } from "@commontools/memory/reference";
 import {
   resetJsonEncodingConfig,
 } from "@commontools/memory/json-encoding-dispatch";
-import {
-  resetStorableValueConfig,
-} from "@commontools/memory/storable-value-dispatch";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();
 
 function resetAllConfigs() {
-  resetExperimentalStorableConfig();
+  resetStorableValueConfig();
   resetCanonicalHashConfig();
   resetJsonEncodingConfig();
-  resetStorableValueConfig();
 }
 
 describe("frozen-object safety contracts", () => {

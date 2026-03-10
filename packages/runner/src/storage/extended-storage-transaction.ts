@@ -31,7 +31,7 @@ import { toThrowable } from "./interface.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   isArrayIndexPropertyName,
-  toStorableValue,
+  shallowStorableFromNativeValue,
 } from "@commontools/memory/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
@@ -143,7 +143,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // When richStorableValues is ON, stored objects are deep-frozen by
         // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
         // TypeError on frozen objects.
-        valueObj = toStorableValue(
+        valueObj = shallowStorableFromNativeValue(
           currentValue,
           false,
         ) as StorableObject;

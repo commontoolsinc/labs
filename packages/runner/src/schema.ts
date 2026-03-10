@@ -6,7 +6,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
-import { toStorableValue } from "@commontools/memory/storable-value";
+import { shallowStorableFromNativeValue } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -584,9 +584,9 @@ class TransformObjectCreator
       // default.
       if (isObject(value) && link.schema.properties !== undefined) {
         // Ensure value is mutable before injecting default properties.
-        // toStorableValue(v, false) is a no-op for unfrozen objects and
-        // shallow-clones frozen ones (richStorableValues ON).
-        value = toStorableValue(value, false) as typeof value;
+        // shallowStorableFromNativeValue(v, false) is a no-op for unfrozen
+        // objects and shallow-clones frozen ones (richStorableValues ON).
+        value = shallowStorableFromNativeValue(value, false) as typeof value;
         const propertyEntries = Object.entries(link.schema.properties) as [
           string,
           JSONSchema,
