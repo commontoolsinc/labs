@@ -1,15 +1,9 @@
 /// <cts-enable />
-import {
-  computed,
-  NAME,
-  pattern,
-  UI,
-  type VNode,
-  Writable,
-} from "commontools";
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 import { Controls, SwitchControl, TextControl } from "../ui/controls.tsx";
 
+// deno-lint-ignore no-empty-interface
 interface InputStoryInput {}
 interface InputStoryOutput {
   [NAME]: string;
@@ -42,20 +36,20 @@ export default pattern<InputStoryInput, InputStoryOutput>(() => {
     ),
     controls: (
       <Controls>
-        <div>
-        <TextControl
-          label="placeholder"
-          description="Placeholder text shown when empty"
-          defaultValue="Type something..."
-          value={placeholder}
-        />
-        <SwitchControl
-          label="disabled"
-          description="Disables interaction"
-          defaultValue="false"
-          checked={disabled}
-        />
-        </div>
+        <>
+          <TextControl
+            label="placeholder"
+            description="Placeholder text shown when empty"
+            defaultValue="Type something..."
+            value={placeholder}
+          />
+          <SwitchControl
+            label="disabled"
+            description="Disables interaction"
+            defaultValue="false"
+            checked={disabled}
+          />
+        </>
       </Controls>
     ),
   };

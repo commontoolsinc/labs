@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  action,
-  computed,
-  NAME,
-  pattern,
-  UI,
-  type VNode,
-  Writable,
-} from "commontools";
+import { action, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 import {
   Controls,
@@ -16,6 +8,7 @@ import {
   TextControl,
 } from "../ui/controls.tsx";
 
+// deno-lint-ignore no-empty-interface
 interface ButtonStoryInput {}
 interface ButtonStoryOutput {
   [NAME]: string;
@@ -65,44 +58,44 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
     ),
     controls: (
       <Controls>
-        <div>
-        <SelectControl
-          label="variant"
-          description="Visual style of the button"
-          defaultValue="primary"
-          value={variant}
-          items={[
-            { label: "Primary", value: "primary" },
-            { label: "Secondary", value: "secondary" },
-            { label: "Destructive", value: "destructive" },
-            { label: "Ghost", value: "ghost" },
-          ]}
-        />
-        <SelectControl
-          label="size"
-          description="Size of the button"
-          defaultValue="default"
-          value={size}
-          items={[
-            { label: "Default", value: "default" },
-            { label: "Small", value: "sm" },
-            { label: "Large", value: "lg" },
-            { label: "Icon", value: "icon" },
-          ]}
-        />
-        <TextControl
-          label="children"
-          description="Button label text"
-          defaultValue="Click me"
-          value={label}
-        />
-        <SwitchControl
-          label="disabled"
-          description="Disables interaction"
-          defaultValue="false"
-          checked={disabled}
-        />
-        </div>
+        <>
+          <SelectControl
+            label="variant"
+            description="Visual style of the button"
+            defaultValue="primary"
+            value={variant}
+            items={[
+              { label: "Primary", value: "primary" },
+              { label: "Secondary", value: "secondary" },
+              { label: "Destructive", value: "destructive" },
+              { label: "Ghost", value: "ghost" },
+            ]}
+          />
+          <SelectControl
+            label="size"
+            description="Size of the button"
+            defaultValue="default"
+            value={size}
+            items={[
+              { label: "Default", value: "default" },
+              { label: "Small", value: "sm" },
+              { label: "Large", value: "lg" },
+              { label: "Icon", value: "icon" },
+            ]}
+          />
+          <TextControl
+            label="children"
+            description="Button label text"
+            defaultValue="Click me"
+            value={label}
+          />
+          <SwitchControl
+            label="disabled"
+            description="Disables interaction"
+            defaultValue="false"
+            checked={disabled}
+          />
+        </>
       </Controls>
     ),
   };

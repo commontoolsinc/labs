@@ -1,18 +1,8 @@
 /// <cts-enable />
-import {
-  computed,
-  Default,
-  NAME,
-  pattern,
-  UI,
-  type VNode,
-  Writable,
-} from "commontools";
+import { Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 import Sidebar from "./ui/sidebar.tsx";
-import ButtonStory from "./stories/ct-button-story.tsx";
-import InputStory from "./stories/ct-input-story.tsx";
-import CardStory from "./stories/ct-card-story.tsx";
+import StoryRenderer from "./ui/story-renderer.tsx";
 
 interface CatalogInput {
   selectedStory?: Writable<Default<string, "button">>;
@@ -25,10 +15,7 @@ interface CatalogOutput {
 }
 
 export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
-  const selected = computed(() => selectedStory.get());
-  const buttonStory = ButtonStory({});
-  const inputStory = InputStory({});
-  const cardStory = CardStory({});
+  const stories = StoryRenderer({ selected: selectedStory });
 
   return {
     [NAME]: "Component Catalog",
@@ -77,13 +64,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 backgroundColor: "#ffffff",
               }}
             >
-              {selected === "button"
-                ? buttonStory
-                : selected === "input"
-                  ? inputStory
-                  : selected === "card"
-                    ? cardStory
-                    : null}
+              {stories}
             </div>
 
             {/* Controls panel */}
@@ -92,7 +73,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                 borderTop: "1px solid #e6e9ed",
                 padding: "16px",
                 backgroundColor: "#fafafa",
-                maxHeight: "250px",
+                maxHeight: "400px",
                 overflow: "auto",
               }}
             >
@@ -108,13 +89,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
               >
                 Controls
               </div>
-              {selected === "button"
-                ? buttonStory.controls
-                : selected === "input"
-                  ? inputStory.controls
-                  : selected === "card"
-                    ? cardStory.controls
-                    : null}
+              {stories.controls}
             </div>
           </div>
         </div>
