@@ -1,0 +1,132 @@
+/// <cts-enable />
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+
+import { Controls, SwitchControl } from "../ui/controls.tsx";
+
+// deno-lint-ignore no-empty-interface
+interface HScrollStoryInput {}
+interface HScrollStoryOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  controls: VNode;
+}
+
+export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
+  const showScrollbar = Writable.of(true);
+  const fadeEdges = Writable.of(false);
+
+  return {
+    [NAME]: "ct-hscroll Story",
+    [UI]: (
+      <div
+        style={{
+          padding: "1rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: "24px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "14px",
+              fontWeight: "600",
+              marginBottom: "8px",
+              color: "#2e3438",
+            }}
+          >
+            Horizontal Scrollable Area
+          </div>
+          <ct-hscroll
+            show-scrollbar={showScrollbar}
+            fade-edges={fadeEdges}
+            style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
+          >
+            <ct-hstack gap="2">
+              <ct-card style="min-width: 150px;">
+                <span>Card 1</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 2</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 3</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 4</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 5</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 6</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 7</span>
+              </ct-card>
+              <ct-card style="min-width: 150px;">
+                <span>Card 8</span>
+              </ct-card>
+            </ct-hstack>
+          </ct-hscroll>
+        </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: "14px",
+              fontWeight: "600",
+              marginBottom: "8px",
+              color: "#2e3438",
+            }}
+          >
+            Image Gallery Style
+          </div>
+          <ct-hscroll
+            fade-edges
+            style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
+          >
+            <ct-hstack gap="2">
+              <div style="min-width: 120px; height: 80px; background: #fef3c7; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🌅
+              </div>
+              <div style="min-width: 120px; height: 80px; background: #dbeafe; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🏔️
+              </div>
+              <div style="min-width: 120px; height: 80px; background: #dcfce7; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🌿
+              </div>
+              <div style="min-width: 120px; height: 80px; background: #fce7f3; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🌸
+              </div>
+              <div style="min-width: 120px; height: 80px; background: #ede9fe; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🦋
+              </div>
+              <div style="min-width: 120px; height: 80px; background: #ffedd5; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                🍂
+              </div>
+            </ct-hstack>
+          </ct-hscroll>
+        </div>
+      </div>
+    ),
+    controls: (
+      <Controls>
+        <>
+          <SwitchControl
+            label="show-scrollbar"
+            description="Show the scrollbar"
+            defaultValue="true"
+            checked={showScrollbar}
+          />
+          <SwitchControl
+            label="fade-edges"
+            description="Fade content at scroll edges"
+            defaultValue="false"
+            checked={fadeEdges}
+          />
+        </>
+      </Controls>
+    ),
+  };
+});

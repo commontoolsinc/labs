@@ -205,6 +205,158 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               Card
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "modal" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "modal"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "modal" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "modal", selected })}
+            >
+              Modal
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "vstack" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "vstack"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "vstack" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "vstack", selected })}
+            >
+              VStack
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "hstack" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "hstack"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "hstack" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "hstack", selected })}
+            >
+              HStack
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "vgroup" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "vgroup"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "vgroup" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "vgroup", selected })}
+            >
+              VGroup
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "hgroup" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "hgroup"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "hgroup" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "hgroup", selected })}
+            >
+              HGroup
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "vscroll" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "vscroll"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "vscroll" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "vscroll", selected })}
+            >
+              VScroll
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "hscroll" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "hscroll"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "hscroll" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "hscroll", selected })}
+            >
+              HScroll
+            </div>
+          </div>
+
+          {/* Feedback */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Feedback
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "progress" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "progress"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "progress" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "progress", selected })}
+            >
+              Progress
+            </div>
           </div>
 
           {/* Data Visualization */}

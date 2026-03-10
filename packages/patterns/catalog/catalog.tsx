@@ -45,7 +45,20 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
               },
               {
                 name: "Layout",
-                items: [{ id: "card", label: "Card" }],
+                items: [
+                  { id: "card", label: "Card" },
+                  { id: "modal", label: "Modal" },
+                  { id: "vstack", label: "VStack" },
+                  { id: "hstack", label: "HStack" },
+                  { id: "vgroup", label: "VGroup" },
+                  { id: "hgroup", label: "HGroup" },
+                  { id: "vscroll", label: "VScroll" },
+                  { id: "hscroll", label: "HScroll" },
+                ],
+              },
+              {
+                name: "Feedback",
+                items: [{ id: "progress", label: "Progress" }],
               },
               {
                 name: "Data Visualization",
