@@ -163,9 +163,12 @@ export class PiecesController<T = unknown> {
    * Stops and unlinks the existing default pattern, then creates a new one.
    * This is useful for resetting the space's default pattern state.
    *
+   * @param options.customProgram - A pre-compiled program to use instead of the default URL-based pattern
    * @returns The newly created default pattern piece
    */
-  async recreateDefaultPattern(): Promise<PieceController<NameSchema>> {
+  async recreateDefaultPattern(
+    options?: { customProgram?: RuntimeProgram },
+  ): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
     // Stop and unlink the existing default pattern first (before any operations that might fail)
@@ -184,34 +187,48 @@ export class PiecesController<T = unknown> {
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
     let patternConfig: { name: string; urlPath: string; cause: string };
+    let pattern;
 
-    if (isHomeSpace) {
+    if (options?.customProgram) {
       patternConfig = {
-        name: "Home",
-        urlPath: "/api/patterns/system/home.tsx",
-        cause: `home-pattern-${Date.now()}`,
+        name: isHomeSpace ? "Home" : "DefaultPieceList",
+        urlPath: "custom",
+        cause: isHomeSpace
+          ? `home-pattern-${Date.now()}`
+          : `space-root-${Date.now()}`,
       };
+      pattern = await this.#manager.runtime.patternManager.compilePattern(
+        options.customProgram,
+      );
     } else {
-      const customUrl = await this.getDefaultAppUrlFromHome();
-      patternConfig = {
-        name: "DefaultPieceList",
-        urlPath: customUrl || "/api/patterns/system/default-app.tsx",
-        cause: `space-root-${Date.now()}`,
-      };
+      if (isHomeSpace) {
+        patternConfig = {
+          name: "Home",
+          urlPath: "/api/patterns/system/home.tsx",
+          cause: `home-pattern-${Date.now()}`,
+        };
+      } else {
+        const customUrl = await this.getDefaultAppUrlFromHome();
+        patternConfig = {
+          name: "DefaultPieceList",
+          urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+          cause: `space-root-${Date.now()}`,
+        };
+      }
+
+      const patternUrl = new URL(
+        patternConfig.urlPath,
+        this.#manager.runtime.apiUrl,
+      );
+
+      // Load and compile the pattern
+      const program = await this.#manager.runtime.harness.resolve(
+        new HttpProgramResolver(patternUrl.href),
+      );
+      pattern = await this.#manager.runtime.patternManager.compilePattern(
+        program,
+      );
     }
-
-    const patternUrl = new URL(
-      patternConfig.urlPath,
-      this.#manager.runtime.apiUrl,
-    );
-
-    // Load and compile the pattern
-    const program = await this.#manager.runtime.harness.resolve(
-      new HttpProgramResolver(patternUrl.href),
-    );
-    const pattern = await this.#manager.runtime.patternManager.compilePattern(
-      program,
-    );
 
     // Create new piece cell
     let pieceCell: Cell<NameSchema>;
