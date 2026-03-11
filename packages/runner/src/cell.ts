@@ -186,13 +186,13 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw storable value as `StorableValue`, bypassing the
+     * Reads the cell's raw storable value as `Immutable<StorableValue>`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
-    getRawUntyped(options?: IReadOptions): StorableValue;
+    getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
     /** Read the cell's raw storable value as a mutable deep copy. */
     getRawMutable(options?: IReadOptions): T | undefined;
     setRaw(value: NoInfer<T> & StorableValue): void;
@@ -1212,8 +1212,8 @@ export class CellImpl<T extends StorableValue>
       | undefined;
   }
 
-  getRawUntyped(options?: IReadOptions): StorableValue {
-    return this.getRaw(options) as StorableValue;
+  getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
+    return this.getRaw(options) as Immutable<StorableValue>;
   }
 
   getRawMutable(options?: IReadOptions): T | undefined {
