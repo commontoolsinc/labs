@@ -129,22 +129,35 @@ Deno.test("memory websocket negotiates a v2 session", async () => {
   try {
     const socket = await openSocket(address);
     socket.send(JSON.stringify({
-      cmd: "session.open",
-      id: "job:test-open",
+      type: "hello",
       protocol: MEMORY_V2_PROTOCOL,
-      args: {},
     }));
 
     const message = await readJsonMessage<{
-      the: "task/return";
-      of: string;
-      is: { ok: { sessionId: string; serverSeq: number } };
+      type: "hello.ok";
+      protocol: string;
     }>(socket);
 
-    assertEquals(message.the, "task/return");
-    assertEquals(message.of, "job:test-open");
-    assertEquals(message.is.ok.serverSeq, 0);
-    assert(message.is.ok.sessionId.length > 0);
+    assertEquals(message.type, "hello.ok");
+    assertEquals(message.protocol, MEMORY_V2_PROTOCOL);
+
+    socket.send(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-toolshed-open",
+      session: {},
+    }));
+
+    const opened = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string; serverSeq: number };
+    }>(socket);
+
+    assertEquals(opened.type, "response");
+    assertEquals(opened.requestId, "open-1");
+    assertEquals(opened.ok.serverSeq, 0);
+    assert(opened.ok.sessionId.length > 0);
 
     socket.close();
   } finally {
@@ -161,25 +174,63 @@ Deno.test("memory websocket resumes a requested v2 session id", async () => {
   try {
     const socket = await openSocket(address);
     socket.send(JSON.stringify({
-      cmd: "session.open",
-      id: "job:test-resume",
+      type: "hello",
       protocol: MEMORY_V2_PROTOCOL,
-      args: {
+    }));
+
+    await readJsonMessage(socket);
+
+    socket.send(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-toolshed-resume",
+      session: {
         sessionId: "session:test-resume",
         seenSeq: 7,
       },
     }));
 
     const message = await readJsonMessage<{
-      the: "task/return";
-      of: string;
-      is: { ok: { sessionId: string; serverSeq: number } };
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string; serverSeq: number };
     }>(socket);
 
-    assertEquals(message.the, "task/return");
-    assertEquals(message.of, "job:test-resume");
-    assertEquals(message.is.ok.sessionId, "session:test-resume");
-    assertEquals(message.is.ok.serverSeq, 0);
+    assertEquals(message.type, "response");
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.ok.sessionId, "session:test-resume");
+    assertEquals(message.ok.serverSeq, 0);
+
+    socket.close();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+Deno.test("memory websocket requires hello before opening a v2 session", async () => {
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+
+  try {
+    const socket = await openSocket(address);
+    socket.send(JSON.stringify({
+      type: "session.open",
+      requestId: "open-without-hello",
+      space: "did:key:z6Mk-toolshed-no-hello",
+      session: {},
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+
+    assertEquals(message.type, "response");
+    assertEquals(message.requestId, "handshake");
+    assertEquals(message.error.name, "ProtocolError");
 
     socket.close();
   } finally {
