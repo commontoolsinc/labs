@@ -78,7 +78,8 @@ CREATE INDEX IF NOT EXISTS idx_commit_hash ON "commit" (hash);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
   ON "commit" (session_id, local_seq);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_invocation_ref
+DROP INDEX IF EXISTS idx_commit_invocation_ref;
+CREATE INDEX IF NOT EXISTS idx_commit_invocation_ref
   ON "commit" (invocation_ref);
 
 CREATE TABLE IF NOT EXISTS fact (

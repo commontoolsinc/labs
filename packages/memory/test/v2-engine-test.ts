@@ -257,6 +257,61 @@ Deno.test("memory v2 engine persists set and delete commits", async () => {
   }
 });
 
+Deno.test("memory v2 engine allows multiple commits to reuse the same invocation", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    const first = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:1",
+          value: toEntityDocument({ hello: "world" }),
+        }],
+      },
+    });
+
+    const second = applyCommit(engine, {
+      sessionId: "session:2",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:2",
+          value: toEntityDocument({ hello: "again" }),
+        }],
+      },
+    });
+
+    assertEquals(first.seq, 1);
+    assertEquals(second.seq, 2);
+    assertEquals(read(engine, { id: "entity:2" }), toEntityDocument({ hello: "again" }));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine replays patch facts for current and point-in-time reads", async () => {
   const { engine, path } = await createEngine();
 
