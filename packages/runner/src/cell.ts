@@ -1203,7 +1203,18 @@ export class CellImpl<T extends StorableValue>
   }
 
   getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
-    if (!this.synced) this.sync();
+    return this._getRawUntyped(options, true) as Immutable<StorableValue>;
+  }
+
+  getRawUntypedMutable(options?: IReadOptions): StorableValue {
+    return this._getRawUntyped(options, false);
+  }
+
+  private _getRawUntyped(
+    options: IReadOptions | undefined,
+    frozen: boolean,
+  ): StorableValue {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
@@ -1211,16 +1222,10 @@ export class CellImpl<T extends StorableValue>
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    // Deep-copy and freeze without native unwrapping — both getRaw() and
-    // getRawUntyped() return storable-layer values, not native ("wild west")
-    // values.
-    return deepCloneIfNecessary(value) as Immutable<StorableValue>;
-  }
-
-  getRawUntypedMutable(options?: IReadOptions): StorableValue {
-    const raw = this.getRawUntyped(options);
-    if (raw === undefined) return undefined;
-    return deepCloneIfNecessary(raw, false);
+    // Deep-copy with desired frozenness, without native unwrapping — getRaw()
+    // and getRawUntyped() return storable-layer values, not native ("wild
+    // west") values.
+    return deepCloneIfNecessary(value, frozen);
   }
 
   setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
