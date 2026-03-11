@@ -56,3 +56,4 @@ The specification addresses:
 - [Reactivity](./6-reactivity.md)
 - [Schemas](./7-schemas.md)
 - [Traversal and Schema Query](./8-traversal.md)
+- [Path-Granular Transactions (Proposed)](./9-path-granular-transactions.md)
