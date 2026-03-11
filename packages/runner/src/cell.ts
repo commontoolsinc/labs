@@ -252,6 +252,7 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 const cellMethods = new Set<
   | keyof ICell<unknown>
+  | "findIndex"
   | "filter"
   | "filterWithPattern"
   | "flatMap"
@@ -271,6 +272,7 @@ const cellMethods = new Set<
   "map",
   "mapWithPattern",
   "reduce",
+  "findIndex",
   "filter",
   "filterWithPattern",
   "flatMap",
@@ -1498,6 +1500,35 @@ export class CellImpl<T extends StorableValue>
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
+    })(this as unknown as OpaqueRef<any>);
+  }
+
+  /**
+   * Find the index of the first matching element in an array cell.
+   * Similar to Array.prototype.findIndex but reactive — re-runs when any
+   * element changes. Returns -1 if no match is found. Throws TypeError
+   * if the value is not an array, which surfaces as a scheduler error
+   * and leaves the result undefined.
+   */
+  findIndex(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => boolean,
+  ): OpaqueRef<number> {
+    // Uses lift rather than a per-element-pattern builtin (like filter/map)
+    // because findIndex returns a plain number, not an element reference —
+    // there's no benefit to per-element reactive tracking. The lift approach
+    // short-circuits naturally and the predicate receives unwrapped values,
+    // so normal JS comparisons work. Tradeoff: reruns the full search on any
+    // array change. For per-element reactivity, use filter(pred)[0] instead.
+    return lift((list: any[]) => {
+      if (!Array.isArray(list)) {
+        throw new TypeError("findIndex called on non-array value");
+      }
+      return list.findIndex(fn);
     })(this as unknown as OpaqueRef<any>);
   }
 
