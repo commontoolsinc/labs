@@ -176,6 +176,7 @@ export function createDataFlowAnalyzer(
   const handleCallExpression = (
     merged: InternalAnalysis,
     callKind: ReturnType<typeof detectCallKind>,
+    callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
     // Builder calls (like pattern) don't need derive wrapping
@@ -187,14 +188,12 @@ export function createDataFlowAnalyzer(
       };
     }
 
-    // Array method calls do NOT require derive wrapping — ClosureTransformer
-    // handles .map() → .mapWithPattern() rewriting directly.
-    // Setting requiresRewrite: false prevents processBranch from wrapping
-    // conditional branches containing .map() in unnecessary derive() calls.
+    // Array-map calls preserve requiresRewrite from the callee
+    // to handle cases like state.items.filter(...).map(...)
     if (callKind?.kind === "array-method") {
       return {
         ...merged,
-        requiresRewrite: false,
+        requiresRewrite: callee.requiresRewrite,
         rewriteHint,
       };
     }
@@ -704,7 +703,7 @@ export function createDataFlowAnalyzer(
         return undefined;
       })();
 
-      return handleCallExpression(combined, callKind, rewriteHint);
+      return handleCallExpression(combined, callKind, callee, rewriteHint);
     }
 
     if (isFunctionLikeExpression(expression)) {

@@ -376,13 +376,29 @@ function rewritePatternBody(
     }
   };
 
-  const diagnosticsSeen = new Set<number>();
+  const diagnosticsSeen = new Set<string>();
+  let syntheticCounter = 0;
   const reportOnce = (
     node: ts.Node,
     type: "computation" | "optional",
     message: string,
   ): void => {
-    const key = node.getStart(context.sourceFile);
+    // Synthetic nodes (from prior transformers) lack real positions.
+    // Try getStart, fall back to original node, then assign a unique key
+    // so synthetic nodes are never incorrectly deduped with each other.
+    let key: string;
+    try {
+      key = String(node.getStart(context.sourceFile));
+    } catch {
+      const original = ts.getOriginalNode(node);
+      try {
+        key = original !== node && original.pos >= 0
+          ? String(original.getStart(context.sourceFile))
+          : `synthetic:${syntheticCounter++}`;
+      } catch {
+        key = `synthetic:${syntheticCounter++}`;
+      }
+    }
     if (diagnosticsSeen.has(key)) return;
     diagnosticsSeen.add(key);
     if (type === "computation") {
@@ -453,15 +469,12 @@ function rewritePatternBody(
         return visited;
       }
 
-      if (info.dynamic) {
-        reportOnce(
-          visited,
-          "computation",
-          "Dynamic key access is not lowerable in pattern context. Use a compute wrapper for dynamic traversal.",
-        );
-        return visited;
-      }
-
+      // Handle PropertyAccessExpression call targets first, before the
+      // info.dynamic check. Known terminal methods (map, mapWithPattern, etc.)
+      // are handled by the closure/array-method transformers and should not
+      // trigger dynamic-access errors even when their receiver contains a
+      // dynamic element access — that access is reported separately when
+      // visited in its own context.
       if (ts.isPropertyAccessExpression(visited)) {
         const isCallTarget = callTargets.has(node);
 
@@ -483,6 +496,14 @@ function rewritePatternBody(
           }
 
           if (info.path.length <= 1) {
+            return visited;
+          }
+
+          if (info.dynamic) {
+            // The receiver contains a dynamic access (e.g. obj[key].map(...)).
+            // We can't rewrite the receiver path to .key() calls when it
+            // contains a dynamic segment. Return as-is; the dynamic access
+            // will be reported when visited in its own context.
             return visited;
           }
 
@@ -523,6 +544,16 @@ function rewritePatternBody(
           );
           return visited;
         }
+      }
+
+      // Dynamic key access on non-terminal-method expressions is not lowerable.
+      if (info.dynamic) {
+        reportOnce(
+          visited,
+          "computation",
+          "Dynamic key access is not lowerable in pattern context. Use a compute wrapper for dynamic traversal.",
+        );
+        return visited;
       }
 
       const firstPathSegment = info.path[0];
