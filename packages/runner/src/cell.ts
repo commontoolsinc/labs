@@ -10,7 +10,11 @@ import {
   shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value";
-import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
+import type {
+  MemorySpace,
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -195,7 +199,7 @@ declare module "@commontools/api" {
     getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
     /** Read the cell's raw storable value as a mutable deep copy. */
     getRawMutable(options?: IReadOptions): T | undefined;
-    setRaw(value: NoInfer<T> & StorableValue): void;
+    setRaw(value: (NoInfer<T> & StorableDatum) | undefined): void;
     /**
      * Sets the raw cell value to any `StorableValue`, bypassing the cell's
      * type parameter `T`. Use this when writing pre-formed storable data
@@ -1222,7 +1226,7 @@ export class CellImpl<T extends StorableValue>
     return storableFromNativeValue(raw, false) as T;
   }
 
-  setRaw(value: NoInfer<T> & StorableValue): void {
+  setRaw(value: (NoInfer<T> & StorableDatum) | undefined): void {
     this.setRawUntyped(value);
   }
 
