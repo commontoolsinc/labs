@@ -4,9 +4,10 @@ import { assertEquals } from "@std/assert/equals";
 import { type NormalizedLink, Runtime } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema } from "@commontools/runner";
+import type { JSONSchema, MemorySpace, URI } from "@commontools/runner";
 import { parseLink } from "../src/link-utils.ts";
 import { env } from "@commontools/integration";
+import { IStorageManager } from "../src/storage/interface.ts";
 const { API_URL } = env;
 
 // Create test identity
@@ -18,6 +19,21 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 console.log("\n=== TEST: Sync Schema uses Path ===");
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
+
+function read(
+  storageManager: IStorageManager,
+  space: MemorySpace,
+  id: URI,
+) {
+  const tx = storageManager.edit();
+  const { ok: value } = tx.read({
+    space,
+    type: "application/json",
+    id,
+    path: ["value"],
+  });
+  return value?.value;
+}
 
 async function test() {
   // First runtime - save data
@@ -115,10 +131,12 @@ async function test() {
   // This will be the link to the employee's address field
   const sigilLink = JSON.parse(JSON.stringify(newCell.key(0).getRaw()));
   const normalizedLink = parseLink(sigilLink) as NormalizedLink;
-  const record = runtime2.storageManager.open(normalizedLink.space!).get(
+  const record = read(
+    runtime2.storageManager,
+    normalizedLink.space!,
     normalizedLink.id!,
   );
-  assertEquals(record?.value, employeeData);
+  assertEquals(record, employeeData);
   await runtime2.dispose();
 }
 

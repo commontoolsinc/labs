@@ -171,7 +171,7 @@ export interface LocalStorageOptions {
 
 export interface IStorageProvider {
   /**
-   * Sync a value from storage. Use `get()` to retrieve the value.
+   * Sync a value from storage. Use transactions to retrieve the value.
    *
    * @param uri - uri of the entity to sync.
    * @param selector - The SchemaPathSelector with the path and schema that determines what to sync.

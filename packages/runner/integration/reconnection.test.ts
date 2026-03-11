@@ -6,8 +6,15 @@
  */
 
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.ts";
-import type { StorableObject, URI } from "@commontools/memory/interface";
+import { Replica, StorageManager } from "../src/storage/cache.ts";
+import type {
+  Changes,
+  MemorySpace,
+  Revision,
+  State,
+  StorableObject,
+  URI,
+} from "@commontools/memory/interface";
 import { env } from "@commontools/integration";
 import type { JSONSchema } from "@commontools/api";
 const { API_URL } = env;
@@ -16,6 +23,17 @@ const MEMORY_WS_URL = `${
   API_URL.replace("http://", "ws://")
 }api/storage/memory`;
 const TEST_DOC_ID = "test-reconnection-counter";
+
+function send(
+  storageManager: StorageManager,
+  space: MemorySpace,
+  id: URI,
+  value: any,
+) {
+  const tx = storageManager.edit();
+  tx.write({ space, type: "application/json", id, path: ["value"] }, value);
+  return tx.commit();
+}
 
 Deno.test({
   name: "schema query reconnection test",
@@ -36,7 +54,7 @@ Deno.test({
 
     // Open provider
     const provider1 = storageManager1.open(signer.did());
-    console.log(`Connected to memory server`);
+    console.log(`Connected to memory server for space`, signer.did());
 
     // Define test schema
     const testSchema: JSONSchema = {
@@ -71,17 +89,36 @@ Deno.test({
     const uri: URI = `of:${TEST_DOC_ID}`;
     // Listen for updates on the test-reconnection-counter document
     // Note: this is not the schema subscription, its just a client-side listener
-    provider1.sink<UpdateValue>(uri, (value) => {
-      updateCount1++;
-      updates1.push(value.value);
-      console.log(`Provider1 Update #${updateCount1}:`, value.value);
-    });
 
-    provider3.sink<UpdateValue>(uri, (value) => {
-      updateCount3++;
-      updates3.push(value.value);
-      console.log(`Provider3 Update #${updateCount3}:`, value.value);
-    });
+    const nextCallback1 = (value?: Revision<State>) => {
+      const changes: Changes = (value?.is as any).transaction.args.changes;
+      if (uri in changes) {
+        updateCount1++;
+        updates1.push((changes[uri] as any).is.value);
+        console.log(`Provider1 Update #${updateCount1}:`, changes[uri]);
+      }
+    };
+    const providerConnection1 = storageManager1.open(signer.did());
+    const replica1 = (providerConnection1 as any).provider.replica as Replica;
+    replica1.subscribe(
+      { id: signer.did(), type: "application/commit+json" },
+      nextCallback1,
+    );
+
+    const nextCallback3 = (value?: Revision<State>) => {
+      const changes: Changes = (value?.is as any).transaction.args.changes;
+      if (uri in changes) {
+        updateCount3++;
+        updates3.push((changes[uri] as any).is.value);
+        console.log(`Provider3 Update #${updateCount3}:`, changes[uri]);
+      }
+    };
+    const providerConnection3 = storageManager3.open(signer.did());
+    const replica3 = (providerConnection3 as any).provider.replica as Replica;
+    replica3.subscribe(
+      { id: signer.did(), type: "application/commit+json" },
+      nextCallback3,
+    );
 
     // Establish server-side subscription with schema
     console.log("Establishing subscriptions...");
@@ -90,18 +127,13 @@ Deno.test({
 
     // Send initial value to server
     console.log("Sending initial value...");
-    await provider1.send([{
-      uri,
-      value: {
-        value: {
-          value: 1,
-          timestamp: new Date().toISOString(),
-        },
-      },
-    }]);
+    await send(storageManager1, signer.did(), uri, {
+      value: 1,
+      timestamp: new Date().toISOString(),
+    });
 
     // Wait to give server time to send us back the update
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 10000));
 
     // Check if our listeners were called via the subscription
     if (updateCount1 === 0 || updateCount3 === 0) {
@@ -180,16 +212,12 @@ Deno.test({
 
         try {
           // Send an update as the second
-          const result = await provider2.send([{
-            uri,
-            value: {
-              value: {
-                value: testValue++,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          }]);
-          console.log(result);
+          const data = {
+            value: testValue++,
+            timestamp: new Date().toISOString(),
+          };
+          await send(storageManager2, signer.did(), uri, data);
+          console.log("sent", data);
 
           // Check if we've received updates with value >= 100 (post-reconnection)
           const postReconnectUpdates1 = updates1.filter((u) => u.value >= 100);

@@ -133,11 +133,6 @@ const logger = getLogger("storage.cache", {
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const _dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 
-interface NotFoundError extends Error {
-  name: "NotFound";
-  address: FactAddress;
-}
-
 const toKey = ({ id, type }: BaseMemoryAddress) => `${id}/${type}`;
 const fromKey = (key: string): BaseMemoryAddress => {
   const separatorIndex = key.indexOf("/");
