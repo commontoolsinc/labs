@@ -5,6 +5,7 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
+  deepCloneIfNecessary,
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
   storableFromNativeValue,
@@ -1213,13 +1214,13 @@ export class CellImpl<T extends StorableValue>
     // Deep-copy and freeze without native unwrapping — both getRaw() and
     // getRawUntyped() return storable-layer values, not native ("wild west")
     // values.
-    return storableFromNativeValue(value) as Immutable<StorableValue>;
+    return deepCloneIfNecessary(value) as Immutable<StorableValue>;
   }
 
   getRawUntypedMutable(options?: IReadOptions): StorableValue {
     const raw = this.getRawUntyped(options);
     if (raw === undefined) return undefined;
-    return storableFromNativeValue(raw, false);
+    return deepCloneIfNecessary(raw, false);
   }
 
   setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
