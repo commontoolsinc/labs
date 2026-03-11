@@ -17,6 +17,13 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
+// FIXTURE: counter-pattern-no-name
+// Verifies: same transforms as counter-pattern apply even when the file has no unique name
+//   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
+//   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
+//   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
+//   state.value ? a : b (in JSX)      → __ctHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+// Context: Identical to counter-pattern; verifies no-name patterns still transform correctly
 export default pattern<PatternState>((state) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
