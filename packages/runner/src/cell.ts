@@ -1393,7 +1393,23 @@ export class CellImpl<T extends StorableValue>
             }
           };
         } else if (prop === Symbol.toPrimitive) {
-          return () => {
+          return (hint?: string) => {
+            // CT-1334: When inside a reactive context (computed/derive action),
+            // resolve the cell value through the action frame's materialize
+            // function. This handles builder cells captured in computed()
+            // closures, which have no storage link but can be resolved through
+            // the pattern's process cell binding.
+            const frame = getTopFrame();
+            if (frame?.unsafe_binding?.materialize) {
+              const cellPath = (self as unknown as CellImpl<T>).path;
+              const value = frame.unsafe_binding.materialize([
+                "argument",
+                ...cellPath,
+              ]);
+              if (hint === "number") return Number(value);
+              if (hint === "string") return String(value);
+              return value;
+            }
             throw new Error(
               "Tried to access a reactive reference outside a reactive context. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
             );
