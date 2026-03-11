@@ -153,7 +153,7 @@ Then use theme CSS variables with fallbacks:
 .button {
   background-color: var(
     --ct-theme-color-primary,
-    var(--ct-color-primary, #3b82f6)
+    var(--ct-colors-primary-500, #3b82f6)
   );
   border-radius: var(
     --ct-theme-border-radius,
