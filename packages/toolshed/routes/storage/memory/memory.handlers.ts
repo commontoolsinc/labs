@@ -1,6 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import { Memory, memory, memoryV2, memoryV2Server } from "../memory.ts";
+import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commontools/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
@@ -60,13 +60,31 @@ const attachV2SocketPipeline = async (
   socket: WebSocket,
   firstMessage: string,
 ): Promise<boolean> => {
-  const initialResponse = await memoryV2Server.respond(firstMessage);
-  if (initialResponse === null) {
+  if (Memory.V2Server.parseClientMessage(firstMessage) === null) {
     return false;
   }
 
-  attachSocketPipeline(socket, memoryV2.session());
-  socket.send(initialResponse);
+  const connection = memoryV2Server.connect((message) => {
+    socket.send(JSON.stringify(message));
+  });
+  const onMessage = (event: MessageEvent) => {
+    if (typeof event.data !== "string") {
+      socket.close(1003, "Memory websocket expects text frames");
+      return;
+    }
+    void connection.receive(event.data);
+  };
+  const onClose = () => {
+    socket.removeEventListener("message", onMessage);
+    socket.removeEventListener("close", onClose);
+    socket.removeEventListener("error", onClose);
+    connection.close();
+  };
+
+  socket.addEventListener("message", onMessage);
+  socket.addEventListener("close", onClose, { once: true });
+  socket.addEventListener("error", onClose, { once: true });
+  await connection.receive(firstMessage);
 
   return true;
 };

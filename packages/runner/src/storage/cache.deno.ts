@@ -1,5 +1,6 @@
 import * as MemoryProvider from "@commontools/memory/provider";
 import * as Consumer from "@commontools/memory/consumer";
+import * as V2Storage from "./v2.ts";
 import {
   type Options,
   Provider,
@@ -65,6 +66,12 @@ export class StorageManagerEmulator extends BaseStorageManager {
 
 export class StorageManager extends BaseStorageManager {
   static override open(options: Options) {
+    if (options.memoryVersion === "v2") {
+      if (options.address.protocol === "memory:") {
+        return this.emulate(options);
+      }
+      return V2Storage.StorageManager.open(options);
+    }
     if (options.address.protocol === "memory:") {
       return this.emulate(options);
     } else {
@@ -74,6 +81,9 @@ export class StorageManager extends BaseStorageManager {
   static emulate(
     options: Omit<Options, "address">,
   ) {
+    if (options.memoryVersion === "v2") {
+      return V2Storage.EmulatedStorageManager.emulate(options);
+    }
     return new StorageManagerEmulator({
       ...options,
       address: new URL("memory://"),

@@ -85,10 +85,14 @@ type Send = (message: ServerMessage) => void;
 class Connection {
   #subscriptions = new Map<string, SubscriptionState>();
   #ready = false;
+  #closed = false;
 
   constructor(private readonly server: Server, private readonly send: Send) {}
 
   async receive(payload: string): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
     const parsed = parseClientMessage(payload);
     if (parsed === null) {
       this.send({
@@ -175,6 +179,9 @@ class Connection {
   }
 
   async refresh(space: string): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
     for (const subscription of this.subscriptionsForSpace(space)) {
       const state = await this.server.evaluateGraphQuery(space, subscription.query);
       if (sameEntities(state.entities, subscription.entities)) {
@@ -191,6 +198,15 @@ class Connection {
         },
       });
     }
+  }
+
+  close(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    this.#subscriptions.clear();
+    this.server.disconnect(this);
   }
 }
 
@@ -216,6 +232,10 @@ export class Server {
     const connection = new Connection(this, send);
     this.#connections.add(connection);
     return connection;
+  }
+
+  disconnect(connection: Connection): void {
+    this.#connections.delete(connection);
   }
 
   async close(): Promise<void> {
@@ -349,7 +369,7 @@ export class Server {
     const opened = Engine.open({
       url: this.#store
         ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
-        : new URL(`memory://${space}`),
+        : new URL(`memory:///${encodeURIComponent(space)}`),
     });
     this.#engines.set(space, opened);
     return opened;

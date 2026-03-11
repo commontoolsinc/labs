@@ -1,4 +1,5 @@
 import * as Memory from "@commontools/memory";
+import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
@@ -24,24 +25,22 @@ const result = await Memory.Provider.open({
   memoryVersion: "v1",
 });
 
-const v2Result = await Memory.Provider.open({
-  store: storeUrl,
-  serviceDid: identity.did(),
-  memoryVersion: "v2",
-});
-
 if (result.error) {
   throw result.error;
 }
 
-if (v2Result.error) {
-  throw v2Result.error;
-}
+const memoryV2RootPath = Path.extname(storeUrl.pathname) === ""
+  ? Path.join(Path.fromFileUrl(storeUrl), "v2-engine")
+  : Path.join(
+    Path.dirname(storeUrl.pathname),
+    `${Path.basename(storeUrl.pathname, Path.extname(storeUrl.pathname))}.v2-engine`,
+  );
+const memoryV2StoreUrl = Path.toFileUrl(`${memoryV2RootPath}/`);
+await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
 
 export const memory = result.ok;
-export const memoryV2 = v2Result.ok;
 export const memoryV2Server = new Memory.V2Server.Server({
-  memory: memoryV2,
+  store: memoryV2StoreUrl,
 });
 console.log("Memory: Provider initialized successfully");
 
