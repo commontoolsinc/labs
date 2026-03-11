@@ -1,26 +1,26 @@
 # Memory v2 Implementation Plan
 
 ## Summary
-- [ ] Write this plan into [implementation-plan.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/implementation-plan.md).
-- [ ] Treat the phase-1 cutover as: a `Runtime` configured with `memoryVersion: "v2"` uses v2 implementations for `IStorageProvider` and `IExtendedStorageTransaction`, while runner and scheduler call sites remain unchanged.
-- [ ] Execute the rollout with red/green TDD: every new server, provider, transaction, and integration behavior starts with a failing test and is only then implemented.
-- [ ] Keep v1 and v2 running in parallel during migration, but keep storage physically separate: v2 must not read or write v1 SQLite files. Use a dedicated v2 DB layout such as `<MEMORY_DIR>/v2/<space>.sqlite` and a separate emulation backend.
-- [ ] Add v2 code inside the existing packages rather than creating a new workspace package: shared/server code under [packages/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/memory), client wiring under [packages/runner/src/storage](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/storage), and route/transport dispatch under [packages/toolshed/routes/storage/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory).
+- [x] Write this plan into [implementation-plan.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/implementation-plan.md).
+- [x] Treat the phase-1 cutover as: a `Runtime` configured with `memoryVersion: "v2"` uses v2 implementations for `IStorageProvider` and `IExtendedStorageTransaction`, while runner and scheduler call sites remain unchanged.
+- [x] Execute the rollout with red/green TDD: every new server, provider, transaction, and integration behavior starts with a failing test and is only then implemented.
+- [x] Keep v1 and v2 running in parallel during migration, but keep storage physically separate: v2 must not read or write v1 SQLite files. Use a dedicated v2 DB layout such as `<MEMORY_DIR>/v2/<space>.sqlite` and a separate emulation backend.
+- [x] Add v2 code inside the existing packages rather than creating a new workspace package: shared/server code under [packages/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/memory), client wiring under [packages/runner/src/storage](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/storage), and route/transport dispatch under [packages/toolshed/routes/storage/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory).
 
 ## Public Interfaces and Cutover Boundary
-- [ ] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts), default it to `"v1"`, and thread the resolved value into storage-manager construction and emulation.
-- [ ] Keep `IStorageManager`, `IStorageProvider`, `IExtendedStorageTransaction`, `StorageValue`, `syncCell()`, and `subscribe()` stable at the runtime boundary for phase 1.
-- [ ] Introduce `IStorageNotification` / `StorageNotificationRelay` as the canonical internal names for scheduler notifications, and export temporary aliases for `IStorageSubscription` / `StorageSubscription` until v1 is removed.
-- [ ] Keep compatibility-only fields such as classification and labels accepted at the cutover boundary, but treat them as ignored inputs on the v2 path and stop creating label side-writes in v2.
+- [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts), default it to `"v1"`, and thread the resolved value into storage-manager construction and emulation.
+- [x] Keep `IStorageManager`, `IStorageProvider`, `IExtendedStorageTransaction`, `StorageValue`, `syncCell()`, and `subscribe()` stable at the runtime boundary for phase 1.
+- [x] Introduce `IStorageNotification` / `StorageNotificationRelay` as the canonical internal names for scheduler notifications, and export temporary aliases for `IStorageSubscription` / `StorageSubscription` until v1 is removed.
+- [x] Keep compatibility-only fields such as classification and labels accepted at the cutover boundary, but treat them as ignored inputs on the v2 path and stop creating label side-writes in v2.
 - [ ] Add explicit v1 guard assertions at the v1 provider, transaction, consumer, and server dispatch entry points so a runtime configured for v2 fails immediately if any v1 code path is reached.
 
 ## Phase 1: Core v2 Stack Required Before Cutover
-- [ ] Define v2 shared types and codecs around `EntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`; keep entity storage untyped and re-root selector paths to `["value", ...path]`.
+- [x] Define v2 shared types and codecs around `EntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`; keep entity storage untyped and re-root selector paths to `["value", ...path]`.
 - [ ] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, plus the required pragmas, prepared statements, and default-branch bootstrap.
 - [ ] Implement the v2 read engine: head lookup, point-in-time reconstruction by `seq`, patch replay, snapshot creation/lookup, `source` link traversal, and schema-driven graph queries using the shared `traverse.ts` code path.
 - [ ] Implement the v2 commit engine: server-side parent resolution, global `seq` assignment, overlapping-path validation from confirmed reads, pending-read resolution from `(sessionId, localSeq)`, and atomic fact/head/commit writes with separate persistence of the UCAN invocation and authorization records.
-- [ ] Implement the phase-1 logical session model: the first WebSocket message negotiates `memory/v2`, `session.open` returns or resumes `sessionId`, the server keeps only lightweight session state, and the client owns replay of outstanding commits and subscriptions after reconnect.
-- [ ] Keep the existing `/api/storage/memory` route, but dispatch v2 WebSocket traffic through the new session protocol and keep PATCH transact/query handlers as thin compatibility adapters for tests and one-shot tooling.
+- [x] Implement the phase-1 logical session model: the first WebSocket message negotiates `memory/v2`, `session.open` returns or resumes `sessionId`, the server keeps only lightweight session state, and the client owns replay of outstanding commits and subscriptions after reconnect.
+- [x] Keep the existing `/api/storage/memory` route, but dispatch v2 WebSocket traffic through the new session protocol and keep PATCH transact/query handlers as thin compatibility adapters for tests and one-shot tooling.
 - [ ] Add minimal phase-1 blob support: immutable payload storage plus mutable metadata split; defer advanced blob metadata policy and classification behavior until after cutover.
 - [ ] Build v2 emulation on top of the real v2 server code and an in-memory DB; do not maintain a fake-only code path for tests.
 
@@ -36,7 +36,7 @@
 ## Cutover Exit Criteria
 - [ ] A runtime instantiated with `memoryVersion: "v2"` can run existing runner, pattern, and CLI flows without reaching any v1 code path.
 - [ ] All existing integration tests that exercise `syncCell()`, schema traversal, persistence, reconnect, and scheduler-driven writes pass against a real toolshed server with v2 enabled.
-- [ ] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
+- [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [ ] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and minimal blob persistence.
 - [ ] Add focused client and provider tests for stacked pending commits, notification ordering, own-commit de-duplication, and retry-after-revert behavior.
 
