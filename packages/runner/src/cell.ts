@@ -8,7 +8,6 @@ import {
   deepCloneIfNecessary,
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
-  storableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -1239,8 +1238,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    const storable = storableFromNativeValue(value);
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(storable));
+    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
   getSourceCell<T>(
