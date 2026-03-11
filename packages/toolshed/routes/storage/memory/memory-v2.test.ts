@@ -106,3 +106,38 @@ Deno.test("memory websocket negotiates a v2 session", async () => {
     await server.shutdown();
   }
 });
+
+Deno.test("memory websocket resumes a requested v2 session id", async () => {
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+
+  try {
+    const socket = await openSocket(address);
+    socket.send(JSON.stringify({
+      cmd: "session.open",
+      id: "job:test-resume",
+      protocol: MEMORY_V2_PROTOCOL,
+      args: {
+        sessionId: "session:test-resume",
+        seenSeq: 7,
+      },
+    }));
+
+    const message = await readJsonMessage<{
+      the: "task/return";
+      of: string;
+      is: { ok: { sessionId: string; serverSeq: number } };
+    }>(socket);
+
+    assertEquals(message.the, "task/return");
+    assertEquals(message.of, "job:test-resume");
+    assertEquals(message.is.ok.sessionId, "session:test-resume");
+    assertEquals(message.is.ok.serverSeq, 0);
+
+    socket.close();
+  } finally {
+    await server.shutdown();
+  }
+});
