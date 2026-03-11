@@ -720,3 +720,67 @@ Deno.test("memory websocket preserves alias-derived schemas after v2 reconnect",
     await server.shutdown();
   }
 });
+
+Deno.test("memory websocket keeps retargeted aliases live for subscribed v2 runtimes", async () => {
+  const identity = await Identity.fromPassphrase(
+    `memory-v2-alias-retarget-${Date.now()}`,
+  );
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+  const space = identity.did();
+
+  const schema = {
+    type: "object",
+    properties: {
+      count: { type: "number" },
+      label: { type: "string" },
+    },
+  } as const satisfies JSONSchema;
+
+  try {
+    const runtime1 = createRuntime(identity, base);
+    let tx = runtime1.edit();
+    const firstTarget = runtime1.getCell(space, "v2-alias-retarget-first", undefined, tx);
+    firstTarget.set({ count: 1, label: "first" });
+    const secondTarget = runtime1.getCell(space, "v2-alias-retarget-second", undefined, tx);
+    secondTarget.set({ count: 2, label: "second" });
+    const aliasCell = runtime1.getCell(space, "v2-alias-retarget-source", undefined, tx);
+    aliasCell.setRaw(
+      firstTarget.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+    );
+    await tx.commit();
+    await runtime1.storageManager.synced();
+
+    const subscriberRuntime = createRuntime(identity, base);
+    const aliasCell2 = subscriberRuntime.getCell<{ count: number; label: string }>(
+      space,
+      "v2-alias-retarget-source",
+    );
+    await aliasCell2.sync();
+    await subscriberRuntime.storageManager.synced();
+    assertEquals(aliasCell2.get(), { count: 1, label: "first" });
+
+    let sawRetarget = false;
+    aliasCell2.sink((value) => {
+      if (value?.count === 2 && value?.label === "second") {
+        sawRetarget = true;
+      }
+    });
+
+    tx = runtime1.edit();
+    aliasCell.withTx(tx).setRaw(
+      secondTarget.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+    );
+    await tx.commit();
+    await runtime1.storageManager.synced();
+
+    await waitFor(() => sawRetarget);
+    assertEquals(aliasCell2.schema, schema);
+    assertEquals(aliasCell2.get(), { count: 2, label: "second" });
+
+    await subscriberRuntime.dispose();
+    await runtime1.dispose();
+  } finally {
+    await server.shutdown();
+  }
+});
