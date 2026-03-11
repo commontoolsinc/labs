@@ -1,6 +1,10 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
+// FIXTURE: map-single-capture-no-name
+// Verifies: same map + length guard transforms work with _state: any parameter
+//   people.get().length > 0 && <ul>{people.map(...)}</ul> → when(..., <ul>{mapWithPattern(...)}</ul>)
+// Context: Variant of map-single-capture with _state: any
 export default pattern((_state: any) => {
   const people = cell([
     { id: "1", name: "Alice" },

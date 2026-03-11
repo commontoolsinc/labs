@@ -10,6 +10,11 @@ interface State {
   isPremium: boolean;
 }
 
+// FIXTURE: jsx-conditional-rendering
+// Verifies: ternary expressions and ifElse() calls in JSX are transformed to reactive ifElse()
+//   cond ? a : b             → ifElse(schema, schema, schema, schema, cond, a, b)
+//   ifElse(cond, <jsx>, <jsx>) → ifElse(schema..., cond, <jsx>, <jsx>)
+// Context: Basic, nested, and complex ternaries plus explicit ifElse calls
 export default pattern<State>((state) => {
   return {
     [UI]: (

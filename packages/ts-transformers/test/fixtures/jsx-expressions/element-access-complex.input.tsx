@@ -19,6 +19,12 @@ interface State {
   selectedScore: number;
 }
 
+// FIXTURE: element-access-complex
+// Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in derive()
+//   state.matrix[state.row]![state.col]         → derive({matrix, row, col}, ...)
+//   state.arr[state.a + state.b]                → derive({arr, a, b}, ...)
+//   state.users[state.selectedUser]!.scores[..] → derive({users, selectedUser, selectedScore}, ...)
+// Context: Covers nested indexing, computed indices, chained access, conditions, operators
 export default pattern<State>((state) => {
   return {
     [UI]: (

@@ -20,6 +20,12 @@ interface State {
   separator: string;
 }
 
+// FIXTURE: method-chains
+// Verifies: chained method calls and array method chains in JSX are wrapped in derive()
+//   state.text.trim().toLowerCase()          → derive({text}, ...)
+//   state.items.filter(fn).map(fn)           → .filterWithPattern(...).mapWithPattern(...)
+//   state.prices.reduce(fn, 0)               → derive({prices, discount}, ...)
+// Context: Covers string chains, filter/map chains, reactive args, computed values, complex predicates
 export default pattern<State>((state) => {
   return {
     [UI]: (

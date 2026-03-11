@@ -77,6 +77,11 @@ interface State {
   };
 }
 
+// FIXTURE: parent-suppression-edge
+// Verifies: property access suppression -- sibling properties share a captured parent in derive()
+//   {state.user.name} ... {state.user.age} → individual .key() or shared derive({user: {...}})
+//   {state.config.theme.colors.primary}    → derive with deeply nested capture
+// Context: Tests that the transformer correctly deduplicates and suppresses parent captures
 export default pattern<State>((state) => {
   return {
     [UI]: (

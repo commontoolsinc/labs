@@ -3,6 +3,9 @@ import { cell, pattern, UI } from "commontools";
 
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
+// FIXTURE: logical-triple-or-chain
+// Verifies: triple || chain (a || b || c) is transformed to nested unless() calls
+//   primary.get().length || secondary.get().length || "no content" → unless(unless(...), "no content")
 export default pattern((_state) => {
   const primary = cell("");
   const secondary = cell("");

@@ -1,6 +1,10 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
+// FIXTURE: logical-complex-expressions
+// Verifies: nested && and mixed || && with JSX are transformed to when() with derive() predicates
+//   a && b && <JSX>     → when(derive({a, b}, ...), <JSX>)
+//   (a || b) && <JSX>   → when(derive({a, b}, ...), <JSX>)
 export default pattern((_state) => {
   const items = cell<string[]>([]);
   const isEnabled = cell(false);
