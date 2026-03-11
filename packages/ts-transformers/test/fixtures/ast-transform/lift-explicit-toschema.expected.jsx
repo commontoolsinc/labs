@@ -36,6 +36,10 @@ const logCharmsList = lift({
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
 });
+// FIXTURE: lift-explicit-toschema
+// Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
+//   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
+// Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
 export default logCharmsList;
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

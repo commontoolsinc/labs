@@ -8,6 +8,11 @@ interface State {
     hasPermission: boolean;
     isPremium: boolean;
 }
+// FIXTURE: jsx-conditional-rendering-no-name
+// Verifies: same conditional rendering transforms work when pattern has no NAME export
+//   cond ? a : b             → ifElse(schema..., cond, a, b)
+//   ifElse(cond, <jsx>, <jsx>) → ifElse(schema..., cond, <jsx>, <jsx>)
+// Context: Variant of jsx-conditional-rendering without [NAME], testing schema inference without name
 export default pattern((state) => {
     return {
         [UI]: (<div>

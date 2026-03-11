@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, NAME, pattern, UI } from "commontools";
+// FIXTURE: conditional-empty-check
+// Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
+//   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)
+// Context: Negated length check on a cell array used as conditional guard
 export default pattern(() => {
     const items = cell<string[]>([], {
         type: "array",

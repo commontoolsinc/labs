@@ -1,5 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
+// FIXTURE: literal-widen-string
+// Verifies: string literals (normal, empty, multiline, with spaces) are all widened to { type: "string" }
+//   cell("hello") → cell("hello", { type: "string" })
+//   cell("") → cell("", { type: "string" })
+//   cell("hello\nworld") → cell("hello\nworld", { type: "string" })
 export default function TestLiteralWidenString() {
     const _s1 = cell("hello", {
         type: "string"

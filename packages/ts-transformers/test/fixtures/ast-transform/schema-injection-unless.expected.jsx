@@ -4,6 +4,11 @@ interface State {
     value: string | null;
     defaultValue: string;
 }
+// FIXTURE: schema-injection-unless
+// Verifies: unless() gets condition, fallback, and result schemas injected
+//   unless(value, defaultValue) → unless(conditionSchema, fallbackSchema, resultSchema, value, defaultValue)
+//   pattern<State>(fn)          → pattern(fn, inputSchema, outputSchema)
+// Context: unless(cond, fallback) returns cond if truthy, else fallback; schemas reflect the union type
 export default pattern((__ct_pattern_input) => {
     const value = __ct_pattern_input.key("value");
     const defaultValue = __ct_pattern_input.key("defaultValue");

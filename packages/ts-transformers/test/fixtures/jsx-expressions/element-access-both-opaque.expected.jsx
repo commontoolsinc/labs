@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
+// FIXTURE: element-access-both-opaque
+// Verifies: element access where both array and index are cell-backed OpaqueRefs is wrapped in derive()
+//   items.get()[index.get()] → derive({items, index}, ({items, index}) => items.get()[index.get()])
 export default pattern((_state) => {
     const items = cell(["apple", "banana", "cherry"], {
         type: "array",

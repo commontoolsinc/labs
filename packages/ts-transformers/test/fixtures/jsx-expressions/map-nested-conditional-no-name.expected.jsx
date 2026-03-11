@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
+// FIXTURE: map-nested-conditional-no-name
+// Verifies: same nested conditional map transforms work when pattern param is typed as any
+//   showList && <div>{items.map(...)}</div> → when(showList, <div>{items.mapWithPattern(...)}</div>)
+// Context: Variant of map-nested-conditional with _state: any instead of named pattern
 export default pattern((_state: any) => {
     const items = cell([{ name: "apple" }, { name: "banana" }], {
         type: "array",

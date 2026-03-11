@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
+// FIXTURE: map-nested-conditional
+// Verifies: when() guard around mapWithPattern() with nested when() inside the map body
+//   showList && <div>{items.map(item => <div>{item.name && <span>}</div>)}</div>
+//   → when(showList, <div>{items.mapWithPattern(pattern(... when(item.name, <span>)))}</div>)
 export default pattern((_state) => {
     const items = cell([{ name: "apple" }, { name: "banana" }], {
         type: "array",

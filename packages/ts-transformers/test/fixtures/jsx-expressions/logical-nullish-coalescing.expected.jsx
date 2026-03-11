@@ -2,6 +2,11 @@ import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
+// FIXTURE: logical-nullish-coalescing
+// Verifies: ?? operator combined with && and || is correctly handled in derive()
+//   (config.get().timeout ?? 30) || "disabled" → derive({config}, ...)
+//   (config.get().retries ?? 3) > 0 && "text"  → derive({config}, ...)
+// Context: ?? has different semantics from || and must not be transformed to unless
 export default pattern((_state) => {
     const config = cell<{
         timeout: number | null;

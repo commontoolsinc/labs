@@ -1,5 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
+// FIXTURE: literal-widen-array-elements
+// Verifies: array literals produce { type: "array", items: { type: T } } with widened element types
+//   cell([1, 2, 3]) → cell([...], { type: "array", items: { type: "number" } })
+//   cell(["a", "b"]) → cell([...], { type: "array", items: { type: "string" } })
+//   cell([true, false]) → cell([...], { type: "array", items: { type: "boolean" } })
 export default function TestLiteralWidenArrayElements() {
     const _arr1 = cell([1, 2, 3], {
         type: "array",

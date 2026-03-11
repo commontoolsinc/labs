@@ -11,6 +11,10 @@ interface AppState {
         y: number;
     };
 }
+// FIXTURE: schema-generation-handler-inside-jsx
+// Verifies: handler() inside a JSX expression still gets schemas injected
+//   handler((event: ClickEvent, state: AppState) => ...) → handler(eventSchema, stateSchema, fn)
+// Context: handler() appears as a JSX child expression, not a standalone statement
 export const result = (<div>
     {handler({
         type: "object",

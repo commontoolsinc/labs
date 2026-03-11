@@ -1,6 +1,11 @@
 import * as __ctHelpers from "commontools";
 // deno-lint-ignore-file no-unused-vars
 import { handler, computed } from "commontools";
+// FIXTURE: safe-context-and-jsx
+// Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
+//   computed(() => show) && <span> → when(computed(() => show), <span>)
+//   computed(() => value) || <span> → unless(computed(() => value), <span>)
+// Context: Ensures transforms work in handler context, not just pattern context
 // Test: && with JSX inside handler callback should transform to when()
 const MyHandler = handler({
     type: "object",

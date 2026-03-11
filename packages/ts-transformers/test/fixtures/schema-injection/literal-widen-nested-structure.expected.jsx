@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
+// FIXTURE: literal-widen-nested-structure
+// Verifies: nested object+array literal produces a fully recursive schema with widened leaf types
+//   cell({ users: [{id, name, active}], count }) → cell(..., { type: "object", properties: { users: { type: "array", items: { type: "object", ... } }, count: { type: "number" } } })
 export default function TestLiteralWidenNestedStructure() {
     const _nested = cell({
         users: [

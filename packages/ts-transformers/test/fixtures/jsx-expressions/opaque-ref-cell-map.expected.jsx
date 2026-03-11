@@ -124,6 +124,11 @@ const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
+// FIXTURE: opaque-ref-cell-map
+// Verifies: OpaqueRef<any[]>.map() inside ifElse is transformed to mapWithPattern()
+//   typedCellRef.map((charm, index) => <li>...)  → typedCellRef.mapWithPattern(pattern(...), {})
+//   ifElse(!typedCellRef?.length, <div>, <ul>)   → ifElse(schema..., derive(...), <div>, <ul>)
+// Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
     // cell to store array of charms we created
