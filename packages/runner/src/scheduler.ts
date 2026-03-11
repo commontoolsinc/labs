@@ -1911,9 +1911,7 @@ export class Scheduler {
    *
    * In pull mode, downstream effects are scheduled separately via
    * scheduleAffectedEffects(), and dependent computations are discovered
-   * on-demand by collectDirtyDependencies(). Eagerly propagating dirtiness to
-   * every dependent computation causes unnecessary recomputation for dynamic
-   * parent/child graphs such as map/filter/flatMap.
+   * on-demand by collectDirtyDependencies().
    */
   private markDirty(action: Action): void {
     if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
@@ -1946,15 +1944,26 @@ export class Scheduler {
   private collectDirtyDependencies(
     action: Action,
     workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
   ): boolean {
     const collectStart = performance.now();
     let addedToStack = false;
 
     try {
+      const cached = memo.get(action);
+      if (cached !== undefined) {
+        if (cached && this.computations.has(action)) {
+          workSet.add(action);
+        }
+        return cached;
+      }
+
       const log = this.dependencies.get(action);
 
       if (this.collectStack.has(action)) {
-        return this.dirty.has(action) || workSet.has(action);
+        const cycleResult = this.dirty.has(action) || workSet.has(action);
+        memo.set(action, cycleResult);
+        return cycleResult;
       }
 
       this.collectStack.add(action);
@@ -1962,58 +1971,9 @@ export class Scheduler {
 
       let actionNeedsRun = this.dirty.has(action);
 
-      // Walk explicit reverse dependencies first so we can reach dirty
-      // computations hidden behind currently-clean intermediates.
-      const explicitDependencies = this.reverseDependencies.get(action);
-      if (explicitDependencies) {
-        for (const dependency of explicitDependencies) {
-          if (dependency === action) continue;
-
-          const dependencyNeedsRun = this.collectDirtyDependencies(
-            dependency,
-            workSet,
-          );
-          if (dependencyNeedsRun) {
-            actionNeedsRun = true;
-            if (this.computations.has(dependency)) {
-              workSet.add(dependency);
-            }
-          }
-        }
-      }
-
       if (log) {
-        const dirtyScanStart = performance.now();
-        try {
-          // Find dirty computations that write to entities this action reads
-          for (const computation of this.dirty) {
-            if (computation === action) continue;
-
-            const computationWrites = this.mightWrite.get(computation) ?? [];
-            if (computationWrites.length === 0) continue;
-
-            if (
-              this.readsOverlapWrites(
-                log.reads,
-                log.shallowReads,
-                computationWrites,
-              )
-            ) {
-              actionNeedsRun = true;
-              if (this.computations.has(computation)) {
-                workSet.add(computation);
-              }
-              this.collectDirtyDependencies(computation, workSet);
-            }
-          }
-        } finally {
-          logger.time(
-            dirtyScanStart,
-            "scheduler",
-            "execute",
-            "collectDirtyDependencies",
-            "dirtyScan",
-          );
+        if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
+          actionNeedsRun = true;
         }
       }
 
@@ -2021,6 +1981,7 @@ export class Scheduler {
         workSet.add(action);
       }
 
+      memo.set(action, actionNeedsRun);
       return actionNeedsRun;
     } finally {
       if (addedToStack) {
@@ -2038,40 +1999,55 @@ export class Scheduler {
   private collectDirtyDependenciesForLog(
     log: ReactivityLog,
     workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
   ): boolean {
+    const lookupStart = performance.now();
     const directWriters = new Set<Action>();
+    try {
+      for (const read of log.reads) {
+        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const writers = this.writersByEntity.get(entity);
+        if (!writers) continue;
 
-    for (const read of log.reads) {
-      const entity = `${read.space}/${read.id}` as SpaceAndURI;
-      const writers = this.writersByEntity.get(entity);
-      if (!writers) continue;
-
-      for (const writer of writers) {
-        if (this.effects.has(writer)) continue;
-        const writes = this.mightWrite.get(writer) ?? [];
-        if (this.readsOverlapWrites([read], [], writes)) {
-          directWriters.add(writer);
+        for (const writer of writers) {
+          if (this.effects.has(writer)) continue;
+          const writes = this.mightWrite.get(writer) ?? [];
+          if (this.readsOverlapWrites([read], [], writes)) {
+            directWriters.add(writer);
+          }
         }
       }
-    }
 
-    for (const read of log.shallowReads) {
-      const entity = `${read.space}/${read.id}` as SpaceAndURI;
-      const writers = this.writersByEntity.get(entity);
-      if (!writers) continue;
+      for (const read of log.shallowReads) {
+        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const writers = this.writersByEntity.get(entity);
+        if (!writers) continue;
 
-      for (const writer of writers) {
-        if (this.effects.has(writer)) continue;
-        const writes = this.mightWrite.get(writer) ?? [];
-        if (this.readsOverlapWrites([], [read], writes)) {
-          directWriters.add(writer);
+        for (const writer of writers) {
+          if (this.effects.has(writer)) continue;
+          const writes = this.mightWrite.get(writer) ?? [];
+          if (this.readsOverlapWrites([], [read], writes)) {
+            directWriters.add(writer);
+          }
         }
       }
+    } finally {
+      logger.time(
+        lookupStart,
+        "scheduler",
+        "execute",
+        "collectDirtyDependencies",
+        "writerLookup",
+      );
     }
 
     let hasDirtyDependencies = false;
     for (const writer of directWriters) {
-      const writerNeedsRun = this.collectDirtyDependencies(writer, workSet);
+      const writerNeedsRun = this.collectDirtyDependencies(
+        writer,
+        workSet,
+        memo,
+      );
       if (writerNeedsRun) {
         hasDirtyDependencies = true;
         if (this.computations.has(writer)) {
@@ -2861,9 +2837,11 @@ export class Scheduler {
         depTx.commit();
 
         const dirtyDeps = new Set<Action>();
+        const dirtyDepMemo = new Map<Action, boolean>();
         const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
           deps,
           dirtyDeps,
+          dirtyDepMemo,
         );
 
         // If there are dirty dependencies, add them to pending and re-queue event
@@ -3080,8 +3058,9 @@ export class Scheduler {
         }
 
         // Pull in dirty computations that feed the currently runnable seeds.
+        const dirtyDependencyMemo = new Map<Action, boolean>();
         for (const seed of iterationSeeds) {
-          this.collectDirtyDependencies(seed, workSet);
+          this.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
         }
 
         if (settleIter === 0) {

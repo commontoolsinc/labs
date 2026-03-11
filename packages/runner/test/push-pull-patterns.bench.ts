@@ -145,6 +145,7 @@ type BenchTimingSummary = {
   depCollect?: TimingDelta;
   collectDirty?: TimingDelta;
   dirtyScan?: TimingDelta;
+  writerLookup?: TimingDelta;
   scheduleAffectedEffects?: TimingDelta;
 };
 
@@ -221,6 +222,11 @@ function recordSchedulerTimingSummary(
       after,
       "scheduler/execute/collectDirtyDependencies/dirtyScan",
     ),
+    writerLookup: extractTimingDelta(
+      before,
+      after,
+      "scheduler/execute/collectDirtyDependencies/writerLookup",
+    ),
     scheduleAffectedEffects: extractTimingDelta(
       before,
       after,
@@ -285,6 +291,7 @@ addEventListener("unload", () => {
         formatTimingDelta("depCollect", summary.depCollect),
         formatTimingDelta("collectDirtyDependencies", summary.collectDirty),
         formatTimingDelta("dirtyScan", summary.dirtyScan),
+        formatTimingDelta("writerLookup", summary.writerLookup),
         formatTimingDelta(
           "scheduleAffectedEffects",
           summary.scheduleAffectedEffects,
