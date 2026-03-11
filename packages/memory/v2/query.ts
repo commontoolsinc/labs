@@ -169,34 +169,36 @@ const loadFactsForDoc = (
       return manager.load(address);
     },
   }));
-  if (selector.schema !== false) {
-    const document = fact.value as { value: StorableDatum };
-    const factValue: IMemorySpaceValueAttestation = {
-      address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
-      value: document.value,
-    };
-    const [nextDoc, nextSelector] = getAtPath(
+  const document = fact.value as { value: StorableDatum };
+  const factValue: IMemorySpaceValueAttestation = {
+    address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
+    value: document.value,
+  };
+  const [nextDoc, nextSelector] = getAtPath(
+    tx,
+    factValue,
+    selector.path.slice(1),
+    tracker,
+    cfc,
+    schemaTracker,
+    selector,
+  );
+  if (
+    nextDoc.value !== undefined &&
+    nextSelector !== undefined &&
+    nextSelector.schema !== false
+  ) {
+    const traverser = new SchemaObjectTraverser(
       tx,
-      factValue,
-      selector.path.slice(1),
+      nextSelector,
       tracker,
-      cfc,
       schemaTracker,
-      selector,
+      cfc,
+      undefined,
+      undefined,
+      sharedMemo,
     );
-    if (nextDoc.value !== undefined && nextSelector !== undefined) {
-      const traverser = new SchemaObjectTraverser(
-        tx,
-        nextSelector,
-        tracker,
-        schemaTracker,
-        cfc,
-        undefined,
-        undefined,
-        sharedMemo,
-      );
-      traverser.traverse(nextDoc);
-    }
+    traverser.traverse(nextDoc);
   }
 
   loadSource(
