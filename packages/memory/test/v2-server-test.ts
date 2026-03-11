@@ -1,11 +1,26 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Server } from "../v2/server.ts";
-import { MEMORY_V2_PROTOCOL, type ServerMessage } from "../v2.ts";
+import {
+  MEMORY_V2_PROTOCOL,
+  type GraphUpdateMessage,
+  type ResponseMessage,
+  type ServerMessage,
+} from "../v2.ts";
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
   assertExists(message, "expected a server message");
   return message;
+};
+
+const assertResponse = (message: ServerMessage): ResponseMessage<unknown> => {
+  assertEquals(message.type, "response");
+  return message as ResponseMessage<unknown>;
+};
+
+const assertUpdate = (message: ServerMessage): GraphUpdateMessage => {
+  assertEquals(message.type, "graph.update");
+  return message as GraphUpdateMessage;
 };
 
 Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
@@ -33,11 +48,10 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
     session: {},
   }));
 
-  const opened = shiftMessage(messages);
-  assertEquals(opened.type, "response");
+  const opened = assertResponse(shiftMessage(messages));
   assertEquals(opened.requestId, "open-1");
   assertExists(opened.ok);
-  const sessionId = opened.ok.sessionId;
+  const sessionId = (opened.ok as any).sessionId;
 
   await connection.receive(JSON.stringify({
     type: "transact",
@@ -59,10 +73,9 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
     },
   }));
 
-  const committed = shiftMessage(messages);
-  assertEquals(committed.type, "response");
+  const committed = assertResponse(shiftMessage(messages));
   assertEquals(committed.requestId, "tx-1");
-  assertEquals(committed.ok?.seq, 1);
+  assertEquals((committed.ok as any)?.seq, 1);
 
   await connection.receive(JSON.stringify({
     type: "graph.query",
@@ -80,11 +93,10 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
     },
   }));
 
-  const query = shiftMessage(messages);
-  assertEquals(query.type, "response");
+  const query = assertResponse(shiftMessage(messages));
   assertEquals(query.requestId, "query-1");
-  assertEquals(query.ok?.serverSeq, 1);
-  assertEquals(query.ok?.entities.map((entity) => ({
+  assertEquals((query.ok as any)?.serverSeq, 1);
+  assertEquals((query.ok as any)?.entities.map((entity: any) => ({
     id: entity.id,
     seq: entity.seq,
     document: entity.document,
@@ -121,10 +133,9 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
     space,
     session: {},
   }));
-  const opened = shiftMessage(messages);
-  assertEquals(opened.type, "response");
+  const opened = assertResponse(shiftMessage(messages));
   assertExists(opened.ok);
-  const sessionId = opened.ok.sessionId;
+  const sessionId = (opened.ok as any).sessionId;
 
   await connection.receive(JSON.stringify({
     type: "graph.query",
@@ -143,10 +154,9 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
     },
   }));
 
-  const subscribed = shiftMessage(messages);
-  assertEquals(subscribed.type, "response");
+  const subscribed = assertResponse(shiftMessage(messages));
   assertEquals(subscribed.requestId, "query-1");
-  assertExists(subscribed.ok?.subscriptionId);
+  assertExists((subscribed.ok as any)?.subscriptionId);
 
   await connection.receive(JSON.stringify({
     type: "transact",
@@ -168,15 +178,13 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
     },
   }));
 
-  const committed = shiftMessage(messages);
-  assertEquals(committed.type, "response");
+  const committed = assertResponse(shiftMessage(messages));
   assertEquals(committed.requestId, "tx-1");
-  assertEquals(committed.ok?.seq, 1);
+  assertEquals((committed.ok as any)?.seq, 1);
 
-  const update = shiftMessage(messages);
-  assertEquals(update.type, "graph.update");
-  assertEquals(update.subscriptionId, subscribed.ok?.subscriptionId);
-  assertEquals(update.result.entities.map((entity) => ({
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.subscriptionId, (subscribed.ok as any)?.subscriptionId);
+  assertEquals(update.result.entities.map((entity: any) => ({
     id: entity.id,
     seq: entity.seq,
     document: entity.document,
