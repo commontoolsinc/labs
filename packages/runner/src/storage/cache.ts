@@ -1,8 +1,5 @@
 import { fromString, refer } from "@commontools/memory/reference";
-import type {
-  StorableDatum,
-  StorableValue,
-} from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -27,11 +24,10 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { assert, unclaimed } from "@commontools/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
-import type { Cancel } from "@commontools/runner";
 import { getLogger } from "@commontools/utils/logger";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -56,9 +52,7 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
-  OptStorageValue,
   PullError,
-  PushError,
   Retract,
   StorageValue,
   URI,
@@ -72,7 +66,6 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
-import { storableFromNativeValue } from "@commontools/memory/storable-value";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -139,11 +132,6 @@ const logger = getLogger("storage.cache", {
 // Module-level cache: data URI + schema hash + path + space → Promise
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const _dataURISyncCache = new Map<string, Promise<Cell<any>>>();
-
-interface NotFoundError extends Error {
-  name: "NotFound";
-  address: FactAddress;
-}
 
 const toKey = ({ id, type }: BaseMemoryAddress) => `${id}/${type}`;
 const fromKey = (key: string): BaseMemoryAddress => {
@@ -1749,31 +1737,12 @@ class ProviderConnection implements IStorageProvider {
     }
   }
 
-  sink<T extends StorableValue = StorableValue>(
-    uri: URI,
-    callback: (value: StorageValue<T>) => void,
-  ) {
-    return this.provider.sink(uri, callback);
-  }
-
   sync(uri: URI, selector?: SchemaPathSelector) {
     return this.provider.sync(uri, selector);
   }
 
   synced() {
     return this.provider.synced();
-  }
-
-  get<T extends StorableValue = StorableValue>(
-    uri: URI,
-  ): OptStorageValue<T> {
-    return this.provider.get(uri);
-  }
-
-  send<T extends StorableValue = StorableValue>(
-    batch: { uri: URI; value: StorageValue<T> }[],
-  ) {
-    return this.provider.send(batch);
   }
 
   getReplica() {
@@ -1857,32 +1826,6 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  sink<T extends StorableValue = StorableValue>(
-    uri: URI,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel {
-    // Capture workspace locally, so that if it changes later, our cancel
-    // will unsubscribe with the same object.
-    const { workspace } = this;
-    const address = { id: uri, type: this.the };
-    const subscriber = (revision?: Revision<State>) => {
-      // If since is -1, this is not a real revision, so don't notify subscribers
-      if (revision && revision.since !== -1) {
-        // ⚠️ We may not have a value because fact was retracted or
-        // (less likely) deleted altogether. We still need to notify sink
-        // but we do this with the empty object per
-        // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
-        // TODO(@seefeldb): Make compatible `sink` API change
-        callback((revision?.is ?? {}) as unknown as StorageValue<T>);
-      }
-    };
-
-    workspace.subscribe(address, subscriber);
-    workspace.load([[address, undefined]]);
-
-    return () => workspace.unsubscribe(address, subscriber);
-  }
-
   sync(
     uri: URI,
     selector?: SchemaPathSelector,
@@ -1914,72 +1857,6 @@ export class Provider implements IStorageProvider {
       Promise.all(this.serverSubscriptions.getAllPromises()),
       Promise.all(this.workspace.commitPromises),
     ]);
-  }
-
-  get<T extends StorableValue = StorableValue>(
-    uri: URI,
-  ): OptStorageValue<T> {
-    const entity = this.workspace.get({ id: uri, type: this.the });
-
-    return entity?.is as OptStorageValue<T>;
-  }
-
-  // This is mostly just used by tests and tools, since the transactions will
-  // directly commit their results.
-  async send<T extends StorableValue = StorableValue>(
-    batch: { uri: URI; value: StorageValue<T> }[],
-  ): Promise<
-    Result<Unit, PushError>
-  > {
-    const { the, workspace } = this;
-    const LABEL_TYPE = "application/label+json" as const;
-
-    // Collect facts so that we can derive desired state and a corresponding
-    // transaction
-    const facts: Fact[] = [];
-    for (const { uri, value } of batch) {
-      const newValue = value.value !== undefined
-        ? storableFromNativeValue({ value: value.value, source: value.source })
-        : undefined;
-
-      const current = workspace.get({ id: uri, type: this.the });
-      if (!deepEqual(current?.is, newValue)) {
-        if (newValue !== undefined) {
-          facts.push(assert({
-            the,
-            of: uri,
-            is: newValue as StorableDatum,
-            // If fact has no `cause` it is unclaimed fact.
-            cause: current?.cause ? current : null,
-          }));
-        } else {
-          facts.push(retract(current as Consumer.Assertion));
-        }
-      }
-      if (value.labels !== undefined) {
-        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
-        if (!deepEqual(currentLabel?.is, value.labels)) {
-          if (value.labels !== undefined) {
-            facts.push(assert({
-              the: LABEL_TYPE,
-              of: uri,
-              is: value.labels as StorableDatum,
-              // If fact has no `cause` it is unclaimed fact.
-              cause: currentLabel?.cause ? currentLabel : null,
-            }));
-          } else {
-            facts.push(retract(currentLabel as Consumer.Assertion));
-          }
-        }
-      }
-    }
-    // If we don't have any writes, don't bother sending it.
-    if (facts.length > 0) {
-      const result = await this.workspace.commit({ facts, claims: [] });
-      return result.error ? result : { ok: {} };
-    } else {
-      return { ok: {} };
-    }
   }
 
   /**

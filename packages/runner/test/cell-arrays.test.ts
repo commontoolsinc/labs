@@ -58,9 +58,13 @@ describe("Cell array element conversion", () => {
     await tx.commit();
     await runtime.idle();
 
-    const entry = storageManager.open(space).get(
-      refCell.getAsNormalizedFullLink().id,
-    );
+    tx = runtime.edit();
+    const { ok: entry } = tx.read({
+      space,
+      type: "application/json",
+      id: refCell.getAsNormalizedFullLink().id,
+      path: ["value"],
+    });
     expect(entry?.value).toEqual([{ foo: 1 }, { foo: 2 }, { foo: 3 }]);
 
     tx = runtime.edit();
