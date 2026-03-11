@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import type { CellHandle } from "@commontools/runtime-client";
 import { CTRender } from "./ct-render.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
@@ -37,7 +38,7 @@ describe("CTRender", () => {
   it("should accept a CellHandle as cell property", () => {
     const element = new CTRender();
     const cell = createMockCellHandle({ ui: "some-vnode" });
-    element.cell = cell;
+    element.cell = cell as CellHandle;
     expect(element.cell).toBe(cell);
   });
 });
@@ -78,7 +79,7 @@ describe("CTRender disconnectedCallback", () => {
   it("should reset state on disconnect", () => {
     const element = new CTRender();
     const cell = createMockCellHandle({ name: "test" });
-    element.cell = cell;
+    element.cell = cell as CellHandle;
     element.variant = "preview";
 
     // disconnectedCallback should clean up internal state without throwing
