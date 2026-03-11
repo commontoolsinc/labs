@@ -602,3 +602,130 @@ Deno.test("memory websocket re-establishes subscribed v2 runtimes after server r
     await server.shutdown();
   }
 });
+
+Deno.test("memory websocket round-trips alias schema metadata through synced v2 runtimes", async () => {
+  const identity = await Identity.fromPassphrase(
+    `memory-v2-alias-schema-${Date.now()}`,
+  );
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+  const space = identity.did();
+
+  const schema = {
+    type: "object",
+    properties: {
+      count: { type: "number" },
+      label: { type: "string" },
+    },
+  } as const satisfies JSONSchema;
+
+  try {
+    const runtime1 = createRuntime(identity, base);
+    let tx = runtime1.edit();
+    const targetCell = runtime1.getCell(space, "v2-alias-schema-target", undefined, tx);
+    targetCell.set({ count: 42, label: "test" });
+
+    const aliasCell = runtime1.getCell(space, "v2-alias-schema-source", undefined, tx);
+    aliasCell.setRaw(
+      targetCell.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+    );
+    await tx.commit();
+    await runtime1.storageManager.synced();
+    await runtime1.dispose();
+
+    const runtime2 = createRuntime(identity, base);
+    const aliasCell2 = runtime2.getCell<{ count: number; label: string }>(
+      space,
+      "v2-alias-schema-source",
+    );
+    await aliasCell2.sync();
+    await runtime2.storageManager.synced();
+    assertEquals(aliasCell2.schema, schema);
+    const syncedAlias = aliasCell2.asSchemaFromLinks<{ count: number; label: string }>();
+    await syncedAlias.sync();
+    await runtime2.storageManager.synced();
+
+    assertEquals(syncedAlias.schema, schema);
+    assertEquals(syncedAlias.key("count").schema, { type: "number" });
+    assertEquals(syncedAlias.get(), { count: 42, label: "test" });
+
+    await runtime2.dispose();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+Deno.test("memory websocket preserves alias-derived schemas after v2 reconnect", async () => {
+  const identity = await Identity.fromPassphrase(
+    `memory-v2-alias-reconnect-${Date.now()}`,
+  );
+  let server = Deno.serve({ port: 0 }, app.fetch);
+  const port = server.addr.port;
+  const base = new URL(`http://${server.addr.hostname}:${port}`);
+  const space = identity.did();
+
+  const schema = {
+    type: "object",
+    properties: {
+      count: { type: "number" },
+      label: { type: "string" },
+    },
+  } as const satisfies JSONSchema;
+
+  try {
+    const runtime1 = createRuntime(identity, base);
+    let tx = runtime1.edit();
+    const targetCell = runtime1.getCell(space, "v2-alias-reconnect-target", undefined, tx);
+    targetCell.set({ count: 1, label: "start" });
+    const aliasCell = runtime1.getCell(space, "v2-alias-reconnect-source", undefined, tx);
+    aliasCell.setRaw(
+      targetCell.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+    );
+    await tx.commit();
+    await runtime1.storageManager.synced();
+    await runtime1.dispose();
+
+    const subscriberRuntime = createRuntime(identity, base);
+    const aliasCell2 = subscriberRuntime.getCell<{ count: number; label: string }>(
+      space,
+      "v2-alias-reconnect-source",
+    );
+    await aliasCell2.sync();
+    await subscriberRuntime.storageManager.synced();
+    assertEquals(aliasCell2.schema, schema);
+    const syncedAlias = aliasCell2.asSchemaFromLinks<{ count: number; label: string }>();
+    await syncedAlias.sync();
+    await subscriberRuntime.storageManager.synced();
+    assertEquals(syncedAlias.schema, schema);
+    assertEquals(syncedAlias.get(), { count: 1, label: "start" });
+
+    let sawUpdate = false;
+    syncedAlias.sink((value) => {
+      if (value?.count === 2 && value?.label === "after-restart") {
+        sawUpdate = true;
+      }
+    });
+
+    await server.shutdown();
+    server = Deno.serve({ port }, app.fetch);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const runtime2 = createRuntime(identity, base);
+    const targetCell2 = runtime2.getCell(space, "v2-alias-reconnect-target");
+    await targetCell2.sync();
+    tx = runtime2.edit();
+    targetCell2.withTx(tx).set({ count: 2, label: "after-restart" });
+    await tx.commit();
+    await runtime2.storageManager.synced();
+
+    await waitFor(() => sawUpdate);
+    assertEquals(syncedAlias.schema, schema);
+    assertEquals(syncedAlias.key("count").schema, { type: "number" });
+    assertEquals(syncedAlias.get(), { count: 2, label: "after-restart" });
+
+    await runtime2.dispose();
+    await subscriberRuntime.dispose();
+  } finally {
+    await server.shutdown();
+  }
+});
