@@ -355,6 +355,9 @@ export const open = async (
         } else {
           // Ensure directory exists for directory mode
           await FS.ensureDir(options.store);
+          if (options.memoryVersion === "v2") {
+            await FS.ensureDir(new URL("./v2/", options.store));
+          }
         }
       }
       return { ok: await new Memory(options) };
