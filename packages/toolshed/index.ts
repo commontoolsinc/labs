@@ -19,15 +19,30 @@ const initializeRuntime = async () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
-    // Compute compilation cache fingerprint from git state.
-    // Returns undefined when not in a git repo (e.g. Docker), disabling the cache.
-    const fingerprint = await computeGitFingerprint();
-    const cachedCompiler = fingerprint
-      ? new CachedCompiler(
-        new FileSystemCompilationCache("/tmp/ct-compilation-cache"),
-        fingerprint,
-      )
-      : undefined;
+    // Construct server-side compilation cache if enabled.
+    // Fingerprint is derived from git state; returns undefined when not
+    // in a git repo (e.g. Docker), which also disables the cache.
+    let cachedCompiler: InstanceType<typeof CachedCompiler> | undefined;
+    if (env.COMPILATION_CACHE_SERVER) {
+      const fingerprint = await computeGitFingerprint();
+      if (fingerprint) {
+        cachedCompiler = new CachedCompiler(
+          new FileSystemCompilationCache("/tmp/ct-compilation-cache"),
+          fingerprint,
+        );
+        console.log(
+          `Compilation cache enabled (server), fingerprint=${
+            fingerprint.substring(0, 8)
+          }`,
+        );
+      } else {
+        console.log("Compilation cache disabled (server): no git fingerprint");
+      }
+    } else {
+      console.log(
+        "Compilation cache disabled (server): COMPILATION_CACHE_SERVER not set",
+      );
+    }
 
     runtime = new Runtime({
       apiUrl: new URL(env.MEMORY_URL),

@@ -6,6 +6,7 @@ declare global {
   var $EXPERIMENTAL_STORABLE_PROTOCOL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
   var $EXPERIMENTAL_CANONICAL_HASHING: string | undefined;
+  var $COMPILATION_CACHE_CLIENT: string | undefined;
 }
 
 export const ENVIRONMENT: "development" | "production" =
@@ -25,3 +26,5 @@ export const EXPERIMENTAL = {
   unifiedJsonEncoding: $EXPERIMENTAL_UNIFIED_JSON_ENCODING === "true",
   canonicalHashing: $EXPERIMENTAL_CANONICAL_HASHING === "true",
 };
+
+export const COMPILATION_CACHE_CLIENT = $COMPILATION_CACHE_CLIENT === "true";

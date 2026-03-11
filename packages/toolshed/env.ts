@@ -201,6 +201,16 @@ const EnvSchema = z.object({
   ) => v === "true"),
 
   // ===========================================================================
+  // Compilation cache flags (see docs/specs/compilation-cache.md)
+  // ===========================================================================
+  COMPILATION_CACHE_SERVER: z.string().default("false").transform((
+    v,
+  ) => v === "true"),
+  COMPILATION_CACHE_CLIENT: z.string().default("false").transform((
+    v,
+  ) => v === "true"),
+
+  // ===========================================================================
   // Sandbox Service
   //   * /routes/sandbox/exec
   // ===========================================================================
