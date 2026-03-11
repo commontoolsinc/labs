@@ -253,3 +253,106 @@ Deno.test("memory v2 engine persists set and delete commits", async () => {
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 engine replays patch facts for current and point-in-time reads", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+    const original = toEntityDocument(
+      {
+        profile: { name: "Alice" },
+        tags: ["one"],
+      },
+      toSourceLink("origin"),
+    );
+
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "entity:patch", value: original }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:patch",
+          patches: [
+            { op: "replace", path: "/profile/name", value: "Bob" },
+            { op: "add", path: "/profile/title", value: "Dr" },
+            {
+              op: "splice",
+              path: "/tags",
+              index: 1,
+              remove: 0,
+              add: ["two", "three"],
+            },
+          ],
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:patch" }), {
+      value: {
+        profile: { name: "Bob", title: "Dr" },
+        tags: ["one", "two", "three"],
+      },
+      source: { "/": "origin" },
+    });
+    assertEquals(read(engine, { id: "entity:patch", seq: 1 }), original);
+
+    const patchFact = engine.database.prepare(
+      `SELECT fact_type, value_ref
+       FROM fact
+       WHERE id = 'entity:patch' AND seq = 2`,
+    ).get() as
+      | {
+        fact_type: string;
+        value_ref: string;
+      }
+      | undefined;
+    assertEquals(patchFact?.fact_type, "patch");
+
+    const patchValue = engine.database.prepare(
+      "SELECT data FROM value WHERE hash = ?",
+    ).get([patchFact?.value_ref]) as { data: string } | undefined;
+    assertEquals(JSON.parse(patchValue?.data ?? "null"), [
+      { op: "replace", path: "/profile/name", value: "Bob" },
+      { op: "add", path: "/profile/title", value: "Dr" },
+      {
+        op: "splice",
+        path: "/tags",
+        index: 1,
+        remove: 0,
+        add: ["two", "three"],
+      },
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
