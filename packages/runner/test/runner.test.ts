@@ -1352,14 +1352,12 @@ describe("runner utils", () => {
 
       // Run with first pattern
       runtime.run(undefined, pattern1, { input: 5 }, resultCell);
-      await runtime.idle();
-      expect(resultCell.getAsQueryResult()).toEqual({ output: 10 }); // 5 * 2
+      expect(await resultCell.pull()).toEqual({ output: 10 }); // 5 * 2
 
       // Change pattern via setup (not run or start)
-      // The $TYPE sink should detect the change and restart
+      // The $TYPE sink should detect the change and restart once the result is pulled.
       await runtime.setup(undefined, pattern2, { input: 5 }, resultCell);
-      await runtime.idle();
-      expect(resultCell.getAsQueryResult()).toEqual({ output: 50 }); // 5 * 10
+      expect(await resultCell.pull()).toEqual({ output: 50 }); // 5 * 10
     });
   });
 });

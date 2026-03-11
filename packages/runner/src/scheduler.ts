@@ -1531,8 +1531,6 @@ export class Scheduler {
 
       for (const otherAction of writers) {
         if (otherAction === action) continue;
-        if (this.actionParent.get(action) === otherAction) continue;
-        if (this.actionParent.get(otherAction) === action) continue;
         // Skip if we already found this dependency
         if (newDependencies.has(otherAction)) continue;
 
@@ -1600,8 +1598,6 @@ export class Scheduler {
 
     const scanAction = (action: Action) => {
       if (action === writer) return;
-      if (this.actionParent.get(action) === writer) return;
-      if (this.actionParent.get(writer) === action) return;
       const log = this.dependencies.get(action);
       if (!log?.reads?.length && !log?.shallowReads.length) return;
       if (
@@ -1911,20 +1907,18 @@ export class Scheduler {
   }
 
   /**
-   * Marks an action as dirty and propagates to all dependents transitively.
+   * Marks an action as dirty.
+   *
+   * In pull mode, downstream effects are scheduled separately via
+   * scheduleAffectedEffects(), and dependent computations are discovered
+   * on-demand by collectDirtyDependencies(). Eagerly propagating dirtiness to
+   * every dependent computation causes unnecessary recomputation for dynamic
+   * parent/child graphs such as map/filter/flatMap.
    */
   private markDirty(action: Action): void {
     if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
 
     this.dirty.add(action);
-
-    // Propagate to dependents transitively
-    const deps = this.dependents.get(action);
-    if (deps) {
-      for (const dependent of deps) {
-        this.markDirty(dependent);
-      }
-    }
   }
 
   /**
@@ -1950,13 +1944,32 @@ export class Scheduler {
     workSet: Set<Action>,
   ): void {
     const log = this.dependencies.get(action);
-    if (!log) return;
 
     // Check for cycle: if action is already in the collection stack, skip
     if (this.collectStack.has(action)) return;
 
     // Add to collection stack before processing
     this.collectStack.add(action);
+
+    // Walk explicit reverse dependencies first so we can reach dirty
+    // computations hidden behind currently-clean intermediates.
+    const explicitDependencies = this.reverseDependencies.get(action);
+    if (explicitDependencies) {
+      for (const dependency of explicitDependencies) {
+        if (workSet.has(dependency)) continue;
+        if (dependency === action) continue;
+
+        if (this.dirty.has(dependency)) {
+          workSet.add(dependency);
+        }
+        this.collectDirtyDependencies(dependency, workSet);
+      }
+    }
+
+    if (!log) {
+      this.collectStack.delete(action);
+      return;
+    }
 
     // Find dirty computations that write to entities this action reads
     for (const computation of this.dirty) {
@@ -3388,13 +3401,16 @@ function topologicalSort(
     }
   }
 
-  // Add parent-child edges: parent must execute before child
+  // Add parent-child edges only when no opposing data dependency exists.
+  // Structural creation order is a fallback; semantic read/write dependencies
+  // should win once a parent actually reads a child's result.
   if (actionParent) {
     for (const child of actions) {
       const parent = actionParent.get(child);
       if (parent && actions.has(parent)) {
         const graphParent = graph.get(parent)!;
-        if (!graphParent.has(child)) {
+        const graphChild = graph.get(child)!;
+        if (!graphParent.has(child) && !graphChild.has(parent)) {
           graphParent.add(child);
           inDegree.set(child, (inDegree.get(child) || 0) + 1);
         }
