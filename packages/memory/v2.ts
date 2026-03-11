@@ -1,4 +1,4 @@
-import type { JSONValue } from "./interface.ts";
+import type { JSONValue, SchemaPathSelector } from "./interface.ts";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
@@ -109,6 +109,94 @@ export interface SessionOpenResult {
   serverSeq: number;
 }
 
+export interface HelloMessage {
+  type: "hello";
+  protocol: typeof MEMORY_V2_PROTOCOL;
+}
+
+export interface HelloOkMessage {
+  type: "hello.ok";
+  protocol: typeof MEMORY_V2_PROTOCOL;
+}
+
+export interface SessionDescriptor {
+  sessionId?: SessionId;
+  seenSeq?: number;
+}
+
+export interface SessionOpenRequest {
+  type: "session.open";
+  requestId: string;
+  space: string;
+  session: SessionDescriptor;
+}
+
+export interface GraphQueryRoot {
+  id: EntityId;
+  selector: SchemaPathSelector;
+}
+
+export interface GraphQuery {
+  roots: GraphQueryRoot[];
+  subscribe?: boolean;
+  since?: number;
+  branch?: BranchName;
+  excludeSent?: boolean;
+}
+
+export interface EntitySnapshot {
+  id: EntityId;
+  seq: number;
+  hash?: Reference;
+  document: EntityDocument | null;
+}
+
+export interface GraphQueryResult {
+  serverSeq: number;
+  entities: EntitySnapshot[];
+  subscriptionId?: string;
+}
+
+export interface TransactRequest {
+  type: "transact";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  commit: ClientCommit;
+  invocation?: Record<string, unknown>;
+  authorization?: JSONValue;
+}
+
+export interface GraphQueryRequest {
+  type: "graph.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: GraphQuery;
+}
+
+export interface GraphUnsubscribeRequest {
+  type: "graph.unsubscribe";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  subscriptionId: string;
+}
+
+export interface ResponseMessage<Result> {
+  type: "response";
+  requestId: string;
+  ok?: Result;
+  error?: V2Error;
+}
+
+export interface GraphUpdateMessage {
+  type: "graph.update";
+  subscriptionId: string;
+  space: string;
+  result: GraphQueryResult;
+}
+
 export interface V2Error {
   name: string;
   message: string;
@@ -129,8 +217,18 @@ export interface TaskEffect<Effect> {
 }
 
 export type Receipt<Result, Effect> = TaskReturn<Result> | TaskEffect<Effect>;
-export type ClientMessage = SessionOpenCommand;
-export type ServerMessage = TaskReturn<V2Result<unknown>>;
+export type LegacyClientMessage = SessionOpenCommand;
+export type LegacyServerMessage = TaskReturn<V2Result<unknown>>;
+export type ClientMessage =
+  | HelloMessage
+  | SessionOpenRequest
+  | TransactRequest
+  | GraphQueryRequest
+  | GraphUnsubscribeRequest;
+export type ServerMessage =
+  | HelloOkMessage
+  | ResponseMessage<unknown>
+  | GraphUpdateMessage;
 
 export const toSourceLink = (id: string): SourceLink => ({ "/": id });
 

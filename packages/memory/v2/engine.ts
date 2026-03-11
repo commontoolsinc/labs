@@ -233,7 +233,7 @@ WHERE branch = :branch AND id = :id
 `;
 
 const SELECT_CURRENT = `
-SELECT f.fact_type, f.seq, v.data
+SELECT f.hash, f.fact_type, f.seq, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
@@ -241,7 +241,7 @@ WHERE h.branch = :branch AND h.id = :id
 `;
 
 const SELECT_AT_SEQ = `
-SELECT f.fact_type, f.seq, v.data
+SELECT f.hash, f.fact_type, f.seq, v.data
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.branch = :branch
@@ -317,6 +317,12 @@ FROM branch
 WHERE name = :branch
 `;
 
+const SELECT_BRANCH_HEAD_SEQ = `
+SELECT head_seq
+FROM branch
+WHERE name = :branch
+`;
+
 const INSERT_BLOB = `
 INSERT OR IGNORE INTO blob_store (hash, data, content_type, size)
 VALUES (:hash, :data, :content_type, :size)
@@ -379,6 +385,15 @@ export interface ReadOptions {
   seq?: number;
 }
 
+export interface EntityState {
+  id: EntityId;
+  branch: BranchName;
+  hash: Reference;
+  seq: number;
+  factType: Operation["op"];
+  document: EntityDocument | null;
+}
+
 export interface PutBlobOptions {
   value: Uint8Array;
   contentType: string;
@@ -408,6 +423,7 @@ type FactRow = {
 };
 
 type ReadRow = {
+  hash: string;
   fact_type: Operation["op"];
   seq: number;
   data: string | null;
@@ -440,6 +456,13 @@ export const read = (
   engine: Engine,
   { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
 ): EntityDocument | null => {
+  return readState(engine, { id, branch, seq })?.document ?? null;
+};
+
+export const readState = (
+  engine: Engine,
+  { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
+): EntityState | null => {
   const statement = seq === undefined
     ? engine.database.prepare(SELECT_CURRENT)
     : engine.database.prepare(SELECT_AT_SEQ);
@@ -451,18 +474,43 @@ export const read = (
     return null;
   }
 
+  let document: EntityDocument | null;
   switch (row.fact_type) {
     case "set":
-      return normalizeEntityDocument(JSON.parse(row.data ?? "null") as JSONValue);
+      document = normalizeEntityDocument(
+        JSON.parse(row.data ?? "null") as JSONValue,
+      );
+      break;
     case "delete":
-      return null;
+      document = null;
+      break;
     case "patch":
-      return reconstructPatchedDocument(engine, {
+      document = reconstructPatchedDocument(engine, {
         id,
         branch,
         seq: row.seq,
       });
+      break;
   }
+
+  return {
+    id,
+    branch,
+    hash: row.hash as Reference,
+    seq: row.seq,
+    factType: row.fact_type,
+    document,
+  };
+};
+
+export const headSeq = (
+  engine: Engine,
+  branch: BranchName = DEFAULT_BRANCH,
+): number => {
+  const row = engine.database.prepare(SELECT_BRANCH_HEAD_SEQ).get({
+    branch,
+  }) as { head_seq: number } | undefined;
+  return row?.head_seq ?? 0;
 };
 
 export const putBlob = (
