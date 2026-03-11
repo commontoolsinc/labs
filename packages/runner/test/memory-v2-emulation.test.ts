@@ -47,4 +47,30 @@ describe("Memory v2 emulation", () => {
 
     expect(persisted?.value).toEqual({ hello: "world" });
   });
+
+  it("ignores legacy label side-writes on the v2 path", async () => {
+    const provider = storageManager.open(space);
+    const uri = `of:memory-v2-labels-${Date.now()}` as const;
+
+    const result = await provider.send([{
+      uri,
+      value: {
+        value: { hello: "labels" },
+        labels: { classification: ["confidential"] },
+      },
+    }]);
+
+    expect(result).toEqual({ ok: {} });
+
+    const query = storageManager.mount(space).query({
+      select: {
+        [uri]: {
+          "application/label+json": {},
+        },
+      },
+    });
+
+    await query;
+    expect(query.facts).toEqual([]);
+  });
 });
