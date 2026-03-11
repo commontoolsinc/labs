@@ -472,8 +472,8 @@ function loadFactsForDoc(
     if (selector.schema !== false) {
       if (fact.address.path.length > 0) {
         throw new Error("Invalid fact.address.path (must be empty)");
-      } else if (!isObject(fact.value) || !("value" in fact.value)) {
-        throw new Error("Invalid fact.value with no value");
+      } else if (!("value" in fact.value)) {
+        return; // this doc lacks the portion that could be matched by a schema
       } else if (selector.path.length < 1 || selector.path[0] !== "value") {
         throw new Error("Invalid selector path with no value");
       }
