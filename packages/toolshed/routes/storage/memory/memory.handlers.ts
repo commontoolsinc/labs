@@ -1,6 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import { Memory, memory, memoryV2Server } from "../memory.ts";
+import { Memory, memory, memoryV2, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commontools/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
@@ -36,18 +36,25 @@ const readFirstSocketMessage = async (
   });
 };
 
-const attachV1SocketPipeline = (socket: WebSocket, firstMessage: string) => {
+const attachSocketPipeline = (
+  socket: WebSocket,
+  session: Memory.ProviderSession<Memory.Protocol>,
+  firstMessages: readonly string[] = [],
+) => {
   const { readable, writable } = Memory.Socket.fromWithPrefix<string, string>(
     socket,
-    [firstMessage],
+    firstMessages,
   );
 
   readable
     .pipeThrough(Codec.UCAN.fromStringStream())
-    .pipeThrough(memory.session())
+    .pipeThrough(session)
     .pipeThrough(Codec.Receipt.toStringStream())
     .pipeTo(writable);
 };
+
+const attachV1SocketPipeline = (socket: WebSocket, firstMessage: string) =>
+  attachSocketPipeline(socket, memory.session(), [firstMessage]);
 
 const attachV2SocketPipeline = async (
   socket: WebSocket,
@@ -58,21 +65,8 @@ const attachV2SocketPipeline = async (
     return false;
   }
 
+  attachSocketPipeline(socket, memoryV2.session());
   socket.send(initialResponse);
-  socket.onmessage = async (event) => {
-    if (typeof event.data !== "string") {
-      socket.close(1003, "Memory websocket expects text frames");
-      return;
-    }
-
-    const response = await memoryV2Server.respond(event.data);
-    if (response === null) {
-      socket.close(1003, "Unsupported memory/v2 message");
-      return;
-    }
-
-    socket.send(response);
-  };
 
   return true;
 };

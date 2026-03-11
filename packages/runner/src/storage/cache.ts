@@ -68,6 +68,12 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import {
+  MEMORY_V2_PROTOCOL,
+  type SessionOpenResult,
+  type V2Error,
+} from "@commontools/memory/v2";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1458,6 +1464,7 @@ export interface ConnectionOptions {
   address: URL;
   inspector?: Channel;
   spaceIdentity?: Signer;
+  memoryVersion?: MemoryVersion;
 }
 
 export interface ProviderConnectionOptions extends ConnectionOptions {
@@ -1474,10 +1481,16 @@ class ProviderConnection implements IStorageProvider {
   inspector?: Channel;
   provider: Provider;
   spaceIdentity?: Signer;
+  memoryVersion: MemoryVersion;
   reader: ReadableStreamDefaultReader<
     UCAN<ConsumerCommandInvocation<Protocol>>
   >;
   writer: WritableStreamDefaultWriter<ProviderCommand<Protocol>>;
+  #pendingSessionOpen:
+    | PromiseWithResolvers<SessionOpenResult>
+    | undefined;
+  #pendingSessionOpenId: string | undefined;
+  #sessionId: string | undefined;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -1486,13 +1499,14 @@ class ProviderConnection implements IStorageProvider {
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
-    { id, address, provider, inspector, spaceIdentity }:
+    { id, address, provider, inspector, spaceIdentity, memoryVersion = "v1" }:
       ProviderConnectionOptions,
   ) {
     this.address = address;
     this.provider = provider;
     this.handleEvent = this.handleEvent.bind(this);
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
@@ -1543,6 +1557,18 @@ class ProviderConnection implements IStorageProvider {
     });
     this.connection!.send(Codec.UCAN.toString(invocation));
   }
+  postSessionOpen() {
+    const id = `job:${crypto.randomUUID()}`;
+    this.#pendingSessionOpenId = id;
+    this.#pendingSessionOpen = Promise.withResolvers<SessionOpenResult>();
+    this.connection!.send(JSON.stringify({
+      cmd: "session.open",
+      id,
+      protocol: MEMORY_V2_PROTOCOL,
+      args: this.#sessionId === undefined ? {} : { sessionId: this.#sessionId },
+    }));
+    return this.#pendingSessionOpen.promise;
+  }
   setTimeout() {
     this.timeoutID = setTimeout(
       this.handleEvent,
@@ -1585,6 +1611,9 @@ class ProviderConnection implements IStorageProvider {
     return Codec.Receipt.fromString(source);
   }
   onReceive(data: string) {
+    if (this.resolveSessionOpen(data)) {
+      return;
+    }
     return this.writer.write(
       this.inspect({ receive: this.parse(data) }).receive,
     );
@@ -1597,6 +1626,25 @@ class ProviderConnection implements IStorageProvider {
     this.inspect({
       connect: { attempt: this.connectionCount },
     });
+
+    if (this.memoryVersion === "v2") {
+      try {
+        const { sessionId } = await this.postSessionOpen();
+        if (this.connection !== socket) {
+          return;
+        }
+        this.#sessionId = sessionId;
+      } catch (error) {
+        logger.error(
+          "connection-error",
+          () => ["Failed to negotiate memory/v2 session:", error],
+        );
+        if (this.connection === socket) {
+          socket.close();
+        }
+        return;
+      }
+    }
 
     // Only re-establish subscriptions if we previously had a successful
     // connection that we lost. Don't re-establish on first successful
@@ -1647,6 +1695,9 @@ class ProviderConnection implements IStorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
+      this.rejectSessionOpen(
+        new Error(`Disconnected while waiting on ${event.type}`),
+      );
       // Report disconnection to inspector
       switch (event.type) {
         case "error":
@@ -1691,6 +1742,60 @@ class ProviderConnection implements IStorageProvider {
       time: Date.now(),
     });
     return message;
+  }
+
+  resolveSessionOpen(data: string): boolean {
+    if (
+      this.memoryVersion !== "v2" || this.#pendingSessionOpen === undefined ||
+      this.#pendingSessionOpenId === undefined
+    ) {
+      return false;
+    }
+
+    let payload: {
+      the?: string;
+      of?: string;
+      is?: { ok?: SessionOpenResult; error?: V2Error };
+    };
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      this.rejectSessionOpen(
+        new Error("Invalid memory/v2 session.open response payload"),
+      );
+      return true;
+    }
+
+    if (
+      payload.the !== "task/return" || payload.of !== this.#pendingSessionOpenId
+    ) {
+      return false;
+    }
+
+    const pending = this.#pendingSessionOpen;
+    this.#pendingSessionOpen = undefined;
+    this.#pendingSessionOpenId = undefined;
+
+    if (payload.is?.error) {
+      pending.reject(new Error(payload.is.error.message));
+    } else if (payload.is?.ok) {
+      pending.resolve(payload.is.ok);
+    } else {
+      pending.reject(new Error("Malformed memory/v2 session.open response"));
+    }
+
+    return true;
+  }
+
+  rejectSessionOpen(error: Error) {
+    const pending = this.#pendingSessionOpen;
+    if (pending === undefined) {
+      return;
+    }
+
+    this.#pendingSessionOpen = undefined;
+    this.#pendingSessionOpenId = undefined;
+    pending.reject(error);
   }
 
   /**
@@ -1802,6 +1907,7 @@ export class Provider implements IStorageProvider {
       provider: this,
       address: options.address,
       spaceIdentity: options.spaceIdentity,
+      memoryVersion: options.memoryVersion,
     });
   }
   get replica() {
@@ -2013,12 +2119,6 @@ export class StorageManager implements IStorageManager {
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
     const { id, address, as, settings } = this;
 
-    if (this.memoryVersion === "v2") {
-      throw new Error(
-        `v2 remote storage wiring is not implemented yet for ${address.href}`,
-      );
-    }
-
     // Determine the correct spaceIdentity for this space
     // For the workspace space (where spaceIdentity.did() === space), use spaceIdentity
     // For other spaces (like home space), pass undefined
@@ -2033,6 +2133,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
+      memoryVersion: this.memoryVersion,
       spaceIdentity: spaceIdentityForSpace,
     });
   }

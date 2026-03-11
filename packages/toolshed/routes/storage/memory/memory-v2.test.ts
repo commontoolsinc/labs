@@ -1,6 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
 import { MEMORY_V2_PROTOCOL } from "@commontools/memory/v2";
+import { Identity } from "@commontools/identity";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const openSocket = async (url: URL): Promise<WebSocket> => {
   const socket = new WebSocket(url);
@@ -29,6 +32,48 @@ const readJsonMessage = async <Message>(socket: WebSocket): Promise<Message> => 
 
   return JSON.parse(payload) as Message;
 };
+
+Deno.test("memory websocket supports a runtime using the v2 cutover path", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-traffic");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+
+  try {
+    const storageManager = StorageManager.open({
+      as: identity,
+      address,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(`http://${server.addr.hostname}:${server.addr.port}`),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      identity.did(),
+      `memory-v2-toolshed-${Date.now()}`,
+      undefined,
+      tx,
+    );
+
+    cell.set({ hello: "world" });
+    await tx.commit();
+    await runtime.idle();
+
+    const persisted = storageManager.open(identity.did()).get(
+      cell.getAsNormalizedFullLink().id,
+    );
+
+    assertEquals(persisted?.value, { hello: "world" });
+
+    await runtime.dispose();
+  } finally {
+    await server.shutdown();
+  }
+});
 
 Deno.test("memory websocket negotiates a v2 session", async () => {
   const server = Deno.serve({ port: 0 }, app.fetch);
