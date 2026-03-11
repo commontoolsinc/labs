@@ -18,7 +18,8 @@ const config: Config = {
   port: SHELL_PORT,
   publicDir: "public",
   watchDir: "src",
-  redirectToIndex: /^\/(?!((assets|scripts|styles|static)\/.*))/,
+  redirectToIndex:
+    /^\/(?!((assets|scripts|styles|static)\/.*|build-manifest\.json))/,
   staticDirs: [
     { from: "../static/assets", to: "/static" },
   ],
