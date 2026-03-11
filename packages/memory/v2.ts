@@ -23,6 +23,13 @@ export interface EntityDocument {
   source?: SourceLink;
 }
 
+export interface Blob {
+  hash: Reference;
+  value: Uint8Array;
+  contentType: string;
+  size: number;
+}
+
 export type PatchOp =
   | { op: "replace"; path: string; value: JSONValue }
   | { op: "add"; path: string; value: JSONValue }
@@ -126,6 +133,9 @@ export type ClientMessage = SessionOpenCommand;
 export type ServerMessage = TaskReturn<V2Result<unknown>>;
 
 export const toSourceLink = (id: string): SourceLink => ({ "/": id });
+
+export const toBlobMetadataId = (hash: Reference): EntityId =>
+  `urn:blob-meta:${hash}`;
 
 export const isSourceLink = (value: unknown): value is SourceLink => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
