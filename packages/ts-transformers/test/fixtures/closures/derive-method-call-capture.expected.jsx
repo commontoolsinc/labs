@@ -5,6 +5,10 @@ interface State {
         value: number;
     };
 }
+// FIXTURE: derive-method-call-capture
+// Verifies: a deep property access on a captured object is restructured into a nested capture object
+//   derive(value, fn) → derive(schema, schema, { value, state: { counter: { value: state.counter.value } } }, fn)
+// Context: `state.counter.value` is captured as a nested object structure, not a flat binding
 export default pattern((state: State) => {
     const value = Writable.of(10, {
         type: "number"

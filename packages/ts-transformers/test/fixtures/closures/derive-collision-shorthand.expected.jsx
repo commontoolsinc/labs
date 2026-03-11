@@ -1,5 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-collision-shorthand
+// Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
+//   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
+//   shorthand `{ multiplier }` → `{ multiplier: multiplier_1 }`
+// Context: shorthand must expand to keep the property name while using the renamed capture binding
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"

@@ -1,5 +1,11 @@
 import * as __ctHelpers from "commontools";
 import { Writable, computed, pattern } from "commontools";
+// FIXTURE: computed-with-closed-over-cell-map
+// Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
+//   computed(() => numbers.map(n => n * multiplier.get())) → derive(..., { numbers, multiplier }, ({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))
+// Context: Unlike OpaqueRef arrays, Cell arrays still need reactive mapping even
+//   inside a derive callback. The .map() callback's closed-over `multiplier` cell
+//   is passed as a params object to mapWithPattern.
 export default pattern(() => {
     const numbers = Writable.of([1, 2, 3], {
         type: "array",

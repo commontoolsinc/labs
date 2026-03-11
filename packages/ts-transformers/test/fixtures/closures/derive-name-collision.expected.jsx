@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-name-collision
+// Verifies: when the input variable and a capture share the same name, the capture is renamed with a suffix
+//   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
+//   callback: `multiplier.get()` (capture) → `multiplier_1.get()`
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"

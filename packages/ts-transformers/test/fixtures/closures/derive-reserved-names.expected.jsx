@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-reserved-names
+// Verifies: variables with __ct_ prefixed names are captured without special treatment
+//   derive(value, fn) → derive(schema, schema, { value, __ct_reserved }, fn)
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"

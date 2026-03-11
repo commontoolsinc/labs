@@ -1,5 +1,11 @@
 import * as __ctHelpers from "commontools";
 import { Writable, computed, pattern } from "commontools";
+// FIXTURE: computed-pattern-typed
+// Verifies: computed() inside a typed pattern with destructured params is closure-extracted
+//   computed(() => value.get() * multiplier) → derive(..., { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier)
+// Context: The pattern uses generic type params <{ multiplier: number }, number>.
+//   Destructured `multiplier` is captured with asOpaque: true (it is an OpaqueRef
+//   from the pattern input), while `value` is captured with asCell: true.
 export default pattern((__ct_pattern_input) => {
     const multiplier = __ct_pattern_input.key("multiplier");
     const value = Writable.of(10, {
