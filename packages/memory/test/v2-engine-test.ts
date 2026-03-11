@@ -2,13 +2,16 @@ import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   DEFAULT_BRANCH,
+  toBlobMetadataId,
   toEntityDocument,
   toSourceLink,
 } from "../v2.ts";
 import {
   applyCommit,
   close,
+  getBlob,
   open,
+  putBlob,
   read,
   type Engine,
 } from "../v2/engine.ts";
@@ -351,6 +354,44 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
         add: ["two", "three"],
       },
     ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine stores immutable blobs separately from entity facts", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const payload = new Uint8Array([0, 1, 2, 3, 4, 5]);
+    const blob = putBlob(engine, {
+      value: payload,
+      contentType: "application/octet-stream",
+    });
+
+    assertEquals(blob.size, payload.byteLength);
+    assertEquals(blob.contentType, "application/octet-stream");
+    assertEquals(toBlobMetadataId(blob.hash), `urn:blob-meta:${blob.hash}`);
+
+    const stored = getBlob(engine, blob.hash);
+    assertEquals(stored, {
+      hash: blob.hash,
+      value: payload,
+      contentType: "application/octet-stream",
+      size: payload.byteLength,
+    });
+
+    const duplicate = putBlob(engine, {
+      value: payload,
+      contentType: "application/octet-stream",
+    });
+    assertEquals(duplicate.hash, blob.hash);
+
+    const blobCount = engine.database.prepare(
+      "SELECT COUNT(*) AS count FROM blob_store WHERE hash = ?",
+    ).get([blob.hash]) as { count: number } | undefined;
+    assertEquals(blobCount?.count, 1);
   } finally {
     close(engine);
     await Deno.remove(path);
