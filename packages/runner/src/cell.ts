@@ -6,7 +6,6 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  nativeFromStorableValue,
   shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value";
@@ -1199,29 +1198,21 @@ export class CellImpl<T extends StorableValue>
   }
 
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-
-    const tx = this.runtime.readTx(this.tx);
-    // Resolve all links ON THE WAY to the target, but don't resolve the final link
-    const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, "top"),
-      options,
-    );
-    return nativeFromStorableValue(value as StorableValue) as
-      | Immutable<T>
-      | undefined;
+    return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
   getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
     if (!this.synced) this.sync();
     const tx = this.runtime.readTx(this.tx);
+    // Resolve all links ON THE WAY to the target, but don't resolve the final
+    // link.
     const value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    // Re-storable-ize to get a frozen deep copy without native unwrapping.
-    // Unlike getRaw() which goes through nativeFromStorableValue (unwrapping
-    // StorableMap -> Map, etc.), this preserves the storable-layer representation.
+    // Deep-copy and freeze without native unwrapping — both getRaw() and
+    // getRawUntyped() return storable-layer values, not native ("wild west")
+    // values.
     return storableFromNativeValue(value) as Immutable<StorableValue>;
   }
 
