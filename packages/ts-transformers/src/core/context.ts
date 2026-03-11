@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   DiagnosticInput,
+  ReactiveContextOverride,
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
@@ -122,5 +123,26 @@ export class TransformationContext {
    */
   isArrayMethodCallback(node: ts.Node): boolean {
     return this.options.mapCallbackRegistry?.has(node) ?? false;
+  }
+
+  markSubtreeReactiveContext(
+    node: ts.Node,
+    override: ReactiveContextOverride,
+  ): void {
+    const registry = this.options.reactiveContextOverrideRegistry;
+    if (!registry) return;
+
+    const visit = (current: ts.Node): void => {
+      registry.set(current, override);
+      ts.forEachChild(current, visit);
+    };
+
+    visit(node);
+  }
+
+  getReactiveContextOverride(
+    node: ts.Node,
+  ): ReactiveContextOverride | undefined {
+    return this.options.reactiveContextOverrideRegistry?.get(node);
   }
 }

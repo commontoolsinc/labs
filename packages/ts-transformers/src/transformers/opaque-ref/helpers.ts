@@ -268,6 +268,11 @@ export function createComputedCallForExpression(
     }
   }
 
+  context.markSubtreeReactiveContext?.(expression, {
+    kind: "compute",
+    owner: "computed",
+  });
+
   const { factory, checker, sourceFile } = context;
 
   // Get result type for the computed call

@@ -17,6 +17,13 @@
  *   Readers: context.isArrayMethodCallback() (called by capability-lowering,
  *            reactive-context classifier)
  *
+ * reactiveContextOverrideRegistry (WeakMap<ts.Node, ReactiveContextOverride>)
+ *   Marks authored subtrees that are synthetically moved under compute wrappers
+ *   so later passes classify them against compute context instead of their
+ *   original pattern parent chain.
+ *   Writers: opaque-ref/helpers, builtins/derive
+ *   Readers: reactive-context classifier
+ *
  * SchemaHints (WeakMap<ts.Node, SchemaHint>)
  *   Overrides default schema generation behavior (e.g., array items: false).
  *   Writers: capture analysis in schema-injection
@@ -36,6 +43,8 @@ export type {
   DiagnosticInput,
   DiagnosticSeverity,
   FunctionCapabilitySummary,
+  ReactiveContextOverride,
+  ReactiveContextOverrideRegistry,
   ReactiveCapability,
   SchemaHint,
   SchemaHints,

@@ -116,6 +116,33 @@ function shouldTransformArrayMethod(
     context.checker,
     context,
   );
+  const syntheticContext = context.getReactiveContextOverride(methodCall);
+
+  const targetType = getTypeAtLocationWithFallback(
+    mapTarget, // the receiver of the array method call
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  const receiverKind = classifyReactiveReceiverKind(
+    targetType,
+    context.checker,
+  );
+
+  // Synthetic compute wrappers (for example, ternary branches lowered via
+  // OpaqueRefJSX) keep the original node/symbol identity. That can make a
+  // plain callback parameter still look pattern-owned via the original tree.
+  // If the wrapper explicitly moved this subtree into compute context and the
+  // current receiver has already been unwrapped to a plain array, keep plain
+  // array semantics.
+  if (
+    syntheticContext?.kind === "compute" &&
+    receiverKind === "plain" &&
+    !isDeriveCall(mapTarget) &&
+    !ts.isCallExpression(unwrapExpression(mapTarget))
+  ) {
+    return false;
+  }
 
   if (
     contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
@@ -128,17 +155,6 @@ function shouldTransformArrayMethod(
   if (isDeriveCall(mapTarget)) {
     return contextInfo.kind === "pattern";
   }
-
-  const targetType = getTypeAtLocationWithFallback(
-    mapTarget, // the receiver of the array method call
-    context.checker,
-    context.options.typeRegistry,
-    context.options.logger,
-  );
-  const receiverKind = classifyReactiveReceiverKind(
-    targetType,
-    context.checker,
-  );
 
   return shouldRewriteCollectionMethod(
     contextInfo.kind,

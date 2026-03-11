@@ -197,6 +197,10 @@ export function createDeriveCall(
   if (refs.length === 0) return undefined;
 
   const { factory, tsContext, ctHelpers, context } = options;
+  context.markSubtreeReactiveContext?.(expression, {
+    kind: "compute",
+    owner: "derive",
+  });
   const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
     refs,
   );

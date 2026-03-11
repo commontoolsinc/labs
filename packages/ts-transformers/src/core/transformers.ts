@@ -1,4 +1,8 @@
 import ts from "typescript";
+import type {
+  ReactiveContextKind,
+  ReactiveContextOwner,
+} from "../ast/reactive-context.ts";
 import { TransformationContext } from "./mod.ts";
 
 export type TransformMode = "transform" | "error";
@@ -50,6 +54,14 @@ export type CapabilitySummaryRegistry = WeakMap<
   ts.Node,
   FunctionCapabilitySummary
 >;
+export interface ReactiveContextOverride {
+  readonly kind: ReactiveContextKind;
+  readonly owner: ReactiveContextOwner;
+}
+export type ReactiveContextOverrideRegistry = WeakMap<
+  ts.Node,
+  ReactiveContextOverride
+>;
 
 export interface TransformationOptions {
   readonly mode?: TransformMode;
@@ -57,6 +69,7 @@ export interface TransformationOptions {
   readonly logger?: (message: string) => void;
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
+  readonly reactiveContextOverrideRegistry?: ReactiveContextOverrideRegistry;
   readonly schemaHints?: SchemaHints;
   readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**

@@ -1307,6 +1307,54 @@ export default pattern<State>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: ternary branch derive keeps nested map in compute context",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface TagEvent {
+  label: string;
+}
+
+export default pattern<{ recentEvents: TagEvent[] }>(({ recentEvents }) => ({
+  [UI]: (
+    <div>
+      {recentEvents.length === 0
+        ? <span>No events yet</span>
+        : (
+          <div>
+            {recentEvents.map((event: TagEvent, idx: number) => (
+              <ct-hstack key={idx} gap="2">
+                <span>{event.label}</span>
+              </ct-hstack>
+            ))}
+          </div>
+        )}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "({ recentEvents }) => (<div>",
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.map((event: TagEvent, idx: number) =>",
+    );
+    assert(
+      !output.includes("recentEvents.mapWithPattern("),
+      "expected nested map inside derive-wrapped ternary branch to stay plain .map()",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: derive object-literal input preserves property schemas",
   async () => {
     const source = `/// <cts-enable />
