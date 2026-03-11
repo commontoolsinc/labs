@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   DEFAULT_BRANCH,
@@ -392,6 +392,100 @@ Deno.test("memory v2 engine stores immutable blobs separately from entity facts"
       "SELECT COUNT(*) AS count FROM blob_store WHERE hash = ?",
     ).get([blob.hash]) as { count: number } | undefined;
     assertEquals(blobCount?.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine rejects commits with stale confirmed reads", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{ id: "entity:source", path: [], seq: 0 }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 1, actor: "other" },
+      },
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{ id: "entity:source", path: [], seq: 1 }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ count: 2 }),
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: {
+            ...invocation,
+            args: { localSeq: 2 },
+          },
+          authorization,
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [{ id: "entity:source", path: [], seq: 1 }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:target",
+              value: toEntityDocument({ copied: true }),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+
+    const rejectedCommit = engine.database.prepare(
+      `SELECT seq
+       FROM "commit"
+       WHERE session_id = 'session:1' AND local_seq = 2`,
+    ).get() as { seq: number } | undefined;
+    assertEquals(rejectedCommit, undefined);
+    assertEquals(read(engine, { id: "entity:target" }), null);
   } finally {
     close(engine);
     await Deno.remove(path);
