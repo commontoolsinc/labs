@@ -146,7 +146,7 @@ async function testNewLinkDiscovery() {
 
   tx = runtime3.edit();
   // Update person to link to address using manual link format
-  personCell3.withTx(tx).setRaw({
+  personCell3.withTx(tx).setRawUntyped({
     name: "Alice",
     address: {
       "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
@@ -253,7 +253,7 @@ async function testLinkedDocumentChanges() {
     tx,
   );
   // Create a manual link to the address cell
-  personCell.setRaw({
+  personCell.setRawUntyped({
     name: "Bob",
     address: {
       "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
@@ -408,7 +408,7 @@ async function testDeepLinkChain() {
     addressSchema,
     tx,
   );
-  addressCell.setRaw({
+  addressCell.setRawUntyped({
     street: "123 Main St",
     city: {
       "/": { "link@1": { id: `of:${cityEntityId["/"]}`, path: [] } },
@@ -427,7 +427,7 @@ async function testDeepLinkChain() {
     personSchema,
     tx,
   );
-  personCell.setRaw({
+  personCell.setRawUntyped({
     name: "Charlie",
     address: {
       "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },

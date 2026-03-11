@@ -187,7 +187,7 @@ declare module "@commontools/api" {
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     /** Read the cell's raw storable value as a mutable deep copy. */
     getRawMutable(options?: IReadOptions): T | undefined;
-    setRaw(value: T & StorableValue): void;
+    setRaw(value: NoInfer<T> & StorableValue): void;
     /**
      * Sets the raw cell value to any `StorableValue`, bypassing the cell's
      * type parameter `T`. Use this when writing pre-formed storable data
@@ -1209,7 +1209,7 @@ export class CellImpl<T extends StorableValue>
     return storableFromNativeValue(raw, false) as T;
   }
 
-  setRaw(value: T & StorableValue): void {
+  setRaw(value: NoInfer<T> & StorableValue): void {
     this.setRawUntyped(value);
   }
 
