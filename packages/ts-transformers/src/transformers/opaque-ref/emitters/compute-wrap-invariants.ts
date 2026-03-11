@@ -31,9 +31,6 @@ function isSupportedPatternBoundary(
   return (
     callKind?.kind === "array-method" ||
     callKind?.kind === "derive" ||
-    callKind?.kind === "ifElse" ||
-    callKind?.kind === "when" ||
-    callKind?.kind === "unless" ||
     callKind?.kind === "builder"
   );
 }

@@ -1566,6 +1566,128 @@ export default pattern<{ fields: Field[] }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: nested authored ifElse predicate in helper-owned branch lowers to derive",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, ifElse, pattern, UI } from "commontools";
+
+interface ValidationIssue {
+  message: string;
+  severity: "error" | "warning";
+}
+
+interface ExtractedField {
+  targetModule: string;
+  fieldName: string;
+  confidenceLevel?: "high" | "medium" | "low";
+  validationIssue?: ValidationIssue;
+  explanation?: string;
+}
+
+interface Preview {
+  fields?: ExtractedField[];
+}
+
+export default pattern<{
+  inputFields: ExtractedField[];
+  fieldCheckStates: Record<string, boolean>;
+  showPreview: boolean;
+}>((state) => {
+  const preview = computed((): Preview | null => ({ fields: state.inputFields }));
+
+  return {
+    [UI]: (
+      <div>
+        {ifElse(
+          state.showPreview,
+          <div>
+            {preview?.fields?.map((f: ExtractedField, idx: number) => {
+              const fieldKey = f.targetModule + "." + f.fieldName;
+              const isChecked = state.fieldCheckStates[fieldKey] === true;
+              const confidenceBg = f.confidenceLevel === "high"
+                ? "#dcfce7"
+                : f.confidenceLevel === "medium"
+                ? "#fef9c3"
+                : f.confidenceLevel === "low"
+                ? "#fee2e2"
+                : "transparent";
+              const confidenceColor = f.confidenceLevel === "high"
+                ? "#166534"
+                : f.confidenceLevel === "medium"
+                ? "#854d0e"
+                : f.confidenceLevel === "low"
+                ? "#991b1b"
+                : "#6b7280";
+              const confidenceIcon = f.confidenceLevel === "high"
+                ? "✓"
+                : f.confidenceLevel === "medium"
+                ? "~"
+                : f.confidenceLevel === "low"
+                ? "!"
+                : "";
+              const confidenceLabel = f.confidenceLevel === "high"
+                ? "High"
+                : f.confidenceLevel === "medium"
+                ? "Med"
+                : f.confidenceLevel === "low"
+                ? "Low"
+                : "";
+              const hasConfidence = f.confidenceLevel !== undefined;
+
+              return (
+                <div key={idx} style={{ opacity: isChecked ? 1 : 0.6 }}>
+                  {ifElse(
+                    hasConfidence,
+                    <span style={{ background: confidenceBg, color: confidenceColor }}>
+                      {confidenceIcon} {confidenceLabel}
+                    </span>,
+                    null,
+                  )}
+                  {ifElse(
+                    f.validationIssue !== undefined,
+                    <span
+                      style={{
+                        background: f.validationIssue?.severity === "error"
+                          ? "#fee2e2"
+                          : "#fef3c7",
+                        color: f.validationIssue?.severity === "error"
+                          ? "#991b1b"
+                          : "#92400e",
+                      }}
+                    >
+                      {f.validationIssue?.message}
+                    </span>,
+                    null,
+                  )}
+                  {ifElse(
+                    f.explanation !== undefined && f.explanation !== "",
+                    <div>{f.explanation}</div>,
+                    null,
+                  )}
+                </div>
+              );
+            })}
+          </div>,
+          null,
+        )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "=> f.validationIssue !== undefined",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse rewrites condition and branches uniformly",
   async () => {
     const source = `/// <cts-enable />
