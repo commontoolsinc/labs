@@ -14,6 +14,7 @@ export { computeGitFingerprint } from "./git-fingerprint.ts";
 const logger = getLogger("compilation-cache");
 
 const DEFAULT_MAX_ENTRIES = 500;
+const DEFAULT_EVICTION_INTERVAL = 50;
 
 export interface CachedCompilerStats {
   hits: number;
@@ -39,13 +40,18 @@ export class CachedCompiler {
   };
 
   private maxEntries: number;
+  private evictionInterval: number;
+  private writesSinceEviction = 0;
+  private evicting = false;
 
   constructor(
     private cache: CompilationCacheStorage,
     private fingerprint: string,
     maxEntries?: number,
+    evictionInterval?: number,
   ) {
     this.maxEntries = maxEntries ?? DEFAULT_MAX_ENTRIES;
+    this.evictionInterval = evictionInterval ?? DEFAULT_EVICTION_INTERVAL;
   }
 
   /**
@@ -76,7 +82,7 @@ export class CachedCompiler {
         cachedAt: Date.now(),
       });
       this.stats.writes++;
-      await this.evictByCount();
+      this.maybeEvictByCount();
     } catch (err) {
       this.stats.writeErrors++;
       logger.warn("compilation-cache", "Failed to write cache entry", err);
@@ -113,25 +119,41 @@ export class CachedCompiler {
     return this.fingerprint;
   }
 
-  private async evictByCount(): Promise<void> {
-    const count = await this.cache.count();
-    if (count <= this.maxEntries) return;
+  /** Fire-and-forget eviction check. Runs every N writes, skips if already running. */
+  private maybeEvictByCount(): void {
+    this.writesSinceEviction++;
+    if (this.writesSinceEviction < this.evictionInterval) return;
+    if (this.evicting) return;
+    this.evicting = true;
+    this.doEviction().finally(() => {
+      this.evicting = false;
+      this.writesSinceEviction = 0;
+    });
+  }
 
-    // First try stale eviction (cheap — removes wrong-fingerprint entries)
-    let evicted = await this.cache.evictStale(this.fingerprint);
+  private async doEviction(): Promise<void> {
+    try {
+      const count = await this.cache.count();
+      if (count <= this.maxEntries) return;
 
-    // If still over cap, evict oldest entries by cachedAt
-    const remaining = await this.cache.count();
-    if (remaining > this.maxEntries) {
-      evicted += await this.cache.evictOldest(this.maxEntries);
-    }
+      // First try stale eviction (cheap — removes wrong-fingerprint entries)
+      let evicted = await this.cache.evictStale(this.fingerprint);
 
-    if (evicted > 0) {
-      this.stats.countEvictions += evicted;
-      logger.warn(
-        "compilation-cache",
-        `Count-based eviction: removed ${evicted} entries (cap=${this.maxEntries})`,
-      );
+      // If still over cap, evict oldest entries by cachedAt
+      const remaining = await this.cache.count();
+      if (remaining > this.maxEntries) {
+        evicted += await this.cache.evictOldest(this.maxEntries);
+      }
+
+      if (evicted > 0) {
+        this.stats.countEvictions += evicted;
+        logger.warn(
+          "compilation-cache",
+          `Count-based eviction: removed ${evicted} entries (cap=${this.maxEntries})`,
+        );
+      }
+    } catch (err) {
+      logger.warn("compilation-cache", "Eviction failed", err);
     }
   }
 }

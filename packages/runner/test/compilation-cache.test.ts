@@ -355,8 +355,8 @@ describe("CachedCompiler", () => {
   });
 
   it("evicts oldest entries when exceeding maxEntries", async () => {
-    // Create a compiler with a cap of 2
-    const smallCompiler = new CachedCompiler(storage, "fp", 2);
+    // Create a compiler with cap=2 and evictionInterval=1 so every write checks
+    const smallCompiler = new CachedCompiler(storage, "fp", 2, 1);
 
     // Add 3 entries — the third should trigger eviction of the oldest
     await smallCompiler.set("hash1", testJsScript);
@@ -375,6 +375,9 @@ describe("CachedCompiler", () => {
 
     // Trigger eviction by setting a 4th entry
     await smallCompiler.set("hash4", testJsScript2);
+
+    // Eviction is fire-and-forget; yield to let it complete
+    await new Promise((r) => setTimeout(r, 0));
 
     // Should have evicted down to 2
     expect(await storage.count()).toBe(2);
