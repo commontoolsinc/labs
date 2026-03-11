@@ -1,10 +1,13 @@
 import { Database } from "@db/sqlite";
+import { fromDigest } from "merkle-reference";
 import { refer } from "../reference.ts";
 import type { JSONValue } from "../interface.ts";
+import { sha256 } from "../hash-impl.ts";
 import { applyPatch } from "./patch.ts";
 import {
   DEFAULT_BRANCH,
   EMPTY_VALUE_REF,
+  type Blob,
   type BranchName,
   type ClientCommit,
   type EntityDocument,
@@ -297,6 +300,17 @@ FROM branch
 WHERE name = :branch
 `;
 
+const INSERT_BLOB = `
+INSERT OR IGNORE INTO blob_store (hash, data, content_type, size)
+VALUES (:hash, :data, :content_type, :size)
+`;
+
+const SELECT_BLOB = `
+SELECT data, content_type, size
+FROM blob_store
+WHERE hash = :hash
+`;
+
 export interface Engine {
   url: URL;
   database: Database;
@@ -348,6 +362,11 @@ export interface ReadOptions {
   seq?: number;
 }
 
+export interface PutBlobOptions {
+  value: Uint8Array;
+  contentType: string;
+}
+
 type HeadRow = {
   fact_hash: string;
   seq: number;
@@ -380,6 +399,12 @@ type ReadRow = {
 type PatchRow = {
   patch_ops: string;
   seq: number;
+};
+
+type BlobRow = {
+  data: Uint8Array;
+  content_type: string;
+  size: number;
 };
 
 export const open = async ({ url }: OpenOptions): Promise<Engine> => {
@@ -421,6 +446,40 @@ export const read = (
         seq: row.seq,
       });
   }
+};
+
+export const putBlob = (
+  engine: Engine,
+  options: PutBlobOptions,
+): Blob => {
+  const hash = hashBlob(options.value);
+  engine.database.prepare(INSERT_BLOB).run({
+    hash,
+    data: options.value,
+    content_type: options.contentType,
+    size: options.value.byteLength,
+  });
+  return {
+    hash,
+    value: new Uint8Array(options.value),
+    contentType: options.contentType,
+    size: options.value.byteLength,
+  };
+};
+
+export const getBlob = (engine: Engine, hash: Reference): Blob | null => {
+  const row = engine.database.prepare(SELECT_BLOB).get({
+    hash,
+  }) as BlobRow | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    hash,
+    value: new Uint8Array(row.data),
+    contentType: row.content_type,
+    size: row.size,
+  };
 };
 
 export const applyCommit = (
@@ -750,6 +809,10 @@ const isEntityDocument = (
     typeof value === "object" &&
     !Array.isArray(value) &&
     Object.hasOwn(value, "value");
+};
+
+const hashBlob = (value: Uint8Array): Reference => {
+  return fromDigest(sha256(value)).toString() as Reference;
 };
 
 const emptyReferenceFor = (id: EntityId): Reference => {
