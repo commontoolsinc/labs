@@ -1420,6 +1420,61 @@ export default pattern<{
 );
 
 Deno.test(
+  "Capability-first: computed array map in ternary branch stays pattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI, Writable } from "commontools";
+
+interface Item {
+  name: string;
+  value: number;
+}
+
+export default pattern<{ items: Item[] }>((state) => {
+  const showList = Writable.of(true);
+
+  const sorted = computed(() =>
+    [...state.items].sort((a, b) => a.value - b.value)
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {showList
+          ? (
+            <div>
+              {sorted.map((item: Item) => (
+                <span>{item.name}</span>
+              ))}
+            </div>
+          )
+          : <span>Hidden</span>}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      1,
+    );
+    assertStringIncludes(
+      output,
+      "sorted.mapWithPattern(",
+    );
+    assert(
+      !output.includes("sorted.map((item: Item) =>"),
+      "expected computed array map in ternary branch to stay pattern-lowered",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: derive object-literal input preserves property schemas",
   async () => {
     const source = `/// <cts-enable />
