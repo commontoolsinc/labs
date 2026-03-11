@@ -540,14 +540,18 @@ function handleIntervalNow(
     state.cancelRegistered = true;
   }
 
+  // Expose only the lastTriggered timestamp to consumers (consistent with
+  // one-shot #now which returns a plain number). The full metadata object
+  // stays in the shared cell for internal coordination.
+  const resultCell = state.cell.key("lastTriggered");
   const candidatesCell = ctx.runtime.getImmutableCell(
     ctx.parentCell.space,
-    [state.cell],
+    [resultCell],
     undefined,
     ctx.tx,
   );
   sendResult(ctx.tx, {
-    result: state.cell,
+    result: resultCell,
     candidates: candidatesCell,
   });
   return true;
