@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
 import {
   type DragState,
@@ -15,7 +16,7 @@ import {
 /** Create a minimal DragState for testing (no real DOM elements). */
 function createMockDragState(overrides?: Partial<DragState>): DragState {
   return {
-    cell: createMockCellHandle({ name: "test" }),
+    cell: createMockCellHandle({ name: "test" }) as CellHandle,
     sourceElement: {} as HTMLElement,
     preview: { parentNode: null } as unknown as HTMLElement,
     pointerX: 0,
