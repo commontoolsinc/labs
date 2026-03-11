@@ -273,54 +273,20 @@ export class StorageManager implements IStorageManager {
   }
 
   async syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
-    const target = this.describeSyncTarget(cell);
-    if (!target.space) {
+    const { space, id, schema } = cell.getAsNormalizedFullLink();
+    if (!space) {
       throw new Error("No space set");
     }
 
-    await this.syncTarget(cell, target);
-
-    try {
-      const resolvedCell = cell.resolveAsCell();
-      const resolved = this.describeSyncTarget(resolvedCell);
-      if (stableHash(target) !== stableHash(resolved)) {
-        await this.syncTarget(resolvedCell, resolved);
-      }
-    } catch {
-      // Reads may legitimately fail on cyclic or broken links; keep the
-      // original sync rather than turning those cases into sync failures.
-    }
-    return cell;
-  }
-
-  private async syncTarget<T>(
-    cell: Cell<T>,
-    target: {
-      space: MemorySpace;
-      id: string;
-      schema: JSONSchema | undefined;
-      path: string[];
-    },
-  ): Promise<Cell<T>> {
-    if (target.id.startsWith("data:")) {
-      return await this.syncDataURICell(cell, target.space, target.id, target.schema);
+    if (id.startsWith("data:")) {
+      return this.syncDataURICell(cell, space, id, schema);
     }
 
-    await this.open(target.space).sync(target.id as URI, {
-      path: target.path,
-      schema: target.schema ?? false,
+    await this.open(space).sync(id, {
+      path: cell.path.map((segment) => segment.toString()),
+      schema: schema ?? false,
     });
     return cell;
-  }
-
-  private describeSyncTarget<T>(cell: Cell<T>) {
-    const { space, id, schema, path } = cell.getAsNormalizedFullLink();
-    return {
-      space,
-      id,
-      schema,
-      path: path.map((segment) => segment.toString()),
-    };
   }
 
   private resolveCrossSpace(resolve: () => void): Promise<void> {
