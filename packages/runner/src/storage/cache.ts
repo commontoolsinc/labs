@@ -79,6 +79,7 @@ import {
   type SessionOpenResult,
   type V2Error,
 } from "@commonfabric/memory/v2";
+import * as V2Storage from "./v2.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -2151,6 +2152,9 @@ export class StorageManager implements IStorageManager {
   #crossSpacesPromises: Set<Promise<void>> = new Set();
 
   static open(options: Options) {
+    if (options.memoryVersion === "v2") {
+      return V2Storage.StorageManager.open(options);
+    }
     if (options.address.protocol === "memory:") {
       throw new RangeError(
         "memory: protocol is not supported in browser runtime",
