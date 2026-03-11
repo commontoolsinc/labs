@@ -1213,11 +1213,20 @@ export class CellImpl<T extends StorableValue>
   }
 
   getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
-    return this.getRaw(options) as Immutable<StorableValue>;
+    if (!this.synced) this.sync();
+    const tx = this.runtime.readTx(this.tx);
+    const value = tx.readValueOrThrow(
+      resolveLink(this.runtime, tx, this.link, "top"),
+      options,
+    );
+    // Re-storable-ize to get a frozen deep copy without native unwrapping.
+    // Unlike getRaw() which goes through nativeFromStorableValue (unwrapping
+    // StorableMap -> Map, etc.), this preserves the storable-layer representation.
+    return storableFromNativeValue(value) as Immutable<StorableValue>;
   }
 
   getRawUntypedMutable(options?: IReadOptions): T | undefined {
-    const raw = this.getRaw(options);
+    const raw = this.getRawUntyped(options);
     if (raw === undefined) return undefined;
     return storableFromNativeValue(raw, false) as T;
   }
