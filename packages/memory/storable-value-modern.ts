@@ -664,6 +664,16 @@ function deepCloneIfNecessaryInternal(
   frozen: boolean,
   seen: Set<object> | null,
 ): StorableValue {
+  // Primitives (null, undefined, boolean, number, string, bigint) and special
+  // primitives (EpochNsec, EpochDays, ContentId) are inherently immutable --
+  // frozenness is irrelevant, always return as-is.
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+  if (value instanceof SpecialPrimitiveValue) {
+    return value;
+  }
+
   // Identity optimization: if we want frozen output and this subtree is
   // already deep-frozen, return it as-is. This applies at every level of
   // recursion, preserving deep-frozen subtrees within larger structures.
@@ -672,15 +682,6 @@ function deepCloneIfNecessaryInternal(
   }
 
   switch (tagFromNativeValue(value)) {
-    // Primitives (null, undefined, boolean, number, string, bigint) pass
-    // through -- frozenness doesn't apply.
-    case NATIVE_TAGS.Primitive:
-    // Special primitives are always frozen, returned as-is.
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentId:
-      return value;
-
     case NATIVE_TAGS.StorableInstance:
       // Delegate to the protocol's shallowClone method.
       return (value as StorableInstance).shallowClone(frozen);
@@ -726,8 +727,9 @@ function deepCloneIfNecessaryInternal(
     }
 
     default:
-      // deepCloneIfNecessary operates on already-valid StorableValues.
-      // Unrecognized types should never reach here.
+      // Primitives and special primitives are handled before the switch;
+      // Array, Object, and StorableInstance are handled above. This should
+      // never be reached for valid StorableValues.
       throw new Error(
         `Cannot deep-clone: ${
           (value as object).constructor?.name ?? typeof value
