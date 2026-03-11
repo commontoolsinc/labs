@@ -68,6 +68,56 @@ The home space maintains a managed list of spaces in
 Users add spaces via the Spaces tab in the home pattern. Clicking a space link
 navigates to it (creating it if it doesn't exist yet).
 
+## Custom Home Pattern
+
+The home space's default pattern is the home experience itself — by default,
+`/api/patterns/system/home.tsx`. You can replace it with a custom pattern using
+the CT CLI:
+
+```bash
+# Deploy a custom home pattern
+ct piece set-home -i ./my.key -a http://localhost:8000 ./my-home.tsx
+
+# Reset to the system default
+ct piece set-home -i ./my.key -a http://localhost:8000 --reset
+```
+
+Under the hood, `set-home` calls `PiecesController.recreateDefaultPattern()`
+with the compiled program. This tears down the existing default pattern, creates
+a new piece from the custom source, and links it as the space's
+`defaultPattern`.
+
+### Identity Matching
+
+The home space DID equals the user's identity DID. This means **the CLI identity
+must match the browser identity** for `set-home` to affect what the browser
+displays.
+
+The browser shell derives identity from a mnemonic via
+`Identity.fromMnemonic()`, while `ct id derive` uses
+`Identity.fromPassphrase()`. These are different algorithms — the same input
+produces different DIDs.
+
+To share identity between browser and CLI:
+
+```bash
+# 1. Create a mnemonic in the browser (login/register screen)
+# 2. Export a CLI key using fromMnemonic (not fromPassphrase):
+deno eval '
+import { Identity } from "./packages/identity/src/identity.ts";
+const mnemonic = "your 24-word mnemonic here";
+const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
+await Deno.writeFile("./browser.key", id.toPkcs8());
+'
+
+# 3. Use that key with ct
+ct piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
+```
+
+Note: `ct id derive <passphrase>` will NOT produce the same identity as the
+browser. You must use `fromMnemonic` with `implementation: "noble"` to get a
+PKCS8 key that matches the browser's identity.
+
 ## Default App URL
 
 The `defaultPattern.defaultAppUrl` setting controls which pattern is used as the
@@ -78,6 +128,21 @@ custom URL is used; otherwise it falls back to
 
 This enables users to maintain personal forks of the default app pattern (e.g.,
 `default-app-ben.tsx`) with different features or configurations.
+
+## How Default Patterns Work
+
+Both the home pattern and the default app pattern follow the same mechanism:
+
+1. When a space is opened, `PiecesController.ensureDefaultPattern()` checks if
+   a `defaultPattern` piece already exists on the space cell
+2. If not, it creates one:
+   - **Home space** (`space === userIdentityDID`): uses
+     `/api/patterns/system/home.tsx`
+   - **Other spaces**: reads `defaultAppUrl` from the home space; falls back to
+     `/api/patterns/system/default-app.tsx`
+3. The pattern is compiled, run, and linked as `spaceCell.defaultPattern`
+4. `recreateDefaultPattern()` can replace it — either with a URL-based system
+   pattern or a custom `RuntimeProgram` (used by `ct piece set-home`)
 
 ## Implementation Details
 
