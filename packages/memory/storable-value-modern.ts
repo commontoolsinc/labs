@@ -651,9 +651,9 @@ export function deepCloneIfNecessaryRich(
  * `switch (tagFromNativeValue(value))` for type dispatch, consistent with
  * `shallowCloneIfNecessary` and `toRichStorableValue`.
  *
- * The `isDeepFrozenStorableValue` check is here (not in the entry point) so
- * that partial deep-frozen subtrees within a larger mutable structure are
- * preserved as-is during recursion.
+ * Each container/instance case checks `frozen && isDeepFrozenStorableValue`
+ * so that partial deep-frozen subtrees within a larger structure are preserved
+ * as-is during recursion.
  *
  * @param seen - Tracks ancestor objects for circular reference detection.
  *   Lazily initialized on first use to avoid allocating a Set for values
@@ -664,29 +664,22 @@ function deepCloneIfNecessaryInternal(
   frozen: boolean,
   seen: Set<object> | null,
 ): StorableValue {
-  // Primitives (null, undefined, boolean, number, string, bigint) and special
-  // primitives (EpochNsec, EpochDays, ContentId) are inherently immutable --
-  // frozenness is irrelevant, always return as-is.
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-  if (value instanceof SpecialPrimitiveValue) {
-    return value;
-  }
-
-  // Identity optimization: if we want frozen output and this subtree is
-  // already deep-frozen, return it as-is. This applies at every level of
-  // recursion, preserving deep-frozen subtrees within larger structures.
-  if (frozen && isDeepFrozenStorableValue(value)) {
-    return value;
-  }
-
   switch (tagFromNativeValue(value)) {
+    // Inherently immutable types -- frozenness is irrelevant.
+    case NATIVE_TAGS.Primitive:
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value;
+
     case NATIVE_TAGS.StorableInstance:
-      // Delegate to the protocol's shallowClone method.
+      // Identity optimization: already-correct frozenness needs no clone.
+      if (frozen && isDeepFrozenStorableValue(value)) return value;
       return (value as StorableInstance).shallowClone(frozen);
 
     case NATIVE_TAGS.Array: {
+      // Identity optimization: deep-frozen subtrees are preserved as-is.
+      if (frozen && isDeepFrozenStorableValue(value)) return value;
       const arr = value as StorableValue[];
       seen ??= new Set();
       if (seen.has(arr)) {
@@ -705,6 +698,8 @@ function deepCloneIfNecessaryInternal(
     }
 
     case NATIVE_TAGS.Object: {
+      // Identity optimization: deep-frozen subtrees are preserved as-is.
+      if (frozen && isDeepFrozenStorableValue(value)) return value;
       const obj = value as object;
       seen ??= new Set();
       if (seen.has(obj)) {
@@ -727,9 +722,7 @@ function deepCloneIfNecessaryInternal(
     }
 
     default:
-      // Primitives and special primitives are handled before the switch;
-      // Array, Object, and StorableInstance are handled above. This should
-      // never be reached for valid StorableValues.
+      // All valid StorableValue types are handled above.
       throw new Error(
         `Cannot deep-clone: ${
           (value as object).constructor?.name ?? typeof value
