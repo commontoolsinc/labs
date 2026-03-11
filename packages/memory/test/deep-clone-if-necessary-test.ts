@@ -6,7 +6,10 @@ import {
   setStorableValueConfig,
 } from "../storable-value.ts";
 import type { StorableValue } from "../interface.ts";
-import { StorableError } from "../storable-native-instances.ts";
+import {
+  StorableEpochNsec,
+  StorableError,
+} from "../storable-native-instances.ts";
 
 // ============================================================================
 // Tests
@@ -243,6 +246,87 @@ describe("deepCloneIfNecessary", () => {
       expect(Object.getPrototypeOf(result)).toBe(null);
       expect(result.x).toBe(42);
       expect(Object.isFrozen(result)).toBe(false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // SpecialPrimitiveValue pass-through
+  // --------------------------------------------------------------------------
+
+  describe("SpecialPrimitiveValue", () => {
+    it("passes through StorableEpochNsec unchanged", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const epoch = new StorableEpochNsec(1234567890n);
+      Object.freeze(epoch);
+      const result = deepCloneIfNecessary(epoch as unknown as StorableValue);
+      expect(result).toBe(epoch); // identity -- special primitives are immutable
+    });
+
+    it("passes through StorableEpochNsec when frozen=false", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const epoch = new StorableEpochNsec(42n);
+      Object.freeze(epoch);
+      // frozen parameter is irrelevant for special primitives
+      const result = deepCloneIfNecessary(
+        epoch as unknown as StorableValue,
+        false,
+      );
+      expect(result).toBe(epoch);
+    });
+
+    it("passes through StorableEpochNsec nested in an object", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const epoch = new StorableEpochNsec(999n);
+      Object.freeze(epoch);
+      const value = { time: epoch, label: "test" } as StorableValue;
+      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result.time).toBe(epoch); // same instance -- not cloned
+      expect(result.label).toBe("test");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Circular reference detection
+  // --------------------------------------------------------------------------
+
+  describe("circular reference detection", () => {
+    it("throws on direct circular object reference", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const obj = {} as Record<string, unknown>;
+      obj.self = obj;
+      expect(() => deepCloneIfNecessary(obj as StorableValue)).toThrow(
+        "Cannot deep-clone circular reference",
+      );
+    });
+
+    it("throws on circular array reference", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const arr: unknown[] = [1, 2];
+      arr.push(arr);
+      expect(() => deepCloneIfNecessary(arr as StorableValue)).toThrow(
+        "Cannot deep-clone circular reference",
+      );
+    });
+
+    it("throws on indirect circular reference", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const a = {} as Record<string, unknown>;
+      const b = { parent: a } as Record<string, unknown>;
+      a.child = b;
+      expect(() => deepCloneIfNecessary(a as StorableValue)).toThrow(
+        "Cannot deep-clone circular reference",
+      );
+    });
+
+    it("handles shared (diamond) references without throwing", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const shared = { x: 1 };
+      const value = { a: shared, b: shared } as StorableValue;
+      // Shared (non-circular) references should not throw.
+      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      expect(result).toEqual({ a: { x: 1 }, b: { x: 1 } });
+      expect(Object.isFrozen(result)).toBe(true);
     });
   });
 

@@ -646,17 +646,20 @@ export function deepCloneIfNecessaryRich(
   if (frozen && isDeepFrozenStorableValue(value)) {
     return value;
   }
-  return deepCloneIfNecessaryInternal(value, frozen);
+  return deepCloneIfNecessaryInternal(value, frozen, new Set());
 }
 
 /**
  * Internal recursive implementation for `deepCloneIfNecessaryRich`. Uses
  * `switch (tagFromNativeValue(value))` for type dispatch, consistent with
  * `shallowCloneIfNecessary` and `toRichStorableValue`.
+ *
+ * @param seen - Tracks ancestor objects for circular reference detection.
  */
 function deepCloneIfNecessaryInternal(
   value: StorableValue,
   frozen: boolean,
+  seen: Set<object>,
 ): StorableValue {
   switch (tagFromNativeValue(value)) {
     // Primitives (null, undefined, boolean, number, string, bigint) pass
@@ -674,23 +677,38 @@ function deepCloneIfNecessaryInternal(
 
     case NATIVE_TAGS.Array: {
       const arr = value as StorableValue[];
+      if (seen.has(arr)) {
+        throw new Error("Cannot deep-clone circular reference");
+      }
+      seen.add(arr);
       const copy: StorableValue[] = new Array(arr.length);
       for (let i = 0; i < arr.length; i++) {
         if (i in arr) {
-          copy[i] = deepCloneIfNecessaryInternal(arr[i], frozen);
+          copy[i] = deepCloneIfNecessaryInternal(arr[i], frozen, seen);
         }
       }
+      seen.delete(arr);
       if (frozen) Object.freeze(copy);
       return copy;
     }
 
     case NATIVE_TAGS.Object: {
-      // Preserve null prototypes (e.g. Object.create(null)).
-      const proto = Object.getPrototypeOf(value);
-      const copy = Object.create(proto) as Record<string, StorableValue>;
-      for (const [key, val] of Object.entries(value as object)) {
-        copy[key] = deepCloneIfNecessaryInternal(val as StorableValue, frozen);
+      const obj = value as object;
+      if (seen.has(obj)) {
+        throw new Error("Cannot deep-clone circular reference");
       }
+      seen.add(obj);
+      // Preserve null prototypes (e.g. Object.create(null)).
+      const proto = Object.getPrototypeOf(obj);
+      const copy = Object.create(proto) as Record<string, StorableValue>;
+      for (const [key, val] of Object.entries(obj)) {
+        copy[key] = deepCloneIfNecessaryInternal(
+          val as StorableValue,
+          frozen,
+          seen,
+        );
+      }
+      seen.delete(obj);
       if (frozen) Object.freeze(copy);
       return copy;
     }
