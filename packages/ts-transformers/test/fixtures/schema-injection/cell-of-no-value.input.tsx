@@ -1,6 +1,12 @@
 /// <cts-enable />
 import { Cell, cell, ComparableCell } from "commontools";
 
+// FIXTURE: cell-of-no-value
+// Verifies: Cell.of/cell with type arg but no value injects undefined as first arg plus schema
+//   Cell.of<string>() → Cell.of<string>(undefined, { type: "string" })
+//   cell<string>() → cell<string>(undefined, { type: "string" })
+//   ComparableCell.of<{ name: string }>() → ComparableCell.of<...>(undefined, { type: "object", ... })
+//   Cell.of<string>("hello") → Cell.of<string>("hello", { type: "string" })
 export default function TestCellOfNoValue() {
   // Cell.of with type argument but no value - should become Cell.of(undefined, schema)
   const _c1 = Cell.of<string>();
