@@ -643,10 +643,7 @@ export function deepCloneIfNecessaryRich(
   value: StorableValue,
   frozen = true,
 ): StorableValue {
-  if (frozen && isDeepFrozenStorableValue(value)) {
-    return value;
-  }
-  return deepCloneIfNecessaryInternal(value, frozen, new Set());
+  return deepCloneIfNecessaryInternal(value, frozen, null);
 }
 
 /**
@@ -654,13 +651,26 @@ export function deepCloneIfNecessaryRich(
  * `switch (tagFromNativeValue(value))` for type dispatch, consistent with
  * `shallowCloneIfNecessary` and `toRichStorableValue`.
  *
+ * The `isDeepFrozenStorableValue` check is here (not in the entry point) so
+ * that partial deep-frozen subtrees within a larger mutable structure are
+ * preserved as-is during recursion.
+ *
  * @param seen - Tracks ancestor objects for circular reference detection.
+ *   Lazily initialized on first use to avoid allocating a Set for values
+ *   that are already deep-frozen.
  */
 function deepCloneIfNecessaryInternal(
   value: StorableValue,
   frozen: boolean,
-  seen: Set<object>,
+  seen: Set<object> | null,
 ): StorableValue {
+  // Identity optimization: if we want frozen output and this subtree is
+  // already deep-frozen, return it as-is. This applies at every level of
+  // recursion, preserving deep-frozen subtrees within larger structures.
+  if (frozen && isDeepFrozenStorableValue(value)) {
+    return value;
+  }
+
   switch (tagFromNativeValue(value)) {
     // Primitives (null, undefined, boolean, number, string, bigint) pass
     // through -- frozenness doesn't apply.
@@ -677,6 +687,7 @@ function deepCloneIfNecessaryInternal(
 
     case NATIVE_TAGS.Array: {
       const arr = value as StorableValue[];
+      seen ??= new Set();
       if (seen.has(arr)) {
         throw new Error("Cannot deep-clone circular reference");
       }
@@ -694,6 +705,7 @@ function deepCloneIfNecessaryInternal(
 
     case NATIVE_TAGS.Object: {
       const obj = value as object;
+      seen ??= new Set();
       if (seen.has(obj)) {
         throw new Error("Cannot deep-clone circular reference");
       }

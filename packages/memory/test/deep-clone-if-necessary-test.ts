@@ -110,6 +110,21 @@ describe("deepCloneIfNecessary", () => {
       expect(result).toBe(value); // identity -- no clone needed
     });
 
+    it("preserves deep-frozen subtrees as-is within unfrozen parent", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      // `frozenChild` is a deep-frozen subtree.
+      const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
+      // `value` is NOT frozen (unfrozen parent), so it must be cloned.
+      const value = { a: frozenChild, b: "mutable" } as StorableValue;
+      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      // The outer object is a new frozen clone.
+      expect(result).not.toBe(value);
+      expect(Object.isFrozen(result)).toBe(true);
+      // The deep-frozen subtree is preserved by identity -- not re-cloned.
+      expect(result.a).toBe(frozenChild);
+      expect(result.b).toBe("mutable");
+    });
+
     // -- Frozen=false (mutable copy) --
 
     it("returns a mutable copy when frozen=false", () => {
