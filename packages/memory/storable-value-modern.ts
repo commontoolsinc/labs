@@ -667,7 +667,7 @@ function deepCloneIfNecessaryInternal(
   // Primitives (null, undefined, boolean, number, string, bigint) and special
   // primitives (EpochNsec, EpochDays, ContentId) are inherently immutable --
   // frozenness is irrelevant, always return as-is.
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (value === null || typeof value !== "object") {
     return value;
   }
   if (value instanceof SpecialPrimitiveValue) {
