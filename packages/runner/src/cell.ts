@@ -91,7 +91,6 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { combineSchema } from "./traverse.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
@@ -1726,17 +1725,7 @@ function subscribeToReferencedDocs<T>(
     const schema = link.schema;
     const needsTraversal = schema === undefined ||
       ContextualFlowControl.isTrueSchema(schema);
-    const resolvedLink = resolveLink(runtime, wrappedTx, link);
-    const reactiveLink = (schema !== undefined)
-      ? {
-        ...resolvedLink,
-        schema: resolvedLink.schema !== undefined
-          ? combineSchema(schema, resolvedLink.schema)
-          : schema,
-      }
-      : resolvedLink;
-
-    const newValue = validateAndTransform(runtime, wrappedTx, reactiveLink);
+    const newValue = validateAndTransform(runtime, wrappedTx, link);
     if (needsTraversal && newValue !== undefined && newValue !== null) {
       deepTraverse(newValue);
     }
