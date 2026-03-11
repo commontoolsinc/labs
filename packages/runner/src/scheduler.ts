@@ -1445,7 +1445,12 @@ export class Scheduler {
     if (typeof populateDependencies === "function") {
       const depTx = this.runtime.edit();
       try {
-        populateDependencies(depTx);
+        logger.timeStart("collectDependencies", "populate");
+        try {
+          populateDependencies(depTx);
+        } finally {
+          logger.timeEnd("collectDependencies", "populate");
+        }
       } catch (error) {
         logger.debug(options.errorLogLabel, () => [
           options.errorMessage(action, error),
