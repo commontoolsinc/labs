@@ -479,7 +479,7 @@ function loadFactsForDoc(
       }
       const factValue: IMemorySpaceValueAttestation = {
         address: { ...fact.address, space, path: ["value"] },
-        value: (fact.value.value as Immutable<JSONObject>),
+        value: fact.value.value as Immutable<JSONObject>,
       };
       const [newDoc, newSelector] = getAtPath(
         tx,

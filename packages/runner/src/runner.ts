@@ -306,7 +306,7 @@ export class Runner {
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: patternId || "unknown",
-      resultRef: (pattern.resultSchema !== undefined
+      resultRef: pattern.resultSchema !== undefined
         ? resultCell.asSchema(pattern.resultSchema).getAsLink({
           base: processCell,
           includeSchema: true,
@@ -315,7 +315,7 @@ export class Runner {
         })
         : resultCell.getAsLink({
           base: processCell,
-        })),
+        }),
       internal,
       ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
     });
