@@ -166,7 +166,7 @@ Always provide fallbacks to base CSS variables for components that may be used w
 .button {
   background-color: var(
     --ct-theme-color-primary,
-    var(--ct-color-primary, #3b82f6)
+    var(--ct-colors-primary-500, #3b82f6)
   );
   font-family: var(--ct-theme-font-family, inherit);
   border-radius: var(
