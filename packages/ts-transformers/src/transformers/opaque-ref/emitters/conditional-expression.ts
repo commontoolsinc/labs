@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
+  classifyReactiveContext,
   detectCallKind,
   normalizeDataFlows,
   registerSyntheticCallType,
@@ -15,12 +16,145 @@ import {
   filterRelevantDataFlows,
 } from "../helpers.ts";
 
-function branchHasPendingRewrite(
+function isTransparentBranchWrapper(node: ts.Expression): boolean {
+  return (
+    ts.isParenthesizedExpression(node) ||
+    ts.isJsxExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isArrayLiteralExpression(node) ||
+    ts.isObjectLiteralExpression(node) ||
+    ts.isJsxElement(node) ||
+    ts.isJsxFragment(node) ||
+    ts.isJsxSelfClosingElement(node)
+  );
+}
+
+function isSupportedBranchBoundary(
+  node: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
+): boolean {
+  if (!ts.isCallExpression(node)) return false;
+
+  const callKind = detectCallKind(node, context.checker);
+  return (
+    callKind?.kind === "array-method" ||
+    callKind?.kind === "derive" ||
+    callKind?.kind === "ifElse" ||
+    callKind?.kind === "when" ||
+    callKind?.kind === "unless" ||
+    callKind?.kind === "builder"
+  );
+}
+
+function getNodeSnippet(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  maxLength = 160,
+): string {
+  try {
+    const text = node.getText(sourceFile).replace(/\s+/g, " ").trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 3)}...`;
+  } catch {
+    return ts.SyntaxKind[node.kind];
+  }
+}
+
+function throwBranchWrapCompilerBug(
+  message: string,
+  culprit: ts.Expression,
+  branch: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
+): never {
+  const culpritContext = classifyReactiveContext(
+    culprit,
+    context.checker,
+    context,
+  );
+  throw new Error(
+    [
+      "Internal Common Tools compiler error: ternary branch wrap decision disagreed with reactive-context classification.",
+      "This is a bug in the compiler, not in your code. Please report it to the maintainers.",
+      message,
+      `Culprit: ${ts.SyntaxKind[culprit.kind]} \`${getNodeSnippet(culprit, context.sourceFile)}\``,
+      `Branch: ${ts.SyntaxKind[branch.kind]} \`${getNodeSnippet(branch, context.sourceFile)}\``,
+      `Reactive context: ${culpritContext.kind} (${culpritContext.owner})`,
+    ].join("\n"),
+  );
+}
+
+function findSupportedBranchBoundaryAncestor(
+  node: ts.Expression,
+  branch: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
+): ts.Expression | undefined {
+  let current: ts.Node | undefined = node.parent;
+
+  while (current && current !== branch) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      return undefined;
+    }
+
+    if (ts.isExpression(current)) {
+      if (isSupportedBranchBoundary(current, context)) {
+        return current;
+      }
+
+      if (!isTransparentBranchWrapper(current)) {
+        return undefined;
+      }
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
+}
+
+function assertValidBranchWrapCandidate(
+  culprit: ts.Expression,
+  branch: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
+): void {
+  const culpritContext = classifyReactiveContext(
+    culprit,
+    context.checker,
+    context,
+  );
+
+  if (culpritContext.kind === "compute") {
+    throwBranchWrapCompilerBug(
+      "The branch emitter tried to add a compute wrapper around a node that the shared context classifier already considers compute.",
+      culprit,
+      branch,
+      context,
+    );
+  }
+
+  const supportedBoundary = findSupportedBranchBoundaryAncestor(
+    culprit,
+    branch,
+    context,
+  );
+  if (supportedBoundary) {
+    throwBranchWrapCompilerBug(
+      `The branch emitter identified a node inside an already-supported pattern boundary: \`${getNodeSnippet(supportedBoundary, context.sourceFile)}\`.`,
+      culprit,
+      branch,
+      context,
+    );
+  }
+}
+
+function findPendingBranchRewrite(
   expr: ts.Expression,
   analyze: Parameters<Emitter>[0]["analyze"],
   context: Parameters<Emitter>[0]["context"],
-): boolean {
-  let pending = false;
+): ts.Expression | undefined {
+  let pending: ts.Expression | undefined;
 
   const visit = (node: ts.Node): void => {
     if (pending) return;
@@ -40,19 +174,7 @@ function branchHasPendingRewrite(
       return;
     }
 
-    if (
-      ts.isParenthesizedExpression(node) ||
-      ts.isJsxExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isTypeAssertionExpression(node) ||
-      ts.isNonNullExpression(node) ||
-      ts.isSatisfiesExpression(node) ||
-      ts.isArrayLiteralExpression(node) ||
-      ts.isObjectLiteralExpression(node) ||
-      ts.isJsxElement(node) ||
-      ts.isJsxFragment(node) ||
-      ts.isJsxSelfClosingElement(node)
-    ) {
+    if (isTransparentBranchWrapper(node)) {
       ts.forEachChild(node, visit);
       return;
     }
@@ -63,21 +185,11 @@ function branchHasPendingRewrite(
       return;
     }
 
-    if (ts.isCallExpression(node)) {
-      const callKind = detectCallKind(node, context.checker);
-      if (
-        callKind?.kind === "array-method" ||
-        callKind?.kind === "derive" ||
-        callKind?.kind === "ifElse" ||
-        callKind?.kind === "when" ||
-        callKind?.kind === "unless" ||
-        callKind?.kind === "builder"
-      ) {
-        return;
-      }
+    if (isSupportedBranchBoundary(node, context)) {
+      return;
     }
 
-    pending = true;
+    pending = node;
   };
 
   visit(expr);
@@ -102,10 +214,13 @@ function processBranch(
     context,
   );
 
-  if (
-    rewrittenDataFlows.length > 0 &&
-    branchHasPendingRewrite(rewritten, analyze, context)
-  ) {
+  const pendingRewrite = rewrittenDataFlows.length > 0
+    ? findPendingBranchRewrite(rewritten, analyze, context)
+    : undefined;
+
+  if (pendingRewrite) {
+    assertValidBranchWrapCandidate(pendingRewrite, rewritten, context);
+
     const plan = createBindingPlan(rewrittenDataFlows);
     const derived = createComputedCallForExpression(rewritten, plan, context);
     if (derived) {
