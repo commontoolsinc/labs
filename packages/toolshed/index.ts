@@ -3,6 +3,11 @@ import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import {
+  CachedCompiler,
+  computeGitFingerprint,
+  FileSystemCompilationCache,
+} from "@commontools/runner/compilation-cache";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server
@@ -10,9 +15,20 @@ let runtime: Runtime;
 
 // Initialize runtime with storage and signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeRuntime = () => {
+const initializeRuntime = async () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
+
+    // Compute compilation cache fingerprint from git state.
+    // Returns undefined when not in a git repo (e.g. Docker), disabling the cache.
+    const fingerprint = await computeGitFingerprint();
+    const cachedCompiler = fingerprint
+      ? new CachedCompiler(
+        new FileSystemCompilationCache("/tmp/ct-compilation-cache"),
+        fingerprint,
+      )
+      : undefined;
+
     runtime = new Runtime({
       apiUrl: new URL(env.MEMORY_URL),
       storageManager: StorageManager.open({
@@ -25,6 +41,7 @@ const initializeRuntime = () => {
         unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
         canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
       },
+      cachedCompiler,
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
@@ -87,9 +104,9 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-function startServer() {
+async function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  initializeRuntime();
+  await initializeRuntime();
 
   const serverOptions = {
     hostname: env.HOST,

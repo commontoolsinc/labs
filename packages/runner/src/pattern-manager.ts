@@ -308,7 +308,7 @@ export class PatternManager {
   }
 
   async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
-    let program: RuntimeProgram | undefined;
+    let program: RuntimeProgram;
     if (typeof input === "string") {
       program = {
         main: "/main.tsx",
@@ -317,6 +317,53 @@ export class PatternManager {
     } else {
       program = input;
     }
+
+    const { cachedCompiler } = this.runtime;
+    if (cachedCompiler) {
+      const programHash = createRef(
+        { src: program },
+        "pattern source",
+      ).toString();
+      const cached = await cachedCompiler.get(programHash);
+      if (cached) {
+        // Cache hit — evaluate the pre-compiled JS
+        const { main, exportMap: _ } = await this.runtime.harness.evaluate(
+          cached.id,
+          cached.jsScript,
+          program.files,
+        );
+        const exportName = program.mainExport ?? "default";
+        if (main && !(exportName in main)) {
+          throw new Error(
+            `No "${exportName}" export found in compiled pattern.`,
+          );
+        }
+        const pattern = main![exportName] as Pattern;
+        pattern.program = program;
+        return pattern;
+      }
+
+      // Cache miss — compile, evaluate, then write to cache
+      const compileResult = await this.runtime.harness.compile(program);
+      const { main, exportMap: _ } = await this.runtime.harness.evaluate(
+        compileResult.id,
+        compileResult.jsScript,
+        program.files,
+      );
+      const exportName = program.mainExport ?? "default";
+      if (main && !(exportName in main)) {
+        throw new Error(
+          `No "${exportName}" export found in compiled pattern.`,
+        );
+      }
+      // Fire-and-forget cache write
+      cachedCompiler.set(programHash, compileResult).catch(() => {});
+      const pattern = main![exportName] as Pattern;
+      pattern.program = program;
+      return pattern;
+    }
+
+    // No persistent cache — use the existing all-in-one path
     const pattern = await this.runtime.harness.run(program);
     pattern.program = program;
     return pattern;
