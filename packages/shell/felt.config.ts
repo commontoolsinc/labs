@@ -10,6 +10,8 @@ const config: Config = {
     { in: "src/index.ts", out: "scripts/index" },
     {
       in: "../runtime-client/backends/web-worker/index.ts",
+      // Changing this path requires a matching update in
+      // packages/shell/src/lib/runtime.ts (fetchBuildHash).
       out: "scripts/worker-runtime",
     },
   ],
