@@ -1,6 +1,6 @@
 # Generating comprehensive test coverage
 
-We're in repo `labs-secondary`.
+We're in repo `labs`.
 
 Goal: implement a random unchecked item from
 `packages/generated-patterns/integration/patterns/test-ideas.md`, create its
@@ -18,11 +18,11 @@ Steps:
      `PatternIntegrationScenario` from `../pattern-harness.ts`, define
      scenarios, export them, and run them in a `describe`/`it` block. See any
      existing `.test.ts` file (e.g. `echo.test.ts`) for the pattern.
-   - Use CTS APIs (`handler`, `pattern`, `lift`, `str`, `cell`, `createCell`) to
-     realize the described structure. You can use `derive` as well, it is just a
-     convenience wrapper around lift: `derive(x, x => x+1)` is the same as
+   - Import from `"commontools"`. Available APIs: `handler`, `pattern`, `lift`,
+     `str`, `cell`, `derive`, `Cell`, `Default`. `derive` is a convenience
+     wrapper around lift: `derive(x, x => x+1)` is the same as
      `lift(x => x+1)(x)`.
-   - Do not use `compute` and `render` as they'll be deprecated.
+   - Do not use `compute` or `render` — they are deprecated.
    - Don't use `.setDefault`, instead use `Default<type, value>` in the type
      declaration.
    - Keep patterns offline-friendly (no network or LLM).
