@@ -358,29 +358,33 @@ describe("CachedCompiler", () => {
     // Create a compiler with cap=2 and evictionInterval=1 so every write checks
     const smallCompiler = new CachedCompiler(storage, "fp", 2, 1);
 
-    // Add 3 entries — the third should trigger eviction of the oldest
-    await smallCompiler.set("hash1", testJsScript);
-    // Ensure distinct cachedAt by using the internal storage directly
-    // to control timestamps
+    // Seed 3 entries with hardcoded timestamps via storage directly
+    await storage.set("hash1", {
+      jsScript: testJsScript,
+      fingerprint: "fp",
+      cachedAt: 1000,
+    });
     await storage.set("hash2", {
       jsScript: testJsScript2,
       fingerprint: "fp",
-      cachedAt: Date.now() + 1000,
+      cachedAt: 3000,
     });
     await storage.set("hash3", {
       jsScript: testJsScript,
       fingerprint: "fp",
-      cachedAt: Date.now() + 2000,
+      cachedAt: 2000,
     });
 
-    // Trigger eviction by setting a 4th entry
+    // Trigger eviction by writing through the compiler (4th entry, over cap of 2)
     await smallCompiler.set("hash4", testJsScript2);
 
     // Eviction is fire-and-forget; yield to let it complete
     await new Promise((r) => setTimeout(r, 0));
 
-    // Should have evicted down to 2
+    // Should have evicted down to 2 — hash1 (oldest) and hash3 removed
     expect(await storage.count()).toBe(2);
+    expect(await storage.get("hash2")).toBeDefined();
+    expect(await storage.get("hash4")).toBeDefined();
 
     const stats = smallCompiler.getStats();
     expect(stats.countEvictions).toBeGreaterThan(0);

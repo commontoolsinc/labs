@@ -6,6 +6,10 @@ import type {
 
 const logger = getLogger("compilation-cache");
 
+function isCacheEntry(dirEntry: Deno.DirEntry): boolean {
+  return dirEntry.isFile && dirEntry.name.endsWith(".json");
+}
+
 /**
  * **Server-only.** Requires Deno filesystem APIs (`Deno.readTextFile`,
  * `Deno.writeTextFile`, `Deno.mkdir`, `Deno.rename`, `Deno.remove`,
@@ -47,7 +51,7 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
     let evicted = 0;
     try {
       for await (const dirEntry of Deno.readDir(this.cacheDir)) {
-        if (!dirEntry.isFile || !dirEntry.name.endsWith(".json")) continue;
+        if (!isCacheEntry(dirEntry)) continue;
         const filePath = `${this.cacheDir}/${dirEntry.name}`;
         try {
           const text = await Deno.readTextFile(filePath);
@@ -76,7 +80,7 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
     const entries: { name: string; cachedAt: number }[] = [];
     try {
       for await (const dirEntry of Deno.readDir(this.cacheDir)) {
-        if (!dirEntry.isFile || !dirEntry.name.endsWith(".json")) continue;
+        if (!isCacheEntry(dirEntry)) continue;
         const filePath = `${this.cacheDir}/${dirEntry.name}`;
         try {
           const text = await Deno.readTextFile(filePath);
@@ -120,7 +124,7 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
     let n = 0;
     try {
       for await (const dirEntry of Deno.readDir(this.cacheDir)) {
-        if (dirEntry.isFile && dirEntry.name.endsWith(".json")) n++;
+        if (isCacheEntry(dirEntry)) n++;
       }
     } catch {
       // Directory doesn't exist
