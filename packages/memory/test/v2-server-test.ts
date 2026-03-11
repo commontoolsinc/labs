@@ -186,6 +186,8 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
   assertEquals(committed.requestId, "tx-1");
   assertEquals((committed.ok as any)?.seq, 1);
 
+  await tick();
+
   const update = assertUpdate(shiftMessage(messages));
   assertEquals(update.subscriptionId, (subscribed.ok as any)?.subscriptionId);
   assertEquals(update.result.entities.map((entity: any) => ({

@@ -340,6 +340,13 @@ export interface Engine {
   database: Database;
 }
 
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
 export interface OpenOptions {
   url: URL;
 }
@@ -677,7 +684,7 @@ const validateConfirmedReads = (
       after_seq: read.seq,
     }) as { seq: number } | undefined;
     if (conflict) {
-      throw new Error(
+      throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflict.seq}`,
       );
     }
@@ -703,7 +710,7 @@ const resolvePendingReads = (
       local_seq: read.localSeq,
     }) as { hash: string; seq: number } | undefined;
     if (!row) {
-      throw new Error(`pending dependency not resolved: ${read.localSeq}`);
+      throw new ConflictError(`pending dependency not resolved: ${read.localSeq}`);
     }
     resolutions.set(read.localSeq, {
       localSeq: read.localSeq,

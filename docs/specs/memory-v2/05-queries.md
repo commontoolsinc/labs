@@ -364,6 +364,12 @@ Given a `SchemaQuery`, the server:
 6. Returns the `FactSet` along with the schema tracker (for subscription
    setup).
 
+The initial execution and every later schema-subscription refresh MUST use the
+same traversal semantics as `packages/runner/src/traverse.ts`. The server MAY
+cache bookkeeping such as reachable-entity sets or dirty roots, but the result
+sent to clients must be equivalent to rerunning `graph.query` with the shared
+traversal code against the current committed state.
+
 ---
 
 ## 5.4 Subscriptions
@@ -448,6 +454,18 @@ subscription updates. Instead of sending one update per commit, the server
 batches changes and sends a single update covering all commits since the last
 sent update. The coalesced update includes the latest `FactEntry` per entity,
 not intermediate states.
+
+The required ordering invariant is:
+
+1. The server first drains the currently pending successful commits for the
+   space/branch.
+2. It then re-runs the affected subscriptions against that latest state.
+3. Only after that refresh does it emit subscription updates.
+
+If a new transaction fails with `ConflictError` while such a refresh is still
+pending, the server MUST run the pending subscription refresh before returning
+the conflict. This guarantees that, after the client receives a local revert,
+its subscribed state is fresh enough for an immediate retry.
 
 ### 5.4.6 Subscription State
 

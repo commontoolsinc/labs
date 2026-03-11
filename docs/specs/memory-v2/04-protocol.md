@@ -442,8 +442,12 @@ interface GraphQuerySuccess {
 
 When `subscribe: true`, the server tracks which entities are reachable from the
 query's schema graph. When any reachable entity changes, the server re-evaluates
-the affected portion of the graph and pushes updates (as `task/effect`). See
-section 5 (Queries) for details on schema traversal.
+the affected query and pushes updates (as `task/effect`). The initial result
+and every later `graph.query` subscription update MUST be computed by the same
+schema traversal implementation shared with the runtime
+(`packages/runner/src/traverse.ts`); the server MUST NOT use a separate ad hoc
+matcher for incremental graph-query subscriptions. See section 5 (Queries) for
+details on schema traversal.
 
 ### 4.3.6 Branch Lifecycle Commands
 
@@ -1129,8 +1133,22 @@ Submit C3 → [authorize C3] → wait for C2 to send → Send C3
 
 The server processes transactions serially within a branch (or with equivalent
 serializable isolation). Responses are sent in the order transactions are
-processed. Subscription updates are sent after the producing transaction's
-response.
+processed.
+
+For subscription delivery, the ordering rule is:
+
+- After successful commits, the server MAY defer subscription refresh briefly in
+  order to coalesce multiple commits, but it MUST first drain the currently
+  pending commits for that space/branch and then run the subscription queries
+  against the resulting latest state.
+- For `graph.query` subscriptions, that refresh is a re-evaluation of the query
+  using the shared traversal code, not a separate incremental algorithm with
+  different semantics.
+- If a transaction fails with `ConflictError` while there are unflushed
+  successful commits for the same space/branch, the server MUST flush the
+  affected subscription queries before returning the conflict response. This
+  ensures that a client receiving a local `"revert"` can retry immediately
+  against fresh enough subscribed state.
 
 ---
 

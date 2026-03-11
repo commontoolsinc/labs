@@ -297,6 +297,24 @@ server confirms C1 and C3 but we haven't heard about C2 yet, do NOT notify about
 C3's confirmation until C2 is resolved. This prevents the scheduler from seeing
 out-of-order state.
 
+### Server Subscription Flush Ordering
+
+The server-side counterpart to the `"revert"` guarantee is:
+
+- Successful commits may be coalesced before subscription delivery, but the
+  server must drain the currently pending successful commits for that
+  space/branch before it re-runs subscription queries.
+- `graph.query` subscription refreshes must reuse the shared traversal code
+  path (`packages/runner/src/traverse.ts`), not a second implementation with
+  slightly different reachability semantics.
+- If a transaction then fails with `ConflictError` while such a refresh is
+  pending, the server must flush that subscription refresh before returning the
+  conflict response.
+
+That last rule is load-bearing. The client retries immediately after a local
+`"revert"`, so by the time the revert promise resolves, the subscribed state
+must already reflect the winning remote commit(s).
+
 ---
 
 ## 6. Pending State and Pipelining
