@@ -1947,67 +1947,92 @@ export class Scheduler {
     action: Action,
     workSet: Set<Action>,
   ): boolean {
-    const log = this.dependencies.get(action);
+    const collectStart = performance.now();
+    let addedToStack = false;
 
-    if (this.collectStack.has(action)) {
-      return this.dirty.has(action) || workSet.has(action);
-    }
+    try {
+      const log = this.dependencies.get(action);
 
-    this.collectStack.add(action);
+      if (this.collectStack.has(action)) {
+        return this.dirty.has(action) || workSet.has(action);
+      }
 
-    let actionNeedsRun = this.dirty.has(action);
+      this.collectStack.add(action);
+      addedToStack = true;
 
-    // Walk explicit reverse dependencies first so we can reach dirty
-    // computations hidden behind currently-clean intermediates.
-    const explicitDependencies = this.reverseDependencies.get(action);
-    if (explicitDependencies) {
-      for (const dependency of explicitDependencies) {
-        if (dependency === action) continue;
+      let actionNeedsRun = this.dirty.has(action);
 
-        const dependencyNeedsRun = this.collectDirtyDependencies(
-          dependency,
-          workSet,
-        );
-        if (dependencyNeedsRun) {
-          actionNeedsRun = true;
-          if (this.computations.has(dependency)) {
-            workSet.add(dependency);
+      // Walk explicit reverse dependencies first so we can reach dirty
+      // computations hidden behind currently-clean intermediates.
+      const explicitDependencies = this.reverseDependencies.get(action);
+      if (explicitDependencies) {
+        for (const dependency of explicitDependencies) {
+          if (dependency === action) continue;
+
+          const dependencyNeedsRun = this.collectDirtyDependencies(
+            dependency,
+            workSet,
+          );
+          if (dependencyNeedsRun) {
+            actionNeedsRun = true;
+            if (this.computations.has(dependency)) {
+              workSet.add(dependency);
+            }
           }
         }
       }
-    }
 
-    if (log) {
-      // Find dirty computations that write to entities this action reads
-      for (const computation of this.dirty) {
-        if (computation === action) continue;
+      if (log) {
+        const dirtyScanStart = performance.now();
+        try {
+          // Find dirty computations that write to entities this action reads
+          for (const computation of this.dirty) {
+            if (computation === action) continue;
 
-        const computationWrites = this.mightWrite.get(computation) ?? [];
-        if (computationWrites.length === 0) continue;
+            const computationWrites = this.mightWrite.get(computation) ?? [];
+            if (computationWrites.length === 0) continue;
 
-        if (
-          this.readsOverlapWrites(
-            log.reads,
-            log.shallowReads,
-            computationWrites,
-          )
-        ) {
-          actionNeedsRun = true;
-          if (this.computations.has(computation)) {
-            workSet.add(computation);
+            if (
+              this.readsOverlapWrites(
+                log.reads,
+                log.shallowReads,
+                computationWrites,
+              )
+            ) {
+              actionNeedsRun = true;
+              if (this.computations.has(computation)) {
+                workSet.add(computation);
+              }
+              this.collectDirtyDependencies(computation, workSet);
+            }
           }
-          this.collectDirtyDependencies(computation, workSet);
+        } finally {
+          logger.time(
+            dirtyScanStart,
+            "scheduler",
+            "execute",
+            "collectDirtyDependencies",
+            "dirtyScan",
+          );
         }
       }
+
+      if (actionNeedsRun && this.computations.has(action)) {
+        workSet.add(action);
+      }
+
+      return actionNeedsRun;
+    } finally {
+      if (addedToStack) {
+        this.collectStack.delete(action);
+      }
+      logger.time(
+        collectStart,
+        "scheduler",
+        "execute",
+        "collectDirtyDependencies",
+      );
     }
-
-    this.collectStack.delete(action);
-
-    if (actionNeedsRun && this.computations.has(action)) {
-      workSet.add(action);
-    }
-
-    return actionNeedsRun;
   }
 
   private collectDirtyDependenciesForLog(
@@ -2085,29 +2110,35 @@ export class Scheduler {
    * Finds and schedules all effects that transitively depend on the given computation.
    */
   private scheduleAffectedEffects(computation: Action): void {
-    const visited = new Set<Action>();
-    const toSchedule: Action[] = [];
+    const start = performance.now();
 
-    const findEffects = (action: Action) => {
-      if (visited.has(action)) return;
-      visited.add(action);
+    try {
+      const visited = new Set<Action>();
+      const toSchedule: Action[] = [];
 
-      if (this.effects.has(action)) {
-        toSchedule.push(action);
-      }
+      const findEffects = (action: Action) => {
+        if (visited.has(action)) return;
+        visited.add(action);
 
-      const deps = this.dependents.get(action);
-      if (deps) {
-        for (const dependent of deps) {
-          findEffects(dependent);
+        if (this.effects.has(action)) {
+          toSchedule.push(action);
         }
+
+        const deps = this.dependents.get(action);
+        if (deps) {
+          for (const dependent of deps) {
+            findEffects(dependent);
+          }
+        }
+      };
+
+      findEffects(computation);
+
+      for (const effect of toSchedule) {
+        this.scheduleWithDebounce(effect);
       }
-    };
-
-    findEffects(computation);
-
-    for (const effect of toSchedule) {
-      this.scheduleWithDebounce(effect);
+    } finally {
+      logger.time(start, "scheduler", "scheduleAffectedEffects");
     }
   }
 
