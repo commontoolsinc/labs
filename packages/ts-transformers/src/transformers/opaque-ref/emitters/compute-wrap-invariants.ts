@@ -94,9 +94,7 @@ function findSupportedPatternBoundaryAncestor(
 
     if (ts.isExpression(current)) {
       if (isSupportedPatternBoundary(current, context)) {
-        return isPatternManagedByBoundary(node, current, context)
-          ? current
-          : undefined;
+        return current;
       }
 
       if (!isTransparentWrapContainer(current)) {
@@ -108,52 +106,6 @@ function findSupportedPatternBoundaryAncestor(
   }
 
   return undefined;
-}
-
-function getBoundaryArgumentIndex(
-  node: ts.Expression,
-  boundary: ts.CallExpression,
-): number | undefined {
-  let current: ts.Node = node;
-
-  while (current.parent && current.parent !== boundary) {
-    current = current.parent;
-  }
-
-  if (current.parent !== boundary) {
-    return undefined;
-  }
-
-  const index = boundary.arguments.findIndex((argument) =>
-    argument === current
-  );
-  return index >= 0 ? index : undefined;
-}
-
-function isPatternManagedByBoundary(
-  node: ts.Expression,
-  boundary: ts.Expression,
-  context: TransformationContext,
-): boolean {
-  if (!ts.isCallExpression(boundary)) {
-    return false;
-  }
-
-  const callKind = detectCallKind(boundary, context.checker);
-  if (!callKind) {
-    return false;
-  }
-
-  if (callKind.kind === "ifElse") {
-    const argumentIndex = getBoundaryArgumentIndex(node, boundary);
-    return argumentIndex === 1 || argumentIndex === 2;
-  }
-
-  if (callKind.kind === "when" || callKind.kind === "unless") {
-    return getBoundaryArgumentIndex(node, boundary) === 1;
-  }
-
-  return true;
 }
 
 export function assertValidComputeWrapCandidate(

@@ -18,7 +18,6 @@ import {
   findPendingComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 
-// Helper to process a conditional branch (whenTrue/whenFalse)
 function processBranch(
   expr: ts.Expression,
   context: Parameters<Emitter>[0]["context"],
@@ -118,8 +117,6 @@ export const emitConditionalExpression: Emitter = ({
     },
   });
 
-  // Register the result type for schema injection
-  // The result type is the union of whenTrue and whenFalse types (from the original ternary)
   if (context.options.typeRegistry) {
     const resultType = context.checker.getTypeAtLocation(expression);
     registerSyntheticCallType(

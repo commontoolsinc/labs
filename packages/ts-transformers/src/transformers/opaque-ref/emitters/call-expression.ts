@@ -1,25 +1,57 @@
 import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
+import { detectCallKind } from "../../../ast/mod.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
-import { selectDataFlowsWithin } from "../../../ast/mod.ts";
+import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
+
+function getConditionalHelperArgLabel(
+  helperName: "ifElse" | "when" | "unless",
+  index: number,
+): string {
+  if (helperName === "ifElse") {
+    if (index === 0) return "ifElse condition";
+    if (index === 1) return "ifElse true branch";
+    return "ifElse false branch";
+  }
+
+  if (helperName === "when") {
+    return index === 0 ? "when condition" : "when value";
+  }
+
+  return index === 0 ? "unless condition" : "unless value";
+}
 
 export const emitCallExpression: Emitter = ({
   expression,
   dataFlows,
   context,
   analysis,
+  analyze,
   rewriteChildren,
   inSafeContext,
+  reactiveContextKind,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
 
   const hint = analysis.rewriteHint;
+  const callKind = detectCallKind(expression, context.checker);
+  // Synthetic when/unless/ifElse calls created by earlier lowering passes
+  // already own their argument rewriting decisions and must not be reprocessed.
+  const isAuthoredCall = expression.pos >= 0;
+  const conditionalHelperName: "ifElse" | "when" | "unless" | undefined =
+    hint?.kind === "call-if-else" ? "ifElse" : (
+        callKind?.kind === "ifElse" ||
+        callKind?.kind === "when" ||
+        callKind?.kind === "unless"
+      )
+      ? callKind.kind
+      : undefined;
 
   if (hint?.kind === "skip-call-rewrite") {
     if (hint.reason === "array-method") {
@@ -47,33 +79,9 @@ export const emitCallExpression: Emitter = ({
     return undefined;
   }
 
-  if (hint?.kind === "call-if-else") {
-    const predicateDataFlows = selectDataFlowsWithin(
-      dataFlows,
-      hint.predicate,
-    );
-    const relevantPredicateDataFlows = filterRelevantDataFlows(
-      predicateDataFlows,
-      analysis,
-      context,
-    );
-
-    let rewrittenPredicate: ts.Expression = hint.predicate;
-    if (relevantPredicateDataFlows.length > 0) {
-      const plan = createBindingPlan(relevantPredicateDataFlows);
-      const derivedPredicate = createComputedCallForExpression(
-        hint.predicate,
-        plan,
-        context,
-      );
-      if (derivedPredicate && derivedPredicate !== hint.predicate) {
-        rewrittenPredicate = derivedPredicate;
-      }
-    } else {
-      const child = rewriteChildren(hint.predicate);
-      if (child !== hint.predicate) {
-        rewrittenPredicate = child;
-      }
+  if (conditionalHelperName) {
+    if (!isAuthoredCall) {
+      return undefined;
     }
 
     const rewrittenCallee = rewriteChildren(expression.expression);
@@ -81,15 +89,20 @@ export const emitCallExpression: Emitter = ({
     let changed = rewrittenCallee !== expression.expression;
 
     expression.arguments.forEach((argument, index) => {
-      let updated: ts.Expression = argument;
-      if (index === 0) {
-        updated = rewrittenPredicate;
-      } else {
-        const child = rewriteChildren(argument);
-        if (child !== argument) {
-          updated = child;
-        }
-      }
+      const updated = !inSafeContext &&
+          reactiveContextKind === "pattern"
+        ? rewriteHelperOwnedExpression({
+          expression: argument,
+          containerLabel: getConditionalHelperArgLabel(
+            conditionalHelperName,
+            index,
+          ),
+          assertContainer: expression,
+          context,
+          analyze,
+          rewriteChildren,
+        })
+        : rewriteChildren(argument) || argument;
       if (updated !== argument) changed = true;
       rewrittenArgs.push(updated);
     });

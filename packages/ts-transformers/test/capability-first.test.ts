@@ -1566,6 +1566,48 @@ export default pattern<{ fields: Field[] }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: authored ifElse rewrites condition and branches uniformly",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, UI } from "commontools";
+
+interface Item {
+  name: string;
+}
+
+export default pattern<{ items: Item[]; limit: number }>(({ items, limit }) => ({
+  [UI]: (
+    <div>
+      {ifElse(
+        limit > 0,
+        items.map((item: Item) => <span>{item.name}</span>),
+        <span>Hidden</span>,
+      )}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "=> limit > 0",
+    );
+    assertStringIncludes(
+      output,
+      "items.mapWithPattern(",
+    );
+    assert(
+      !output.includes("items.map((item: Item) =>"),
+      "expected authored ifElse branch map to stay pattern-lowered",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: derive object-literal input preserves property schemas",
   async () => {
     const source = `/// <cts-enable />
