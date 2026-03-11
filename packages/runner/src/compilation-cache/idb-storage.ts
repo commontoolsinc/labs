@@ -75,8 +75,6 @@ export class IDBCompilationCache implements CompilationCacheStorage {
     const db = await this.getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const index = store.index("by-fingerprint");
-
     // Get all keys, then delete those with non-matching fingerprint.
     // We can't use the index to find "not equal", so we iterate all entries.
     const allKeys = await reqPromise(store.getAllKeys());
@@ -90,9 +88,6 @@ export class IDBCompilationCache implements CompilationCacheStorage {
         evicted++;
       }
     }
-    // Suppress unused variable warning — index is created for potential
-    // future use with cursor-based eviction.
-    void index;
 
     await txPromise(tx);
     return evicted;
