@@ -744,6 +744,45 @@ describe("pull mode with references", () => {
     expect(seen).toEqual([undefined, "Ada"]);
     cancel();
   });
+
+  it("should re-run a schema sink when a followed link target changes", async () => {
+    const source = runtime.getCell(space, "linked-sink-source", undefined, tx);
+    const target = runtime.getCell<{ name: string }>(
+      space,
+      "linked-sink-target",
+      undefined,
+      tx,
+    );
+
+    source.set({
+      profile: target,
+    });
+    target.set({ name: "Ada" });
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    const profileName = source.key("profile").key("name").asSchema({
+      type: "string",
+    } as const satisfies JSONSchema);
+
+    const seen: Array<string | undefined> = [];
+    const cancel = profileName.sink((value) => {
+      seen.push(value);
+    });
+
+    await runtime.idle();
+    expect(seen).toEqual(["Ada"]);
+
+    target.withTx(tx).set({ name: "Grace" });
+
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["Ada", "Grace"]);
+    cancel();
+  });
 });
 
 describe("handler dependency pulling", () => {

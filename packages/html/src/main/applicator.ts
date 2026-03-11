@@ -16,6 +16,22 @@ import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+function hasNodeType(node: unknown, nodeType: number): boolean {
+  return typeof node === "object" && node !== null &&
+    (node as { nodeType?: unknown }).nodeType === nodeType;
+}
+
+function isElementNode(node: unknown): node is HTMLElement {
+  return hasNodeType(node, ELEMENT_NODE);
+}
+
+function isTextNode(node: unknown): node is Node {
+  return hasNodeType(node, TEXT_NODE);
+}
+
 /**
  * Reserved node ID for the container element.
  * Must match the value in worker/reconciler.ts.
@@ -278,14 +294,14 @@ export class DomApplicator {
 
   private updateText(nodeId: number, text: string): void {
     const node = this.nodes.get(nodeId);
-    if (node && node.nodeType === Node.TEXT_NODE) {
+    if (isTextNode(node)) {
       node.textContent = text;
     }
   }
 
   private setProp(nodeId: number, key: string, value: unknown): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
 
     // Use the configured property setter (defaults to setPropDefault)
     this.setPropHandler(node, key, value);
@@ -293,7 +309,7 @@ export class DomApplicator {
 
   private removeProp(nodeId: number, key: string): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
 
     if (key.startsWith("on") && key.length > 2) {
       this.removeEvent(nodeId, key.slice(2).toLowerCase());
@@ -355,7 +371,7 @@ export class DomApplicator {
 
   private setBinding(nodeId: number, propName: string, cellRef: CellRef): void {
     const node = this.nodes.get(nodeId);
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElementNode(node)) return;
 
     // Create a CellHandle from the CellRef
     const cellHandle = new CellHandle(this.runtimeClient, cellRef);

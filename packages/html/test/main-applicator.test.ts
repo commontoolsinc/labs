@@ -1,9 +1,8 @@
 /**
  * Tests for the main-thread DOM applicator.
  *
- * Note: Some tests are skipped because they require a real DOM environment
- * (HTMLElement instanceof checks). These would need to be run in a browser
- * or with a DOM library like jsdom/happy-dom.
+ * Note: Some tests are still omitted because the mock document here only
+ * covers the DOM surface the applicator needs in unit tests.
  */
 
 import { assertEquals, assertExists } from "@std/assert";
@@ -192,6 +191,33 @@ Deno.test("DomApplicator - create elements", async (t) => {
     assertEquals((applicator.getNode(1) as any).tagName, "DIV");
     assertEquals((applicator.getNode(2) as any).tagName, "SPAN");
     assertEquals((applicator.getNode(3) as any).textContent, "Hello");
+  });
+
+  await t.step("updates text nodes without DOM globals", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "span" },
+        { op: "create-text", nodeId: 2, text: "0" },
+        { op: "insert-child", parentId: 1, childId: 2, beforeId: null },
+      ],
+    });
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{ op: "update-text", nodeId: 2, text: "1" }],
+    });
+
+    const textNode = applicator.getNode(2) as any;
+    assertExists(textNode);
+    assertEquals(textNode.textContent, "1");
   });
 });
 
