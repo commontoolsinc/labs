@@ -2679,11 +2679,7 @@ describe("interval #now wish", () => {
       return { nowValue: wish({ query: "#now/5000" }) };
     });
 
-    const resultCell = runtime.getCell<{
-      nowValue?: {
-        result?: { startTime: number; interval: number; lastTriggered: number };
-      };
-    }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "interval now result",
       undefined,
@@ -2695,14 +2691,10 @@ describe("interval #now wish", () => {
 
     await result.pull();
 
-    const nowResult = result.key("nowValue").get()?.result;
-    expect(nowResult).toBeDefined();
-    expect(typeof nowResult!.lastTriggered).toBe("number");
-    expect(nowResult!.interval).toBe(5000);
-    expect(typeof nowResult!.startTime).toBe("number");
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
     // Coarsened to 5s — must be divisible by 5000
-    expect(nowResult!.lastTriggered % 5000).toBe(0);
-    expect(nowResult!.startTime % 5000).toBe(0);
+    expect(nowValue! % 5000).toBe(0);
   });
 
   it("#now/1 is clamped to minimum 1000ms", async () => {
@@ -2710,11 +2702,7 @@ describe("interval #now wish", () => {
       return { nowValue: wish({ query: "#now/1" }) };
     });
 
-    const resultCell = runtime.getCell<{
-      nowValue?: {
-        result?: { startTime: number; interval: number; lastTriggered: number };
-      };
-    }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "clamped now result",
       undefined,
@@ -2726,12 +2714,10 @@ describe("interval #now wish", () => {
 
     await result.pull();
 
-    const nowResult = result.key("nowValue").get()?.result;
-    expect(nowResult).toBeDefined();
-    expect(typeof nowResult!.lastTriggered).toBe("number");
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
     // Clamped to 1000ms — must be divisible by 1000
-    expect(nowResult!.lastTriggered % 1000).toBe(0);
-    expect(nowResult!.interval).toBe(1000);
+    expect(nowValue! % 1000).toBe(0);
   });
 
   it("#now/60000 values are coarsened to 60s boundary", async () => {
@@ -2739,11 +2725,7 @@ describe("interval #now wish", () => {
       return { nowValue: wish({ query: "#now/60000" }) };
     });
 
-    const resultCell = runtime.getCell<{
-      nowValue?: {
-        result?: { startTime: number; interval: number; lastTriggered: number };
-      };
-    }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "60s now result",
       undefined,
@@ -2755,12 +2737,10 @@ describe("interval #now wish", () => {
 
     await result.pull();
 
-    const nowResult = result.key("nowValue").get()?.result;
-    expect(nowResult).toBeDefined();
-    expect(typeof nowResult!.lastTriggered).toBe("number");
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
     // Coarsened to 60s — must be divisible by 60000
-    expect(nowResult!.lastTriggered % 60000).toBe(0);
-    expect(nowResult!.interval).toBe(60000);
+    expect(nowValue! % 60000).toBe(0);
   });
 
   it("#now/abc throws WishError", async () => {
@@ -2816,11 +2796,7 @@ describe("interval #now wish", () => {
       return { nowValue: wish({ query: "#now/1000" }) };
     });
 
-    const resultCell = runtime.getCell<{
-      nowValue?: {
-        result?: { startTime: number; interval: number; lastTriggered: number };
-      };
-    }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "cleanup now result",
       undefined,
@@ -2916,11 +2892,7 @@ describe("interval #now wish", () => {
       return { nowValue: wish({ query: "#now/1000" }) };
     });
 
-    const resultCell = runtime.getCell<{
-      nowValue?: {
-        result?: { startTime: number; interval: number; lastTriggered: number };
-      };
-    }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "ticking now result",
       undefined,
@@ -2932,12 +2904,9 @@ describe("interval #now wish", () => {
 
     await result.pull();
 
-    const initialResult = result.key("nowValue").get()?.result;
-    expect(initialResult).toBeDefined();
-    const initial = initialResult!.lastTriggered;
+    const initial = result.key("nowValue").get()?.result;
     expect(typeof initial).toBe("number");
-    expect(initial % 1000).toBe(0);
-    expect(initialResult!.interval).toBe(1000);
+    expect(initial! % 1000).toBe(0);
 
     // Poll until value changes, with a generous deadline for CI
     const deadline = Date.now() + 5000;
@@ -2945,10 +2914,10 @@ describe("interval #now wish", () => {
     while (updated === initial && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
       await result.pull();
-      updated = result.key("nowValue").get()?.result?.lastTriggered ?? initial;
+      updated = result.key("nowValue").get()?.result;
     }
-    expect(updated).toBeGreaterThan(initial);
-    expect(updated % 1000).toBe(0);
+    expect(updated).toBeGreaterThan(initial!);
+    expect(updated! % 1000).toBe(0);
 
     // Clean up timer
     runtime.runner.stop(resultCell);
