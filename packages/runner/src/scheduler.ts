@@ -662,6 +662,25 @@ export class Scheduler {
     // Store the populateDependencies callback for use in execute()
     this.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
 
+    // In pull mode, newly subscribed computations can be the replacement for an
+    // already-running child graph (for example after a $TYPE change). Seed any
+    // statically declared writes immediately so existing effects can discover
+    // the new writer before the first execute() cycle.
+    if (
+      this.pullMode &&
+      !actionIsEffect &&
+      !immediateLog
+    ) {
+      const declaredWrites = (action as Partial<TelemetryAnnotations>).writes;
+      if (declaredWrites && declaredWrites.length > 0) {
+        this.setDependencies(action, {
+          reads: [],
+          shallowReads: [],
+          writes: declaredWrites,
+        });
+      }
+    }
+
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
     if (immediateLog) {
@@ -688,6 +707,14 @@ export class Scheduler {
     this.dirty.add(action);
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
+
+    if (
+      this.pullMode &&
+      !actionIsEffect &&
+      this.mightWrite.get(action)?.length
+    ) {
+      this.scheduleAffectedEffects(action);
+    }
 
     // Emit telemetry for new subscription
     const actionId = this.getActionId(action);
@@ -1504,6 +1531,8 @@ export class Scheduler {
 
       for (const otherAction of writers) {
         if (otherAction === action) continue;
+        if (this.actionParent.get(action) === otherAction) continue;
+        if (this.actionParent.get(otherAction) === action) continue;
         // Skip if we already found this dependency
         if (newDependencies.has(otherAction)) continue;
 
@@ -1571,6 +1600,8 @@ export class Scheduler {
 
     const scanAction = (action: Action) => {
       if (action === writer) return;
+      if (this.actionParent.get(action) === writer) return;
+      if (this.actionParent.get(writer) === action) return;
       const log = this.dependencies.get(action);
       if (!log?.reads?.length && !log?.shallowReads.length) return;
       if (
@@ -1935,28 +1966,44 @@ export class Scheduler {
       const computationWrites = this.mightWrite.get(computation) ?? [];
       if (computationWrites.length === 0) continue;
 
-      // Check if computation writes to something action reads (with path overlap)
-      let found = false;
-      for (const write of computationWrites) {
-        for (const read of log.reads) {
-          if (
-            write.space === read.space &&
-            write.id === read.id &&
-            arraysOverlap(write.path, read.path)
-          ) {
-            workSet.add(computation);
-            // Recursively collect deps of this computation
-            this.collectDirtyDependencies(computation, workSet);
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
+      if (
+        this.readsOverlapWrites(
+          log.reads,
+          log.shallowReads,
+          computationWrites,
+        )
+      ) {
+        workSet.add(computation);
+        // Recursively collect deps of this computation
+        this.collectDirtyDependencies(computation, workSet);
       }
     }
 
     // Remove from collection stack after processing
     this.collectStack.delete(action);
+  }
+
+  /**
+   * In pull mode, pending/dirty effects are always runnable seeds.
+   * When inline idempotency mode is enabled, include computations too so
+   * diagnostics still execute even without an external effect.
+   */
+  private collectPullIterationSeeds(workSet: Set<Action>): void {
+    for (const action of this.pending) {
+      if (this.effects.has(action)) {
+        workSet.add(action);
+      } else if (this.idempotencyCheckMode && this.computations.has(action)) {
+        workSet.add(action);
+      }
+    }
+
+    for (const action of this.dirty) {
+      if (this.effects.has(action)) {
+        workSet.add(action);
+      } else if (this.idempotencyCheckMode && this.computations.has(action)) {
+        workSet.add(action);
+      }
+    }
   }
 
   /**
@@ -2925,28 +2972,35 @@ export class Scheduler {
 
       if (this.pullMode) {
         workSet = new Set<Action>();
+        const iterationSeeds = new Set<Action>();
 
-        // On first iteration, add initial seeds and collect their dirty deps
+        // Every iteration needs to consider newly created pending effects.
+        // Without this, nested/recursive patterns can stall after creating
+        // new `readResult`/`$TYPE` effects in an earlier iteration.
+        this.collectPullIterationSeeds(iterationSeeds);
+
+        // On first iteration, add special-case seeds discovered before settle
         if (settleIter === 0) {
           for (const seed of initialSeeds) {
-            workSet.add(seed);
+            iterationSeeds.add(seed);
           }
-          // Collect dirty dependencies from initial seeds
-          for (const seed of initialSeeds) {
-            this.collectDirtyDependencies(seed, workSet);
-          }
+        }
+
+        for (const seed of iterationSeeds) {
+          workSet.add(seed);
+        }
+
+        // Pull in dirty computations that feed the currently runnable seeds.
+        for (const seed of iterationSeeds) {
+          this.collectDirtyDependencies(seed, workSet);
+        }
+
+        if (settleIter === 0) {
           logger.debug("schedule-execute-pull", () => [
-            `Pull mode: Effects: ${initialSeeds.size}, Dirty deps added: ${
-              workSet.size - initialSeeds.size
+            `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${
+              workSet.size - iterationSeeds.size
             }`,
           ]);
-        } else {
-          // On subsequent iterations, re-collect from all effects
-          for (const effect of this.effects) {
-            if (this.dependencies.has(effect)) {
-              this.collectDirtyDependencies(effect, workSet);
-            }
-          }
         }
       } else {
         // Push mode: work set is just the pending actions
@@ -3311,12 +3365,18 @@ function topologicalSort(
         if (actionA !== actionB && !graphA.has(actionB)) {
           const logB = dependencies.get(actionB);
           if (!logB) continue;
-          const { reads } = logB;
           if (
-            reads.some(
+            logB.reads.some(
               (addr) =>
                 addr.space === write.space &&
                 addr.id === write.id &&
+                arraysOverlap(write.path, addr.path),
+            ) ||
+            logB.shallowReads.some(
+              (addr) =>
+                addr.space === write.space &&
+                addr.id === write.id &&
+                write.path.length <= addr.path.length + 1 &&
                 arraysOverlap(write.path, addr.path),
             )
           ) {
