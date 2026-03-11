@@ -641,13 +641,8 @@ Deno.test("memory websocket round-trips alias schema metadata through synced v2 
     await aliasCell2.sync();
     await runtime2.storageManager.synced();
     assertEquals(aliasCell2.schema, schema);
-    const syncedAlias = aliasCell2.asSchemaFromLinks<{ count: number; label: string }>();
-    await syncedAlias.sync();
-    await runtime2.storageManager.synced();
-
-    assertEquals(syncedAlias.schema, schema);
-    assertEquals(syncedAlias.key("count").schema, { type: "number" });
-    assertEquals(syncedAlias.get(), { count: 42, label: "test" });
+    assertEquals(aliasCell2.key("count").schema, { type: "number" });
+    assertEquals(aliasCell2.get(), { count: 42, label: "test" });
 
     await runtime2.dispose();
   } finally {
@@ -693,14 +688,10 @@ Deno.test("memory websocket preserves alias-derived schemas after v2 reconnect",
     await aliasCell2.sync();
     await subscriberRuntime.storageManager.synced();
     assertEquals(aliasCell2.schema, schema);
-    const syncedAlias = aliasCell2.asSchemaFromLinks<{ count: number; label: string }>();
-    await syncedAlias.sync();
-    await subscriberRuntime.storageManager.synced();
-    assertEquals(syncedAlias.schema, schema);
-    assertEquals(syncedAlias.get(), { count: 1, label: "start" });
+    assertEquals(aliasCell2.get(), { count: 1, label: "start" });
 
     let sawUpdate = false;
-    syncedAlias.sink((value) => {
+    aliasCell2.sink((value) => {
       if (value?.count === 2 && value?.label === "after-restart") {
         sawUpdate = true;
       }
@@ -719,9 +710,9 @@ Deno.test("memory websocket preserves alias-derived schemas after v2 reconnect",
     await runtime2.storageManager.synced();
 
     await waitFor(() => sawUpdate);
-    assertEquals(syncedAlias.schema, schema);
-    assertEquals(syncedAlias.key("count").schema, { type: "number" });
-    assertEquals(syncedAlias.get(), { count: 2, label: "after-restart" });
+    assertEquals(aliasCell2.schema, schema);
+    assertEquals(aliasCell2.key("count").schema, { type: "number" });
+    assertEquals(aliasCell2.get(), { count: 2, label: "after-restart" });
 
     await runtime2.dispose();
     await subscriberRuntime.dispose();
