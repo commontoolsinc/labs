@@ -1,6 +1,7 @@
 import { Database } from "@db/sqlite";
 import { refer } from "../reference.ts";
 import type { JSONValue } from "../interface.ts";
+import { applyPatch } from "./patch.ts";
 import {
   DEFAULT_BRANCH,
   EMPTY_VALUE_REF,
@@ -9,6 +10,7 @@ import {
   type EntityDocument,
   type EntityId,
   type Operation,
+  type PatchOp,
   type Reference,
   type SessionId,
 } from "../v2.ts";
@@ -246,6 +248,30 @@ ORDER BY f.seq DESC
 LIMIT 1
 `;
 
+const SELECT_LATEST_BASE = `
+SELECT f.fact_type, f.seq, v.data
+FROM fact f
+JOIN value v ON v.hash = f.value_ref
+WHERE f.branch = :branch
+  AND f.id = :id
+  AND f.fact_type IN ('set', 'delete')
+  AND f.seq <= :seq
+ORDER BY f.seq DESC
+LIMIT 1
+`;
+
+const SELECT_PATCHES = `
+SELECT v.data AS patch_ops, f.seq
+FROM fact f
+JOIN value v ON v.hash = f.value_ref
+WHERE f.branch = :branch
+  AND f.id = :id
+  AND f.fact_type = 'patch'
+  AND f.seq > :base_seq
+  AND f.seq <= :seq
+ORDER BY f.seq ASC
+`;
+
 const SELECT_NEXT_SEQ = `
 SELECT COALESCE(MAX(seq), 0) + 1 AS seq
 FROM "commit"
@@ -351,6 +377,11 @@ type ReadRow = {
   data: string | null;
 };
 
+type PatchRow = {
+  patch_ops: string;
+  seq: number;
+};
+
 export const open = async ({ url }: OpenOptions): Promise<Engine> => {
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
@@ -380,11 +411,15 @@ export const read = (
 
   switch (row.fact_type) {
     case "set":
-      return JSON.parse(row.data ?? "null") as EntityDocument;
+      return normalizeEntityDocument(JSON.parse(row.data ?? "null") as JSONValue);
     case "delete":
       return null;
     case "patch":
-      throw new Error("patch replay is not implemented yet");
+      return reconstructPatchedDocument(engine, {
+        id,
+        branch,
+        seq: row.seq,
+      });
   }
 };
 
@@ -552,16 +587,17 @@ const writeOperation = (
 
   switch (operation.op) {
     case "set": {
-      const valueRef = toReference(operation.value);
+      const value = normalizeEntityDocument(operation.value);
+      const valueRef = toReference(value);
       engine.database.prepare(INSERT_VALUE).run({
         hash: valueRef,
-        data: JSON.stringify(operation.value),
+        data: JSON.stringify(value),
       });
 
       const hash = toReference({
         type: "set",
         id: operation.id,
-        value: operation.value,
+        value,
         parent: parentRef,
       });
 
@@ -582,6 +618,37 @@ const writeOperation = (
         seq,
       });
       return { hash, parent: parent ?? null, valueRef, factType: "set" };
+    }
+    case "patch": {
+      const valueRef = toReference(operation.patches);
+      engine.database.prepare(INSERT_VALUE).run({
+        hash: valueRef,
+        data: JSON.stringify(operation.patches),
+      });
+
+      const hash = toReference({
+        type: "patch",
+        id: operation.id,
+        ops: operation.patches,
+        parent: parentRef,
+      });
+      engine.database.prepare(INSERT_FACT).run({
+        hash,
+        id: operation.id,
+        value_ref: valueRef,
+        parent: parent ?? null,
+        branch,
+        seq,
+        commit_seq: seq,
+        fact_type: "patch",
+      });
+      engine.database.prepare(UPSERT_HEAD).run({
+        branch,
+        id: operation.id,
+        fact_hash: hash,
+        seq,
+      });
+      return { hash, parent: parent ?? null, valueRef, factType: "patch" };
     }
     case "delete": {
       const hash = toReference({
@@ -612,9 +679,77 @@ const writeOperation = (
         factType: "delete",
       };
     }
-    case "patch":
-      throw new Error("patch commits are not implemented yet");
   }
+};
+
+const reconstructPatchedDocument = (
+  engine: Engine,
+  options: {
+    id: EntityId;
+    branch: BranchName;
+    seq: number;
+  },
+): EntityDocument => {
+  const { id, branch, seq } = options;
+  const baseRow = engine.database.prepare(SELECT_LATEST_BASE).get({
+    branch,
+    id,
+    seq,
+  }) as ReadRow | undefined;
+
+  let baseSeq = 0;
+  let document = emptyEntityDocument();
+  if (baseRow) {
+    baseSeq = baseRow.seq;
+    if (baseRow.fact_type === "set") {
+      document = normalizeEntityDocument(
+        JSON.parse(baseRow.data ?? "null") as JSONValue,
+      );
+    }
+  }
+
+  const patches = engine.database.prepare(SELECT_PATCHES).all({
+    branch,
+    id,
+    base_seq: baseSeq,
+    seq,
+  }) as PatchRow[];
+
+  for (const patch of patches) {
+    document = applyPatchDocument(
+      document,
+      JSON.parse(patch.patch_ops) as PatchOp[],
+    );
+  }
+
+  return document;
+};
+
+const applyPatchDocument = (
+  document: EntityDocument,
+  patches: PatchOp[],
+): EntityDocument => {
+  return {
+    ...document,
+    value: applyPatch(document.value, patches),
+  };
+};
+
+const normalizeEntityDocument = (
+  value: JSONValue | EntityDocument,
+): EntityDocument => {
+  return isEntityDocument(value) ? value : { value };
+};
+
+const emptyEntityDocument = (): EntityDocument => ({ value: {} });
+
+const isEntityDocument = (
+  value: JSONValue | EntityDocument,
+): value is EntityDocument => {
+  return value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, "value");
 };
 
 const emptyReferenceFor = (id: EntityId): Reference => {
