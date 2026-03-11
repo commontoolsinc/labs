@@ -230,6 +230,28 @@ entity), it:
 
 This mirrors the `followPointer` function from `traverse.ts`.
 
+#### Source / Provenance Resolution
+
+In addition to schema-directed references, traversal MUST load provenance
+documents via the `source` sibling on an entity document.
+
+When the server loads any document during query evaluation, it MUST inspect the
+top-level document object for:
+
+```json
+{ "source": { "/": "<short-id>" } }
+```
+
+If present, the server resolves that short link to `of:<short-id>` in the same
+space, loads that document, adds it to the query result and subscription
+tracker, and then repeats the same `source` check on the loaded document. This
+continues until a document without `source` is reached or a cycle is detected.
+
+This behavior is not optional provenance decoration. It is part of the query
+result shape, mirroring `loadSource()` in `traverse.ts`, and is required for
+piece/process/source-cell flows to reconstruct the full lineage of a result
+document.
+
 ### 5.3.3 Cycle Detection
 
 Graph traversal must handle cycles. Two cycle detection mechanisms are used,
@@ -357,7 +379,9 @@ Given a `SchemaQuery`, the server:
    a. Loads the entity's current value.
    b. Runs the schema traversal algorithm (5.3.2), which recursively loads and
       filters linked entities.
-   c. Records all visited entities in the schema tracker.
+   c. For every loaded document, recursively loads any `source` lineage
+      documents (5.3.2 Source / Provenance Resolution).
+   d. Records all visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
 5. If `since` is provided, filters the result to only include entities whose
    seq exceeds `since`.
@@ -714,8 +738,9 @@ Given a sigil link, the traverser:
    context (see 5.3.4 Schema Narrowing).
 
 Given a source short-link, traversal resolves `{"/":"<short-id>"}` to
-`of:<short-id>` in the current space and recursively includes provenance
-entities.
+`of:<short-id>` in the current space, includes that document in the result, and
+then continues following `source` on the loaded document until the chain ends or
+a cycle is detected.
 
 ### 5.10.3 Entity ID References
 

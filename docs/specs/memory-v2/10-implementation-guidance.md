@@ -502,9 +502,17 @@ import { SchemaObjectTraverser } from "@commontools/runner/traverse";
 - Query results are identical on client and server
 - Schema-driven graph traversal follows the same link resolution rules
 - Cell links, write redirects, and cycle detection work the same everywhere
+- Result documents bring along their recursive `source` lineage the same way
+  `loadSource()` does on the client/query side
 
 `syncCell()` depends on the schema-query path to load cells and follow
 schema-defined references. Every integration test exercises that path.
+
+That last point matters for piece and process flows: if a queried document has a
+top-level `source` sibling, the server must load `of:<short-id>` in the same
+space, include it in the result/tracker, and continue following `source` on the
+loaded document until the chain ends or a cycle is detected. Do not treat this
+as a best-effort extra fetch; it is part of the required traversal semantics.
 
 At the same time, the protocol should still support:
 
