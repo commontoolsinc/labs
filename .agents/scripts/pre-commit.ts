@@ -127,13 +127,17 @@ if (safeToRestage.length > 0) {
   }).output();
 }
 
+// Schema-generator fixture inputs use bare Cell/Stream/Writable types that are
+// injected at runtime by a custom TypeScript compiler host (see
+// schema-generator/test/utils.ts CELL_BRAND_PRELUDE). They can't pass deno check.
+function isSchemaFixtureInput(path: string): boolean {
+  return path.includes("schema-generator/test/fixtures/") &&
+    path.endsWith(".input.ts");
+}
+
 // 2. Lint and type-check can run in parallel (both read-only)
-// Exclude schema-generator test fixture inputs from type checking — they use
-// bare Cell/Stream/Writable types that are injected at runtime by a custom
-// TypeScript compiler host (see schema-generator/test/utils.ts CELL_BRAND_PRELUDE).
 const tsFiles = files.filter((f) =>
-  /\.(ts|tsx)$/.test(f) &&
-  !(f.includes("schema-generator/test/fixtures/") && f.endsWith(".input.ts"))
+  /\.(ts|tsx)$/.test(f) && !isSchemaFixtureInput(f)
 );
 
 const errors = [
