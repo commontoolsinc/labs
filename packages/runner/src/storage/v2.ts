@@ -104,6 +104,7 @@ export interface SessionFactory {
 
 class WebSocketTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
 
@@ -111,6 +112,10 @@ class WebSocketTransport implements MemoryV2Client.Transport {
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
   }
 
   async send(payload: string): Promise<void> {
@@ -155,10 +160,16 @@ class WebSocketTransport implements MemoryV2Client.Transport {
       socket.addEventListener("close", () => {
         this.#socket = null;
         this.#opening = null;
+        this.#closeReceiver();
       });
       socket.addEventListener("error", (event) => {
         this.#socket = null;
         this.#opening = null;
+        this.#closeReceiver(
+          event instanceof ErrorEvent && event.error instanceof Error
+            ? event.error
+            : new Error("memory/v2 websocket transport error"),
+        );
         reject(event);
       }, { once: true });
     });
