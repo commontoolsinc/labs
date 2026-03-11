@@ -653,22 +653,6 @@ export interface ITransactionWriter extends ITransactionReader {
 }
 
 /**
- * This is transaction representation from the storage perpective. It will not
- * be exposed outside of the storage provider intenals and is designed to allow
- * storage provider to maintain consistency guarantees.
- */
-export interface IStorageTransactionConsistencyMaintenance {
-  /**
-   * This is an internal method called by a storage provider that lets
-   * transaction know about potential invariant changes. Transaction can track
-   * of all the changes internally and if any of the changes affect any of it's
-   * invariants it can transition transaction state from `Open` to failed with
-   * `IStorageConsistencyError`.
-   */
-  merge(changes: Iterable<State>): void;
-}
-
-/**
  * Error that is produced when transaction is being updated after it was already
  * aborted.
  */
