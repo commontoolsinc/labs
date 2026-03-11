@@ -1448,6 +1448,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
+  memoryVersion?: MemoryVersion;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -1865,6 +1866,7 @@ export class Provider implements IStorageProvider {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
+  readonly memoryVersion: MemoryVersion;
 
   subscribers: Map<
     string,
@@ -1891,6 +1893,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
     spaceIdentity,
+    memoryVersion = "v1",
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
@@ -1898,6 +1901,7 @@ export class Provider implements IStorageProvider {
     this.spaces = new Map();
     this.subscription = subscription;
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
     this.workspace = this.mount(space);
   }
 
@@ -1966,7 +1970,71 @@ export class Provider implements IStorageProvider {
       Promise.all(this.workspace.commitPromises),
     ]);
   }
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptStorageValue<T> {
+    const entity = this.workspace.get({ id: uri, type: this.the });
 
+    return entity?.is as OptStorageValue<T>;
+  }
+
+  // This is mostly just used by tests and tools, since the transactions will
+  // directly commit their results.
+  async send<T extends StorableValue = StorableValue>(
+    batch: { uri: URI; value: StorageValue<T> }[],
+  ): Promise<
+    Result<Unit, PushError>
+  > {
+    const { the, workspace } = this;
+    const LABEL_TYPE = "application/label+json" as const;
+
+    // Collect facts so that we can derive desired state and a corresponding
+    // transaction
+    const facts: Fact[] = [];
+    for (const { uri, value } of batch) {
+      const newValue = value.value !== undefined
+        ? toDeepStorableValue({ value: value.value, source: value.source })
+        : undefined;
+
+      const current = workspace.get({ id: uri, type: this.the });
+      if (!deepEqual(current?.is, newValue)) {
+        if (newValue !== undefined) {
+          facts.push(assert({
+            the,
+            of: uri,
+            is: newValue as StorableDatum,
+            // If fact has no `cause` it is unclaimed fact.
+            cause: current?.cause ? current : null,
+          }));
+        } else {
+          facts.push(retract(current as Consumer.Assertion));
+        }
+      }
+      if (this.memoryVersion === "v1" && value.labels !== undefined) {
+        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          if (value.labels !== undefined) {
+            facts.push(assert({
+              the: LABEL_TYPE,
+              of: uri,
+              is: value.labels as StorableDatum,
+              // If fact has no `cause` it is unclaimed fact.
+              cause: currentLabel?.cause ? currentLabel : null,
+            }));
+          } else {
+            facts.push(retract(currentLabel as Consumer.Assertion));
+          }
+        }
+      }
+    }
+    // If we don't have any writes, don't bother sending it.
+    if (facts.length > 0) {
+      const result = await this.workspace.commit({ facts, claims: [] });
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
+  }
   /**
    * Polls all spaces for changes.
    */
