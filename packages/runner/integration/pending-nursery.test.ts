@@ -19,17 +19,26 @@ console.log("\n=== TEST: Simple object persistence ===");
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
 
+const createV1Runtime = (identity: Identity) => {
+  const storageManager = StorageManager.open({
+    as: identity,
+    address: new URL("/api/storage/memory", API_URL),
+    memoryVersion: "v1",
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(API_URL),
+    storageManager,
+    memoryVersion: "v1",
+  });
+  return { runtime, storageManager };
+};
+
 async function test() {
   // First runtime - save data
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1, storageManager: storageManager1 } =
+    createV1Runtime(identity);
   const provider1: Provider =
-    (runtime1.storageManager.open(identity.did()) as any).provider;
+    storageManager1.openConnection(identity.did()).provider;
 
   const schema = {
     type: "object",
@@ -61,16 +70,11 @@ async function test() {
   );
 
   // Second runtime - fetch data
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2, storageManager: storageManager2 } =
+    createV1Runtime(identity);
 
   const provider2: Provider =
-    (runtime2.storageManager.open(identity.did()) as any).provider;
+    storageManager2.openConnection(identity.did()).provider;
   let s2Count = 0;
   provider2.replica.heap.subscribe(
     { id: uri, type: "application/json" },

@@ -1473,7 +1473,7 @@ export interface ProviderConnectionOptions extends ConnectionOptions {
   provider: Provider;
 }
 
-class ProviderConnection implements IStorageProvider {
+export class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
   connectionCount = 0;
@@ -2131,6 +2131,14 @@ export interface Options {
   memoryVersion?: MemoryVersion;
 }
 
+export type V1StorageManagerOptions = Options & {
+  memoryVersion?: "v1";
+};
+
+export type V2StorageManagerOptions = Options & {
+  memoryVersion: "v2";
+};
+
 export class StorageManager implements IStorageManager {
   address: URL;
   as: Signer;
@@ -2142,7 +2150,9 @@ export class StorageManager implements IStorageManager {
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
 
-  static open(options: Options) {
+  static open(options: V1StorageManagerOptions): StorageManager;
+  static open(options: V2StorageManagerOptions): V2Storage.StorageManager;
+  static open(options: Options): StorageManager | V2Storage.StorageManager {
     if (options.memoryVersion === "v2") {
       return V2Storage.StorageManager.open(options);
     }
@@ -2178,7 +2188,7 @@ export class StorageManager implements IStorageManager {
    * creates a new web socket connection to `${this.address}?space=${space}`
    * in order to cluster connections for the space in the same group.
    */
-  open(space: MemorySpace) {
+  open(space: MemorySpace): IStorageProviderWithReplica {
     const provider = this.#providers.get(space);
     if (!provider) {
       const provider = this.connect(space);
@@ -2186,6 +2196,10 @@ export class StorageManager implements IStorageManager {
       return provider;
     }
     return provider;
+  }
+
+  openConnection(space: MemorySpace): ProviderConnection {
+    return this.open(space) as ProviderConnection;
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {

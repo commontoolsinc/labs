@@ -5,6 +5,8 @@ import {
   type Options,
   Provider,
   StorageManager as BaseStorageManager,
+  type V1StorageManagerOptions,
+  type V2StorageManagerOptions,
 } from "./cache.ts";
 import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
@@ -40,6 +42,10 @@ export class StorageManagerEmulator extends BaseStorageManager {
     });
   }
 
+  override open(space: MemorySpace): Provider {
+    return super.open(space) as Provider;
+  }
+
   mount(space: MemorySpace) {
     return this.session().mount(space);
   }
@@ -65,7 +71,20 @@ export class StorageManagerEmulator extends BaseStorageManager {
 }
 
 export class StorageManager extends BaseStorageManager {
-  static override open(options: Options) {
+  static override open(
+    options: V1StorageManagerOptions,
+  ): StorageManager | StorageManagerEmulator;
+  static override open(
+    options: V2StorageManagerOptions,
+  ): V2Storage.StorageManager | V2Storage.EmulatedStorageManager;
+  static override open(
+    options: Options,
+  ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
+    V2Storage.EmulatedStorageManager;
+  static override open(
+    options: Options,
+  ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
+    V2Storage.EmulatedStorageManager {
     if (options.memoryVersion === "v2") {
       if (options.address.protocol === "memory:") {
         return this.emulate(options);
@@ -79,8 +98,17 @@ export class StorageManager extends BaseStorageManager {
     }
   }
   static emulate(
+    options: Omit<V1StorageManagerOptions, "address">,
+  ): StorageManagerEmulator;
+  static emulate(
+    options: Omit<V2StorageManagerOptions, "address">,
+  ): V2Storage.EmulatedStorageManager;
+  static emulate(
     options: Omit<Options, "address">,
-  ) {
+  ): StorageManagerEmulator | V2Storage.EmulatedStorageManager;
+  static emulate(
+    options: Omit<Options, "address">,
+  ): StorageManagerEmulator | V2Storage.EmulatedStorageManager {
     if (options.memoryVersion === "v2") {
       return V2Storage.EmulatedStorageManager.emulate(options);
     }
