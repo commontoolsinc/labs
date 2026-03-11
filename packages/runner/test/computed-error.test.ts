@@ -68,13 +68,10 @@ Deno.test("computed throws error", async () => {
   argumentCell.withTx(tx2).set({ input: 2 });
   await tx2.commit();
 
-  await runtime.scheduler.idle();
+  const afterError = (await resultCell.pull()) as any;
 
-  // What is the value of poisoned now?
-  const proxy: any = resultCell.getAsQueryResult();
-
-  assertEquals(proxy.poisoned, undefined);
-  assertEquals(proxy.healthy, undefined);
+  assertEquals(afterError.poisoned, undefined);
+  assertEquals(afterError.healthy, undefined);
 
   assertEquals(errorCaught, true);
 
