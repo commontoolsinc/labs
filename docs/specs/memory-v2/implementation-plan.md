@@ -7,6 +7,14 @@
 - [x] Keep v1 and v2 running in parallel during migration, but keep storage physically separate: v2 must not read or write v1 SQLite files. Use a dedicated v2 DB layout such as `<MEMORY_DIR>/v2/<space>.sqlite` and a separate emulation backend.
 - [x] Add v2 code inside the existing packages rather than creating a new workspace package: shared/server code under [packages/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/memory), client wiring under [packages/runner/src/storage](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/storage), and route/transport dispatch under [packages/toolshed/routes/storage/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory).
 
+## Reprioritized For V1 Parity
+- [x] Treat the cutover target as non-branching v1 parity first: current runtime usage is centered on `syncCell()`, schema traversal, subscriptions, reconnect, optimistic pending writes, and scheduler notification ordering.
+- [x] Treat branch lifecycle, branch-scoped reads, merges, and branch-aware subscriptions as explicitly post-cutover work. There is no current v1 branch product surface to preserve.
+- [x] Treat immutable blob payload storage as lower priority than provider/query parity. The v1 cutover path does not currently depend on dedicated blob upload/download routes, but the v2 engine now has the foundational `blob_store` support.
+- [ ] Finish the real v2 provider/replica path so the runtime stops relying on the high-level compatibility layer and starts exercising the spec-native engine for the features v1 already uses.
+- [ ] Finish the v2 query/subscription path that current runtime flows rely on: `graph.query`, shared `traverse.ts` behavior, `source` link traversal, schema-driven sync, reconnect replay, and scheduler-visible integration ordering.
+- [ ] Keep path-level overlap analysis, snapshots, blob transport endpoints, GC, and other optimizations behind the v1-parity cutover unless an existing v1 behavior proves they are required sooner.
+
 ## Public Interfaces and Cutover Boundary
 - [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts), default it to `"v1"`, and thread the resolved value into storage-manager construction and emulation.
 - [x] Keep `IStorageManager`, `IStorageProvider`, `IExtendedStorageTransaction`, `StorageValue`, `syncCell()`, and `subscribe()` stable at the runtime boundary for phase 1.
@@ -16,7 +24,7 @@
 
 ## Phase 1: Core v2 Stack Required Before Cutover
 - [x] Define v2 shared types and codecs around `EntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`; keep entity storage untyped and re-root selector paths to `["value", ...path]`.
-- [ ] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, plus the required pragmas, prepared statements, and default-branch bootstrap.
+- [x] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, plus the required pragmas, prepared statements, and default-branch bootstrap.
 - [ ] Implement the v2 read engine: head lookup, point-in-time reconstruction by `seq`, patch replay, snapshot creation/lookup, `source` link traversal, and schema-driven graph queries using the shared `traverse.ts` code path.
 - [ ] Implement the v2 commit engine: server-side parent resolution, global `seq` assignment, overlapping-path validation from confirmed reads, pending-read resolution from `(sessionId, localSeq)`, and atomic fact/head/commit writes with separate persistence of the UCAN invocation and authorization records.
 - [x] Implement the phase-1 logical session model: the first WebSocket message negotiates `memory/v2`, `session.open` returns or resumes `sessionId`, the server keeps only lightweight session state, and the client owns replay of outstanding commits and subscriptions after reconnect.
