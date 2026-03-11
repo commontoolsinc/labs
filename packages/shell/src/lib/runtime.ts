@@ -26,6 +26,33 @@ const identityLogger = getLogger("shell.identity", {
 });
 
 /**
+ * Fetch the worker bundle hash from the build manifest.
+ * Cached at module level — the hash doesn't change within a page session.
+ * See docs/specs/compilation-cache.md Phase 3.
+ */
+let buildHashPromise: Promise<string | undefined> | undefined;
+function fetchBuildHash(): Promise<string | undefined> {
+  if (!buildHashPromise) {
+    buildHashPromise = (async () => {
+      try {
+        const resp = await fetch(
+          new URL("/build-manifest.json", globalThis.location.origin),
+        );
+        if (resp.ok) {
+          const manifest = await resp.json();
+          // Key must match the worker entry's `out` path in felt.config.ts.
+          return manifest["scripts/worker-runtime.js"] as string | undefined;
+        }
+      } catch {
+        // Manifest not available — compilation cache disabled
+      }
+      return undefined;
+    })();
+  }
+  return buildHashPromise;
+}
+
+/**
  * RuntimeInternals bundles all resources bound to an identity/host/space triplet.
  * Uses RuntimeClient to run the Runtime in a web client.
  */
@@ -259,14 +286,18 @@ export class RuntimeInternals extends EventTarget {
       })`,
     );
 
-    // Worker script is bundled with shell assets, so load from shell origin
-    // (not apiUrl which points to the backend/router)
-    const transport = await WebWorkerRuntimeTransport.connect({
-      workerUrl: new URL(
-        "/scripts/worker-runtime.js",
-        globalThis.location.origin,
-      ),
-    });
+    // Fetch build manifest (for compilation cache fingerprint) and
+    // connect worker transport in parallel — they're independent I/O.
+    // See docs/specs/compilation-cache.md Phase 3.
+    const [buildHash, transport] = await Promise.all([
+      fetchBuildHash(),
+      WebWorkerRuntimeTransport.connect({
+        workerUrl: new URL(
+          "/scripts/worker-runtime.js",
+          globalThis.location.origin,
+        ),
+      }),
+    ]);
     const client = await RuntimeClient.initialize(transport, {
       apiUrl,
       identity: session.as,
@@ -274,6 +305,7 @@ export class RuntimeInternals extends EventTarget {
       spaceDid: session.space,
       spaceName: session.spaceName,
       experimental: EXPERIMENTAL,
+      buildHash,
     });
 
     // Wait for PieceManager to sync
