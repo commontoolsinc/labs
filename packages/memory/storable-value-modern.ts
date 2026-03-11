@@ -670,9 +670,7 @@ function deepCloneIfNecessaryInternal(
 
     case NATIVE_TAGS.StorableInstance:
       // Delegate to the protocol's shallowClone method.
-      return (value as StorableInstance).shallowClone(
-        frozen,
-      ) as StorableValue;
+      return (value as StorableInstance).shallowClone(frozen);
 
     case NATIVE_TAGS.Array: {
       const arr = value as StorableValue[];
@@ -683,7 +681,7 @@ function deepCloneIfNecessaryInternal(
         }
       }
       if (frozen) Object.freeze(copy);
-      return copy as StorableValue;
+      return copy;
     }
 
     case NATIVE_TAGS.Object: {
@@ -694,7 +692,7 @@ function deepCloneIfNecessaryInternal(
         copy[key] = deepCloneIfNecessaryInternal(val as StorableValue, frozen);
       }
       if (frozen) Object.freeze(copy);
-      return copy as StorableValue;
+      return copy;
     }
 
     default:

@@ -127,6 +127,23 @@ describe("deepCloneIfNecessary", () => {
       expect(Object.isFrozen(result)).toBe(false);
     });
 
+    it("clones already-mutable values when frozen=false (not identity)", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const inner = { x: 1 };
+      const value = { a: inner, b: [2, 3] } as StorableValue;
+      const result = deepCloneIfNecessary(value, false) as Record<
+        string,
+        unknown
+      >;
+      // Must be a different reference, even though input is already mutable.
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: { x: 1 }, b: [2, 3] });
+      expect(Object.isFrozen(result)).toBe(false);
+      // Nested values are also cloned.
+      expect(result.a).not.toBe(inner);
+      expect(result.b).not.toBe((value as Record<string, unknown>).b);
+    });
+
     it("deep-unfreezes nested structures when frozen=false", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = Object.freeze([1, 2]);
