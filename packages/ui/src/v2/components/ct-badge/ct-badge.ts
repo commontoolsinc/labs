@@ -24,6 +24,33 @@ export class CTBadge extends BaseElement {
     :host {
       display: inline-block;
       box-sizing: border-box;
+      --ct-badge-color-primary: var(
+        --ct-theme-color-primary,
+        hsl(212, 100%, 47%)
+      );
+      --ct-badge-color-primary-foreground: var(
+        --ct-theme-color-primary-foreground,
+        hsl(0, 0%, 100%)
+      );
+      --ct-badge-color-secondary: var(
+        --ct-theme-color-secondary,
+        hsl(0, 0%, 96%)
+      );
+      --ct-badge-color-secondary-foreground: var(
+        --ct-theme-color-secondary-foreground,
+        hsl(0, 0%, 9%)
+      );
+      --ct-badge-color-destructive: var(
+        --ct-theme-color-error,
+        hsl(0, 100%, 50%)
+      );
+      --ct-badge-color-destructive-foreground: var(
+        --ct-theme-color-error-foreground,
+        hsl(0, 0%, 100%)
+      );
+      --ct-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
+      --ct-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --ct-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
     }
 
     *,
@@ -47,24 +74,24 @@ export class CTBadge extends BaseElement {
 
     /* Variant styles */
     .badge.default {
-      background-color: var(--primary, hsl(212, 100%, 47%));
-      color: var(--primary-foreground, hsl(0, 0%, 100%));
+      background-color: var(--ct-badge-color-primary, hsl(212, 100%, 47%));
+      color: var(--ct-badge-color-primary-foreground, hsl(0, 0%, 100%));
     }
 
     .badge.secondary {
-      background-color: var(--secondary, hsl(0, 0%, 96%));
-      color: var(--secondary-foreground, hsl(0, 0%, 9%));
+      background-color: var(--ct-badge-color-secondary, hsl(0, 0%, 96%));
+      color: var(--ct-badge-color-secondary-foreground, hsl(0, 0%, 9%));
     }
 
     .badge.destructive {
-      background-color: var(--destructive, hsl(0, 100%, 50%));
-      color: var(--destructive-foreground, hsl(0, 0%, 100%));
+      background-color: var(--ct-badge-color-destructive, hsl(0, 100%, 50%));
+      color: var(--ct-badge-color-destructive-foreground, hsl(0, 0%, 100%));
     }
 
     .badge.outline {
       background-color: transparent;
-      border-color: var(--border, hsl(0, 0%, 89%));
-      color: var(--foreground, hsl(0, 0%, 9%));
+      border-color: var(--ct-badge-color-border, hsl(0, 0%, 89%));
+      color: var(--ct-badge-color-text, hsl(0, 0%, 9%));
     }
 
     /* Close button */
@@ -91,7 +118,7 @@ export class CTBadge extends BaseElement {
     }
 
     .close-button:focus-visible {
-      outline: 2px solid var(--ring, hsl(212, 100%, 47%));
+      outline: 2px solid var(--ct-badge-color-ring, hsl(212, 100%, 47%));
       outline-offset: 2px;
       border-radius: 2px;
     }

@@ -5,17 +5,17 @@
 export const toggleGroupStyles = `
   :host {
     display: inline-flex;
-    --group-gap: 0;
-    --border: #e2e8f0;
-    --background: #ffffff;
+    --ct-toggle-group-gap: 0;
+    --ct-toggle-group-color-border: var(--ct-theme-color-border, #e2e8f0);
+    --ct-toggle-group-color-background: var(--ct-theme-color-background, #ffffff);
   }
 
   .toggle-group {
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: var(--group-gap);
-    background-color: var(--background);
+    gap: var(--ct-toggle-group-gap);
+    background-color: var(--ct-toggle-group-color-background);
     border-radius: 0.375rem;
     padding: 0.25rem;
   }
@@ -28,13 +28,13 @@ export const toggleGroupStyles = `
   /* Variant: connected toggles (no gap) */
   :host([variant="connected"]) .toggle-group {
     gap: 0;
-    border: 1px solid var(--border);
+    border: 1px solid var(--ct-toggle-group-color-border);
     padding: 0;
   }
 
   :host([variant="connected"]) ::slotted(ct-toggle) {
     border-radius: 0;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--ct-toggle-group-color-border);
   }
 
   :host([variant="connected"]) ::slotted(ct-toggle:first-child) {
@@ -66,7 +66,7 @@ export const toggleGroupStyles = `
 
   :host([orientation="vertical"][variant="connected"]) ::slotted(ct-toggle) {
     border-right: none;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ct-toggle-group-color-border);
   }
 
   :host([orientation="vertical"][variant="connected"]) ::slotted(ct-toggle:first-child) {

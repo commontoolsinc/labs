@@ -45,6 +45,10 @@ export class CTHScroll extends BaseElement {
       display: block;
       position: relative;
       overflow: hidden;
+      --ct-hscroll-color-surface: var(--muted, #f1f5f9);
+      --ct-hscroll-color-thumb: var(--muted-foreground, #64748b);
+      --ct-hscroll-color-thumb-hover: var(--foreground, #475569);
+      --ct-hscroll-color-background: var(--background, white);
     }
 
     .scroll-wrapper {
@@ -78,17 +82,17 @@ export class CTHScroll extends BaseElement {
     }
 
     .scroll-container::-webkit-scrollbar-track {
-      background: var(--muted, #f1f5f9);
+      background: var(--ct-hscroll-color-surface, #f1f5f9);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--muted-foreground, #64748b);
+      background: var(--ct-hscroll-color-thumb, #64748b);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--foreground, #475569);
+      background: var(--ct-hscroll-color-thumb-hover, #475569);
     }
 
     /* Padding utilities */
@@ -134,7 +138,7 @@ export class CTHScroll extends BaseElement {
       left: 0;
       background: linear-gradient(
         to right,
-        var(--background, white),
+        var(--ct-hscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -142,7 +146,11 @@ export class CTHScroll extends BaseElement {
 
     :host([fade-edges]) .scroll-wrapper::after {
       right: 0;
-      background: linear-gradient(to left, var(--background, white), transparent);
+      background: linear-gradient(
+        to left,
+        var(--ct-hscroll-color-background, white),
+        transparent
+      );
       opacity: 0;
     }
 

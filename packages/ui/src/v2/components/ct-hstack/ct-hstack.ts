@@ -26,6 +26,32 @@ export class CTHStack extends BaseElement {
   static override styles = css`
     :host {
       display: block;
+      --ct-hstack-gap-0: 0;
+      --ct-hstack-gap-1: 0.25rem;
+      --ct-hstack-gap-2: 0.5rem;
+      --ct-hstack-gap-3: 0.75rem;
+      --ct-hstack-gap-4: 1rem;
+      --ct-hstack-gap-5: 1.25rem;
+      --ct-hstack-gap-6: 1.5rem;
+      --ct-hstack-gap-8: 2rem;
+      --ct-hstack-gap-10: 2.5rem;
+      --ct-hstack-gap-12: 3rem;
+      --ct-hstack-gap-16: 4rem;
+      --ct-hstack-gap-20: 5rem;
+      --ct-hstack-gap-24: 6rem;
+      --ct-hstack-padding-0: 0;
+      --ct-hstack-padding-1: 0.25rem;
+      --ct-hstack-padding-2: 0.5rem;
+      --ct-hstack-padding-3: 0.75rem;
+      --ct-hstack-padding-4: 1rem;
+      --ct-hstack-padding-5: 1.25rem;
+      --ct-hstack-padding-6: 1.5rem;
+      --ct-hstack-padding-8: 2rem;
+      --ct-hstack-padding-10: 2.5rem;
+      --ct-hstack-padding-12: 3rem;
+      --ct-hstack-padding-16: 4rem;
+      --ct-hstack-padding-20: 5rem;
+      --ct-hstack-padding-24: 6rem;
     }
 
     .stack {
@@ -36,43 +62,43 @@ export class CTHStack extends BaseElement {
 
     /* Gap utilities */
     .gap-0 {
-      gap: 0;
+      gap: var(--ct-hstack-gap-0);
     }
     .gap-1 {
-      gap: 0.25rem;
+      gap: var(--ct-hstack-gap-1);
     }
     .gap-2 {
-      gap: 0.5rem;
+      gap: var(--ct-hstack-gap-2);
     }
     .gap-3 {
-      gap: 0.75rem;
+      gap: var(--ct-hstack-gap-3);
     }
     .gap-4 {
-      gap: 1rem;
+      gap: var(--ct-hstack-gap-4);
     }
     .gap-5 {
-      gap: 1.25rem;
+      gap: var(--ct-hstack-gap-5);
     }
     .gap-6 {
-      gap: 1.5rem;
+      gap: var(--ct-hstack-gap-6);
     }
     .gap-8 {
-      gap: 2rem;
+      gap: var(--ct-hstack-gap-8);
     }
     .gap-10 {
-      gap: 2.5rem;
+      gap: var(--ct-hstack-gap-10);
     }
     .gap-12 {
-      gap: 3rem;
+      gap: var(--ct-hstack-gap-12);
     }
     .gap-16 {
-      gap: 4rem;
+      gap: var(--ct-hstack-gap-16);
     }
     .gap-20 {
-      gap: 5rem;
+      gap: var(--ct-hstack-gap-20);
     }
     .gap-24 {
-      gap: 6rem;
+      gap: var(--ct-hstack-gap-24);
     }
 
     /* Alignment */
@@ -124,43 +150,43 @@ export class CTHStack extends BaseElement {
 
     /* Padding utilities */
     .p-0 {
-      padding: 0;
+      padding: var(--ct-hstack-padding-0);
     }
     .p-1 {
-      padding: 0.25rem;
+      padding: var(--ct-hstack-padding-1);
     }
     .p-2 {
-      padding: 0.5rem;
+      padding: var(--ct-hstack-padding-2);
     }
     .p-3 {
-      padding: 0.75rem;
+      padding: var(--ct-hstack-padding-3);
     }
     .p-4 {
-      padding: 1rem;
+      padding: var(--ct-hstack-padding-4);
     }
     .p-5 {
-      padding: 1.25rem;
+      padding: var(--ct-hstack-padding-5);
     }
     .p-6 {
-      padding: 1.5rem;
+      padding: var(--ct-hstack-padding-6);
     }
     .p-8 {
-      padding: 2rem;
+      padding: var(--ct-hstack-padding-8);
     }
     .p-10 {
-      padding: 2.5rem;
+      padding: var(--ct-hstack-padding-10);
     }
     .p-12 {
-      padding: 3rem;
+      padding: var(--ct-hstack-padding-12);
     }
     .p-16 {
-      padding: 4rem;
+      padding: var(--ct-hstack-padding-16);
     }
     .p-20 {
-      padding: 5rem;
+      padding: var(--ct-hstack-padding-20);
     }
     .p-24 {
-      padding: 6rem;
+      padding: var(--ct-hstack-padding-24);
     }
 
     /* Direct children styling */

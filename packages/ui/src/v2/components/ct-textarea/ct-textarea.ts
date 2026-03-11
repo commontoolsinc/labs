@@ -99,23 +99,33 @@ export class CTTextarea extends BaseElement {
     :host {
       display: block;
       width: 100%;
+      --ct-textarea-color-background: var(--ct-theme-color-background, #ffffff);
+      --ct-textarea-color-text: var(--ct-theme-color-text, #0f172a);
+      --ct-textarea-color-border: var(--ct-theme-color-border, #e2e8f0);
+      --ct-textarea-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --ct-textarea-color-error: var(--ct-theme-color-error, #dc2626);
+      --ct-textarea-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --ct-textarea-color-text-muted: var(--ct-theme-color-text-muted, #64748b);
+      --ct-textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
+      --ct-textarea-font-family: var(--ct-theme-font-family, inherit);
+      --ct-textarea-animation-duration: var(--ct-theme-animation-duration, 150ms);
 
       /* Default color values if not provided */
-      --background: var(--ct-theme-color-background, #ffffff);
-      --foreground: var(--ct-theme-color-text, #0f172a);
-      --border: var(--ct-theme-color-border, #e2e8f0);
-      --ring: var(--ct-theme-color-primary, #3b82f6);
-      --destructive: var(--ct-theme-color-error, #dc2626);
-      --muted: var(--ct-theme-color-surface, #f1f5f9);
-      --muted-foreground: var(--ct-theme-color-text-muted, #64748b);
-      --placeholder: var(--ct-theme-color-text-muted, #94a3b8);
+      --background: var(--ct-textarea-color-background, #ffffff);
+      --foreground: var(--ct-textarea-color-text, #0f172a);
+      --border: var(--ct-textarea-color-border, #e2e8f0);
+      --ring: var(--ct-textarea-color-primary, #3b82f6);
+      --destructive: var(--ct-textarea-color-error, #dc2626);
+      --muted: var(--ct-textarea-color-surface, #f1f5f9);
+      --muted-foreground: var(--ct-textarea-color-text-muted, #64748b);
+      --placeholder: var(--ct-textarea-color-text-muted, #94a3b8);
 
       /* Textarea dimensions */
       --textarea-padding-x: 0.75rem;
       --textarea-padding-y: 0.5rem;
       --textarea-font-size: 0.875rem;
       --textarea-line-height: 1.25rem;
-      --textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
+      --textarea-border-radius: var(--ct-textarea-border-radius, 0.375rem);
       --textarea-min-height: 5rem;
     }
 
@@ -127,12 +137,12 @@ export class CTTextarea extends BaseElement {
       padding: var(--textarea-padding-y) var(--textarea-padding-x);
       font-size: var(--textarea-font-size);
       line-height: var(--textarea-line-height);
-      font-family: var(--ct-theme-font-family, inherit);
+      font-family: var(--ct-textarea-font-family, inherit);
       color: var(--foreground);
       background-color: var(--background);
       border: 1px solid var(--border);
       border-radius: var(--textarea-border-radius);
-      transition: all var(--ct-theme-animation-duration, 150ms)
+      transition: all var(--ct-textarea-animation-duration, 150ms)
         var(--ct-transition-timing-ease);
       display: block;
       overflow: auto;
@@ -184,7 +194,7 @@ export class CTTextarea extends BaseElement {
       outline-offset: 2px;
       border-color: var(--ring);
       box-shadow: 0 0 0 3px
-        var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+        var(--ct-textarea-color-primary, rgba(59, 130, 246, 0.15));
       }
 
       textarea:focus-visible {
@@ -192,7 +202,7 @@ export class CTTextarea extends BaseElement {
         outline-offset: 2px;
         border-color: var(--ring);
         box-shadow: 0 0 0 3px
-          var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+          var(--ct-textarea-color-primary, rgba(59, 130, 246, 0.15));
         }
 
         /* Disabled state */
@@ -217,398 +227,400 @@ export class CTTextarea extends BaseElement {
         textarea.error:focus,
         textarea.error:focus-visible {
           border-color: var(--destructive);
-          box-shadow: 0 0 0 3px var(--ct-theme-color-error, rgba(220, 38, 38, 0.1));
+          box-shadow: 0 0 0 3px
+            var(--ct-textarea-color-error, rgba(220, 38, 38, 0.1));
+          }
+
+          /* Scrollbar styling */
+          textarea::-webkit-scrollbar {
+            width: 0.5rem;
+            height: 0.5rem;
+          }
+
+          textarea::-webkit-scrollbar-track {
+            background-color: var(--muted);
+            border-radius: calc(var(--textarea-border-radius) * 0.5);
+          }
+
+          textarea::-webkit-scrollbar-thumb {
+            background-color: var(--border);
+            border-radius: calc(var(--textarea-border-radius) * 0.5);
+            transition: background-color var(--ct-textarea-animation-duration, 150ms);
+          }
+
+          textarea::-webkit-scrollbar-thumb:hover {
+            background-color: var(--muted-foreground);
+          }
+
+          /* Firefox scrollbar styling */
+          textarea {
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) var(--muted);
+          }
+
+          /* Autofill styles */
+          textarea:-webkit-autofill,
+          textarea:-webkit-autofill:hover,
+          textarea:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--foreground);
+            -webkit-box-shadow: 0 0 0px 1000px var(--muted) inset;
+            transition: background-color 5000s ease-in-out 0s;
+          }
+
+          /* Selection styles */
+          textarea::selection {
+            background-color: var(--ring);
+            color: var(--background);
+            opacity: 0.3;
+          }
+
+          textarea::-moz-selection {
+            background-color: var(--ring);
+            color: var(--background);
+            opacity: 0.3;
+          }
+
+          /* Auto-resize specific styles */
+          :host([auto-resize]) textarea {
+            overflow-y: hidden;
+          }
+        `;
+
+        // Theme consumption
+        @consume({ context: themeContext, subscribe: true })
+        @property({ attribute: false })
+        declare theme?: CTTheme;
+
+        // Cache + initial setup
+        private _textarea: HTMLTextAreaElement | null = null;
+        private _cellController = createStringCellController(this, {
+          timing: {
+            strategy: "debounce",
+            delay: 300,
+          },
+        });
+
+        // Form field controller handles buffering when in ct-form context
+        private _formField = createFormFieldController<string>(this, {
+          cellController: this._cellController,
+          validate: () => ({
+            valid: this.checkValidity(),
+            message: this.validationMessage,
+          }),
+        });
+
+        constructor() {
+          super();
+          this.placeholder = "";
+          this.value = "";
+          this.disabled = false;
+          this.readonly = false;
+          this.error = false;
+          this.rows = 4;
+          this.cols = 50;
+          this.name = "";
+          this.required = false;
+          this.autofocus = false;
+          this.maxlength = "";
+          this.minlength = "";
+          this.wrap = "soft";
+          this.spellcheck = true;
+          this.autocomplete = "off";
+          this.resize = "vertical";
+          this.autoResize = false;
+          this.timingStrategy = "debounce";
+          this.timingDelay = 300;
         }
 
-        /* Scrollbar styling */
-        textarea::-webkit-scrollbar {
-          width: 0.5rem;
-          height: 0.5rem;
+        private getValue(): string {
+          return this._formField.getValue();
         }
 
-        textarea::-webkit-scrollbar-track {
-          background-color: var(--muted);
-          border-radius: calc(var(--textarea-border-radius) * 0.5);
+        private setValue(newValue: string): void {
+          this._formField.setValue(newValue);
         }
 
-        textarea::-webkit-scrollbar-thumb {
-          background-color: var(--border);
-          border-radius: calc(var(--textarea-border-radius) * 0.5);
-          transition: background-color var(--ct-theme-animation-duration, 150ms);
+        get textarea(): HTMLTextAreaElement | null {
+          if (!this._textarea) {
+            this._textarea = this.shadowRoot?.querySelector("textarea") as
+              | HTMLTextAreaElement
+              | null;
+          }
+          return this._textarea;
         }
 
-        textarea::-webkit-scrollbar-thumb:hover {
-          background-color: var(--muted-foreground);
-        }
+        private _minHeight = 0;
 
-        /* Firefox scrollbar styling */
-        textarea {
-          scrollbar-width: thin;
-          scrollbar-color: var(--border) var(--muted);
-        }
-
-        /* Autofill styles */
-        textarea:-webkit-autofill,
-        textarea:-webkit-autofill:hover,
-        textarea:-webkit-autofill:focus {
-          -webkit-text-fill-color: var(--foreground);
-          -webkit-box-shadow: 0 0 0px 1000px var(--muted) inset;
-          transition: background-color 5000s ease-in-out 0s;
-        }
-
-        /* Selection styles */
-        textarea::selection {
-          background-color: var(--ring);
-          color: var(--background);
-          opacity: 0.3;
-        }
-
-        textarea::-moz-selection {
-          background-color: var(--ring);
-          color: var(--background);
-          opacity: 0.3;
-        }
-
-        /* Auto-resize specific styles */
-        :host([auto-resize]) textarea {
-          overflow-y: hidden;
-        }
-      `;
-
-      // Theme consumption
-      @consume({ context: themeContext, subscribe: true })
-      @property({ attribute: false })
-      declare theme?: CTTheme;
-
-      // Cache + initial setup
-      private _textarea: HTMLTextAreaElement | null = null;
-      private _cellController = createStringCellController(this, {
-        timing: {
-          strategy: "debounce",
-          delay: 300,
-        },
-      });
-
-      // Form field controller handles buffering when in ct-form context
-      private _formField = createFormFieldController<string>(this, {
-        cellController: this._cellController,
-        validate: () => ({
-          valid: this.checkValidity(),
-          message: this.validationMessage,
-        }),
-      });
-
-      constructor() {
-        super();
-        this.placeholder = "";
-        this.value = "";
-        this.disabled = false;
-        this.readonly = false;
-        this.error = false;
-        this.rows = 4;
-        this.cols = 50;
-        this.name = "";
-        this.required = false;
-        this.autofocus = false;
-        this.maxlength = "";
-        this.minlength = "";
-        this.wrap = "soft";
-        this.spellcheck = true;
-        this.autocomplete = "off";
-        this.resize = "vertical";
-        this.autoResize = false;
-        this.timingStrategy = "debounce";
-        this.timingDelay = 300;
-      }
-
-      private getValue(): string {
-        return this._formField.getValue();
-      }
-
-      private setValue(newValue: string): void {
-        this._formField.setValue(newValue);
-      }
-
-      get textarea(): HTMLTextAreaElement | null {
-        if (!this._textarea) {
+        override firstUpdated() {
+          // Cache reference
           this._textarea = this.shadowRoot?.querySelector("textarea") as
             | HTMLTextAreaElement
             | null;
-        }
-        return this._textarea;
-      }
 
-      private _minHeight = 0;
-
-      override firstUpdated() {
-        // Cache reference
-        this._textarea = this.shadowRoot?.querySelector("textarea") as
-          | HTMLTextAreaElement
-          | null;
-
-        // Bind the initial value to the cell controller
-        this._cellController.bind(this.value, stringSchema);
-
-        // Update timing options to match current properties
-        this._cellController.updateTimingOptions({
-          strategy: this.timingStrategy,
-          delay: this.timingDelay,
-        });
-
-        // Apply theme on mount
-        applyThemeToElement(this, this.theme ?? defaultTheme);
-
-        // Register with form after binding is complete
-        this._formField.register(this.name);
-
-        if (this.autofocus) {
-          this.textarea?.focus();
-        }
-
-        // Store initial height for auto-resize
-        if (this.autoResize && this.textarea) {
-          this._minHeight = this.textarea.scrollHeight;
-          this.adjustHeight();
-        }
-      }
-
-      override disconnectedCallback() {
-        super.disconnectedCallback();
-        // Controllers handle cleanup automatically via ReactiveController
-      }
-
-      override willUpdate(
-        changedProperties: Map<string | number | symbol, unknown>,
-      ) {
-        super.willUpdate(changedProperties);
-
-        // Bind value in willUpdate (before render) to avoid extra render cycle
-        if (changedProperties.has("value")) {
-          // Bind the new cell first so getValue() returns the new value
+          // Bind the initial value to the cell controller
           this._cellController.bind(this.value, stringSchema);
-          // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
-          this._formField.clearBuffer();
-        }
-      }
 
-      override updated(
-        changedProperties: Map<string | number | symbol, unknown>,
-      ) {
-        super.updated(changedProperties);
-
-        // Update timing options if they changed
-        if (
-          changedProperties.has("timingStrategy") ||
-          changedProperties.has("timingDelay")
-        ) {
+          // Update timing options to match current properties
           this._cellController.updateTimingOptions({
             strategy: this.timingStrategy,
             delay: this.timingDelay,
           });
-        }
 
-        if (changedProperties.has("theme")) {
+          // Apply theme on mount
           applyThemeToElement(this, this.theme ?? defaultTheme);
-        }
 
-        if (changedProperties.has("value") && this.autoResize) {
-          this.adjustHeight();
-        }
+          // Register with form after binding is complete
+          this._formField.register(this.name);
 
-        if (changedProperties.has("autoResize")) {
-          if (this.autoResize) {
-            this.resize = "none";
-            if (this.textarea) {
-              this._minHeight = this.textarea.scrollHeight;
-              this.adjustHeight();
-            }
-          } else {
-            this.resize = "vertical";
+          if (this.autofocus) {
+            this.textarea?.focus();
+          }
+
+          // Store initial height for auto-resize
+          if (this.autoResize && this.textarea) {
+            this._minHeight = this.textarea.scrollHeight;
+            this.adjustHeight();
           }
         }
-      }
 
-      override render() {
-        const resizeStyle = this.resize === "none" || this.autoResize
-          ? "resize: none;"
-          : `resize: ${this.resize};`;
-
-        return html`
-          <textarea
-            class="${this.error ? "error" : ""}"
-            style="${resizeStyle}"
-            placeholder="${ifDefined(this.placeholder || undefined)}"
-            .value="${this.getValue()}"
-            ?disabled="${this.disabled}"
-            ?readonly="${this.readonly}"
-            ?required="${this.required}"
-            name="${ifDefined(this.name || undefined)}"
-            rows="${this.rows}"
-            cols="${this.cols}"
-            wrap="${this.wrap}"
-            ?spellcheck="${this.spellcheck}"
-            autocomplete="${this.autocomplete}"
-            maxlength="${ifDefined(this.maxlength || undefined)}"
-            minlength="${ifDefined(this.minlength || undefined)}"
-            @input="${this._handleInput}"
-            @change="${this._handleChange}"
-            @focus="${this._handleFocus}"
-            @blur="${this._handleBlur}"
-            @keydown="${this._handleKeyDown}"
-            part="textarea"
-          ></textarea>
-        `;
-      }
-
-      private _handleInput(event: Event) {
-        const textarea = event.target as HTMLTextAreaElement;
-        const oldValue = this.getValue();
-        this.setValue(textarea.value);
-
-        // Auto-resize if enabled
-        if (this.autoResize) {
-          this.adjustHeight();
+        override disconnectedCallback() {
+          super.disconnectedCallback();
+          // Controllers handle cleanup automatically via ReactiveController
         }
 
-        // Emit custom input event
-        this.emit("ct-input", {
-          value: textarea.value,
-          oldValue,
-          name: this.name,
-        });
-      }
+        override willUpdate(
+          changedProperties: Map<string | number | symbol, unknown>,
+        ) {
+          super.willUpdate(changedProperties);
 
-      private _handleChange(event: Event) {
-        const textarea = event.target as HTMLTextAreaElement;
-        const oldValue = this.getValue();
+          // Bind value in willUpdate (before render) to avoid extra render cycle
+          if (changedProperties.has("value")) {
+            // Bind the new cell first so getValue() returns the new value
+            this._cellController.bind(this.value, stringSchema);
+            // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+            this._formField.clearBuffer();
+          }
+        }
 
-        // Emit custom change event
-        this.emit("ct-change", {
-          value: textarea.value,
-          oldValue,
-          name: this.name,
-        });
-      }
+        override updated(
+          changedProperties: Map<string | number | symbol, unknown>,
+        ) {
+          super.updated(changedProperties);
 
-      private _handleFocus(_event: Event) {
-        this._cellController.onFocus();
-        this.emit("ct-focus", {
-          value: this.getValue(),
-          name: this.name,
-        });
-      }
+          // Update timing options if they changed
+          if (
+            changedProperties.has("timingStrategy") ||
+            changedProperties.has("timingDelay")
+          ) {
+            this._cellController.updateTimingOptions({
+              strategy: this.timingStrategy,
+              delay: this.timingDelay,
+            });
+          }
 
-      private _handleBlur(_event: Event) {
-        this._cellController.onBlur();
-        this.emit("ct-blur", {
-          value: this.getValue(),
-          name: this.name,
-        });
-      }
+          if (changedProperties.has("theme")) {
+            applyThemeToElement(this, this.theme ?? defaultTheme);
+          }
 
-      private _handleKeyDown(event: KeyboardEvent) {
-        this.emit("ct-keydown", {
-          key: event.key,
-          value: this.getValue(),
-          shiftKey: event.shiftKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          altKey: event.altKey,
-          name: this.name,
-        });
+          if (changedProperties.has("value") && this.autoResize) {
+            this.adjustHeight();
+          }
 
-        // Special handling for Enter key with modifiers
-        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-          this.emit("ct-submit", {
+          if (changedProperties.has("autoResize")) {
+            if (this.autoResize) {
+              this.resize = "none";
+              if (this.textarea) {
+                this._minHeight = this.textarea.scrollHeight;
+                this.adjustHeight();
+              }
+            } else {
+              this.resize = "vertical";
+            }
+          }
+        }
+
+        override render() {
+          const resizeStyle = this.resize === "none" || this.autoResize
+            ? "resize: none;"
+            : `resize: ${this.resize};`;
+
+          return html`
+            <textarea
+              class="${this.error ? "error" : ""}"
+              style="${resizeStyle}"
+              placeholder="${ifDefined(this.placeholder || undefined)}"
+              .value="${this.getValue()}"
+              ?disabled="${this.disabled}"
+              ?readonly="${this.readonly}"
+              ?required="${this.required}"
+              name="${ifDefined(this.name || undefined)}"
+              rows="${this.rows}"
+              cols="${this.cols}"
+              wrap="${this.wrap}"
+              ?spellcheck="${this.spellcheck}"
+              autocomplete="${this.autocomplete}"
+              maxlength="${ifDefined(this.maxlength || undefined)}"
+              minlength="${ifDefined(this.minlength || undefined)}"
+              @input="${this._handleInput}"
+              @change="${this._handleChange}"
+              @focus="${this._handleFocus}"
+              @blur="${this._handleBlur}"
+              @keydown="${this._handleKeyDown}"
+              part="textarea"
+            ></textarea>
+          `;
+        }
+
+        private _handleInput(event: Event) {
+          const textarea = event.target as HTMLTextAreaElement;
+          const oldValue = this.getValue();
+          this.setValue(textarea.value);
+
+          // Auto-resize if enabled
+          if (this.autoResize) {
+            this.adjustHeight();
+          }
+
+          // Emit custom input event
+          this.emit("ct-input", {
+            value: textarea.value,
+            oldValue,
+            name: this.name,
+          });
+        }
+
+        private _handleChange(event: Event) {
+          const textarea = event.target as HTMLTextAreaElement;
+          const oldValue = this.getValue();
+
+          // Emit custom change event
+          this.emit("ct-change", {
+            value: textarea.value,
+            oldValue,
+            name: this.name,
+          });
+        }
+
+        private _handleFocus(_event: Event) {
+          this._cellController.onFocus();
+          this.emit("ct-focus", {
             value: this.getValue(),
             name: this.name,
           });
         }
+
+        private _handleBlur(_event: Event) {
+          this._cellController.onBlur();
+          this.emit("ct-blur", {
+            value: this.getValue(),
+            name: this.name,
+          });
+        }
+
+        private _handleKeyDown(event: KeyboardEvent) {
+          this.emit("ct-keydown", {
+            key: event.key,
+            value: this.getValue(),
+            shiftKey: event.shiftKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            altKey: event.altKey,
+            name: this.name,
+          });
+
+          // Special handling for Enter key with modifiers
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            this.emit("ct-submit", {
+              value: this.getValue(),
+              name: this.name,
+            });
+          }
+        }
+
+        /**
+         * Adjust height for auto-resize functionality
+         */
+        private adjustHeight(): void {
+          if (!this.textarea || !this.autoResize) return;
+
+          // Reset height to recalculate
+          (this.textarea as HTMLTextAreaElement).style.height = "auto";
+
+          // Set new height based on scrollHeight
+          const newHeight = Math.max(
+            this._minHeight,
+            (this.textarea as HTMLTextAreaElement).scrollHeight,
+          );
+          (this.textarea as HTMLTextAreaElement).style.height =
+            `${newHeight}px`;
+        }
+
+        /**
+         * Focus the textarea programmatically
+         */
+        override focus(): void {
+          this.textarea?.focus();
+        }
+
+        /**
+         * Blur the textarea programmatically
+         */
+        override blur(): void {
+          this.textarea?.blur();
+        }
+
+        /**
+         * Select all text in the textarea
+         */
+        select(): void {
+          this.textarea?.select();
+        }
+
+        /**
+         * Set selection range in the textarea
+         */
+        setSelectionRange(
+          start: number,
+          end: number,
+          direction?: "forward" | "backward" | "none",
+        ): void {
+          this.textarea?.setSelectionRange(start, end, direction);
+        }
+
+        /**
+         * Check validity of the textarea
+         */
+        checkValidity(): boolean {
+          return this.textarea?.checkValidity() ?? true;
+        }
+
+        /**
+         * Report validity of the textarea
+         */
+        reportValidity(): boolean {
+          return this.textarea?.reportValidity() ?? true;
+        }
+
+        /**
+         * Get the validity state
+         */
+        get validity(): ValidityState | undefined {
+          return this.textarea?.validity;
+        }
+
+        /**
+         * Get validation message
+         */
+        get validationMessage(): string {
+          return this.textarea?.validationMessage || "";
+        }
+
+        /**
+         * Set custom validity message
+         */
+        setCustomValidity(message: string): void {
+          this.textarea?.setCustomValidity(message);
+        }
       }
 
-      /**
-       * Adjust height for auto-resize functionality
-       */
-      private adjustHeight(): void {
-        if (!this.textarea || !this.autoResize) return;
-
-        // Reset height to recalculate
-        (this.textarea as HTMLTextAreaElement).style.height = "auto";
-
-        // Set new height based on scrollHeight
-        const newHeight = Math.max(
-          this._minHeight,
-          (this.textarea as HTMLTextAreaElement).scrollHeight,
-        );
-        (this.textarea as HTMLTextAreaElement).style.height = `${newHeight}px`;
-      }
-
-      /**
-       * Focus the textarea programmatically
-       */
-      override focus(): void {
-        this.textarea?.focus();
-      }
-
-      /**
-       * Blur the textarea programmatically
-       */
-      override blur(): void {
-        this.textarea?.blur();
-      }
-
-      /**
-       * Select all text in the textarea
-       */
-      select(): void {
-        this.textarea?.select();
-      }
-
-      /**
-       * Set selection range in the textarea
-       */
-      setSelectionRange(
-        start: number,
-        end: number,
-        direction?: "forward" | "backward" | "none",
-      ): void {
-        this.textarea?.setSelectionRange(start, end, direction);
-      }
-
-      /**
-       * Check validity of the textarea
-       */
-      checkValidity(): boolean {
-        return this.textarea?.checkValidity() ?? true;
-      }
-
-      /**
-       * Report validity of the textarea
-       */
-      reportValidity(): boolean {
-        return this.textarea?.reportValidity() ?? true;
-      }
-
-      /**
-       * Get the validity state
-       */
-      get validity(): ValidityState | undefined {
-        return this.textarea?.validity;
-      }
-
-      /**
-       * Get validation message
-       */
-      get validationMessage(): string {
-        return this.textarea?.validationMessage || "";
-      }
-
-      /**
-       * Set custom validity message
-       */
-      setCustomValidity(message: string): void {
-        this.textarea?.setCustomValidity(message);
-      }
-    }
-
-    globalThis.customElements.define("ct-textarea", CTTextarea);
+      globalThis.customElements.define("ct-textarea", CTTextarea);

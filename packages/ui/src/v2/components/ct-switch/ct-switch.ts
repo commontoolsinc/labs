@@ -34,13 +34,16 @@ export class CTSwitch extends BaseElement {
       line-height: 0;
 
       /* Default color values if not provided */
-      --background: #ffffff;
-      --foreground: #0f172a;
-      --primary: #0f172a;
-      --primary-foreground: #f8fafc;
-      --border: #e2e8f0;
-      --ring: #94a3b8;
-      --input: #e2e8f0;
+      --ct-switch-color-background: var(--ct-theme-color-background, #ffffff);
+      --ct-switch-color-foreground: var(--ct-theme-color-text, #0f172a);
+      --ct-switch-color-primary: var(--ct-theme-color-primary, #0f172a);
+      --ct-switch-color-primary-foreground: var(
+        --ct-theme-color-primary-foreground,
+        #f8fafc
+      );
+      --ct-switch-color-border: var(--ct-theme-color-border, #e2e8f0);
+      --ct-switch-color-ring: var(--ct-theme-color-primary, #94a3b8);
+      --ct-switch-color-input: var(--ct-theme-color-border, #e2e8f0);
     }
 
     :host([disabled]) {
@@ -56,8 +59,8 @@ export class CTSwitch extends BaseElement {
       outline: 2px solid transparent;
       outline-offset: 2px;
       box-shadow:
-        0 0 0 2px var(--background, #fff),
-        0 0 0 4px var(--ring, #94a3b8);
+        0 0 0 2px var(--ct-switch-color-background, #fff),
+        0 0 0 4px var(--ct-switch-color-ring, #94a3b8);
       }
 
       .switch {
@@ -65,14 +68,14 @@ export class CTSwitch extends BaseElement {
         width: 2rem; /* w-8 */
         height: 1.15rem; /* h-[1.15rem] */
         border-radius: 9999px; /* rounded-full */
-        background-color: var(--input, #e2e8f0);
+        background-color: var(--ct-switch-color-input, #e2e8f0);
         transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
         display: flex;
         align-items: center;
       }
 
       .switch.checked {
-        background-color: var(--primary, #0f172a);
+        background-color: var(--ct-switch-color-primary, #0f172a);
       }
 
       .switch.disabled {
@@ -87,7 +90,7 @@ export class CTSwitch extends BaseElement {
         width: 0.875rem; /* 14px */
         height: 0.875rem; /* 14px */
         border-radius: 9999px;
-        background-color: var(--background, #fff);
+        background-color: var(--ct-switch-color-background, #fff);
         transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
         box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
       }
@@ -111,7 +114,7 @@ export class CTSwitch extends BaseElement {
 
       /* Hover state */
       :host(:not([disabled]):hover) .switch:not(.checked) {
-        background-color: var(--border, #e2e8f0);
+        background-color: var(--ct-switch-color-border, #e2e8f0);
       }
 
       :host(:not([disabled]):hover) .switch.checked {

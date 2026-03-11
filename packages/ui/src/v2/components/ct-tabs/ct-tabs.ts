@@ -42,9 +42,9 @@ export class CTTabs extends BaseElement {
       :host {
         display: flex;
         flex-direction: column;
-        width: 100%;
+        width: var(--ct-tabs-width, 100%);
         min-height: 0;
-        flex: 1;
+        flex: var(--ct-tabs-flex, 1);
       }
 
       .tabs {

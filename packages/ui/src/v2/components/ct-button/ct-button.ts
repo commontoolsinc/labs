@@ -45,6 +45,63 @@ export class CTButton extends BaseElement {
         display: inline-block;
         outline: none;
         box-sizing: border-box;
+        --ct-button-border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        --ct-button-border-radius-full: var(
+          --ct-theme-border-radius-full,
+          var(--ct-radius-full, 9999px)
+        );
+        --ct-button-font-family: var(--ct-theme-font-family, inherit);
+        --ct-button-animation-duration: var(--ct-theme-animation-duration, 0.2s);
+        --ct-button-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
+        --ct-button-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
+        --ct-button-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+        --ct-button-color-primary: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-primary-500, #3b82f6)
+        );
+        --ct-button-color-primary-foreground: var(
+          --ct-theme-color-primary-foreground,
+          #ffffff
+        );
+        --ct-button-color-secondary: var(
+          --ct-theme-color-secondary,
+          var(--ct-colors-gray-100, #f3f4f6)
+        );
+        --ct-button-color-secondary-foreground: var(
+          --ct-theme-color-secondary-foreground,
+          var(--ct-colors-gray-900, #111827)
+        );
+        --ct-button-color-error: var(
+          --ct-theme-color-error,
+          var(--ct-colors-error, #dc2626)
+        );
+        --ct-button-color-error-foreground: var(
+          --ct-theme-color-error-foreground,
+          #ffffff
+        );
+        --ct-button-color-border: var(
+          --ct-theme-color-border,
+          var(--ct-colors-gray-300, #d1d5db)
+        );
+        --ct-button-color-surface: var(
+          --ct-theme-color-surface,
+          var(--ct-colors-gray-50, #f9fafb)
+        );
+        --ct-button-color-surface-hover: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-colors-gray-200, #e5e7eb)
+        );
+        --ct-button-color-text: var(
+          --ct-theme-color-text,
+          var(--ct-colors-gray-900, #111827)
+        );
+        --ct-button-color-text-muted: var(
+          --ct-theme-color-text-muted,
+          var(--ct-colors-gray-500, #6b7280)
+        );
       }
 
       *,
@@ -59,14 +116,14 @@ export class CTButton extends BaseElement {
         justify-content: center;
         white-space: nowrap;
         border-radius: var(
-          --ct-theme-border-radius,
+          --ct-button-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
         font-weight: 500;
-        font-family: var(--ct-theme-font-family, inherit);
+        font-family: var(--ct-button-font-family, inherit);
         line-height: 1.25rem;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
+        transition: all var(--ct-button-animation-duration, 0.2s) ease;
         cursor: pointer;
         user-select: none;
         border: 1px solid transparent;
@@ -81,7 +138,7 @@ export class CTButton extends BaseElement {
 
       .button:focus-visible {
         outline: 2px solid
-          var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
+          var(--ct-button-color-primary, var(--ct-colors-primary-500, #3b82f6));
         outline-offset: 2px;
       }
 
@@ -94,21 +151,21 @@ export class CTButton extends BaseElement {
       /* Size variants */
       .button.default {
         height: 2.5rem;
-        padding: var(--ct-theme-spacing-normal, 0.5rem)
-          var(--ct-theme-spacing-loose, 1rem);
+        padding: var(--ct-button-spacing-normal, 0.5rem)
+          var(--ct-button-spacing-loose, 1rem);
         }
 
         .button.sm {
           height: 2.25rem;
-          padding: var(--ct-theme-spacing-tight, 0.25rem)
-            var(--ct-theme-spacing-normal, 0.75rem);
+          padding: var(--ct-button-spacing-tight, 0.25rem)
+            var(--ct-button-spacing-normal, 0.75rem);
           font-size: 0.75rem;
         }
 
         .button.lg {
           height: 2.75rem;
-          padding: var(--ct-theme-spacing-normal, 0.5rem)
-            var(--ct-theme-spacing-loose, 2rem);
+          padding: var(--ct-button-spacing-normal, 0.5rem)
+            var(--ct-button-spacing-loose, 2rem);
           font-size: 1rem;
           line-height: 1.5rem;
         }
@@ -121,24 +178,24 @@ export class CTButton extends BaseElement {
 
         .button.md {
           height: 2rem;
-          padding: var(--ct-theme-spacing-tight, 0.25rem)
-            var(--ct-theme-spacing-normal, 0.75rem);
+          padding: var(--ct-button-spacing-tight, 0.25rem)
+            var(--ct-button-spacing-normal, 0.75rem);
           font-size: 0.75rem;
         }
 
         /* Variant styles */
         .button.primary {
           background-color: var(
-            --ct-theme-color-primary,
-            var(--ct-color-primary, #3b82f6)
+            --ct-button-color-primary,
+            var(--ct-colors-primary-500, #3b82f6)
           );
           color: var(
-            --ct-theme-color-primary-foreground,
-            var(--ct-color-white, #ffffff)
+            --ct-button-color-primary-foreground,
+            #ffffff
           );
           border-color: var(
-            --ct-theme-color-primary,
-            var(--ct-color-primary, #3b82f6)
+            --ct-button-color-primary,
+            var(--ct-colors-primary-500, #3b82f6)
           );
         }
 
@@ -153,14 +210,17 @@ export class CTButton extends BaseElement {
 
         .button.destructive {
           background-color: var(
-            --ct-theme-color-error,
-            var(--ct-color-red-600, #dc2626)
+            --ct-button-color-error,
+            var(--ct-colors-error, #dc2626)
           );
           color: var(
-            --ct-theme-color-error-foreground,
-            var(--ct-color-white, #ffffff)
+            --ct-button-color-error-foreground,
+            #ffffff
           );
-          border-color: var(--ct-theme-color-error, var(--ct-color-red-600, #dc2626));
+          border-color: var(
+            --ct-button-color-error,
+            var(--ct-colors-error, #dc2626)
+          );
         }
 
         .button.destructive:hover:not(:disabled) {
@@ -169,50 +229,50 @@ export class CTButton extends BaseElement {
 
         .button.outline {
           border-color: var(
-            --ct-theme-color-border,
-            var(--ct-color-gray-300, #d1d5db)
+            --ct-button-color-border,
+            var(--ct-colors-gray-300, #d1d5db)
           );
           background-color: transparent;
-          color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          color: var(--ct-button-color-text, var(--ct-colors-gray-900, #111827));
         }
 
         .button.outline:hover:not(:disabled) {
           background-color: var(
-            --ct-theme-color-surface,
-            var(--ct-color-gray-50, #f9fafb)
+            --ct-button-color-surface,
+            var(--ct-colors-gray-50, #f9fafb)
           );
         }
 
         .button.secondary {
           background-color: var(
-            --ct-theme-color-secondary,
-            var(--ct-color-gray-100, #f3f4f6)
+            --ct-button-color-secondary,
+            var(--ct-colors-gray-100, #f3f4f6)
           );
           color: var(
-            --ct-theme-color-secondary-foreground,
-            var(--ct-color-gray-900, #111827)
+            --ct-button-color-secondary-foreground,
+            var(--ct-colors-gray-900, #111827)
           );
           border-color: var(
-            --ct-theme-color-secondary,
-            var(--ct-color-gray-100, #f3f4f6)
+            --ct-button-color-secondary,
+            var(--ct-colors-gray-100, #f3f4f6)
           );
         }
 
         .button.secondary:hover:not(:disabled) {
           background-color: var(
-            --ct-theme-color-surface-hover,
-            var(--ct-color-gray-200, #e5e7eb)
+            --ct-button-color-surface-hover,
+            var(--ct-colors-gray-200, #e5e7eb)
           );
           border-color: var(
-            --ct-theme-color-surface-hover,
-            var(--ct-color-gray-200, #e5e7eb)
+            --ct-button-color-surface-hover,
+            var(--ct-colors-gray-200, #e5e7eb)
           );
         }
 
         .button.ghost {
           color: var(
-            --ct-theme-color-text-muted,
-            var(--ct-color-gray-500, #6b7280)
+            --ct-button-color-text-muted,
+            var(--ct-colors-gray-500, #6b7280)
           );
           background-color: transparent;
           border: none;
@@ -220,10 +280,10 @@ export class CTButton extends BaseElement {
         }
 
         .button.ghost:hover:not(:disabled) {
-          color: var(--ct-theme-color-text, var(--ct-color-gray-700, #374151));
+          color: var(--ct-button-color-text, var(--ct-colors-gray-700, #374151));
           background-color: var(
-            --ct-theme-color-surface-hover,
-            var(--ct-color-gray-100, #f3f4f6)
+            --ct-button-color-surface-hover,
+            var(--ct-colors-gray-100, #f3f4f6)
           );
         }
 
@@ -231,13 +291,16 @@ export class CTButton extends BaseElement {
           width: 1.5rem;
           height: 1.5rem;
           border-radius: var(
-            --ct-theme-border-radius,
+            --ct-button-border-radius,
             var(--ct-border-radius-sm, 0.25rem)
           );
         }
 
         .button.link {
-          color: var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
+          color: var(
+            --ct-button-color-primary,
+            var(--ct-colors-primary-500, #3b82f6)
+          );
           text-underline-offset: 4px;
         }
 
@@ -247,14 +310,14 @@ export class CTButton extends BaseElement {
 
         .button.pill {
           background: var(
-            --ct-theme-color-surface,
-            var(--ct-color-gray-100, #f3f4f6)
+            --ct-button-color-surface,
+            var(--ct-colors-gray-100, #f3f4f6)
           );
-          color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          color: var(--ct-button-color-text, var(--ct-colors-gray-900, #111827));
           border: 1px solid
-            var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+            var(--ct-button-color-border, var(--ct-colors-gray-300, #d1d5db));
           border-radius: var(
-            --ct-theme-border-radius-full,
+            --ct-button-border-radius-full,
             var(--ct-radius-full, 9999px)
           );
           height: auto;
@@ -265,8 +328,8 @@ export class CTButton extends BaseElement {
 
         .button.pill:hover:not(:disabled) {
           background: var(
-            --ct-theme-color-surface-hover,
-            var(--ct-color-gray-200, #e5e7eb)
+            --ct-button-color-surface-hover,
+            var(--ct-colors-gray-200, #e5e7eb)
           );
         }
       `,

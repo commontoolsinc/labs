@@ -47,6 +47,7 @@ export class CTSeparator extends BaseElement {
     :host {
       display: block;
       box-sizing: border-box;
+      --ct-separator-color-border: var(--border, hsl(0, 0%, 89%));
     }
 
     *,
@@ -56,7 +57,7 @@ export class CTSeparator extends BaseElement {
     }
 
     .separator {
-      background-color: var(--border, hsl(0, 0%, 89%));
+      background-color: var(--ct-separator-color-border, hsl(0, 0%, 89%));
       flex-shrink: 0;
     }
 

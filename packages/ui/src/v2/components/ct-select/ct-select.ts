@@ -67,6 +67,17 @@ export class CTSelect extends BaseElement {
         display: inline-block;
         width: 100%;
         box-sizing: border-box;
+        --ct-select-color-text: var(--ct-theme-color-text, #111827);
+        --ct-select-color-background: var(--ct-theme-color-background, #ffffff);
+        --ct-select-color-border: var(--ct-theme-color-border, #e5e7eb);
+        --ct-select-color-primary: var(--ct-theme-color-primary, #3b82f6);
+        --ct-select-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+        --ct-select-border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        --ct-select-animation-duration: var(--ct-theme-animation-duration, 150ms);
+        --ct-select-font-family: var(--ct-theme-font-family, inherit);
       }
 
       select {
@@ -75,16 +86,16 @@ export class CTSelect extends BaseElement {
         padding: 0.5rem 0.75rem;
         font-size: 0.875rem;
         line-height: 1.25rem;
-        color: var(--ct-theme-color-text, #111827);
-        background-color: var(--ct-theme-color-background, #ffffff);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        color: var(--ct-select-color-text, #111827);
+        background-color: var(--ct-select-color-background, #ffffff);
+        border: 1px solid var(--ct-select-color-border, #e5e7eb);
         border-radius: var(
-          --ct-theme-border-radius,
+          --ct-select-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        transition: all var(--ct-theme-animation-duration, 150ms)
+        transition: all var(--ct-select-animation-duration, 150ms)
           var(--ct-transition-timing-ease);
-        font-family: var(--ct-theme-font-family, inherit);
+        font-family: var(--ct-select-font-family, inherit);
         appearance: none;
         -moz-appearance: none;
         background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' xmlns='http://www.w3.org/2000/svg' fill='%23666666'%3E%3Cpath d='M6 8 0 0h12L6 8Z'/%3E%3C/svg%3E");
@@ -97,20 +108,20 @@ export class CTSelect extends BaseElement {
       select:disabled {
         cursor: not-allowed;
         opacity: 0.5;
-        background-color: var(--ct-theme-color-surface, #f1f5f9);
+        background-color: var(--ct-select-color-surface, #f1f5f9);
       }
 
       /* Focus */
       select:focus {
         outline: none;
-        border-color: var(--ct-theme-color-primary, #3b82f6);
+        border-color: var(--ct-select-color-primary, #3b82f6);
         box-shadow: 0 0 0 3px
-          var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+          var(--ct-select-color-primary, rgba(59, 130, 246, 0.15));
         }
 
         /* Hover */
         select:hover:not(:disabled):not(:focus) {
-          border-color: var(--ct-theme-color-border, #d1d5db);
+          border-color: var(--ct-select-color-border, #d1d5db);
         }
 
         /* Arrow removed on multi */

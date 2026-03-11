@@ -24,6 +24,8 @@ export class CTLabel extends BaseElement {
     :host {
       display: inline-block;
       box-sizing: border-box;
+      --ct-label-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --ct-label-color-required: var(--ct-theme-color-error, hsl(0, 100%, 50%));
     }
 
     *,
@@ -39,7 +41,7 @@ export class CTLabel extends BaseElement {
       font-size: 0.875rem;
       font-weight: 500;
       line-height: 1.25rem;
-      color: var(--foreground, hsl(0, 0%, 9%));
+      color: var(--ct-label-color-text, hsl(0, 0%, 9%));
       cursor: pointer;
       user-select: none;
     }
@@ -50,7 +52,7 @@ export class CTLabel extends BaseElement {
     }
 
     .required-indicator {
-      color: var(--destructive, hsl(0, 100%, 50%));
+      color: var(--ct-label-color-required, hsl(0, 100%, 50%));
       font-weight: 600;
       line-height: 1;
       margin-left: 0.125rem;

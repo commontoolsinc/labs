@@ -28,6 +28,16 @@ export class CTCard extends BaseElement {
     :host {
       display: block;
       box-sizing: border-box;
+      --ct-card-border-radius: var(--ct-theme-border-radius, 0.5rem);
+      --ct-card-animation-duration: var(--ct-theme-animation-duration, 150ms);
+      --ct-card-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
+      --ct-card-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+      --ct-card-color-border: var(--border, hsl(0, 0%, 89%));
+      --ct-card-color-surface: var(--card, hsl(0, 0%, 100%));
+      --ct-card-color-text: var(--card-foreground, hsl(0, 0%, 9%));
+      --ct-card-color-hover-surface: var(--accent, hsl(0, 0%, 96%));
+      --ct-card-color-focus-ring: var(--ring, hsl(212, 100%, 47%));
+      --ct-card-color-muted-text: var(--muted-foreground, hsl(0, 0%, 45%));
     }
 
     *,
@@ -37,12 +47,12 @@ export class CTCard extends BaseElement {
     }
 
     .card {
-      border-radius: var(--ct-theme-border-radius, 0.5rem);
-      border: 1px solid var(--border, hsl(0, 0%, 89%));
-      background-color: var(--card, hsl(0, 0%, 100%));
-      color: var(--card-foreground, hsl(0, 0%, 9%));
+      border-radius: var(--ct-card-border-radius, 0.5rem);
+      border: 1px solid var(--ct-card-color-border, hsl(0, 0%, 89%));
+      background-color: var(--ct-card-color-surface, hsl(0, 0%, 100%));
+      color: var(--ct-card-color-text, hsl(0, 0%, 9%));
       overflow: hidden;
-      transition: all var(--ct-theme-animation-duration, 150ms)
+      transition: all var(--ct-card-animation-duration, 150ms)
         cubic-bezier(0.4, 0, 0.2, 1);
       }
 
@@ -51,7 +61,7 @@ export class CTCard extends BaseElement {
       }
 
       .card[tabindex="0"]:hover {
-        background-color: var(--accent, hsl(0, 0%, 96%));
+        background-color: var(--ct-card-color-hover-surface, hsl(0, 0%, 96%));
         transform: translateY(-1px);
         box-shadow:
           0 4px 6px -1px rgba(0, 0, 0, 0.1),
@@ -59,7 +69,7 @@ export class CTCard extends BaseElement {
         }
 
         .card[tabindex="0"]:focus-visible {
-          outline: 2px solid var(--ring, hsl(212, 100%, 47%));
+          outline: 2px solid var(--ct-card-color-focus-ring, hsl(212, 100%, 47%));
           outline-offset: 2px;
         }
 
@@ -69,13 +79,13 @@ export class CTCard extends BaseElement {
 
         /* Header section */
         .card-header {
-          padding: var(--ct-theme-spacing-loose, 1rem);
+          padding: var(--ct-card-spacing-loose, 1rem);
           padding-bottom: 0;
         }
 
         /* When header is the only section, add bottom padding */
         .card-header:not(.empty):has(+ .card-content.empty) {
-          padding-bottom: var(--ct-theme-spacing-loose, 1rem);
+          padding-bottom: var(--ct-card-spacing-loose, 1rem);
         }
 
         /* Hide header if empty (controlled by JS via .empty class) */
@@ -89,7 +99,7 @@ export class CTCard extends BaseElement {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: var(--ct-theme-spacing-loose, 1rem);
+          gap: var(--ct-card-spacing-loose, 1rem);
         }
 
         /* Hide title wrapper if empty (controlled by JS via .empty class) */
@@ -110,13 +120,13 @@ export class CTCard extends BaseElement {
         ::slotted([slot="description"]) {
           font-size: 0.875rem;
           line-height: 1.25rem;
-          color: var(--muted-foreground, hsl(0, 0%, 45%));
-          margin-top: var(--ct-theme-spacing-tight, 0.25rem);
+          color: var(--ct-card-color-muted-text, hsl(0, 0%, 45%));
+          margin-top: var(--ct-card-spacing-tight, 0.25rem);
         }
 
         /* Content section */
         .card-content {
-          padding: var(--ct-theme-spacing-loose, 1rem);
+          padding: var(--ct-card-spacing-loose, 1rem);
         }
 
         /* Hide content if empty (controlled by JS via .empty class) */
@@ -127,7 +137,7 @@ export class CTCard extends BaseElement {
 
         /* Footer section */
         .card-footer {
-          padding: var(--ct-theme-spacing-loose, 1rem);
+          padding: var(--ct-card-spacing-loose, 1rem);
           padding-top: 0;
         }
 
@@ -139,11 +149,11 @@ export class CTCard extends BaseElement {
 
         /* Adjust spacing when sections are used together */
         .card-header:not(:empty) + .card-content:not(:empty) {
-          padding-top: var(--ct-theme-spacing-loose, 1rem);
+          padding-top: var(--ct-card-spacing-loose, 1rem);
         }
 
         .card-content:not(:empty) + .card-footer:not(:empty) {
-          padding-top: var(--ct-theme-spacing-loose, 1rem);
+          padding-top: var(--ct-card-spacing-loose, 1rem);
         }
       `;
 
