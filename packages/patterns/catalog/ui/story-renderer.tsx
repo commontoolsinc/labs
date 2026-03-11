@@ -17,7 +17,6 @@ import VScrollStory from "../stories/ct-vscroll-story.tsx";
 import HScrollStory from "../stories/ct-hscroll-story.tsx";
 import TextareaStory from "../stories/ct-textarea-story.tsx";
 import MessageInputStory from "../stories/ct-message-input-story.tsx";
-import FabStory from "../stories/ct-fab-story.tsx";
 import ToolbarStory from "../stories/ct-toolbar-story.tsx";
 import HeadingStory from "../stories/ct-heading-story.tsx";
 import LabelStory from "../stories/ct-label-story.tsx";
@@ -78,8 +77,6 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TextareaStory({});
         case "message-input":
           return MessageInputStory({});
-        case "fab":
-          return FabStory({});
         case "toolbar":
           return ToolbarStory({});
         case "heading":

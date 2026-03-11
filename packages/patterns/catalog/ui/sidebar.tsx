@@ -37,6 +37,10 @@ const selectItem = handler<
 });
 
 export default pattern<SidebarInput, SidebarOutput>(
+  // NOTE: categories prop is intentionally unused. Sidebar items are hardcoded
+  // because passing dynamic items as sub-pattern props makes `id` a reactive
+  // cell, which breaks handler bindings (selected.set(id) sets a cell ref, not
+  // the string value).
   ({ selected, categories: _categories }) => {
     const current = computed(() => selected.get());
 
@@ -207,21 +211,6 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "message-input", selected })}
             >
               Message Input
-            </div>
-            <div
-              style={{
-                padding: "4px 12px",
-                margin: "1px 8px",
-                borderRadius: "4px",
-                fontSize: "13px",
-                color: current === "fab" ? "#1ea7fd" : "#2e3438",
-                backgroundColor: current === "fab" ? "#e8f4fd" : "transparent",
-                fontWeight: current === "fab" ? "600" : "400",
-                cursor: "pointer",
-              }}
-              onClick={selectItem({ id: "fab", selected })}
-            >
-              FAB
             </div>
           </div>
 

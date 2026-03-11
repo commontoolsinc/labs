@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 import { Controls, SwitchControl } from "../ui/controls.tsx";
 
@@ -14,6 +14,7 @@ interface SwitchStoryOutput {
 export default pattern<SwitchStoryInput, SwitchStoryOutput>(() => {
   const checked = Writable.of(false);
   const disabled = Writable.of(false);
+  const statusText = computed(() => (checked.get() ? "On" : "Off"));
 
   return {
     [NAME]: "ct-switch Story",
@@ -29,7 +30,7 @@ export default pattern<SwitchStoryInput, SwitchStoryOutput>(() => {
         >
           <ct-switch $checked={checked} disabled={disabled} />
           <span style={{ fontSize: "0.875rem", color: "#6b7280" }}>
-            {checked ? "On" : "Off"}
+            {statusText}
           </span>
         </div>
       </div>

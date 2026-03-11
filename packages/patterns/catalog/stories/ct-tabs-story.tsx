@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commontools";
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 // deno-lint-ignore no-empty-interface
 interface TabsStoryInput {}
@@ -10,6 +10,8 @@ interface TabsStoryOutput {
 }
 
 export default pattern<TabsStoryInput, TabsStoryOutput>(() => {
+  const activeTab = Writable.of("one");
+
   return {
     [NAME]: "ct-tabs Story",
     [UI]: (
@@ -19,7 +21,7 @@ export default pattern<TabsStoryInput, TabsStoryOutput>(() => {
           maxWidth: "400px",
         }}
       >
-        <ct-tabs value="one">
+        <ct-tabs $value={activeTab}>
           <ct-tab-list>
             <ct-tab value="one">Tab One</ct-tab>
             <ct-tab value="two">Tab Two</ct-tab>
