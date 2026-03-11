@@ -367,7 +367,34 @@ function factoryFromPattern<T, R>(
     return outputs;
   }, pattern) satisfies PatternFactory<T, R>;
 
+  // Track this pattern so exportsCallback can assign .program to it,
+  // even if it's an inline sub-pattern that isn't exported.
+  createdPatterns?.add(patternFactory);
+
   return patternFactory;
+}
+
+// Track all patterns created during a single evaluation pass. `factory.ts`
+// sets/clears this so `exportsCallback` can assign `.program` to inline
+// (non-exported) sub-patterns that would otherwise lack stored source.
+let createdPatterns: Set<Pattern> | undefined;
+// Patterns from the most recently completed evaluation, available for
+// pattern-manager to register sub-patterns after compilation. CT-1340
+let lastCreatedPatterns: Set<Pattern> | undefined;
+
+export function setCreatedPatternsTracker(set: Set<Pattern> | undefined): void {
+  createdPatterns = set;
+}
+
+export function finalizeCreatedPatterns(): void {
+  lastCreatedPatterns = createdPatterns;
+  createdPatterns = undefined;
+}
+
+export function consumeCreatedPatterns(): Set<Pattern> | undefined {
+  const result = lastCreatedPatterns;
+  lastCreatedPatterns = undefined;
+  return result;
 }
 
 const frames: Frame[] = [];

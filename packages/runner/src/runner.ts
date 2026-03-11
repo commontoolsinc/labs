@@ -1598,11 +1598,16 @@ export class Runner {
                   resultPatternAsString,
                 );
 
+                // CT-1340: Handler result patterns are created at runtime via
+                // patternFromFrame() and never stored. Skip the $TYPE watcher
+                // — the parent action manages their lifecycle (recreates on
+                // each re-evaluation), matching nested pattern behavior (L1895).
                 this.run(
                   tx,
                   resultPattern,
                   undefined,
                   resultCell,
+                  { doNotUpdateOnPatternChange: true },
                 );
                 addCancel(() => this.stop(resultCell));
 

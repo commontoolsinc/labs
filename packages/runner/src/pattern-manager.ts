@@ -6,6 +6,7 @@ import {
   Schema,
   unsafe_originalPattern,
 } from "./builder/types.ts";
+import { consumeCreatedPatterns } from "./builder/pattern.ts";
 import { Cell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
@@ -403,7 +404,24 @@ export class PatternManager {
     const source = patternMeta.program
       ? (patternMeta.program as RuntimeProgram)
       : patternMeta.src!;
-    const pattern = await this.compilePattern(source);
+    const defaultExport = await this.compilePattern(source);
+
+    // CT-1340: Compilation re-evaluates the whole file, creating all patterns
+    // (including inline sub-patterns). Register them all so they can be found
+    // by ID. The requested patternId may be a sub-pattern, not the default export.
+    const createdPatterns = consumeCreatedPatterns();
+    if (createdPatterns) {
+      for (const p of createdPatterns) {
+        const id = this.registerPattern(p);
+        if (id !== patternId && !this.patternMetaCellById.has(id)) {
+          // Also save sub-patterns to storage for future lookups
+          this.savePattern({ patternId: id, space });
+        }
+      }
+    }
+
+    // Prefer the exact match from patternIdMap (may be a sub-pattern registered above)
+    const pattern = this.patternIdMap.get(patternId) ?? defaultExport;
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());

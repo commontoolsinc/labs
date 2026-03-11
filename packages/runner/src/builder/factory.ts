@@ -3,6 +3,7 @@
  */
 import type {
   BuilderFunctionsAndConstants,
+  Pattern,
   ToSchemaFunction,
 } from "./types.ts";
 import {
@@ -24,7 +25,11 @@ import {
   WebhookConfigSchema,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { pattern } from "./pattern.ts";
+import {
+  finalizeCreatedPatterns,
+  pattern,
+  setCreatedPatternsTracker,
+} from "./pattern.ts";
 import { action, byRef, computed, derive, handler, lift } from "./module.ts";
 import {
   compileAndRun,
@@ -66,14 +71,37 @@ export const createBuilder = (): {
   commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
+  // Track all patterns created during evaluation so we can assign .program
+  // to inline sub-patterns (not just exports). CT-1340
+  const allCreatedPatterns = new Set<Pattern>();
+  setCreatedPatternsTracker(allCreatedPatterns);
+
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
+    // Stop tracking new patterns and move to lastCreatedPatterns so
+    // pattern-manager can consume them after compilation. CT-1340
+    finalizeCreatedPatterns();
+
     for (const [value, program] of exports) {
       if (isPattern(value)) {
         // This will associate the program with the pattern
         value.program = program;
+      }
+    }
+
+    // For inline sub-patterns that weren't exported: find any program from
+    // the exports (all share the same source files) and assign it.
+    // The sub-pattern will be re-instantiated when the parent runs, so
+    // the specific mainExport doesn't matter — what matters is that the
+    // source files are stored so the pattern can be rehydrated.
+    const anyProgram = exports.values().next().value;
+    if (anyProgram) {
+      for (const p of allCreatedPatterns) {
+        if (!p.program) {
+          p.program = anyProgram;
+        }
       }
     }
   };
