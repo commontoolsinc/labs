@@ -4,6 +4,10 @@ interface Point {
     x: number;
     y: number;
 }
+// FIXTURE: derive-destructured-param
+// Verifies: a captured cell works alongside destructuring inside the callback body
+//   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
+// Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
 export default pattern(() => {
     const point = Writable.of({ x: 10, y: 20 } as Point, {
         type: "object",

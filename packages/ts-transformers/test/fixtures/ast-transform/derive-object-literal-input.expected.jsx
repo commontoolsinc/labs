@@ -12,6 +12,12 @@ const acceptedCount = cell<number>(0, {
 const rejectedCount = cell<number>(0, {
     type: "number"
 } as const satisfies __ctHelpers.JSONSchema);
+// FIXTURE: derive-object-literal-input
+// Verifies: cell(), lift(), and derive() all get schemas injected from type annotations
+//   cell<string>("initial")             → cell<string>("initial", { type: "string" })
+//   lift((value: string) => value)      → lift(inputSchema, outputSchema, fn)
+//   derive({ stage, ... }, fn)          → derive(inputSchema, outputSchema, { stage, ... }, fn)
+// Context: No export default; first export-relevant statement is the cells/lifts/derive at top level
 const normalizedStage = lift({
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema, {

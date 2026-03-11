@@ -6,6 +6,12 @@ interface Item {
   active: boolean;
 }
 
+// FIXTURE: map-jsx-map-filter-chain
+// Verifies: chained .map().filter().map() on reactive array all transform
+//   .map(fn)    → .mapWithPattern(pattern(...), {})
+//   .filter(fn) → .filterWithPattern(pattern(...), {})
+//   .map(fn)    → .mapWithPattern(pattern(...), {})
+// Context: Three-step chain; no outer captures in any callback
 export default pattern<{ list: Item[] }>(({ list }) => {
   return {
     [UI]: (

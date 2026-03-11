@@ -1,5 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
+// FIXTURE: pattern-with-cells
+// Verifies: pattern input property access is transformed to .key() and arithmetic to derive()
+//   cell.value       → cell.key("value")
+//   cell.value + 1   → derive({value: asOpaque}, ({cell}) => cell.value + 1)
+//   cell.value * 2   → derive({value: asOpaque}, ({cell}) => cell.value * 2)
 export default pattern((cell) => {
     return {
         [UI]: (<div>

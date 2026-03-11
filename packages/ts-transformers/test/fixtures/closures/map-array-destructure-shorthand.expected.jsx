@@ -7,6 +7,11 @@ type ItemTuple = [
 interface State {
     items: ItemTuple[];
 }
+// FIXTURE: map-array-destructure-shorthand
+// Verifies: array-destructured map params are not incorrectly captured as shorthand properties
+//   .map(([item]) => ...) → .mapWithPattern(pattern(...), {}) with key("element", "0")
+//   .map(([item, count], index) → key("element", "0"), key("element", "1"), key("index")
+// Context: Shorthand JSX usage like {item} must not cause array-destructured bindings to be captured
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     return {

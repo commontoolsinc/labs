@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-conditional-expression
+// Verifies: captures used in both branches of a ternary are extracted
+//   derive(value, fn) → derive(schema, schema, { value, threshold, multiplier }, fn)
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"

@@ -5,6 +5,10 @@ interface Problem {
     discount: number;
     tax: number;
 }
+// FIXTURE: complex-expressions
+// Verifies: multi-variable arithmetic in JSX is wrapped in derive() with captured refs
+//   {price - discount}             → derive({price, discount}, (...) => price - discount)
+//   {(price - discount) * (1+tax)} → derive({price, discount, tax}, (...) => ...)
 export default pattern((__ct_pattern_input) => {
     const price = __ct_pattern_input.key("price");
     const discount = __ct_pattern_input.key("discount");

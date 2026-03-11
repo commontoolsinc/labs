@@ -9,6 +9,11 @@ interface State {
     name: string;
     float: string;
 }
+// FIXTURE: jsx-function-calls
+// Verifies: function/method calls with reactive args in JSX are wrapped in derive()
+//   Math.max(state.a, state.b)     → derive({a, b}, ({state}) => Math.max(state.a, state.b))
+//   state.name.toUpperCase()       → derive({name}, ...)
+//   parseInt(state.float)          → derive({float}, ...)
 export default pattern((state) => {
     return {
         [UI]: (<div>

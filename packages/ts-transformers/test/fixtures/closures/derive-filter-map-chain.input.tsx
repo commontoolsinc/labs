@@ -6,6 +6,11 @@ interface Preference {
   preference: "liked" | "disliked";
 }
 
+// FIXTURE: derive-filter-map-chain
+// Verifies: .filter() and .map() inside a derive callback are NOT transformed to reactive versions
+//   .filter(fn) stays as .filter(fn) (not .filterWithPattern)
+//   .map(fn) stays as .map(fn) (not .mapWithPattern)
+// Context: inside derive, `prefs` is unwrapped to a plain array; plain array methods should not be rewritten
 export default pattern<{ preferences: Preference[]; foodDescription: string }>((state) => {
   // Using object input form for derive - exactly like the issue describes
   // This matches: derive({ foodDescription, preferences }, ({ foodDescription: food, preferences: prefs }) => ...)

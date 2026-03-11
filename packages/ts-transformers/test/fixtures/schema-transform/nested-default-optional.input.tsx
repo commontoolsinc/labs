@@ -28,6 +28,13 @@ const increment = handler(
   },
 );
 
+// FIXTURE: nested-default-optional
+// Verifies: nested optional interfaces with Default<> generate schemas with $ref/$defs and "default" values
+//   Default<NestedOptionalState, {}> → schema property with "default": {}
+//   Optional nested fields → $ref without "required" entries
+//   handler() → injects event/context schemas with asCell annotations
+//   pattern<Args>() → generates input schema, output schema (with asOpaque/asStream)
+// Context: deeply nested optional types (OptionalBranch inside OptionalNested inside NestedOptionalState)
 export default pattern<NestedOptionalArgs>(
   ({ state }) => {
     return {

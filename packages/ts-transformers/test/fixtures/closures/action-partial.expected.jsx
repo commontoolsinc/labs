@@ -6,6 +6,10 @@ interface BaseState {
 }
 // Partial<BaseState> should make both 'a' and 'b' optional in the schema
 type PartState = Partial<BaseState>;
+// FIXTURE: action-partial
+// Verifies: Partial<BaseState> produces optional (anyOf undefined|type) capture schemas in handlers
+//   action(() => console.log(a)) → handler(false, { a: { anyOf: [undefined, string] } }, ...)({ a })
+// Context: Partial<> makes properties optional; capture schemas reflect this with anyOf union
 export default pattern((__ct_pattern_input) => {
     const a = __ct_pattern_input.key("a");
     const b = __ct_pattern_input.key("b");

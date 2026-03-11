@@ -17,6 +17,11 @@ interface State {
   items: Item[];
 }
 
+// FIXTURE: derive-inside-map-with-method-chain
+// Verifies: derive nested inside .map() correctly transforms outer .map() but leaves inner chains alone
+//   state.items.map(fn) → state.items.mapWithPattern(pattern(...))
+//   inner .filter().map() inside derive callback → NOT transformed (plain array)
+// Context: derive is used inline in JSX within a mapWithPattern callback
 export default pattern<State>((state) => {
   return {
     [UI]: (

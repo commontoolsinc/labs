@@ -19,6 +19,11 @@ interface Item {
   value: string;
 }
 
+// FIXTURE: derive-map-input-no-captures
+// Verifies: derive with no captures is NOT closure-transformed, but .map() input is still rewritten
+//   items.map(fn) → items.mapWithPattern(pattern(...))
+//   derive(mappedInput, fn) → derive(schema, schema, mappedInput, fn) (no capture extraction)
+// Context: tests interaction between map transform and derive schema injection on a synthetic node
 export default pattern<{ items: Cell<Item[]> }>(({ items }) => {
   // items.map() will be transformed to items.mapWithPattern()
   // derive has NO captures, so it won't be transformed by ClosureTransformer

@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
+// FIXTURE: collections-array-of-objects
+// Verifies: schema injection generates array-of-objects schema with typed items and required keys
+//   cell([{id: 1, name: "Alice", ...}]) → cell([...], { type: "array", items: { type: "object", properties: {...}, required: [...] } })
 export default function TestCollectionsArrayOfObjects() {
     // Array of objects
     const _arrayOfObjects = cell([

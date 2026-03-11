@@ -59,6 +59,10 @@ interface Input {
   messages: Message[];
 }
 
+// FIXTURE: computed-var-then-map
+// Verifies: KNOWN BUG — .map() after || [] fallback via computed variable is NOT transformed
+//   computed(() => msg.reactions || []).map(fn) — the .map() should become mapWithPattern but doesn't
+// Context: Pending fix. The derive result loses OpaqueRef type info, so map-strategy skips it.
 export default pattern<Input>(({ messages }) => {
   return {
     [UI]: (

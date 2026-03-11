@@ -1,5 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
+// FIXTURE: opaque-ref-operations
+// Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in derive() with asCell schema
+//   {count}           → {count}  (bare ref, no transform)
+//   {count.get() + 1} → derive({count: asCell}, ({count}) => count.get() + 1)
+//   {price.get() * 1.1} → derive({price: asCell}, ...)
 export default pattern((_state) => {
     const count = cell(10, {
         type: "number"

@@ -17,6 +17,12 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
+// FIXTURE: handler-object-literal
+// Verifies: handler gets schema from inline param type; handler invocations use state.key()
+//   handler((_, state: State) => ...)          → handler(false, stateSchema, fn)
+//   myHandler({ value: state.value, ... })     → myHandler({ value: state.key("value"), ... })
+//   myHandler(state)                           → myHandler(state) (unchanged)
+// Context: Pattern already has explicit schemas; only handler schema injection and property access transforms apply
 export default pattern((state) => {
     return {
         // Test case 1: Object literal with all properties from state

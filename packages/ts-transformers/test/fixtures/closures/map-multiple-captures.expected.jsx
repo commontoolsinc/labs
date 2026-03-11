@@ -10,6 +10,11 @@ interface State {
     taxRate: number;
 }
 const shippingCost = 5.99;
+// FIXTURE: map-multiple-captures
+// Verifies: .map() on reactive array captures multiple outer variables (state + local)
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
+//   expression → derive() combining element props, state props, and local variable
+// Context: Captures state.discount, state.taxRate, and local const multiplier; module-level shippingCost is not captured
 export default pattern((state) => {
     const multiplier = 2;
     return {

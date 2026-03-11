@@ -11,6 +11,11 @@ interface Assignment {
 // CT-1036: Property access on derived grouped objects with derived keys
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
+// FIXTURE: derived-property-access-with-derived-key
+// Verifies: .map() chains with derived keys and element access are fully transformed
+//   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
+//   groupedByAisle[aisleName].map  → derive({groupedByAisle, aisleName}, ...).mapWithPattern(...)
+// Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     // Create assignments with aisle data

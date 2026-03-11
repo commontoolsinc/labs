@@ -24,6 +24,10 @@ interface State {
   count: Cell<number>;
 }
 
+// FIXTURE: map-handler-reference
+// Verifies: .map() on reactive array is transformed when callback references a module-level handler
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {count: ...}})
+// Context: handler() at module scope is NOT captured; state.count is captured for handler args
 export default pattern<State>((state) => {
   return {
     [UI]: (

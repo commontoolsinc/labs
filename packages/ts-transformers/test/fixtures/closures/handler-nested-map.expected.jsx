@@ -6,6 +6,10 @@ interface State {
     }>;
     multiplier: number;
 }
+// FIXTURE: handler-nested-map
+// Verifies: .map() inside a handler body is NOT transformed to .mapWithPattern()
+//   onClick={() => { state.items.map(...) }) → handler(..., (_, { state }) => { state.items.map(...) })
+// Context: .map() on a plain array inside a handler remains a normal JS .map(), not a reactive transform
 export default pattern((state) => {
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {

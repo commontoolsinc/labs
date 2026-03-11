@@ -12,6 +12,13 @@
  */
 import { computed, ifElse, pattern, UI, Writable } from "commontools";
 
+// FIXTURE: nested-computed-in-ifelse
+// Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()
+//   computed(() => { secondToggle.get(); ... }) → derive({ secondToggle }, ({ secondToggle }) => { secondToggle.get(); ... })
+//   ternary (showOuter ? ... : ...) → ifElse(showOuter, ..., ...)
+// Context: Regression test — .get() inside a computed() that is nested within
+//   an ifElse branch must NOT get an extra derive wrapper, since computed is
+//   already a safe reactive context.
 export default pattern<Record<PropertyKey, never>>(() => {
   const showOuter = Writable.of(false);
   const secondToggle = Writable.of(false);

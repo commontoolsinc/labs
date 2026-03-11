@@ -15,6 +15,11 @@ const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
   },
 );
 
+// FIXTURE: map-capture-cell-param-no-name
+// Verifies: pattern without generic type param still captures destructured bindings correctly
+//   .map(fn) → .mapWithPattern(pattern(...), { items: items })
+//   items capture → params.items (no asOpaque when schema is inferred from annotation)
+// Context: Same as map-capture-cell-param but uses inline type annotation instead of generic
 export default pattern(
   ({ items }: InputSchema) => {
     return {

@@ -9,6 +9,11 @@ interface State {
   count: number;
 }
 
+// FIXTURE: jsx-string-operations
+// Verifies: string concatenation, template literals, and string methods in JSX are wrapped in derive()
+//   state.title + ": " + state.firstName → derive({title, firstName}, ...)
+//   `Welcome, ${state.firstName}!`       → derive({firstName}, ...)
+//   state.firstName.toUpperCase()        → derive({firstName}, ...)
 export default pattern<State>((state) => {
   return {
     [UI]: (

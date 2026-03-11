@@ -5,6 +5,10 @@ interface State {
         0: number;
     }>;
 }
+// FIXTURE: map-destructured-numeric-alias
+// Verifies: numeric property key destructuring in .map() param is lowered to key() with string index
+//   .map(({ 0: first }) => ...) → key("element", "0") assigned to first
+//   .map(fn) → .mapWithPattern(pattern(...), {})
 export default pattern((state) => {
     return {
         [UI]: (<div>

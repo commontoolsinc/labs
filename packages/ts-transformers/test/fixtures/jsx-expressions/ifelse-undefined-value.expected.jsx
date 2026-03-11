@@ -3,6 +3,11 @@ import { computed, fetchData, ifElse, pattern, UI } from "commontools";
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
+// FIXTURE: ifelse-undefined-value
+// Verifies: ifElse with explicit undefined as ifTrue or ifFalse branch is handled correctly
+//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, derive(...), undefined, {result})
+//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, derive(...), {data}, undefined)
+// Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
     const { pending, result } = fetchData({
         url: "/api/data",

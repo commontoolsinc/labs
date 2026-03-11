@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-empty-input-no-params
+// Verifies: zero-parameter callback with empty `{}` input still captures closed-over cells
+//   derive({}, () => ...) → derive(schema, schema, { a, b }, ({ a, b }) => ...)
+// Context: no explicit input param; captures become the sole parameters of the rewritten callback
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"

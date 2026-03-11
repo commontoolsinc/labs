@@ -18,6 +18,11 @@ const removeItem = handler<
   }
 });
 
+// FIXTURE: map-inside-ifelse-with-handler
+// Verifies: .map() inside an ifElse branch is still transformed to mapWithPattern
+//   .map(fn) → .mapWithPattern(pattern(...), {items: ...})
+//   hasItems ternary → ifElse(...)
+// Context: Map nested inside ifElse; handler references both the items array and iterator variable
 export default pattern<{ items: Item[]; hasItems: boolean }>(
   ({ items, hasItems }) => {
     // CT-1035: Map inside ifElse branches should transform to mapWithPattern

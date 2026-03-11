@@ -7,6 +7,11 @@ interface Entry {
 interface Input {
     items: Entry[];
 }
+// FIXTURE: map-symbol-key-access
+// Verifies: .map() on reactive array is transformed when callback uses symbol key access
+//   .map(fn) → .mapWithPattern(pattern(...), {})
+//   item[NAME] → item.key(__ctHelpers.NAME), item[UI] → item.key(__ctHelpers.UI)
+// Context: Symbol-keyed property access (NAME, UI) is lowered to .key() with helper references
 const _p = pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     return items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {

@@ -43,6 +43,11 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
         items.set(currentItems.toSpliced(index, 1));
     }
 });
+// FIXTURE: map-inside-ifelse-with-handler
+// Verifies: .map() inside an ifElse branch is still transformed to mapWithPattern
+//   .map(fn) → .mapWithPattern(pattern(...), {items: ...})
+//   hasItems ternary → ifElse(...)
+// Context: Map nested inside ifElse; handler references both the items array and iterator variable
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     const hasItems = __ct_pattern_input.key("hasItems");

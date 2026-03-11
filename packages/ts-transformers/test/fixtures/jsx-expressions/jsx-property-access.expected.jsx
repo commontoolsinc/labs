@@ -31,6 +31,12 @@ interface State {
     index: number;
     numbers: number[];
 }
+// FIXTURE: jsx-property-access
+// Verifies: nested property access chains in JSX are converted to .key() or wrapped in derive()
+//   state.user.name                → state.key("user", "name")  (simple access, no derive)
+//   state.user.age + 1             → derive({age}, ({state}) => state.user.age + 1)
+//   state.items[state.index]       → derive({items, index}, ...)
+// Context: Covers deep nesting, style bindings, array access, method calls on properties
 export default pattern((state) => {
     return {
         [UI]: (<div>

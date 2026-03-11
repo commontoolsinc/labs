@@ -6,6 +6,10 @@ interface State {
     }>;
     discount: number;
 }
+// FIXTURE: map-single-capture
+// Verifies: .map() on reactive array captures a single outer state property
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {discount: ...}})
+//   item.price * state.discount → derive() combining element and captured state
 export default pattern((state) => {
     return {
         [UI]: (<div>

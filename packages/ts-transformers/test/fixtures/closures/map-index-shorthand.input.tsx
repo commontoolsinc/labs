@@ -10,6 +10,11 @@ interface State {
   items: Item[];
 }
 
+// FIXTURE: map-index-shorthand
+// Verifies: .map() on reactive array is transformed when index param uses shorthand names (i, idx)
+//   .map((item, i) => ...) → .mapWithPattern(pattern(...), {})
+//   .map((item, idx) => ...) → .mapWithPattern(pattern(...), {})
+// Context: Two maps using different shorthand index names; no outer captures
 export default pattern<State>((state) => {
   return {
     [UI]: (

@@ -1,6 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
 // Test that all literal types are widened in closure captures
+// FIXTURE: derive-all-literal-types
+// Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas
+//   derive(value, fn) → derive(schema, schema, { value, numLiteral, floatLiteral, boolLiteral, strLiteral }, fn)
+// Context: each literal type maps to its widened JSON schema type (e.g., 42 → "number", "hello" → "string")
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"

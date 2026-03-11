@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
+// FIXTURE: literal-widen-null-undefined
+// Verifies: null and undefined literals produce their respective type schemas
+//   cell(null) → cell(null, { type: "null" })
+//   cell(undefined) → cell(undefined, { type: "undefined" })
 export default function TestLiteralWidenNullUndefined() {
     const _c1 = cell(null, {
         type: "null"

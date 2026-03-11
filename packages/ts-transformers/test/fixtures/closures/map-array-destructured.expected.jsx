@@ -8,6 +8,11 @@ interface State {
     pizzas: PizzaEntry[];
     scale: number;
 }
+// FIXTURE: map-array-destructured
+// Verifies: array destructuring in .map() is lowered, with and without captured outer state
+//   .map(([date, pizza]) => ...) → .mapWithPattern(pattern(...), {}) with index-based keys
+//   Closing over state.scale → captures { state: { scale: state.key("scale") } }
+// Context: Two map calls — one without captures (empty {}), one with a captured outer variable
 export default pattern((state) => {
     return {
         [UI]: (<div>

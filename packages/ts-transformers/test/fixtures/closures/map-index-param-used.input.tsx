@@ -11,6 +11,11 @@ interface State {
   offset: number;
 }
 
+// FIXTURE: map-index-param-used
+// Verifies: .map() on reactive array is transformed when index param is used with a capture
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {offset: ...}})
+//   index + state.offset → derive() combining index and captured state
+// Context: Both index parameter and state.offset are used in an expression
 export default pattern<State>((state) => {
   return {
     [UI]: (

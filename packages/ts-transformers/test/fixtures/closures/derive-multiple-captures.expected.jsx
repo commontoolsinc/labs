@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-multiple-captures
+// Verifies: two captured cells are both extracted into the derive capture object
+//   derive(value, fn) → derive(schema, schema, { value, multiplier, offset }, fn)
 export default pattern(() => {
     const value = Writable.of(10, {
         type: "number"

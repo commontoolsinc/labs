@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-local-variable
+// Verifies: callback-local variables are not captured, but outer cells are
+//   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)
+// Context: `sum` is a local const inside the callback and must not appear in captures
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"

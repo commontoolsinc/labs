@@ -12,6 +12,11 @@ interface State {
 }
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))
+// FIXTURE: no-double-derive
+// Verifies: user-written derive() calls are NOT double-wrapped in another derive()
+//   derive(items.length, (n) => n + 1) → derive(schema, schema, items.length, (n) => n + 1)
+//   derive(cellRef, (ref) => ref.name) → derive(schema, schema, cellRef, (ref) => ref.name)
+// Context: Negative test -- prevents the transformer from wrapping already-derived expressions
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     const cellRef = __ct_pattern_input.key("cellRef");

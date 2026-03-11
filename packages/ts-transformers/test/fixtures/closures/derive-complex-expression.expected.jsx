@@ -1,5 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
+// FIXTURE: derive-complex-expression
+// Verifies: multiple captured cells in an arithmetic expression are all extracted
+//   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"

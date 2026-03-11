@@ -8,6 +8,11 @@ interface State {
   quantity: number;
 }
 
+// FIXTURE: jsx-arithmetic-operations
+// Verifies: arithmetic expressions with reactive refs in JSX are wrapped in derive()
+//   {state.count + 1}                      → derive({count}, ({state}) => state.count + 1)
+//   {state.price * state.quantity * 1.08}   → derive({price, quantity}, ...)
+//   {state.count * state.count * state.count} → derive({count}, ...)
 export default pattern<State>((state) => {
   return {
     [UI]: (

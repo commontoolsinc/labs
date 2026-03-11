@@ -12,6 +12,13 @@ interface State {
     discount: number;
     taxRate: number;
 }
+// FIXTURE: jsx-complex-mixed
+// Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
+//   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
+//   .map(fn)                 → .mapWithPattern(pattern(...), {captures})
+//   ternary cond ? a : b     → ifElse(derive(cond), a, b)
+//   {state.discount * 100}   → derive({discount}, ...)
+// Context: Comprehensive fixture combining array methods, conditionals, derive, and attributes
 export default pattern((state) => {
     return {
         [UI]: (<div>

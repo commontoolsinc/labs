@@ -1,6 +1,10 @@
 /// <cts-enable />
 import { Writable, pattern } from "commontools";
 
+// FIXTURE: collections-empty
+// Verifies: empty arrays and objects produce valid degenerate schemas
+//   cell([]) → cell([], { type: "array", items: false })
+//   cell({}) → cell({}, { type: "object", properties: {} })
 export default pattern(() => {
   // Empty array
   const _emptyArray = Writable.of<string[]>([]);

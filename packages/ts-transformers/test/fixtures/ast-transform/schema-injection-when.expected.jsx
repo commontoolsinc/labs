@@ -4,6 +4,11 @@ interface State {
     enabled: boolean;
     message: string;
 }
+// FIXTURE: schema-injection-when
+// Verifies: when() gets condition, value, and result schemas injected
+//   when(enabled, message) → when(conditionSchema, valueSchema, resultSchema, enabled, message)
+//   pattern<State>(fn)     → pattern(fn, inputSchema, outputSchema)
+// Context: when(cond, value) returns value if cond is truthy, else cond; result schema is union type
 export default pattern((__ct_pattern_input) => {
     const enabled = __ct_pattern_input.key("enabled");
     const message = __ct_pattern_input.key("message");

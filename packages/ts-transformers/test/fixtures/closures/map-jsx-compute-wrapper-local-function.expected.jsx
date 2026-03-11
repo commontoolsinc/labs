@@ -1,5 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
+// FIXTURE: map-jsx-compute-wrapper-local-function
+// Verifies: .map() inside a non-reactive forEach is NOT transformed to mapWithPattern
+//   forEach(() => list.map(...)) → derive() wrapping the entire forEach expression
+// Context: Local function and reactive list inside forEach; whole block becomes a derive, not mapWithPattern
 export default pattern((__ct_pattern_input) => {
     const list = __ct_pattern_input.key("list");
     return {

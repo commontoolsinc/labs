@@ -44,6 +44,11 @@ const testHandler = handler(false as const satisfies __ctHelpers.JSONSchema, fal
     } as const satisfies __ctHelpers.JSONSchema);
     return _inHandler;
 });
+// FIXTURE: context-variations
+// Verifies: schema injection works in all code contexts and pattern/handler get their own schemas
+//   cell(N) → cell(N, { type: "number" }) in top-level, function, arrow, class method, pattern, handler
+//   pattern(() => ...) → pattern(() => ..., inputSchema, outputSchema)
+//   handler(() => ...) → handler(inputSchema, outputSchema, () => ...)
 export default function TestContextVariations() {
     return {
         topLevel: _topLevel,

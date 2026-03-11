@@ -4,6 +4,11 @@ interface TodoItem {
     title: string;
     done: boolean;
 }
+// FIXTURE: opaque-ref-map
+// Verifies: .map() on typed arrays is transformed to .mapWithPattern() with generated schemas
+//   items.map((item) => item.title) → items.mapWithPattern(pattern(...), {})
+//   items.map((item, index) => ({...})) → items.mapWithPattern(pattern(...), {}) with index param
+// Context: two .map() calls -- one returning a scalar, one returning an object with index
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     // Map on opaque ref arrays should be transformed to mapWithPattern

@@ -6,6 +6,11 @@ interface State {
   tagCounts: Record<string, number>;
 }
 
+// FIXTURE: map-element-access-opaque
+// Verifies: .map() on reactive array is transformed when callback uses bracket access on a captured opaque object
+//   .map(fn) → .mapWithPattern(pattern(...), {state: {tagCounts: ...}})
+//   state.tagCounts[tag] → derive() with opaque schema for dynamic key access
+// Context: Captures state.tagCounts for bracket-notation element access inside map
 export default pattern<State>((state) => {
   return {
     [UI]: (

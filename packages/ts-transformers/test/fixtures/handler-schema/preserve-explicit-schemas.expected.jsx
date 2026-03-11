@@ -18,6 +18,10 @@ const stateSchema = {
 const logHandler = handler(eventSchema, stateSchema, (event, state) => {
     state.log.push(event.message);
 });
+// FIXTURE: preserve-explicit-schemas
+// Verifies: handler with user-provided schema literals passes them through unchanged (no type-based generation)
+//   handler(eventSchema, stateSchema, fn) → handler(eventSchema, stateSchema, fn) (no transformation)
+// Context: schemas are pre-defined as const objects; transformer must not replace them
 export { logHandler };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

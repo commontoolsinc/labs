@@ -15,4 +15,8 @@ interface LinkedData {
 }
 
 const linkedDataSchema = toSchema<LinkedData>();
+// FIXTURE: special-property-names
+// Verifies: toSchema handles property names that are JSON-LD keywords, kebab-case, or JS reserved words
+//   toSchema<LinkedData>() → schema with "@link", "kebab-case", "with space", "default", "enum", etc.
+// Context: property names requiring quoting; ensures no mangling of special characters
 export { linkedDataSchema };

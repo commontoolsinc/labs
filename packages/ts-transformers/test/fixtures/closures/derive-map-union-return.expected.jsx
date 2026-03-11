@@ -12,6 +12,11 @@ interface Message {
 interface State {
     messages: Message[];
 }
+// FIXTURE: derive-map-union-return
+// Verifies: derive returning a union type (string | null) with nested .map() infers the correct output schema
+//   derive(state.messages, fn) → derive(schema, anyOf[string, null], state.key("messages"), fn)
+//   inner .map() inside derive callback → NOT transformed (plain array after unwrap)
+// Context: previously caused schema to fall back to `true` when the callback became synthetic
 export default pattern((state) => {
     // This derive callback contains a nested map and returns string | null
     // The callback becomes synthetic during transformation, which previously

@@ -6,6 +6,12 @@ interface State {
   threshold: number;
 }
 
+// FIXTURE: map-capture-mixed-reactivity
+// Verifies: captures of different reactivity kinds are annotated distinctly in the schema
+//   label (plain string) → params.label (type: "string", accessed via .params)
+//   limit (cell) → params.limit (asCell: true)
+//   derived (state.threshold) → params.derived (asOpaque: true)
+// Context: Three capture kinds — plain value, cell, and state-derived — in one map callback
 export default pattern<State>((state) => {
   const label = "Result";
   const limit = cell(100);
