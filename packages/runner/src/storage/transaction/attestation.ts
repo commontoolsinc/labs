@@ -136,8 +136,8 @@ const setAtPath = (
     if (rest.length === 0) {
       if (root[index] === value) return { ok: root }; // noop
       const newArray = sparseArrayCopy(root);
-      // We delete elements from an array by setting the array
-      // to another array without those elements
+      // We just set the values here. If you need to delete elements from an
+      // array, set the array to another array without those elements.
       newArray[index] = value;
       return { ok: newArray };
     }
@@ -166,7 +166,8 @@ const setAtPath = (
   // Terminal case
   if (rest.length === 0) {
     if (obj[key] === value) return { ok: root }; // noop
-    // We delete keys by setting an object that lacks those keys
+    // We just set the values here. If you need to delete keys from an object,
+    // set the object to another object without those keys.
     return { ok: { ...obj, [key]: value } };
   }
 
