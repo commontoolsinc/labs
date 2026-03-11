@@ -1516,6 +1516,10 @@ export class Runner {
               } catch (_e) {
                 queryResult = "(Can't serialize to JSON)";
               }
+              console.warn(
+                `[derive] schema mismatch — skipping action:${name}`,
+                { schema: module.argumentSchema, queryResult },
+              );
               logger.flag(
                 "action invalid input",
                 `action:${name}`,
