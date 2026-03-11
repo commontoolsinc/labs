@@ -1,0 +1,632 @@
+import { Database } from "@db/sqlite";
+import { refer } from "../reference.ts";
+import type { JSONValue } from "../interface.ts";
+import {
+  DEFAULT_BRANCH,
+  EMPTY_VALUE_REF,
+  type BranchName,
+  type ClientCommit,
+  type EntityDocument,
+  type EntityId,
+  type Operation,
+  type Reference,
+  type SessionId,
+} from "../v2.ts";
+
+const PRAGMAS = `
+  PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
+  PRAGMA busy_timeout = 5000;
+  PRAGMA cache_size = -64000;
+  PRAGMA temp_store = MEMORY;
+  PRAGMA mmap_size = 268435456;
+  PRAGMA foreign_keys = ON;
+`;
+
+const NEW_DB_PRAGMAS = `
+  PRAGMA page_size = 32768;
+`;
+
+const INIT = `
+BEGIN TRANSACTION;
+
+CREATE TABLE IF NOT EXISTS value (
+  hash  TEXT NOT NULL PRIMARY KEY,
+  data  JSON
+);
+INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
+
+CREATE TABLE IF NOT EXISTS authorization (
+  ref            TEXT    NOT NULL PRIMARY KEY,
+  authorization  JSON    NOT NULL,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invocation (
+  ref         TEXT    NOT NULL PRIMARY KEY,
+  iss         TEXT    NOT NULL,
+  aud         TEXT,
+  cmd         TEXT    NOT NULL,
+  sub         TEXT    NOT NULL,
+  invocation  JSON    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invocation_sub ON invocation (sub);
+CREATE INDEX IF NOT EXISTS idx_invocation_cmd ON invocation (cmd);
+CREATE INDEX IF NOT EXISTS idx_invocation_iss ON invocation (iss);
+
+CREATE TABLE IF NOT EXISTS "commit" (
+  seq                INTEGER NOT NULL PRIMARY KEY,
+  hash               TEXT    NOT NULL,
+  branch             TEXT    NOT NULL DEFAULT '',
+  session_id         TEXT    NOT NULL,
+  local_seq          INTEGER NOT NULL,
+  invocation_ref     TEXT    NOT NULL,
+  authorization_ref  TEXT    NOT NULL,
+  original           JSON    NOT NULL,
+  resolution         JSON    NOT NULL,
+  created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
+  FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
+);
+CREATE INDEX IF NOT EXISTS idx_commit_hash ON "commit" (hash);
+CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
+  ON "commit" (session_id, local_seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_invocation_ref
+  ON "commit" (invocation_ref);
+
+CREATE TABLE IF NOT EXISTS fact (
+  hash        TEXT    NOT NULL PRIMARY KEY,
+  id          TEXT    NOT NULL,
+  value_ref   TEXT    NOT NULL,
+  parent      TEXT,
+  branch      TEXT    NOT NULL DEFAULT '',
+  seq         INTEGER NOT NULL,
+  commit_seq  INTEGER NOT NULL,
+  fact_type   TEXT    NOT NULL,
+  FOREIGN KEY (value_ref) REFERENCES value(hash),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+);
+CREATE INDEX IF NOT EXISTS idx_fact_seq ON fact (seq);
+CREATE INDEX IF NOT EXISTS idx_fact_id ON fact (id);
+CREATE INDEX IF NOT EXISTS idx_fact_id_seq ON fact (id, seq);
+CREATE INDEX IF NOT EXISTS idx_fact_commit ON fact (commit_seq);
+CREATE INDEX IF NOT EXISTS idx_fact_branch ON fact (branch);
+
+CREATE TABLE IF NOT EXISTS head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  fact_hash TEXT    NOT NULL,
+  seq       INTEGER NOT NULL,
+  PRIMARY KEY (branch, id),
+  FOREIGN KEY (fact_hash) REFERENCES fact(hash)
+);
+CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
+
+CREATE TABLE IF NOT EXISTS snapshot (
+  id         TEXT    NOT NULL,
+  seq        INTEGER NOT NULL,
+  value_ref  TEXT    NOT NULL,
+  branch     TEXT    NOT NULL DEFAULT '',
+  PRIMARY KEY (branch, id, seq),
+  FOREIGN KEY (value_ref) REFERENCES value(hash)
+);
+CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, seq);
+
+CREATE TABLE IF NOT EXISTS branch (
+  name           TEXT    NOT NULL PRIMARY KEY,
+  parent_branch  TEXT,
+  fork_seq       INTEGER,
+  created_seq    INTEGER NOT NULL DEFAULT 0,
+  head_seq       INTEGER NOT NULL DEFAULT 0,
+  status         TEXT    NOT NULL DEFAULT 'active',
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at     TEXT,
+  FOREIGN KEY (parent_branch) REFERENCES branch(name)
+);
+INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
+VALUES ('', 0, 0, 'active');
+
+CREATE TABLE IF NOT EXISTS blob_store (
+  hash          TEXT    NOT NULL PRIMARY KEY,
+  data          BLOB    NOT NULL,
+  content_type  TEXT    NOT NULL,
+  size          INTEGER NOT NULL
+);
+
+CREATE VIEW IF NOT EXISTS state AS
+SELECT h.branch, h.id, f.fact_type, f.seq, v.data AS value
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+JOIN value v ON v.hash = f.value_ref;
+
+COMMIT;
+`;
+
+const INSERT_VALUE = `
+INSERT OR IGNORE INTO value (hash, data)
+VALUES (:hash, :data)
+`;
+
+const INSERT_AUTHORIZATION = `
+INSERT OR IGNORE INTO authorization (ref, authorization)
+VALUES (:ref, :authorization)
+`;
+
+const INSERT_INVOCATION = `
+INSERT OR IGNORE INTO invocation (ref, iss, aud, cmd, sub, invocation)
+VALUES (:ref, :iss, :aud, :cmd, :sub, :invocation)
+`;
+
+const INSERT_COMMIT = `
+INSERT INTO "commit" (
+  seq,
+  hash,
+  branch,
+  session_id,
+  local_seq,
+  invocation_ref,
+  authorization_ref,
+  original,
+  resolution
+)
+VALUES (
+  :seq,
+  :hash,
+  :branch,
+  :session_id,
+  :local_seq,
+  :invocation_ref,
+  :authorization_ref,
+  :original,
+  :resolution
+)
+`;
+
+const INSERT_FACT = `
+INSERT INTO fact (
+  hash,
+  id,
+  value_ref,
+  parent,
+  branch,
+  seq,
+  commit_seq,
+  fact_type
+)
+VALUES (
+  :hash,
+  :id,
+  :value_ref,
+  :parent,
+  :branch,
+  :seq,
+  :commit_seq,
+  :fact_type
+)
+`;
+
+const UPSERT_HEAD = `
+INSERT INTO head (branch, id, fact_hash, seq)
+VALUES (:branch, :id, :fact_hash, :seq)
+ON CONFLICT (branch, id) DO UPDATE
+SET fact_hash = :fact_hash, seq = :seq
+`;
+
+const UPDATE_BRANCH_HEAD = `
+UPDATE branch
+SET head_seq = :seq
+WHERE name = :branch
+  AND status = 'active'
+`;
+
+const SELECT_HEAD = `
+SELECT fact_hash, seq
+FROM head
+WHERE branch = :branch AND id = :id
+`;
+
+const SELECT_CURRENT = `
+SELECT f.fact_type, f.seq, v.data
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+JOIN value v ON v.hash = f.value_ref
+WHERE h.branch = :branch AND h.id = :id
+`;
+
+const SELECT_AT_SEQ = `
+SELECT f.fact_type, f.seq, v.data
+FROM fact f
+JOIN value v ON v.hash = f.value_ref
+WHERE f.branch = :branch
+  AND f.id = :id
+  AND f.seq <= :seq
+ORDER BY f.seq DESC
+LIMIT 1
+`;
+
+const SELECT_NEXT_SEQ = `
+SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+FROM "commit"
+`;
+
+const SELECT_EXISTING_COMMIT = `
+SELECT seq, hash, branch, resolution
+FROM "commit"
+WHERE session_id = :session_id
+  AND local_seq = :local_seq
+`;
+
+const SELECT_COMMIT_FACTS = `
+SELECT hash, id, value_ref, parent, branch, seq, commit_seq, fact_type
+FROM fact
+WHERE commit_seq = :commit_seq
+ORDER BY rowid ASC
+`;
+
+const SELECT_BRANCH_STATUS = `
+SELECT status
+FROM branch
+WHERE name = :branch
+`;
+
+export interface Engine {
+  url: URL;
+  database: Database;
+}
+
+export interface OpenOptions {
+  url: URL;
+}
+
+export interface InvocationRecord {
+  iss: string;
+  aud?: string | null;
+  cmd: string;
+  sub: string;
+  args?: JSONValue;
+  [key: string]: unknown;
+}
+
+export type AuthorizationRecord = JSONValue;
+
+export interface ApplyCommitOptions {
+  sessionId: SessionId;
+  invocation: InvocationRecord;
+  authorization: AuthorizationRecord;
+  commit: ClientCommit;
+}
+
+export interface AppliedFact {
+  hash: Reference;
+  id: EntityId;
+  valueRef: string;
+  parent: Reference | null;
+  branch: BranchName;
+  seq: number;
+  commitSeq: number;
+  factType: Operation["op"];
+}
+
+export interface AppliedCommit {
+  seq: number;
+  hash: Reference;
+  branch: BranchName;
+  facts: AppliedFact[];
+}
+
+export interface ReadOptions {
+  id: EntityId;
+  branch?: BranchName;
+  seq?: number;
+}
+
+type HeadRow = {
+  fact_hash: string;
+  seq: number;
+};
+
+type CommitRow = {
+  seq: number;
+  hash: string;
+  branch: string;
+  resolution: string;
+};
+
+type FactRow = {
+  hash: string;
+  id: string;
+  value_ref: string;
+  parent: string | null;
+  branch: string;
+  seq: number;
+  commit_seq: number;
+  fact_type: Operation["op"];
+};
+
+type ReadRow = {
+  fact_type: Operation["op"];
+  seq: number;
+  data: string | null;
+};
+
+export const open = async ({ url }: OpenOptions): Promise<Engine> => {
+  const database = await new Database(toDatabaseAddress(url), { create: true });
+  database.exec(NEW_DB_PRAGMAS);
+  database.exec(PRAGMAS);
+  database.exec(INIT);
+  return { url, database };
+};
+
+export const close = (engine: Engine): void => {
+  engine.database.close();
+};
+
+export const read = (
+  engine: Engine,
+  { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
+): EntityDocument | null => {
+  const statement = seq === undefined
+    ? engine.database.prepare(SELECT_CURRENT)
+    : engine.database.prepare(SELECT_AT_SEQ);
+  const row = (seq === undefined
+    ? statement.get({ branch, id })
+    : statement.get({ branch, id, seq })) as ReadRow | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  switch (row.fact_type) {
+    case "set":
+      return JSON.parse(row.data ?? "null") as EntityDocument;
+    case "delete":
+      return null;
+    case "patch":
+      throw new Error("patch replay is not implemented yet");
+  }
+};
+
+export const applyCommit = (
+  engine: Engine,
+  options: ApplyCommitOptions,
+): AppliedCommit => {
+  return engine.database.transaction(applyCommitTransaction).immediate(
+    engine,
+    options,
+  );
+};
+
+const applyCommitTransaction = (
+  engine: Engine,
+  { sessionId, invocation, authorization, commit }: ApplyCommitOptions,
+): AppliedCommit => {
+  if (commit.operations.length === 0) {
+    throw new Error("memory v2 commit requires at least one operation");
+  }
+
+  const branch = commit.branch ?? DEFAULT_BRANCH;
+  ensureActiveBranch(engine, branch);
+
+  const existing = engine.database.prepare(SELECT_EXISTING_COMMIT).get({
+    session_id: sessionId,
+    local_seq: commit.localSeq,
+  }) as CommitRow | undefined;
+  if (existing) {
+    return {
+      seq: existing.seq,
+      hash: existing.hash as Reference,
+      branch: existing.branch,
+      facts: selectCommitFacts(engine, existing.seq),
+    };
+  }
+
+  const seq = (
+    engine.database.prepare(SELECT_NEXT_SEQ).get() as { seq: number }
+  ).seq;
+  const hash = toReference(commit);
+  const invocationRef = toReference(invocation);
+  const authorizationRef = toReference(authorization);
+
+  engine.database.prepare(INSERT_AUTHORIZATION).run({
+    ref: authorizationRef,
+    authorization: JSON.stringify(authorization),
+  });
+  engine.database.prepare(INSERT_INVOCATION).run({
+    ref: invocationRef,
+    iss: invocation.iss,
+    aud: invocation.aud ?? null,
+    cmd: invocation.cmd,
+    sub: invocation.sub,
+    invocation: JSON.stringify(invocation),
+  });
+  engine.database.prepare(INSERT_COMMIT).run({
+    seq,
+    hash,
+    branch,
+    session_id: sessionId,
+    local_seq: commit.localSeq,
+    invocation_ref: invocationRef,
+    authorization_ref: authorizationRef,
+    original: JSON.stringify(commit),
+    resolution: JSON.stringify({ seq }),
+  });
+
+  const facts: AppliedFact[] = [];
+  const heads = new Map<string, HeadRow | null>();
+  for (const operation of commit.operations) {
+    const head = resolveHead(engine, heads, branch, operation.id);
+    const next = writeOperation(engine, {
+      branch,
+      seq,
+      head,
+      operation,
+    });
+    heads.set(headKey(branch, operation.id), {
+      fact_hash: next.hash,
+      seq,
+    });
+    facts.push({
+      hash: next.hash,
+      id: operation.id,
+      valueRef: next.valueRef,
+      parent: next.parent,
+      branch,
+      seq,
+      commitSeq: seq,
+      factType: next.factType,
+    });
+  }
+
+  engine.database.prepare(UPDATE_BRANCH_HEAD).run({ branch, seq });
+
+  return { seq, hash, branch, facts };
+};
+
+const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
+  const row = engine.database.prepare(SELECT_BRANCH_STATUS).get({
+    branch,
+  }) as { status: string } | undefined;
+  if (!row) {
+    throw new Error(`unknown branch: ${branch}`);
+  }
+  if (row.status !== "active") {
+    throw new Error(`branch is not active: ${branch}`);
+  }
+};
+
+const selectCommitFacts = (engine: Engine, commitSeq: number): AppliedFact[] => {
+  const rows = engine.database.prepare(SELECT_COMMIT_FACTS).all({
+    commit_seq: commitSeq,
+  }) as FactRow[];
+  return rows.map((row) => ({
+    hash: row.hash as Reference,
+    id: row.id,
+    valueRef: row.value_ref,
+    parent: row.parent as Reference | null,
+    branch: row.branch,
+    seq: row.seq,
+    commitSeq: row.commit_seq,
+    factType: row.fact_type,
+  }));
+};
+
+const resolveHead = (
+  engine: Engine,
+  heads: Map<string, HeadRow | null>,
+  branch: BranchName,
+  id: EntityId,
+): HeadRow | null => {
+  const key = headKey(branch, id);
+  if (heads.has(key)) {
+    return heads.get(key) ?? null;
+  }
+
+  const row = engine.database.prepare(SELECT_HEAD).get({
+    branch,
+    id,
+  }) as HeadRow | undefined;
+  const head = row ?? null;
+  heads.set(key, head);
+  return head;
+};
+
+const writeOperation = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    seq: number;
+    head: HeadRow | null;
+    operation: Operation;
+  },
+): {
+  hash: Reference;
+  parent: Reference | null;
+  valueRef: string;
+  factType: Operation["op"];
+} => {
+  const { branch, seq, head, operation } = options;
+  const parent = head?.fact_hash as Reference | undefined;
+  const parentRef = parent ?? emptyReferenceFor(operation.id);
+
+  switch (operation.op) {
+    case "set": {
+      const valueRef = toReference(operation.value);
+      engine.database.prepare(INSERT_VALUE).run({
+        hash: valueRef,
+        data: JSON.stringify(operation.value),
+      });
+
+      const hash = toReference({
+        type: "set",
+        id: operation.id,
+        value: operation.value,
+        parent: parentRef,
+      });
+
+      engine.database.prepare(INSERT_FACT).run({
+        hash,
+        id: operation.id,
+        value_ref: valueRef,
+        parent: parent ?? null,
+        branch,
+        seq,
+        commit_seq: seq,
+        fact_type: "set",
+      });
+      engine.database.prepare(UPSERT_HEAD).run({
+        branch,
+        id: operation.id,
+        fact_hash: hash,
+        seq,
+      });
+      return { hash, parent: parent ?? null, valueRef, factType: "set" };
+    }
+    case "delete": {
+      const hash = toReference({
+        type: "delete",
+        id: operation.id,
+        parent: parentRef,
+      });
+      engine.database.prepare(INSERT_FACT).run({
+        hash,
+        id: operation.id,
+        value_ref: EMPTY_VALUE_REF,
+        parent: parent ?? null,
+        branch,
+        seq,
+        commit_seq: seq,
+        fact_type: "delete",
+      });
+      engine.database.prepare(UPSERT_HEAD).run({
+        branch,
+        id: operation.id,
+        fact_hash: hash,
+        seq,
+      });
+      return {
+        hash,
+        parent: parent ?? null,
+        valueRef: EMPTY_VALUE_REF,
+        factType: "delete",
+      };
+    }
+    case "patch":
+      throw new Error("patch commits are not implemented yet");
+  }
+};
+
+const emptyReferenceFor = (id: EntityId): Reference => {
+  return toReference({ id });
+};
+
+const headKey = (branch: BranchName, id: EntityId): string => `${branch}\0${id}`;
+
+const toReference = (value: unknown): Reference => {
+  return refer(value as NonNullable<unknown> | null).toString() as Reference;
+};
+
+const toDatabaseAddress = (url: URL): URL | string => {
+  return url.protocol === "file:" ? url : ":memory:";
+};

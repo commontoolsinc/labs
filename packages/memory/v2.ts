@@ -39,7 +39,7 @@ export type PatchOp =
 export interface SetOperation {
   op: "set";
   id: EntityId;
-  value: JSONValue;
+  value: JSONValue | EntityDocument;
 }
 
 export interface PatchOperation {

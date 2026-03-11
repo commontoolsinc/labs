@@ -30,6 +30,7 @@ Deno.test("memory v2 engine bootstraps the spec-native schema", async () => {
       `SELECT name, type
        FROM sqlite_schema
        WHERE name NOT LIKE 'sqlite_%'
+         AND type IN ('table', 'view')
        ORDER BY type, name`,
     ).all() as Array<{ name: string; type: string }>;
 
@@ -114,7 +115,7 @@ Deno.test("memory v2 engine persists set and delete commits", async () => {
     const commitRow = engine.database.prepare(
       `SELECT seq, hash, branch, session_id, local_seq, invocation_ref,
               authorization_ref, original, resolution
-       FROM commit
+       FROM "commit"
        WHERE seq = 1`,
     ).get() as
       | {
