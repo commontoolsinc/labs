@@ -473,7 +473,11 @@ function loadFactsForDoc(
       if (fact.address.path.length > 0) {
         throw new Error("Invalid fact.address.path (must be empty)");
       } else if (!isObject(fact.value) || !("value" in fact.value)) {
-        throw new Error("Invalid fact.value with no value");
+        // CT-1341: Some facts (e.g. from setSourceCell) only have metadata
+        // like { source: ... } without a value property. Skip schema traversal
+        // for these — the old code handled this gracefully via getAtPath
+        // returning undefined.
+        return;
       } else if (selector.path.length < 1 || selector.path[0] !== "value") {
         throw new Error("Invalid selector path with no value");
       }
