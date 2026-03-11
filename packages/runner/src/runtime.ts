@@ -246,6 +246,8 @@ export class Runtime {
     // Register built-in modules with runtime injection
     registerBuiltins(this);
 
+    this.scheduler.enablePullMode();
+
     // Set this runtime as the current runtime for global cell compatibility
     // Removed setCurrentRuntime call - no longer using singleton pattern
 

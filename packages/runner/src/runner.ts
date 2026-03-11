@@ -55,6 +55,7 @@ import type {
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
+import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
@@ -1598,8 +1599,15 @@ export class Runner {
                   resultPatternAsString,
                 );
 
+                // Sub-pattern setup reads are child lifecycle bookkeeping, not
+                // semantic dependencies of the parent action. Keep the writes
+                // in the same transaction but suppress those reads from
+                // polluting the parent action's reactivity log.
+                const childSetupTx = new TransactionWrapper(tx, {
+                  nonReactive: true,
+                });
                 this.run(
-                  tx,
+                  childSetupTx,
                   resultPattern,
                   undefined,
                   resultCell,
@@ -1890,11 +1898,7 @@ export class Runner {
       sendToBindings = true;
     }
 
-    // Run the nested pattern without the $TYPE watcher to prevent infinite loops.
-    // Nested patterns don't need to watch for pattern changes - their parent manages lifecycle.
-    this.run(tx, patternImpl, inputs, resultCell, {
-      doNotUpdateOnPatternChange: true,
-    });
+    this.run(tx, patternImpl, inputs, resultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

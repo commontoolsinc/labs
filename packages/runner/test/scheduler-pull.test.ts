@@ -9,7 +9,6 @@ import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -710,17 +709,15 @@ describe("pull mode with references", () => {
 
   it("should re-run a schema sink when a followed link target appears later", async () => {
     const source = runtime.getCell(space, "missing-link-source", undefined, tx);
-    const missingId = "missing-link-target";
+    const target = runtime.getCell<{ name: string }>(
+      space,
+      "missing-link-target",
+      undefined,
+      tx,
+    );
 
     source.set({
-      profile: {
-        "/": {
-          [LINK_V1_TAG]: {
-            id: missingId,
-            path: [],
-          },
-        },
-      },
+      profile: target,
     });
 
     await tx.commit();
@@ -738,13 +735,7 @@ describe("pull mode with references", () => {
     await runtime.idle();
     expect(seen).toEqual([undefined]);
 
-    const target = runtime.getCell<{ name: string }>(
-      space,
-      missingId,
-      undefined,
-      tx,
-    );
-    target.set({ name: "Ada" });
+    target.withTx(tx).set({ name: "Ada" });
 
     await tx.commit();
     tx = runtime.edit();

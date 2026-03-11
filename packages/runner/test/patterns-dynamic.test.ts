@@ -14,12 +14,53 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+const numberSchema = {
+  type: "number",
+} as const satisfies JSONSchema;
+
+const booleanSchema = {
+  type: "boolean",
+} as const satisfies JSONSchema;
+
+const numberArraySchema = {
+  type: "array",
+  items: { type: "number" },
+} as const satisfies JSONSchema;
+
+const numberElementArgumentSchema = {
+  type: "object",
+  properties: {
+    element: numberSchema,
+  },
+  required: ["element"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
+const numberOrNumberArraySchema = {
+  anyOf: [
+    numberSchema,
+    numberArraySchema,
+  ],
+} as const satisfies JSONSchema;
+
 describe("Pattern Runner - Dynamic Patterns", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+
+  function unaryNumberListOpPattern(
+    // deno-lint-ignore no-explicit-any
+    fn: (element: any) => any,
+    resultSchema: JSONSchema,
+  ) {
+    return pattern<{ element: number }, unknown>(
+      ({ element }) => fn(element),
+      numberElementArgumentSchema,
+      resultSchema,
+    );
+  }
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -244,11 +285,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     // Pass `values` through in the return so we can mutate the input list
     // via the result cell (same technique as the CT-1158 test).
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: values.mapWithPattern(doublePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -297,6 +346,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     // Create individual cells for each value so they have stable entity IDs
     const cellA = runtime.getCell<number>(space, "cell-a", undefined, tx);
@@ -308,7 +361,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Pattern that takes a list of values and doubles each one
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: values.mapWithPattern(doublePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -360,6 +417,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     const cellA = runtime.getCell<number>(space, "dup-cell-a", undefined, tx);
     cellA.withTx(tx).set(5);
@@ -367,7 +428,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellB.withTx(tx).set(10);
 
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: values.mapWithPattern(doublePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; doubled: number[] }>(
@@ -395,9 +460,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return x * 2;
     });
+    const doublePattern = unaryNumberListOpPattern(
+      (element) => double(element),
+      numberSchema,
+    );
 
     const mapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, doubled: values.map((x) => double(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        doubled: values.mapWithPattern(doublePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -441,9 +514,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should filter an array by predicate", async () => {
     const isEven = lift((x: number) => x % 2 === 0);
+    const isEvenPattern = unaryNumberListOpPattern(
+      (element) => isEven(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, evens: values.filter((x) => isEven(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        evens: values.filterWithPattern(isEvenPattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
@@ -463,9 +544,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should reactively update filter when element value changes", async () => {
     const isPositive = lift((x: number) => x > 0);
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: values.filterWithPattern(isPositivePattern as any, {}),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -524,9 +613,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: values.filterWithPattern(isPositivePattern as any, {}),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -606,6 +703,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should handle duplicate cell references in filter", async () => {
     const isPositive = lift((x: number) => x > 0);
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const cellA = runtime.getCell<number>(space, "filter-dup-a", undefined, tx);
     cellA.withTx(tx).set(5);
@@ -613,7 +714,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     cellB.withTx(tx).set(-1);
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: values.filterWithPattern(isPositivePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -638,9 +743,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should handle empty and undefined filter inputs", async () => {
     const isEven = lift((x: number) => x % 2 === 0);
+    const isEvenPattern = unaryNumberListOpPattern(
+      (element) => isEven(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, evens: values.filter((x) => isEven(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        evens: values.filterWithPattern(isEvenPattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
@@ -664,9 +777,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: values.filterWithPattern(isPositivePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<
@@ -712,9 +833,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       predRunCount++;
       return x > 0;
     });
+    const isPositivePattern = unaryNumberListOpPattern(
+      (element) => isPositive(element),
+      booleanSchema,
+    );
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, positives: values.filter((x) => isPositive(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        positives: values.filterWithPattern(isPositivePattern as any, {}),
+      };
     });
 
     // deno-lint-ignore no-sparse-arrays
@@ -743,9 +872,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should flatMap an array", async () => {
     const duplicate = lift((x: number) => [x, x * 10]);
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -768,9 +905,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x > 0) return [x, x * 2];
       return [];
     });
+    const expandPattern = unaryNumberListOpPattern(
+      (element) => expand(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => expand(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(expandPattern as any, {}),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -819,9 +964,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+      };
     });
 
     const cellA = runtime.getCell<number>(
@@ -902,9 +1055,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x % 2 === 0) return [x];
       return []; // Odd numbers produce empty arrays
     });
+    const maybeExpandPattern = unaryNumberListOpPattern(
+      (element) => maybeExpand(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => maybeExpand(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(maybeExpandPattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -929,9 +1090,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       if (x === 2) return [20, 21];
       return x; // scalar, not wrapped in array
     });
+    const expandOrPassthroughPattern = unaryNumberListOpPattern(
+      (element) => expandOrPassthrough(element),
+      numberOrNumberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => expandOrPassthrough(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(expandOrPassthroughPattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -955,9 +1124,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+      };
     });
 
     // deno-lint-ignore no-sparse-arrays
@@ -986,9 +1163,17 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       runCount++;
       return [x, x * 10];
     });
+    const duplicatePattern = unaryNumberListOpPattern(
+      (element) => duplicate(element),
+      numberArraySchema,
+    );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return { values, flat: values.flatMap((x) => duplicate(x)) };
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+      };
     });
 
     const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
@@ -1032,13 +1217,15 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // The WithPattern variants receive { element, index, array, params } at
     // runtime (same as map). The PatternFactory type doesn't fully capture
     // this shape — see IDerivable note in api/index.ts.
-    const isEvenPattern = pattern<{ element: number }>(({ element }) => {
-      return lift(
-        { type: "number" } as const satisfies JSONSchema,
-        { type: "boolean" } as const satisfies JSONSchema,
-        (x: number) => x % 2 === 0,
-      )(element);
-    });
+    const isEvenPattern = pattern<{ element: number }>(
+      ({ element }) => {
+        return lift(numberSchema, booleanSchema, (x: number) => x % 2 === 0)(
+          element,
+        );
+      },
+      numberElementArgumentSchema,
+      booleanSchema,
+    );
 
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
@@ -1065,16 +1252,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
   it("should flatMap with a pre-defined pattern (flatMapWithPattern)", async () => {
     // Same type gap as filterWithPattern — see comment above.
-    const duplicatePattern = pattern<{ element: number }>(({ element }) => {
-      return lift(
-        { type: "number" } as const satisfies JSONSchema,
-        {
-          type: "array",
-          items: { type: "number" },
-        } as const satisfies JSONSchema,
-        (x: number) => [x, x * 10],
-      )(element);
-    });
+    const duplicatePattern = pattern<{ element: number }>(
+      ({ element }) => {
+        return lift(
+          numberSchema,
+          numberArraySchema,
+          (x: number) => [x, x * 10],
+        )(
+          element,
+        );
+      },
+      numberElementArgumentSchema,
+      numberArraySchema,
+    );
 
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
