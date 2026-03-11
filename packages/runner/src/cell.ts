@@ -198,7 +198,7 @@ declare module "@commontools/api" {
      */
     getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
     /** Read the cell's raw storable value as a mutable deep copy. */
-    getRawMutable(options?: IReadOptions): T | undefined;
+    getRawUntypedMutable(options?: IReadOptions): T | undefined;
     setRaw(value: (NoInfer<T> & StorableDatum) | undefined): void;
     /**
      * Sets the raw cell value to any `StorableValue`, bypassing the cell's
@@ -313,7 +313,7 @@ const cellMethods = new Set<
   "getAsWriteRedirectLink",
   "getRaw",
   "getRawUntyped",
-  "getRawMutable",
+  "getRawUntypedMutable",
   "setRaw",
   "setRawUntyped",
   "getSourceCell",
@@ -1220,7 +1220,7 @@ export class CellImpl<T extends StorableValue>
     return this.getRaw(options) as Immutable<StorableValue>;
   }
 
-  getRawMutable(options?: IReadOptions): T | undefined {
+  getRawUntypedMutable(options?: IReadOptions): T | undefined {
     const raw = this.getRaw(options);
     if (raw === undefined) return undefined;
     return storableFromNativeValue(raw, false) as T;
