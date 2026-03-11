@@ -491,3 +491,104 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 engine resolves pending reads by session localSeq", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    const first = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+
+    const second = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{ id: "entity:source", path: [], localSeq: 1 }],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:target",
+          value: toEntityDocument({ derived: true }),
+        }],
+      },
+    });
+
+    assertEquals(second.seq, 2);
+
+    const secondCommit = engine.database.prepare(
+      `SELECT resolution
+       FROM "commit"
+       WHERE seq = 2`,
+    ).get() as { resolution: string } | undefined;
+    assertEquals(JSON.parse(secondCommit?.resolution ?? "null"), {
+      seq: 2,
+      resolvedPendingReads: [{
+        localSeq: 1,
+        hash: first.hash,
+        seq: 1,
+      }],
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: {
+            ...invocation,
+            args: { localSeq: 3 },
+          },
+          authorization,
+          commit: {
+            localSeq: 3,
+            reads: {
+              confirmed: [],
+              pending: [{ id: "entity:source", path: [], localSeq: 99 }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:broken",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      Error,
+      "pending dependency",
+    );
+
+    assertEquals(read(engine, { id: "entity:broken" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

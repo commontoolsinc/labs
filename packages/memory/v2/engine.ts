@@ -297,6 +297,13 @@ ORDER BY seq DESC
 LIMIT 1
 `;
 
+const SELECT_PENDING_RESOLUTION = `
+SELECT hash, seq
+FROM "commit"
+WHERE session_id = :session_id
+  AND local_seq = :local_seq
+`;
+
 const SELECT_COMMIT_FACTS = `
 SELECT hash, id, value_ref, parent, branch, seq, commit_seq, fact_type
 FROM fact
@@ -527,6 +534,7 @@ const applyCommitTransaction = (
   }
 
   validateConfirmedReads(engine, branch, commit);
+  const resolvedPendingReads = resolvePendingReads(engine, sessionId, commit);
 
   const seq = (
     engine.database.prepare(SELECT_NEXT_SEQ).get() as { seq: number }
@@ -556,7 +564,11 @@ const applyCommitTransaction = (
     invocation_ref: invocationRef,
     authorization_ref: authorizationRef,
     original: JSON.stringify(commit),
-    resolution: JSON.stringify({ seq }),
+    resolution: JSON.stringify(
+      resolvedPendingReads.length > 0
+        ? { seq, resolvedPendingReads }
+        : { seq },
+    ),
   });
 
   const facts: AppliedFact[] = [];
@@ -621,6 +633,37 @@ const validateConfirmedReads = (
       );
     }
   }
+};
+
+const resolvePendingReads = (
+  engine: Engine,
+  sessionId: SessionId,
+  commit: ClientCommit,
+): Array<{ localSeq: number; hash: Reference; seq: number }> => {
+  const resolutions = new Map<
+    number,
+    { localSeq: number; hash: Reference; seq: number }
+  >();
+
+  for (const read of commit.reads.pending) {
+    if (resolutions.has(read.localSeq)) {
+      continue;
+    }
+    const row = engine.database.prepare(SELECT_PENDING_RESOLUTION).get({
+      session_id: sessionId,
+      local_seq: read.localSeq,
+    }) as { hash: string; seq: number } | undefined;
+    if (!row) {
+      throw new Error(`pending dependency not resolved: ${read.localSeq}`);
+    }
+    resolutions.set(read.localSeq, {
+      localSeq: read.localSeq,
+      hash: row.hash as Reference,
+      seq: row.seq,
+    });
+  }
+
+  return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
 };
 
 const selectCommitFacts = (engine: Engine, commitSeq: number): AppliedFact[] => {
