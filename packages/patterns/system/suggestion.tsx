@@ -3,6 +3,7 @@ import {
   type BuiltInLLMMessage,
   computed,
   type Default,
+  fetchData,
   handler,
   ifElse,
   llmDialog,
@@ -20,7 +21,6 @@ import {
   bash,
   fetchAndRunPattern,
   listMentionable,
-  listPatternIndex,
   listRecent,
 } from "./common-tools.tsx";
 import {
@@ -117,6 +117,25 @@ export default pattern<
     entries: SummaryIndexEntry[];
   }>({ query: "#summaryIndex" }).result;
 
+  const patternIndexUrl = wish<{ url: Writable<string> }>({
+    query: "#pattern-index",
+  });
+  const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+  computed(() => {
+    const urlRef = patternIndexUrl?.result?.url;
+    const urlValue = typeof urlRef?.get === "function"
+      ? urlRef.get()
+      : (typeof urlRef === "string" ? urlRef : undefined);
+    if (typeof urlValue === "string" && urlValue.length > 0) {
+      resolvedPatternUrl.set(urlValue);
+    }
+  });
+
+  const { result: patternIndex } = fetchData({
+    url: resolvedPatternUrl,
+    mode: "text",
+  });
+
   const profileContext = computed(() => {
     const profileText = profile.result;
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
@@ -128,17 +147,20 @@ export default pattern<
 
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    return `You help users by finding relevant content and patterns.${profileCtx}
+    const indexText = patternIndex
+      ? `\n\n--- Available Patterns ---\n${patternIndex}\n---`
+      : "";
+    return `You help users by finding relevant content and patterns.${profileCtx}${indexText}
 
 Your textual responses are invisible to the user — they can only see the presented result.
 
 Strategy:
 1. If the request is ambiguous or you need user preferences, call askUserQuestion first. After calling it, STOP — the user's answer will arrive as the next message. Then resume from step 2 with that context.
-2. Call listPatternIndex to see what patterns are available — do this on almost every request.
+2. Review the available patterns listed above to find the best match for the user's request.
 3. Search the space for existing relevant content using searchSpace.
 4. Decide: if an existing cell matches what the user needs, presentResult with it. Otherwise, use fetchAndRunPattern to instantiate a pattern from the index, optionally with existing data as context, then presentResult with the resulting cell link.
 
-The final result you present is almost always either an existing cell or a pattern instantiated from the index. Always gather the information you need (pattern index, search results, user clarification) before presenting a result.
+The final result you present is almost always either an existing cell or a pattern instantiated from the index. Always gather the information you need (search results, user clarification) before presenting a result.
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
@@ -162,7 +184,6 @@ Use the user context above to personalize your suggestions when relevant.`;
     messages,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
-      listPatternIndex: patternTool(listPatternIndex),
       bash: patternTool(bash, { sandboxId }),
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commontools";
+import { computed, pattern } from "commontools";
 
 interface MyInput {
   value: number;
@@ -7,6 +7,6 @@ interface MyInput {
 
 export default pattern((input: MyInput) => {
   return {
-    result: input.value * 2,
+    result: computed(() => input.value * 2),
   };
 });

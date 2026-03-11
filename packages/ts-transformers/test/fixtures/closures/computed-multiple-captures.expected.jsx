@@ -1,13 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, computed } from "commontools";
-export default function TestComputeMultipleCaptures() {
-    const a = cell(10, {
+import { Writable, computed, pattern } from "commontools";
+export default pattern(() => {
+    const a = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const b = cell(20, {
+    const b = Writable.of(20, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const c = cell(30, {
+    const c = Writable.of(30, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
@@ -38,7 +38,10 @@ export default function TestComputeMultipleCaptures() {
         return sum * c.get();
     });
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

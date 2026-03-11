@@ -11,6 +11,7 @@ import {
   loadFixture,
   transformFixture,
 } from "./utils.ts";
+import type { TransformationDiagnostic } from "../src/mod.ts";
 
 interface FixtureConfig {
   directory: string;
@@ -250,7 +251,8 @@ for (const config of configs) {
       const diagnosticsMap = batchedDiagnosticsByConfig.get(config.describe);
       const precomputedDiagnostics = diagnosticsMap?.get(fullPath);
 
-      return await transformFixture(
+      const pipelineDiagnostics: TransformationDiagnostic[] = [];
+      const result = await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: {
@@ -259,8 +261,28 @@ for (const config of configs) {
           },
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,
+          pipelineDiagnostics,
         },
       );
+
+      // Fail on pipeline diagnostics (validation errors from the transformer)
+      if (!Deno.env.get("SKIP_INPUT_CHECK")) {
+        const errors = pipelineDiagnostics.filter((d) =>
+          d.severity === "error"
+        );
+        if (errors.length > 0) {
+          const messages = errors.map((d) =>
+            `${d.fileName}:${d.line}:${d.column} - ${d.type}: ${d.message}`
+          );
+          throw new Error(
+            `Transformer pipeline produced ${errors.length} error(s):\n${
+              messages.join("\n")
+            }`,
+          );
+        }
+      }
+
+      return result;
     },
     async loadExpected(fixture: { relativeExpectedPath: string }) {
       return await loadFixture(

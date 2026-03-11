@@ -22,10 +22,10 @@ export const emitCallExpression: Emitter = ({
   const hint = analysis.rewriteHint;
 
   if (hint?.kind === "skip-call-rewrite") {
-    if (hint.reason === "array-map") {
-      // For array-map calls (e.g., state.items.filter(...).map(...)),
-      // we don't wrap the map call itself, but we DO need to rewrite
-      // the call chain before .map to wrap reactive expressions
+    if (hint.reason === "array-method") {
+      // For array method calls (e.g., state.items.filter(...).map(...)),
+      // we don't wrap the method call itself, but we DO need to rewrite
+      // the call chain before the method to wrap reactive expressions
 
       // If the callee is a property access (e.g., ...filter(...).map),
       // recursively rewrite the entire callee to handle wrapped expressions

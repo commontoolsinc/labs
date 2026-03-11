@@ -552,7 +552,18 @@ export class ContextualFlowControl {
       fullSchema,
     );
     if (resolved === undefined) {
-      throw new Error(`Failed to resolve $ref in ${JSON.stringify(schemaObj)}`);
+      const ref = "$ref" in schemaObj
+        ? schemaObj.$ref
+        : JSON.stringify(schemaObj);
+      throw new Error(
+        `Failed to resolve $ref: ${ref}. ` +
+          (typeof ref === "string" && ref.startsWith("http")
+            ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc.ts). ` +
+              `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
+              `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
+              `add its schema to embeddedSchemas as well.`
+            : `Schema: ${JSON.stringify(schemaObj)}`),
+      );
     }
     return resolved;
   }
@@ -680,12 +691,16 @@ export class ContextualFlowControl {
             subSchemaStrings.push(subSchemaString);
           }
         }
-        if (subSchemas.length === 0) {
-          cursor = false;
-        } else if (subSchemas.length === 1) {
-          cursor = subSchemas[0];
-        } else {
-          cursor = { "anyOf": subSchemas };
+        // Only update cursor from subSchemas if the isTrueSchema branch
+        // didn't already set cursor = true and break out of the loop.
+        if (cursor !== true) {
+          if (subSchemas.length === 0) {
+            cursor = false;
+          } else if (subSchemas.length === 1) {
+            cursor = subSchemas[0];
+          } else {
+            cursor = { "anyOf": subSchemas };
+          }
         }
         break;
       }

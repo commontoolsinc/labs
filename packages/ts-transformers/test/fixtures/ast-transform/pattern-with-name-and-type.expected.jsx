@@ -1,11 +1,29 @@
 import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import { computed, pattern } from "commontools";
 interface MyInput {
     value: number;
 }
 export default pattern((input: MyInput) => {
     return {
-        result: input.key("value") * 2,
+        result: __ctHelpers.derive({
+            type: "object",
+            properties: {
+                input: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["input"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { input: {
+                value: input.key("value")
+            } }, ({ input: input_1 }) => input.value * 2),
     };
 }, {
     type: "object",
@@ -19,7 +37,8 @@ export default pattern((input: MyInput) => {
     type: "object",
     properties: {
         result: {
-            type: "number"
+            type: "number",
+            asOpaque: true
         }
     },
     required: ["result"]

@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  computed,
   pattern,
 } from "commontools";
 
@@ -12,5 +13,5 @@ interface Output extends Input {
 }
 
 export default pattern<Input, Output>((input) => {
-  return { ...input, bar: 123 };
+  return computed(() => ({ ...input, bar: 123 }));
 });

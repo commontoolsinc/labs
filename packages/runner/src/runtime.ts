@@ -15,8 +15,8 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  resetExperimentalStorableConfig,
-  setExperimentalStorableConfig,
+  resetStorableValueConfig,
+  setStorableValueConfig,
 } from "@commontools/memory/storable-value";
 import {
   resetCanonicalHashConfig,
@@ -26,10 +26,6 @@ import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commontools/memory/json-encoding-dispatch";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "@commontools/memory/storable-value-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -84,6 +80,7 @@ export type ErrorWithContext = Error & {
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
+export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
@@ -111,6 +108,7 @@ export interface RuntimeOptions {
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
+  pieceCreatedCallback?: PieceCreatedCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
@@ -176,6 +174,7 @@ export class Runtime {
   readonly harness: Engine;
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
+  readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -216,10 +215,9 @@ export class Runtime {
     }
 
     // Propagate experimental flags to the memory layer's ambient config.
-    setExperimentalStorableConfig(this.experimental);
+    setStorableValueConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
-    setStorableValueConfig(this.experimental.richStorableValues);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -253,6 +251,7 @@ export class Runtime {
 
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
+    this.pieceCreatedCallback = options.pieceCreatedCallback;
 
     // Handle pattern environment configuration
     if (options.patternEnvironment) {
@@ -341,10 +340,9 @@ export class Runtime {
     this.harness.dispose();
 
     // Reset experimental storable config to defaults
-    resetExperimentalStorableConfig();
+    resetStorableValueConfig();
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();
-    resetStorableValueConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

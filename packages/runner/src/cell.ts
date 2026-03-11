@@ -6,12 +6,10 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toStorableValue,
+  nativeFromStorableValue,
+  shallowStorableFromNativeValue,
+  storableFromNativeValue,
 } from "@commontools/memory/storable-value";
-import {
-  fromStorable,
-  toStorable,
-} from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
@@ -254,6 +252,7 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 const cellMethods = new Set<
   | keyof ICell<unknown>
+  | "findIndex"
   | "filter"
   | "filterWithPattern"
   | "flatMap"
@@ -273,6 +272,7 @@ const cellMethods = new Set<
   "map",
   "mapWithPattern",
   "reduce",
+  "findIndex",
   "filter",
   "filterWithPattern",
   "flatMap",
@@ -1185,7 +1185,7 @@ export class CellImpl<T extends StorableValue>
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    return fromStorable(value as StorableValue) as
+    return nativeFromStorableValue(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
@@ -1197,7 +1197,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toStorable(value);
+    value = storableFromNativeValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1500,6 +1500,35 @@ export class CellImpl<T extends StorableValue>
     return lift((list: any[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
+    })(this as unknown as OpaqueRef<any>);
+  }
+
+  /**
+   * Find the index of the first matching element in an array cell.
+   * Similar to Array.prototype.findIndex but reactive — re-runs when any
+   * element changes. Returns -1 if no match is found. Throws TypeError
+   * if the value is not an array, which surfaces as a scheduler error
+   * and leaves the result undefined.
+   */
+  findIndex(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => boolean,
+  ): OpaqueRef<number> {
+    // Uses lift rather than a per-element-pattern builtin (like filter/map)
+    // because findIndex returns a plain number, not an element reference —
+    // there's no benefit to per-element reactive tracking. The lift approach
+    // short-circuits naturally and the predicate receives unwrapped values,
+    // so normal JS comparisons work. Tradeoff: reruns the full search on any
+    // array change. For per-element reactivity, use filter(pred)[0] instead.
+    return lift((list: any[]) => {
+      if (!Array.isArray(list)) {
+        throw new TypeError("findIndex called on non-array value");
+      }
+      return list.findIndex(fn);
     })(this as unknown as OpaqueRef<any>);
   }
 
@@ -1899,7 +1928,7 @@ export function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Already seen, return previously annotated result. Check this before
-  // toStorableValue() to handle circular references properly.
+  // shallowStorableFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
 
   // Cell links pass through unchanged.
@@ -1912,7 +1941,7 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
-  const converted = toStorableValue(value);
+  const converted = shallowStorableFromNativeValue(value);
   const convertedIsRecord = isRecord(converted);
 
   // If conversion changed the value, cache the result so shared references
@@ -2014,11 +2043,11 @@ export function convertCellsToLinks(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  value = toStorableValue(value);
+  value = shallowStorableFromNativeValue(value);
 
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
-    // `toStorableValue()` converted this into a primitive value of some sort.
+    // `shallowStorableFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

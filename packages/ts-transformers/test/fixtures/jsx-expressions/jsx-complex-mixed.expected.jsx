@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -66,61 +66,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 filter: state.key("filter")
-            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const i = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return i.name.includes(state.key("filter"));
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                filter: {
-                                    type: "string",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["filter"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                filter: state.filter
-            }
-        }).length)}
+            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>

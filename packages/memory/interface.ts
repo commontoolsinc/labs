@@ -68,7 +68,7 @@ export interface StorableObject extends Record<string, StorableDatum> {}
 
 /**
  * A value with storable structure at the top level, but potentially unconverted
- * nested values. This is the result of shallow conversion via `toStorableValue()`
+ * nested values. This is the result of shallow conversion via `shallowStorableFromNativeValue()`
  * - arrays and objects have the right shape but their contents may still contain
  * values requiring further conversion (e.g., Error instances in a `cause` chain).
  */
@@ -80,7 +80,7 @@ export type StorableValueLayer =
 /**
  * Union of raw native JS **object** types that the storable type system can
  * convert into `StorableInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `toStorableValue()` accepts
+ * "sausage grinder" -- `shallowStorableFromNativeValue()` accepts
  * `StorableValue | StorableNativeObject`, meaning callers can pass in either
  * already-storable data or raw native JS objects. The conversion produces
  * `StorableInstance` wrappers (StorableError, StorableMap, etc.) that live

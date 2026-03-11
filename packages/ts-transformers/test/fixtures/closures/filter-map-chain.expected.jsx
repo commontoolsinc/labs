@@ -9,10 +9,16 @@ interface State {
     items: Item[];
     taxRate: number;
 }
+// FIXTURE: filter-map-chain
+// Verifies: filter+map chain with captured outer variables
+//   .filter(fn) → .filterWithPattern(pattern(...), {})  — no captures
+//   .map(fn)    → .mapWithPattern(pattern(...), { state: { taxRate } })
+// Context: The map callback captures state.taxRate from outer scope, so it
+//   appears in the params object and the map body uses derive() for the
+//   reactive computation. The filter has no captures (only element properties).
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {/* Method chain: filter then map, both with captures */}
         {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return item.key("active");

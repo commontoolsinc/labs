@@ -1,4 +1,3 @@
-import { isInstance, isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type {
   StorableNativeObject,
@@ -10,7 +9,62 @@ import {
   isRichStorableValue,
   toDeepRichStorableValue,
   toRichStorableValue,
-} from "./rich-storable-value.ts";
+} from "./storable-value-modern.ts";
+import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
+import {
+  canBeStoredLegacy,
+  isStorableValueLegacy,
+  shallowStorableFromNativeValueLegacy,
+  toDeepStorableValueLegacy,
+} from "./storable-value-legacy.ts";
+export {
+  isArrayIndexPropertyName,
+  isArrayWithOnlyIndexProperties,
+} from "./storable-value-utils.ts";
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched public API
+//
+// These two symbols are reassigned by `configureDispatch()` whenever the
+// storable value conversion flag changes. When OFF (default),
+// `storableFromNativeValue` routes through `toDeepStorableValueLegacy` (legacy
+// conversion) and `nativeFromStorableValue` is an identity passthrough. When ON, they
+// route through the rich storable value conversion functions.
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a native JS value to storable form (deep, recursive).
+ *
+ * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
+ * storable wrappers and deep-freezes. When OFF, performs legacy deep
+ * conversion via `toDeepStorableValueLegacy`.
+ *
+ * @param freeze - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path does not
+ *   freeze.
+ */
+export let storableFromNativeValue: (
+  value: unknown,
+  freeze?: boolean,
+) => StorableValue;
+
+/**
+ * Convert a storable value back to native form. When the flag is ON,
+ * unwraps storable wrappers (StorableError, StorableMap, etc.) back to
+ * native JS types. When OFF, identity passthrough.
+ *
+ * @param frozen - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path is a
+ *   passthrough regardless.
+ */
+export let nativeFromStorableValue: (
+  value: StorableValue,
+  frozen?: boolean,
+) => StorableValue;
+
+// ---------------------------------------------------------------------------
+// Experimental storable value configuration
+// ---------------------------------------------------------------------------
 
 /**
  * Configuration for experimental storable-value features gated behind
@@ -20,8 +74,8 @@ import {
  * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
  */
 export interface ExperimentalStorableConfig {
-  /** When `true`, `toStorableValue` and `toDeepStorableValue` use the
-   *  extended type system (bigint, Map, Set, Uint8Array, Date, etc.). */
+  /** When `true`, storable value functions use the extended type system
+   *  (bigint, Map, Set, Uint8Array, Date, etc.). */
   richStorableValues: boolean;
 }
 
@@ -36,10 +90,11 @@ let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
  * constructor to propagate `ExperimentalOptions` into the memory layer.
  * Merges the provided partial config with defaults.
  */
-export function setExperimentalStorableConfig(
+export function setStorableValueConfig(
   config: Partial<ExperimentalStorableConfig>,
 ): void {
   currentConfig = { ...defaultConfig, ...config };
+  configureDispatch();
 }
 
 /** Returns the current experimental storable-value configuration. */
@@ -52,191 +107,83 @@ export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
-export function resetExperimentalStorableConfig(): void {
+export function resetStorableValueConfig(): void {
   currentConfig = { ...defaultConfig };
+  configureDispatch();
 }
 
-/**
- * Character code for digit `0`.
- */
-const CHAR_CODE_0 = "0".charCodeAt(0);
+// ---------------------------------------------------------------------------
+// Dispatch configuration
+// ---------------------------------------------------------------------------
 
 /**
- * Indicates whether the given string to be used as a property name (for an
- * object or array) is syntactically valid as an array index per se.
- *
- * @param name - The property name to check
- * @returns `true` if `name` when used on an array would access an indexed
- *   element of that array.
+ * Reassign the public API symbols based on the current value of
+ * `currentConfig.richStorableValues`. Called at module load and whenever
+ * the config changes.
  */
-export function isArrayIndexPropertyName(name: string): boolean {
-  switch (name[0]) {
-    case undefined: {
-      // Empty string.
-      return false;
-    }
-    case "0": {
-      // Only valid if the string is `0` per se.
-      return (name === "0");
-    }
-    case "1":
-    case "2":
-    case "3":
-    case "4":
-    case "5":
-    case "6":
-    case "7":
-    case "8":
-    case "9": {
-      // `break` for more detailed check below.
-      break;
-    }
-    default: {
-      return false;
-    }
-  }
+function configureDispatch(): void {
+  if (currentConfig.richStorableValues) {
+    // ----- Rich storable value implementations -----
 
-  const length = name.length;
+    storableFromNativeValue = (
+      value: unknown,
+      freeze = true,
+    ): StorableValue => {
+      return toDeepRichStorableValue(value, freeze);
+    };
 
-  if (length > 10) {
-    // Don't bother with anything more if the name is too long to possibly be a
-    // valid index.
-    return false;
-  }
+    nativeFromStorableValue = (
+      value: StorableValue,
+      frozen = true,
+    ): StorableValue => {
+      return deepNativeValueFromStorableValue(value, frozen) as StorableValue;
+    };
+  } else {
+    // ----- Legacy conversion (flag OFF) -----
 
-  // Check that all characters are (normal) digits, and parse it for a final
-  // range check. (NB: Benchmarking shows that doing it this way is
-  // significantly faster than using a regex test and a final `parseInt()` for
-  // the range check.
-  let num = 0;
-  for (let i = 0; i < length; i++) {
-    const digit = name.charCodeAt(i) - CHAR_CODE_0;
-    if ((digit < 0) || (digit > 9)) {
-      return false;
-    }
-    num = (num * 10) + digit;
-  }
+    storableFromNativeValue = (value: unknown): StorableValue => {
+      return toDeepStorableValueLegacy(value);
+    };
 
-  // Only accept in-range values.
-  return (num < (2 ** 31));
-}
-
-/**
- * Converts specially-recognized class instances to their designated storable
- * form. Returns `null` if the value is not one of the recognized types.
- *
- * Currently recognized types:
- * - `Error` (and subclasses) → `{"@Error": {name, message, stack, ...}}`
- *
- * @param value - The value to check and potentially convert.
- * @returns The storable form of the instance, or `null` if not recognized.
- */
-function specialInstanceToStorableValue(
-  value: unknown,
-): StorableValueLayer | null {
-  if (Error.isError(value)) {
-    const error = value as Error;
-    // Return a single-key object using the `@` prefix convention established
-    // elsewhere in the system. The spread captures any custom enumerable
-    // properties, followed by explicit assignment of the standard (but
-    // non-enumerable) Error properties.
-    return {
-      "@Error": {
-        ...error,
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-        cause: error.cause,
-      },
+    nativeFromStorableValue = (value: StorableValue): StorableValue => {
+      return value;
     };
   }
-
-  return null;
 }
 
-/**
- * Checks whether a value has a callable `toJSON()` method.
- *
- * TODO: Remove `toJSON()` support once all callers have migrated to
- * `[DECONSTRUCT]`. See spec Section 7.1.
- *
- * @param value - The value to check.
- * @returns `true` if the value has a `toJSON` method that is a function.
- */
-function hasToJSONMethod(
-  value: unknown,
-): value is { toJSON: () => unknown } {
-  return (
-    value !== null &&
-    "toJSON" in (value as object) &&
-    typeof (value as { toJSON: unknown }).toJSON === "function"
-  );
-}
+// ---------------------------------------------------------------------------
+// Flag-dispatched type checks
+// ---------------------------------------------------------------------------
 
 /**
  * Determines if the given value is considered "storable" by the system per se
  * (without invoking any conversions such as `.toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
  *
- * For the purposes of this system, storable values are values which are
- * JSON-encodable, _plus_ `undefined`. On the latter: A top-level `undefined`
- * indicates that the salient stored value is to be deleted. `undefined` as an
- * object property value is treated as if it were absent. Arrays must not
- * contain `undefined` elements (including holes); these get converted to `null`
- * during conversion to storable form.
+ * Flag OFF (legacy): storable values are JSON-encodable values plus
+ * `undefined`. Flag ON (rich): delegates to `isRichStorableValue` which
+ * accepts the extended type system.
  *
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
-export function isStorableValue(value: unknown): value is StorableValueLayer {
+export function isStorableValue(
+  value: unknown,
+): value is StorableValueLayer {
   if (currentConfig.richStorableValues) {
     return isRichStorableValue(value);
   }
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-    case "undefined": {
-      return true;
-    }
-
-    case "number": {
-      // Finite numbers are storable. Note: `-0` is accepted because it gets
-      // normalized to `0` during conversion (see `toStorableValue()`).
-      // `NaN` and `Infinity` are not JSON-encodable and thus not storable.
-      return Number.isFinite(value);
-    }
-
-    case "object": {
-      if (value === null) {
-        return true;
-      } else if (Array.isArray(value)) {
-        return isStorableArray(value);
-      } else {
-        return !isInstance(value);
-      }
-    }
-
-    case "function":
-    case "bigint":
-    case "symbol":
-    default: {
-      return false;
-    }
-  }
+  return isStorableValueLegacy(value);
 }
 
 /**
- * Returns `true` if `toDeepStorableValue()` would succeed on the value.
+ * Returns `true` if `storableFromNativeValue()` would succeed on the value.
  * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
- * or a deep tree thereof. Recursive: all nested values in arrays and objects
- * must also be storable or convertible.
+ * or a deep tree thereof.
  *
- * The distinction:
- * - `isStorableValue(x)` -- "is x already a `StorableValue`?"
- * - `canBeStored(x)` -- "could x be converted to a `StorableValue`?"
- *
- * Only available when `richStorableValues` is ON. When the flag is OFF, this
- * falls back to a non-recursive check equivalent to `isStorableValue()`.
+ * Flag OFF (legacy): equivalent to `isStorableValue()` (non-recursive).
+ * Flag ON (rich): delegates to the rich `canBeStored` which recursively
+ * validates nested values.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
@@ -247,311 +194,40 @@ export function canBeStored(
   if (currentConfig.richStorableValues) {
     return canBeStoredRich(value);
   }
-  // In legacy mode, canBeStored is equivalent to isStorableValue --
-  // the legacy path doesn't support StorableNativeObject types.
-  return isStorableValue(value);
+  return canBeStoredLegacy(value);
 }
 
+// ---------------------------------------------------------------------------
+// Flag-dispatched shallow conversion
+// ---------------------------------------------------------------------------
+
 /**
- * Converts a value to a storable (JSON-encodable) form. JSON-encodable values
- * pass through as-is. Functions and instances (non-plain objects) are converted
- * via `toJSON()` if available. Throws on non-encodable primitives (`bigint`,
- * `symbol`) or if a function/instance can't be converted.
+ * Converts a value to storable form without recursing into nested values.
+ * JSON-encodable values pass through as-is. Functions and instances are
+ * converted via `toJSON()` if available.
  *
- * **Note:** This function does _not_ recursively visit the inner contents of
- * values (that is, it doesn't iterate over array or object contents).
+ * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
+ * `toRichStorableValue` which handles the extended type system.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
- *   object or array. When `false`, wrapping and validation still occur but
- *   the result is left mutable. Only applies when `richStorableValues` is ON;
- *   the legacy path does not freeze.
+ *   object or array. Only applies when `richStorableValues` is ON.
  * @returns The storable value (original or converted).
- * @throws Error if the value can't be converted to a JSON-encodable form.
+ * @throws Error if the value can't be converted to storable form.
  */
-export function toStorableValue(
+export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
   if (currentConfig.richStorableValues) {
     return toRichStorableValue(value, freeze);
   }
-  return toStorableValueLegacy(value);
+  return shallowStorableFromNativeValueLegacy(value);
 }
 
-/** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
-function toStorableValueLegacy(value: unknown): StorableValueLayer {
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-    case "undefined": {
-      return value;
-    }
-
-    case "number": {
-      if (Number.isFinite(value)) {
-        // Normalize `-0` to `0` to avoid JSON serialization quirks.
-        return Object.is(value, -0) ? 0 : value;
-      } else {
-        throw new Error("Cannot store non-finite number");
-      }
-    }
-
-    case "function":
-    case "object": {
-      if (value === null) {
-        return null;
-      }
-
-      if (hasToJSONMethod(value)) {
-        const converted = value.toJSON();
-
-        if (!isStorableValue(converted)) {
-          throw new Error(
-            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
-          );
-        }
-
-        return converted;
-      } else if (typeof value === "function") {
-        throw new Error(
-          "Cannot store function per se (needs to have a `toJSON()` method)",
-        );
-      } else if (isInstance(value)) {
-        const special = specialInstanceToStorableValue(value);
-        if (special !== null) {
-          return special;
-        }
-        throw new Error(
-          "Cannot store instance per se (needs to have a `toJSON()` method)",
-        );
-      } else if (Array.isArray(value)) {
-        // Note that if the original `value` had a `toJSON()` method, that would
-        // have triggered the `toJSON` clause above and so we won't end up here.
-        if (!isArrayWithOnlyIndexProperties(value)) {
-          throw new Error(
-            "Cannot store array with enumerable named properties.",
-          );
-        } else if (isStorableArray(value)) {
-          return value;
-        } else {
-          // Array has holes or `undefined` elements. Preserve holes (sparse
-          // slots) and convert `undefined` values to `null`.
-          const arr = value as unknown[];
-          const result = new Array(arr.length);
-          arr.forEach((v, i) => {
-            result[i] = v === undefined ? null : v;
-          });
-          return result;
-        }
-      } else {
-        return value;
-      }
-    }
-
-    case "bigint":
-    case "symbol": {
-      throw new Error(`Cannot store ${typeof value}`);
-    }
-
-    default: {
-      throw new Error(`Shouldn't happen: Unrecognized type ${typeof value}`);
-    }
-  }
-}
-
-// Sentinel value used to indicate that a property should be omitted during
-// conversion in `toDeepStorableValue()`.
-const OMIT = Symbol("OMIT");
-
-// Sentinel value used in the `converted` map to indicate an object is currently
-// being processed (i.e., it's an ancestor in the tree). If we encounter this
-// while recursing, we have a circular reference.
-const PROCESSING = Symbol("PROCESSING");
-
-/**
- * Recursively converts a value to storable (JSON-encodable) form. Like
- * `toStorableValue()` but also recursively processes array elements and object
- * properties.
- *
- * @param value - The value to convert.
- * @param freeze - When `true` (default), deep-freezes the result tree.
- *   When `false`, wrapping and validation still occur but the result is
- *   left mutable. Only applies when `richStorableValues` is ON; the legacy
- *   path does not freeze.
- * @returns The storable value (original or converted).
- * @throws Error if the value (or any nested value) can't be converted.
- */
-export function toDeepStorableValue(
-  value: unknown,
-  freeze = true,
-): StorableValue {
-  if (currentConfig.richStorableValues) {
-    return toDeepRichStorableValue(value, freeze);
-  }
-  return toDeepStorableValueLegacy(value);
-}
-
-/** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
-function toDeepStorableValueLegacy(value: unknown): StorableValue {
-  // The internal helper can return OMIT for nested values that should be
-  // omitted, but at the top level this never happens (OMIT is only returned
-  // when converted.size > 0, i.e., in nested calls).
-  return toDeepStorableValueInternal(value, new Map(), false) as StorableValue;
-}
-
-/**
- * Internal recursive implementation. Can return `OMIT` for nested values that
- * should be omitted from objects (functions without toJSON, undefined).
- */
-function toDeepStorableValueInternal(
-  original: unknown,
-  converted: Map<object, unknown>,
-  inArray: boolean,
-): StorableValue | typeof OMIT {
-  // Track the original value for cycle detection and caching. This is important
-  // because `toStorableValue()` may return a different object (e.g., for sparse
-  // arrays or values with `toJSON()`), but circular references and shared
-  // references point to the original.
-  const isOriginalRecord = isRecord(original);
-
-  if (isOriginalRecord) {
-    const cached = converted.get(original);
-    if (cached === PROCESSING) {
-      throw new Error("Cannot store circular reference");
-    }
-    if (cached !== undefined) {
-      // Already converted this object; return cached result. This handles
-      // shared references efficiently and ensures consistent results since
-      // `toJSON()` could return different values on repeated calls.
-      return cached as StorableValue;
-    }
-    // Mark as currently processing (ancestor) before converting.
-    converted.set(original, PROCESSING);
-  }
-
-  // Handle functions without `toJSON()`: At top level, throw. In arrays,
-  // convert to `null`. In objects, omit the property. This matches
-  // `JSON.stringify()` behavior.
-  if (typeof original === "function" && !hasToJSONMethod(original)) {
-    if (inArray) {
-      return null;
-    } else if (converted.size > 0) {
-      // We're in a nested context (not top level) - omit this property.
-      return OMIT;
-    }
-    throw new Error(
-      "Cannot store function per se (needs to have a `toJSON()` method)",
-    );
-  }
-
-  // Try to convert the top level to storable form. Calls the legacy function
-  // directly since toDeepStorableValueInternal is part of the legacy path.
-  let value: StorableValueLayer;
-  try {
-    value = toStorableValueLegacy(original);
-  } catch (e) {
-    // Clean up converted map before propagating error.
-    if (isOriginalRecord) {
-      converted.delete(original);
-    }
-    throw e;
-  }
-
-  // Primitives and null don't need recursion.
-  if (!isRecord(value)) {
-    if (isOriginalRecord) {
-      // Cache the primitive result for the original object (e.g., from toJSON).
-      converted.set(original, value);
-    }
-    // `undefined` at non-top-level should be omitted (matches JSON.stringify).
-    if (value === undefined && converted.size > 0) {
-      return OMIT;
-    }
-    // At this point, value is a primitive (null, boolean, number, string) or
-    // undefined - all valid StorableValue types.
-    return value as StorableValue;
-  }
-
-  let result: StorableValue;
-
-  // Recursively process arrays and objects.
-  if (Array.isArray(value)) {
-    const arr = new Array(value.length);
-    value.forEach((v, i) => {
-      arr[i] = toDeepStorableValueInternal(v, converted, true);
-    });
-    result = arr as StorableValue;
-  } else {
-    const entries: [string, StorableValue][] = [];
-    for (const [key, val] of Object.entries(value)) {
-      const convertedVal = toDeepStorableValueInternal(val, converted, false);
-      if (convertedVal !== OMIT) {
-        entries.push([key, convertedVal]);
-      }
-    }
-    result = Object.fromEntries(entries) as StorableValue;
-  }
-
-  // Cache the result for the original object.
-  if (isOriginalRecord) {
-    converted.set(original, result);
-  }
-
-  return result;
-}
-
-/**
- * Helper which accepts an array and checks to see whether all of its enumerable
- * own properties are numeric indices (that is, it has no named properties).
- * Unlike {@link isStorableArray}, this returns `true` even for sparse arrays.
- *
- * @param array The array to check.
- * @returns `true` if the array has only numeric properties, `false` otherwise.
- */
-function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
-  const len = array.length;
-  const keys = Object.keys(array);
-
-  // Quick check: more keys than length means there must be named properties.
-  if (keys.length > len) {
-    return false;
-  }
-
-  // Verify all keys are valid indices (non-negative integers < length).
-  return !keys.some((k) => {
-    const n = Number(k);
-    return !Number.isInteger(n) || n < 0 || n >= len;
-  });
-}
-
-/**
- * Helper for other functions in this file, which accepts an array and checks to
- * see whether or not it in storable form. To be in storable form, an array must
- * have only numeric index properties (no extra named properties) and must not
- * contain any explicit `undefined` values at populated indices. Sparse holes
- * are allowed.
- *
- * @param array The array to check.
- * @returns `true` if the array is in storable form, `false` otherwise.
- */
-function isStorableArray(array: unknown[]): boolean {
-  // Reject extra non-numeric properties by checking that all keys are valid
-  // array indices. Sparse arrays have fewer keys than length, which is fine.
-  if (!isArrayWithOnlyIndexProperties(array)) {
-    return false;
-  }
-
-  // Reject `undefined` elements at populated indices. Holes (missing indices)
-  // are allowed — they are preserved as sparse slots.
-  for (let i = 0; i < array.length; i++) {
-    if (i in array && array[i] === undefined) {
-      return false;
-    }
-  }
-
-  return true;
-}
+// ---------------------------------------------------------------------------
+// Flag-dispatched comparison
+// ---------------------------------------------------------------------------
 
 /**
  * Compares two storable values for equality.
@@ -569,3 +245,9 @@ export function valueEqual(a: unknown, b: unknown): boolean {
   }
   return JSON.stringify(a) === JSON.stringify(b);
 }
+
+// ---------------------------------------------------------------------------
+// Initialize dispatch to legacy conversion mode at module load.
+// ---------------------------------------------------------------------------
+
+configureDispatch();

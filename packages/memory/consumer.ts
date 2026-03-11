@@ -62,7 +62,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { toDeepStorableValue } from "./storable-value.ts";
+import { storableFromNativeValue } from "./storable-value.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -612,7 +612,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
     // Deep-clone the source to ensure consistent serialization.
-    this.source = toDeepStorableValue(
+    this.source = storableFromNativeValue(
       source,
     ) as ConsumerInvocationFor<Ability, Protocol>;
     this.#reference = refer(this.source);

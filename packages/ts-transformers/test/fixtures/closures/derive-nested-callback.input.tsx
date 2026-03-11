@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
-export default function TestDerive() {
-  const numbers = cell([1, 2, 3]);
-  const multiplier = cell(2);
+export default pattern(() => {
+  const numbers = Writable.of([1, 2, 3]);
+  const multiplier = Writable.of(2);
 
   // Nested callback - inner array map should not capture outer multiplier
   const result = derive(numbers, (nums) =>
@@ -11,4 +11,4 @@ export default function TestDerive() {
   );
 
   return result;
-}
+});

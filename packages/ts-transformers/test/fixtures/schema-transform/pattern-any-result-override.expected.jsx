@@ -1,12 +1,25 @@
 import * as __ctHelpers from "commontools";
-import { pattern, UI, VNode, } from "commontools";
+import { computed, pattern, UI, VNode, } from "commontools";
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // Case 1: Explicit Output type overrides inferred `any` return
 export const TypedFromAny = pattern((__ct_pattern_input) => {
     const prompt = __ct_pattern_input.key("prompt");
     const result = fetchAny();
-    return result?.title || prompt || "Untitled";
+    return __ctHelpers.derive({
+        type: "object",
+        properties: {
+            result: true,
+            prompt: {
+                type: "string",
+                asOpaque: true
+            }
+        },
+        required: ["result", "prompt"]
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+        result: result,
+        prompt: prompt
+    }, ({ result, prompt }) => result?.title || prompt || "Untitled");
 }, {
     type: "object",
     properties: {

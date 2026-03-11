@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { computed } from "commontools";
+import { computed, pattern } from "commontools";
 
-export default function TestComputeNoCaptures() {
+export default pattern(() => {
   const result = computed(() => 42);
 
   return result;
-}
+});

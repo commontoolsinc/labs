@@ -26,7 +26,7 @@ describe("data flow analyzer", () => {
     assert(
       analysis.rewriteHint && analysis.rewriteHint.kind === "skip-call-rewrite",
     );
-    assertEquals(analysis.rewriteHint.reason, "array-map");
+    assertEquals(analysis.rewriteHint.reason, "array-method");
   });
 
   it("recognises ifElse when called via alias", () => {

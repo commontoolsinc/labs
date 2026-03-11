@@ -71,7 +71,7 @@ function getOpaqueCallKindForParameter(
   declaration: ts.ParameterDeclaration,
   checker: ts.TypeChecker,
   context?: TransformationContext,
-): "builder" | "array-map" | undefined {
+): "builder" | "array-method" | undefined {
   let functionNode: ts.Node | undefined = declaration.parent;
   while (functionNode && !ts.isFunctionLike(functionNode)) {
     functionNode = functionNode.parent;
@@ -88,15 +88,15 @@ function getOpaqueCallKindForParameter(
   if (callKind?.kind === "builder") {
     return "builder";
   }
-  if (callKind?.kind === "array-map") {
-    // For array-map calls, only treat parameters as opaque if the callback
+  if (callKind?.kind === "array-method") {
+    // For array method calls, only treat parameters as opaque if the callback
     // was actually transformed (marked in mapCallbackRegistry)
-    // Untransformed maps (plain .map inside derives) should have regular parameters
-    if (context && !context.isMapCallback(functionNode)) {
+    // Untransformed calls (plain .map inside derives) should have regular parameters
+    if (context && !context.isArrayMethodCallback(functionNode)) {
       // Callback was not transformed, parameters are not opaque
       return undefined;
     }
-    return "array-map";
+    return "array-method";
   }
   return undefined;
 }
@@ -191,7 +191,7 @@ export function filterRelevantDataFlows(
         let node: ts.Node | undefined = firstParam.declaration.parent;
         while (node) {
           if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-            return context.isMapCallback(node);
+            return context.isArrayMethodCallback(node);
           }
           node = node.parent;
         }

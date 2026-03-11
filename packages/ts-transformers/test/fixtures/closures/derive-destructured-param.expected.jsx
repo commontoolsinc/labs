@@ -1,11 +1,11 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 interface Point {
     x: number;
     y: number;
 }
-export default function TestDerive() {
-    const point = cell({ x: 10, y: 20 } as Point, {
+export default pattern(() => {
+    const point = Writable.of({ x: 10, y: 20 } as Point, {
         type: "object",
         properties: {
             x: {
@@ -17,7 +17,7 @@ export default function TestDerive() {
         },
         required: ["x", "y"]
     } as const satisfies __ctHelpers.JSONSchema);
-    const multiplier = cell(2, {
+    const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Destructuring requires .get() first since derive doesn't unwrap Cell
@@ -58,7 +58,10 @@ export default function TestDerive() {
         return (x + y) * multiplier.get();
     });
     return result;
-}
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

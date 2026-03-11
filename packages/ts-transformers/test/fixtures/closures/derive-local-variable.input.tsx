@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 
-export default function TestDeriveLocalVariable() {
-  const a = cell(10);
-  const b = cell(20);
-  const c = cell(30);
+export default pattern(() => {
+  const a = Writable.of(10);
+  const b = Writable.of(20);
+  const c = Writable.of(30);
 
   const result = derive(a, (aVal) => {
     const sum = aVal.get() + b.get();
@@ -12,4 +12,4 @@ export default function TestDeriveLocalVariable() {
   });
 
   return result;
-}
+});

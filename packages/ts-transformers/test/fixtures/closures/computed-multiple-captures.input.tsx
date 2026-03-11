@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { cell, computed } from "commontools";
+import { Writable, computed, pattern } from "commontools";
 
-export default function TestComputeMultipleCaptures() {
-  const a = cell(10);
-  const b = cell(20);
-  const c = cell(30);
+export default pattern(() => {
+  const a = Writable.of(10);
+  const b = Writable.of(20);
+  const c = Writable.of(30);
 
   const result = computed(() => {
     const sum = a.get() + b.get();
@@ -12,4 +12,4 @@ export default function TestComputeMultipleCaptures() {
   });
 
   return result;
-}
+});

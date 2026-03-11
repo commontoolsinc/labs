@@ -867,7 +867,7 @@ function handlePatternSchemaInjection(
   }
 
   const argumentCapabilityMode: CapabilitySummaryApplicationMode =
-    context.isMapCallback(builderFunction) ||
+    context.isArrayMethodCallback(builderFunction) ||
       isMapWithPatternCallbackPatternCall(node)
       ? "full"
       : "defaults_only";

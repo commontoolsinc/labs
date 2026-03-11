@@ -1,11 +1,11 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
+import { Writable, derive, pattern } from "commontools";
 interface Config {
     required: number;
     unionUndefined: number | undefined;
 }
-export default function TestDerive(config: Config) {
-    const value = cell(10, {
+export default pattern((config: Config) => {
+    const value = Writable.of(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
@@ -34,12 +34,26 @@ export default function TestDerive(config: Config) {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         config: {
-            required: config.required,
-            unionUndefined: config.unionUndefined
+            required: config.key("required"),
+            unionUndefined: config.key("unionUndefined")
         }
     }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0));
     return result;
-}
+}, {
+    type: "object",
+    properties: {
+        required: {
+            type: "number"
+        },
+        unionUndefined: {
+            type: ["number", "undefined"]
+        }
+    },
+    required: ["required", "unionUndefined"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
