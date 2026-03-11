@@ -28,6 +28,10 @@ const timedHandler = handler({
 } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.lastUpdate.set(event.timestamp);
 });
+// FIXTURE: date-types
+// Verifies: Date type maps to JSON Schema string with format "date-time"
+//   Date → { type: "string", format: "date-time" }
+//   Cell<Date> → { type: "string", format: "date-time", asCell: true }
 export { timedHandler };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

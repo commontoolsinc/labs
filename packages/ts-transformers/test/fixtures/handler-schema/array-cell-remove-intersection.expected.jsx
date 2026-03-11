@@ -61,6 +61,11 @@ const removeItemAlias = handler(true as const satisfies __ctHelpers.JSONSchema, 
         next.splice(index, 1);
     items.set(next);
 });
+// FIXTURE: array-cell-remove-intersection
+// Verifies: handler context intersection types are flattened and Cell<T[]> generates array schema with asCell
+//   handler<unknown, ListState & { index: number }>() → event: true, context: merged {items, index} schema
+//   Cell<Item[]> → { type: "array", items: { $ref: ... }, asCell: true }
+// Context: inline intersection vs type alias intersection; alias variant loses $defs (items: true)
 export { removeItem, removeItemAlias };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

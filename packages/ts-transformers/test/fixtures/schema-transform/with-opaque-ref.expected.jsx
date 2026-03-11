@@ -16,6 +16,11 @@ const model = {
         value: 0
     }
 } as const satisfies __ctHelpers.JSONSchema;
+// FIXTURE: with-opaque-ref
+// Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
+//   Cell<number> → { type: "number", asCell: true }
+//   toSchema<State>({default: ...}) → schema with "default" key preserved
+//   derive(cell.value, fn) → derive(inputSchema, outputSchema, cell.key("value"), fn)
 export default pattern((cell) => {
     const doubled = derive({
         type: "number"

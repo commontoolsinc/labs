@@ -123,6 +123,13 @@ const addItem = handler // <
 }) => {
     items.push({ text: event.detail.message });
 });
+// FIXTURE: pattern-with-types
+// Verifies: full pattern with toSchema, handler, JSX, and .map() all transform correctly together
+//   toSchema<T>() → inline JSON schema literal with Default<> mapped to "default" values
+//   handler() → injects event schema and context schema with asCell on Cell<> fields
+//   items.map((item, index) => JSX) → items.mapWithPattern(pattern(...), {})
+//   pattern<In, Out>() → uses pre-generated inputSchema/outputSchema passed as arguments
+// Context: kitchen-sink pattern with NAME, UI, handler, array .map(), and Default<> types
 export default pattern((__ct_pattern_input) => {
     const title = __ct_pattern_input.key("title");
     const items = __ct_pattern_input.key("items");

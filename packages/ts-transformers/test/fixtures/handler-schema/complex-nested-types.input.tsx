@@ -47,6 +47,12 @@ const _updateTags = handler<
 
 export { userHandler };
 
+// FIXTURE: complex-nested-types
+// Verifies: handler with nested object types, string literal unions, and Cell-wrapped arrays generate correct schemas
+//   handler<UserEvent, UserState>() → event schema with nested user object and action enum, context schema with asCell fields
+//   "create" | "update" | "delete" → { enum: ["create", "update", "delete"] }
+//   Cell<Array<{...}>> → { type: "array", items: { type: "object", ... }, asCell: true }
+// Context: also tests a second handler (_updateTags) with Cell<string[]>; pattern wraps handler as asStream output
 export default pattern(() => {
   return { userHandler };
 });

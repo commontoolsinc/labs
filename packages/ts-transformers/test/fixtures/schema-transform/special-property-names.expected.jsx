@@ -48,6 +48,10 @@ const linkedDataSchema = {
     },
     required: ["@link", "@context", "@type", "kebab-case", "with space", "with-special-chars!", "default", "enum", "class", "normalProperty"]
 } as const satisfies __ctHelpers.JSONSchema;
+// FIXTURE: special-property-names
+// Verifies: toSchema handles property names that are JSON-LD keywords, kebab-case, or JS reserved words
+//   toSchema<LinkedData>() → schema with "@link", "kebab-case", "with space", "default", "enum", etc.
+// Context: property names requiring quoting; ensures no mangling of special characters
 export { linkedDataSchema };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
