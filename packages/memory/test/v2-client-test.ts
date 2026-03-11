@@ -22,7 +22,7 @@ Deno.test("memory v2 client transacts and receives graph subscription updates", 
     }],
   });
 
-  assertEquals(view.entities.map((entity) => ({
+  assertEquals(view.entities.map((entity: any) => ({
     id: entity.id,
     seq: entity.seq,
     document: entity.document,
@@ -53,7 +53,7 @@ Deno.test("memory v2 client transacts and receives graph subscription updates", 
 
   const update = await pending;
   assertEquals(update.done, false);
-  assertEquals(update.value.entities.map((entity) => ({
+  assertEquals(update.value.entities.map((entity: any) => ({
     id: entity.id,
     seq: entity.seq,
     document: entity.document,
