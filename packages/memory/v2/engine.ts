@@ -287,6 +287,16 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+const SELECT_LATEST_CONFLICT = `
+SELECT seq
+FROM fact
+WHERE branch = :branch
+  AND id = :id
+  AND seq > :after_seq
+ORDER BY seq DESC
+LIMIT 1
+`;
+
 const SELECT_COMMIT_FACTS = `
 SELECT hash, id, value_ref, parent, branch, seq, commit_seq, fact_type
 FROM fact
@@ -516,6 +526,8 @@ const applyCommitTransaction = (
     };
   }
 
+  validateConfirmedReads(engine, branch, commit);
+
   const seq = (
     engine.database.prepare(SELECT_NEXT_SEQ).get() as { seq: number }
   ).seq;
@@ -587,6 +599,27 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
   }
   if (row.status !== "active") {
     throw new Error(`branch is not active: ${branch}`);
+  }
+};
+
+const validateConfirmedReads = (
+  engine: Engine,
+  branch: BranchName,
+  commit: ClientCommit,
+): void => {
+  for (const read of commit.reads.confirmed) {
+    const readBranch = read.branch ?? branch;
+    ensureActiveBranch(engine, readBranch);
+    const conflict = engine.database.prepare(SELECT_LATEST_CONFLICT).get({
+      branch: readBranch,
+      id: read.id,
+      after_seq: read.seq,
+    }) as { seq: number } | undefined;
+    if (conflict) {
+      throw new Error(
+        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflict.seq}`,
+      );
+    }
   }
 };
 
