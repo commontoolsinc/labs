@@ -68,8 +68,29 @@ function transform(context: TransformationContext): ts.SourceFile {
       // Check if expression contains && or || that may need when/unless transformation
       const hasLogicalOps = containsLogicalBinaryOperator(node.expression);
 
+      let exprText: string;
+      try {
+        exprText = node.expression.getText().slice(0, 80);
+      } catch {
+        exprText = "<synthetic>";
+      }
+      console.log(`[OPAQUE-REF-JSX] analyzing JSX expression: ${exprText}...`);
+      let hintStr: string;
+      try {
+        hintStr = JSON.stringify(analysis.rewriteHint);
+      } catch {
+        hintStr = `{kind:${analysis.rewriteHint?.kind}}`;
+      }
+      console.log(
+        `  analysis: containsOpaqueRef=${analysis.containsOpaqueRef} requiresRewrite=${analysis.requiresRewrite} rewriteHint=${hintStr}`,
+      );
+      console.log(
+        `  hasLogicalOps=${hasLogicalOps} contextKind=${contextInfo.kind}`,
+      );
+
       if (contextInfo.kind === "compute") {
         // New policy: compute JSX does not lower && / || and does not add wrappers.
+        console.log(`  -> SKIP (compute context)`);
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
@@ -78,8 +99,10 @@ function transform(context: TransformationContext): ts.SourceFile {
       // because the left side might be an OpaqueRef type (e.g., computed() returns OpaqueRef)
       // which always needs when/unless for correct short-circuit semantics.
       if (!analysis.requiresRewrite && !hasLogicalOps) {
+        console.log(`  -> SKIP (no rewrite needed, no logical ops)`);
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
+      console.log(`  -> PROCEEDING with rewrite`);
 
       // In safe contexts, only proceed if we have binary logical operators
       // that may need when/unless transformation

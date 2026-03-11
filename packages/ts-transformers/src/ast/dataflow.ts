@@ -188,14 +188,27 @@ export function createDataFlowAnalyzer(
       };
     }
 
-    // Array-map calls preserve requiresRewrite from the callee
-    // to handle cases like state.items.filter(...).map(...)
+    // Array method calls (.map, .filter, .flatMap) do NOT require derive wrapping.
+    // The ClosureTransformer handles .map() → .mapWithPattern() rewriting directly.
+    // Setting requiresRewrite: false prevents the OpaqueRefJSX transformer from
+    // wrapping expressions containing .map() in unnecessary derive() calls.
     if (callKind?.kind === "array-method") {
-      return {
+      const result = {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
         rewriteHint,
       };
+      console.log(`[DATAFLOW] handleCallExpression array-method:`);
+      console.log(
+        `  callee.requiresRewrite=${callee.requiresRewrite} callee.containsOpaqueRef=${callee.containsOpaqueRef}`,
+      );
+      console.log(
+        `  merged.requiresRewrite=${merged.requiresRewrite} merged.containsOpaqueRef=${merged.containsOpaqueRef}`,
+      );
+      console.log(
+        `  result.requiresRewrite=${result.requiresRewrite} (forced false for array-method)`,
+      );
+      return result;
     }
 
     // Default: CallExpressions require rewrite if they contain opaque refs
@@ -363,6 +376,9 @@ export function createDataFlowAnalyzer(
       // This handles cases like `discount` where the whole identifier is synthetic
       if (!symbol && isSynthetic(expression)) {
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
+        console.log(
+          `[DATAFLOW] Identifier: ${expression.text} -> synthetic opaque param (containsOpaqueRef=true, requiresRewrite=false)`,
+        );
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -377,6 +393,9 @@ export function createDataFlowAnalyzer(
       const type = tryGetType(expression);
       if (type && isOpaqueRefType(type, checker)) {
         recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
+        console.log(
+          `[DATAFLOW] Identifier: ${expression.text} -> direct OpaqueRef (containsOpaqueRef=true, requiresRewrite=false)`,
+        );
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -385,6 +404,9 @@ export function createDataFlowAnalyzer(
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
         recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
+        console.log(
+          `[DATAFLOW] Identifier: ${expression.text} -> CommonTools default (containsOpaqueRef=true, requiresRewrite=false)`,
+        );
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -395,6 +417,9 @@ export function createDataFlowAnalyzer(
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
         recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
+        console.log(
+          `[DATAFLOW] Identifier: ${expression.text} -> opaque parameter (containsOpaqueRef=true, requiresRewrite=false)`,
+        );
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -407,6 +432,33 @@ export function createDataFlowAnalyzer(
     if (ts.isPropertyAccessExpression(expression)) {
       const target = analyzeExpression(expression.expression, scope, context);
       const propertyType = tryGetType(expression);
+
+      {
+        let exprText: string;
+        try {
+          exprText = expression.getText();
+        } catch {
+          exprText = "<synthetic>";
+        }
+        const propName = expression.name.text;
+        const hasOpaqueType = propertyType &&
+          isOpaqueRefType(propertyType, checker);
+        const propertySymbol = getMemberSymbol(expression, checker);
+        const hasCTDefault = symbolDeclaresCommonToolsDefault(
+          propertySymbol,
+          checker,
+        );
+        const isImplicit = isImplicitOpaqueRefExpression(expression);
+        console.log(
+          `[DATAFLOW] PropertyAccessExpression: ${exprText} (.${propName})`,
+        );
+        console.log(
+          `  target: containsOpaqueRef=${target.containsOpaqueRef} requiresRewrite=${target.requiresRewrite}`,
+        );
+        console.log(
+          `  propertyType isOpaqueRef=${hasOpaqueType} symbolDeclaresCommonToolsDefault=${hasCTDefault} isImplicitOpaque=${isImplicit}`,
+        );
+      }
 
       if (propertyType && isOpaqueRefType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
@@ -601,7 +653,7 @@ export function createDataFlowAnalyzer(
       const condition = analyzeExpression(expression.condition, scope, context);
       const whenTrue = analyzeExpression(expression.whenTrue, scope, context);
       const whenFalse = analyzeExpression(expression.whenFalse, scope, context);
-      return {
+      const result = {
         containsOpaqueRef: condition.containsOpaqueRef ||
           whenTrue.containsOpaqueRef ||
           whenFalse.containsOpaqueRef,
@@ -612,6 +664,41 @@ export function createDataFlowAnalyzer(
           ...whenFalse.dataFlows,
         ],
       };
+      let condText: string, trueText: string, falseText: string;
+      try {
+        condText = expression.condition.getText();
+      } catch {
+        condText = "<synthetic>";
+      }
+      try {
+        trueText = expression.whenTrue.getText().slice(0, 60);
+      } catch {
+        trueText = "<synthetic>";
+      }
+      try {
+        falseText = expression.whenFalse.getText().slice(0, 60);
+      } catch {
+        falseText = "<synthetic>";
+      }
+      console.log(`[DATAFLOW] ConditionalExpression:`);
+      console.log(`  condition: ${condText}`);
+      console.log(`  whenTrue: ${trueText}...`);
+      console.log(`  whenFalse: ${falseText}...`);
+      console.log(
+        `  condition analysis: containsOpaqueRef=${condition.containsOpaqueRef} requiresRewrite=${condition.requiresRewrite}`,
+      );
+      console.log(
+        `  whenTrue analysis: containsOpaqueRef=${whenTrue.containsOpaqueRef} requiresRewrite=${whenTrue.requiresRewrite} rewriteHint=${
+          JSON.stringify(whenTrue.rewriteHint)
+        }`,
+      );
+      console.log(
+        `  whenFalse analysis: containsOpaqueRef=${whenFalse.containsOpaqueRef} requiresRewrite=${whenFalse.requiresRewrite}`,
+      );
+      console.log(
+        `  result: containsOpaqueRef=${result.containsOpaqueRef} requiresRewrite=${result.requiresRewrite}`,
+      );
+      return result;
     }
 
     if (ts.isBinaryExpression(expression)) {
