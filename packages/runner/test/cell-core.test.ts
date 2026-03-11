@@ -717,7 +717,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     const raw = cell.getRaw();
     expect(raw).toBeDefined();
     expect(Object.isFrozen(raw)).toBe(true);
-    expect(Object.isFrozen((raw as { b: number[] }).b)).toBe(true);
+    expect(Object.isFrozen((raw as { b: readonly number[] }).b)).toBe(true);
   });
 
   it("getRawUntyped returns a frozen object", () => {
@@ -731,7 +731,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     const raw = cell.getRawUntyped();
     expect(raw).toBeDefined();
     expect(Object.isFrozen(raw)).toBe(true);
-    expect(Object.isFrozen((raw as { x: number[] }).x)).toBe(true);
+    expect(Object.isFrozen((raw as { x: readonly number[] }).x)).toBe(true);
   });
 
   it("getRawUntypedMutable returns a mutable deep copy", () => {
@@ -750,7 +750,10 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 
     // Verify it's a copy — mutating doesn't affect the cell.
     mutable.items.push(30);
-    expect((cell.getRaw() as { items: number[] }).items).toEqual([10, 20]);
+    expect((cell.getRaw() as { items: readonly number[] }).items).toEqual([
+      10,
+      20,
+    ]);
   });
 
   it("getRaw and getRawUntyped agree, both frozen", () => {
