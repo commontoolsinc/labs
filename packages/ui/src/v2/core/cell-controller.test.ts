@@ -73,7 +73,9 @@ describe("createMockCellHandle", () => {
   it("child.set() propagates to parent value and fires parent subscribers", async () => {
     const parent = createMockCellHandle({ name: "Alice", age: 30 });
     const values: unknown[] = [];
-    parent.subscribe((v) => values.push(structuredClone(v)));
+    parent.subscribe((v) => {
+      values.push(structuredClone(v));
+    });
 
     const child = parent.key("name");
     await child.set("Bob");
@@ -94,7 +96,9 @@ describe("createMockCellHandle", () => {
   it("pushUpdate() simulates backend-pushed value change", () => {
     const cell = createMockCellHandle("original");
     const received: (string | undefined)[] = [];
-    cell.subscribe((v) => received.push(v));
+    cell.subscribe((v) => {
+      received.push(v);
+    });
     received.length = 0; // clear initial
 
     pushUpdate(cell, "from-backend");
@@ -105,7 +109,9 @@ describe("createMockCellHandle", () => {
   it("pushUpdate() suppresses callback when value is equal", () => {
     const cell = createMockCellHandle(42);
     let callCount = 0;
-    cell.subscribe(() => callCount++);
+    cell.subscribe(() => {
+      callCount++;
+    });
     const afterSubscribe = callCount;
 
     pushUpdate(cell, 42); // same value
