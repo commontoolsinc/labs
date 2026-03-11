@@ -144,7 +144,6 @@ class Connection {
         return;
       case "transact":
         this.send(await this.server.transact(parsed));
-        await this.server.notifySpace(parsed.space);
         return;
       case "graph.query": {
         const response = await this.server.graphQuery(parsed);
@@ -214,6 +213,9 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Set<Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  #dirtySpaces = new Set<string>();
+  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #refreshing: Promise<void> | null = null;
   #store?: URL;
 
   constructor(
@@ -239,6 +241,11 @@ export class Server {
   }
 
   async close(): Promise<void> {
+    if (this.#refreshTimer !== null) {
+      clearTimeout(this.#refreshTimer);
+      this.#refreshTimer = null;
+    }
+    await this.#refreshing;
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -275,16 +282,22 @@ export class Server {
         authorization: message.authorization ?? {},
         commit: message.commit,
       });
+      this.markSpaceDirty(message.space);
       return {
         type: "response",
         requestId: message.requestId,
         ok: commit,
       };
     } catch (error) {
+      if (error instanceof Engine.ConflictError) {
+        await this.flushSubscriptions([message.space]);
+      }
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         toError(
-          "TransactionError",
+          error instanceof Engine.ConflictError
+            ? "ConflictError"
+            : "TransactionError",
           error instanceof Error ? error.message : String(error),
         ),
       );
@@ -327,9 +340,69 @@ export class Server {
     return queryGraph(space, engine, query);
   }
 
-  async notifySpace(space: string): Promise<void> {
-    for (const connection of this.#connections) {
-      await connection.refresh(space);
+  markSpaceDirty(space: string): void {
+    this.#dirtySpaces.add(space);
+    this.scheduleRefresh();
+  }
+
+  async flushSubscriptions(spaces?: Iterable<string>): Promise<void> {
+    if (this.#refreshTimer !== null) {
+      clearTimeout(this.#refreshTimer);
+      this.#refreshTimer = null;
+    }
+
+    const run = async () => {
+      await this.refreshLoop(
+        spaces === undefined ? undefined : new Set(spaces),
+      );
+      if (spaces !== undefined && this.#dirtySpaces.size > 0) {
+        this.scheduleRefresh();
+      }
+    };
+
+    const queued = this.#refreshing?.then(run, run) ?? run();
+    this.#refreshing = queued.finally(() => {
+      if (this.#refreshing === queued) {
+        this.#refreshing = null;
+      }
+    });
+    await this.#refreshing;
+  }
+
+  private scheduleRefresh(): void {
+    if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
+      return;
+    }
+    this.#refreshTimer = setTimeout(() => {
+      this.#refreshTimer = null;
+      void this.flushSubscriptions();
+    }, 0);
+  }
+
+  private async refreshLoop(initial?: Set<string>): Promise<void> {
+    let pending = initial;
+    while (true) {
+      const spaces = pending
+        ? [...pending]
+        : [...this.#dirtySpaces];
+      if (spaces.length === 0) {
+        return;
+      }
+
+      for (const space of spaces) {
+        this.#dirtySpaces.delete(space);
+      }
+      pending = undefined;
+
+      for (const space of spaces) {
+        for (const connection of this.#connections) {
+          await connection.refresh(space);
+        }
+      }
+
+      if (initial !== undefined) {
+        return;
+      }
     }
   }
 

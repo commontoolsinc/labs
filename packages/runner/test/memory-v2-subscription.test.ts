@@ -170,4 +170,71 @@ describe("Memory v2 storage notifications", () => {
       after: { value: { version: 3 } },
     });
   });
+
+  it("refreshes subscribed state before a conflict revert resolves", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const uri = `of:memory-v2-retry-${Date.now()}` as URI;
+    const provider = storageManager.open(space);
+    const { replica } = provider;
+    await provider.sync(uri);
+
+    await storageManager.session().mount(space).transact({
+      changes: Changes.from([Fact.assert({
+        the: "application/json",
+        of: uri,
+        is: { version: 1 },
+      })]),
+    });
+    await waitFor(() =>
+      JSON.stringify(replica.get({ id: uri, type: "application/json" as MIME })?.is) ===
+        JSON.stringify({ value: { version: 1 } })
+    );
+
+    await storageManager.session().mount(space).transact({
+      changes: Changes.from([Fact.assert({
+        the: "application/json",
+        of: uri,
+        is: { version: 3 },
+      })]),
+    });
+
+    const source = {
+      journal: {
+        activity() {
+          return [{
+            read: {
+              space,
+              id: uri,
+              type: "application/json",
+              path: [],
+              meta: { seq: 1 },
+            },
+          }];
+        },
+      },
+    } as any;
+
+    const factAddress = { id: uri, type: "application/json" as MIME };
+    const commitPromise = (replica as any).commit({
+      facts: [Fact.assert({
+        the: "application/json",
+        of: uri,
+        is: { version: 2 },
+      })],
+      claims: [],
+    }, source);
+    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 2 } });
+
+    const result = await commitPromise;
+    expect(result.ok).toBeFalsy();
+    expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
+    expect(subscription.reverts.at(-1)).toMatchObject({
+      type: "revert",
+      space,
+      source,
+    });
+    expect(subscription.reverts.at(-1)?.reason.name).toBe("ConflictError");
+  });
 });

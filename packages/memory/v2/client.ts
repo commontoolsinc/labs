@@ -73,7 +73,9 @@ export class Client {
     await this.transport.send(JSON.stringify(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
-      throw new Error(result.error.message);
+      const error = new Error(result.error.message);
+      error.name = result.error.name;
+      throw error;
     }
     return result.ok as Result;
   }

@@ -41,9 +41,11 @@ describe("Memory v2 emulation", () => {
     await tx.commit();
     await runtime.idle();
 
-    const persisted = storageManager.open(space).get(
-      cell.getAsNormalizedFullLink().id,
-    );
+    const provider = storageManager.open(space);
+    await provider.sync(cell.getAsNormalizedFullLink().id);
+    await storageManager.synced();
+
+    const persisted = provider.get(cell.getAsNormalizedFullLink().id);
 
     expect(persisted?.value).toEqual({ hello: "world" });
   });

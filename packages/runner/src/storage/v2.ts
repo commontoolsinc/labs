@@ -1007,7 +1007,11 @@ const toRejectedError = (
   commit: unknown,
 ): StorageTransactionRejected => {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("stale confirmed read") || message.includes("pending dependency")) {
+  if (
+    (error instanceof Error && error.name === "ConflictError") ||
+    message.includes("stale confirmed read") ||
+    message.includes("pending dependency")
+  ) {
     return {
       name: "ConflictError",
       message,
