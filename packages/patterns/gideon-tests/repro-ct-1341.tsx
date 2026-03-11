@@ -1,44 +1,145 @@
 /// <cts-enable />
 /**
- * CT-1341 minimal repro: fetchData cells trigger "Invalid fact.value with no value"
+ * CT-1341 minimal repro: fetchData inside sub-pattern with chained fetches
+ * triggered by pushing items via action.
  *
- * Deploy:
- *   deno task ct piece new repro-ct-1341.tsx -i <key> -a http://localhost:8000 -s repro-1341
+ * Steps to reproduce:
+ *   1. Deploy and open in browser
+ *   2. Click "Add Repo" button
+ *   3. Check browser DevTools console for "Invalid fact.value with no value"
  *
- * Open in browser, then check the toolshed console for:
- *   Error: Invalid fact.value with no value
- *
- * Root cause: fetchData (and fetchProgram, streamData) call setSourceCell()
- * on freshly created cells without writing an initial value first.
- * This produces facts like { source: { "/": "..." } } with no "value" key.
- * PR #3039's stricter validation in loadFactsForDoc throws on these.
- *
- * Compare with map/filter/flatmap builtins which call result.send([])
- * before setSourceCell(), ensuring the fact always has a value.
+ * This mimics the star tracker's structure: an action pushes to an array,
+ * .map() creates sub-patterns, each sub-pattern has multiple fetchData calls
+ * with chained computed URLs (fetch2 depends on fetch1 completing).
  */
-import { pattern, fetchData, NAME, UI } from "commontools";
+import { action, computed, Default, fetchData, FetchOptions, pattern, Stream, Writable, NAME, UI, type VNode } from "commontools";
 
-const app = pattern(({}) => {
-  const data = fetchData<any>({
-    url: "https://api.github.com/repos/anthropics/anthropic-sdk-python",
+// ===== Sub-pattern: fetches repo info then stargazers =====
+
+interface RepoInput {
+  owner: string;
+  repo: string;
+}
+
+interface RepoOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  owner: string;
+  repo: string;
+  stars: number;
+  status: string;
+}
+
+const RepoCard = pattern<RepoInput, RepoOutput>(({ owner, repo }) => {
+  const repoApiUrl = computed(
+    () => `https://api.github.com/repos/${owner}/${repo}`,
+  );
+
+  // First fetch: repo info
+  const repoInfo = fetchData<any>({
+    url: repoApiUrl,
     mode: "json",
   });
 
+  // Chained fetch: stargazers (only after repo info loads)
+  const stargazersUrl = computed(() => {
+    if (!(repoInfo.result || repoInfo.error)) return "";
+    return `https://api.github.com/repos/${owner}/${repo}/stargazers?per_page=5`;
+  });
+
+  const stargazers = fetchData<any>({
+    url: stargazersUrl,
+    mode: "json",
+    options: { headers: { Accept: "application/vnd.github.star+json" } },
+  });
+
+  // Third chained fetch
+  const readmeUrl = computed(() => {
+    if (!(stargazers.result || stargazers.error)) return "";
+    return `https://api.github.com/repos/${owner}/${repo}/readme`;
+  });
+
+  const readme = fetchData<any>({
+    url: readmeUrl,
+    mode: "json",
+  });
+
+  const stars = computed(
+    () => (repoInfo.result as any)?.stargazers_count ?? 0,
+  );
+
+  const status = computed(() => {
+    if (repoInfo.error) return "error: " + JSON.stringify(repoInfo.error);
+    if (!repoInfo.result) return "loading repo info...";
+    if (!stargazers.result && !stargazers.error) return "loading stargazers...";
+    if (!readme.result && !readme.error) return "loading readme...";
+    return "done";
+  });
+
   return {
-    [NAME]: "CT-1341 Repro",
-    result: data.result,
-    pending: data.pending,
-    error: data.error,
+    [NAME]: computed(() => `${owner}/${repo}`),
     [UI]: (
-      <div>
-        <h2>CT-1341 Repro</h2>
-        <p>Check toolshed console for "Invalid fact.value with no value"</p>
-        <p>Pending: {data.pending ? "true" : "false"}</p>
-        <p>Error: {data.error ? String(data.error) : "none"}</p>
-        <p>Result: {data.result ? "got data" : "no data"}</p>
-      </div>
+      <ct-card>
+        <ct-vstack gap="1">
+          <ct-heading level={6}>
+            {owner}/{repo}
+          </ct-heading>
+          <span>Stars: {stars}</span>
+          <span>Status: {status}</span>
+        </ct-vstack>
+      </ct-card>
     ),
+    owner,
+    repo,
+    stars,
+    status,
   };
 });
 
-export default app;
+// ===== Main pattern =====
+
+interface RepoEntry {
+  owner: string;
+  repo: string;
+}
+
+interface AppInput {
+  repos?: Writable<Default<RepoEntry[], []>>;
+}
+
+interface AppOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  repos: RepoEntry[];
+  addRepo: Stream<void>;
+}
+
+export default pattern<AppInput, AppOutput>(({ repos }) => {
+  const addRepo = action(() => {
+    repos.push({ owner: "anthropics", repo: "anthropic-sdk-python" });
+    repos.push({ owner: "facebook", repo: "react" });
+    repos.push({ owner: "denoland", repo: "deno" });
+  });
+
+  const cards = repos.map((entry: RepoEntry) => (
+    <RepoCard owner={entry.owner} repo={entry.repo} />
+  ));
+
+  return {
+    [NAME]: "CT-1341 Repro",
+    repos,
+    addRepo,
+    [UI]: (
+      <ct-vstack gap="3" style="padding: 1rem;">
+        <ct-heading level={4}>CT-1341 Repro</ct-heading>
+        <p>1. Click "Add Repos"</p>
+        <p>2. Check DevTools console for "Invalid fact.value with no value"</p>
+        <ct-button variant="primary" onClick={() => addRepo.send()}>
+          Add Repos
+        </ct-button>
+        <p>Repos: {computed(() => repos.get().length)}</p>
+        {cards}
+      </ct-vstack>
+    ),
+  };
+});
