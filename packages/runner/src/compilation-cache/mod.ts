@@ -24,6 +24,10 @@ export interface CachedCompilerStats {
   countEvictions: number;
 }
 
+/**
+ * Not thread-safe — assumes single-threaded access (Deno main thread).
+ * All methods mutate shared state (stats, storage) without synchronization.
+ */
 export class CachedCompiler {
   private stats: CachedCompilerStats = {
     hits: 0,

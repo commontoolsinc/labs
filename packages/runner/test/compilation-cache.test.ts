@@ -212,6 +212,51 @@ storageTests(
   },
 );
 
+// FileSystemCompilationCache-specific tests
+describe("FileSystem: path traversal validation", () => {
+  let storage: FileSystemCompilationCache;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = Deno.makeTempDirSync({ prefix: "ct-cache-test-" });
+    storage = new FileSystemCompilationCache(tempDir);
+  });
+
+  afterEach(async () => {
+    try {
+      await Deno.remove(tempDir, { recursive: true });
+    } catch { /* already cleaned up */ }
+  });
+
+  it("rejects programHash with path separator", async () => {
+    await expect(storage.get("../etc/passwd")).rejects.toThrow(
+      "Invalid programHash",
+    );
+  });
+
+  it("rejects programHash with backslash", async () => {
+    await expect(storage.get("..\\etc\\passwd")).rejects.toThrow(
+      "Invalid programHash",
+    );
+  });
+
+  it("rejects programHash with dot-dot", async () => {
+    await expect(storage.get("foo..bar")).rejects.toThrow(
+      "Invalid programHash",
+    );
+  });
+
+  it("rejects on set as well", async () => {
+    await expect(
+      storage.set("../../escape", {
+        jsScript: testJsScript,
+        fingerprint: "fp",
+        cachedAt: 1000,
+      }),
+    ).rejects.toThrow("Invalid programHash");
+  });
+});
+
 // Run tests for IDBCompilationCache (using fake-indexeddb polyfill)
 let idbStorage: IDBCompilationCache | undefined;
 storageTests(

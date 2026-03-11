@@ -22,8 +22,9 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
   }
 
   async get(programHash: string): Promise<CompilationCacheEntry | undefined> {
+    const filePath = this.path(programHash);
     try {
-      const text = await Deno.readTextFile(this.path(programHash));
+      const text = await Deno.readTextFile(filePath);
       return JSON.parse(text) as CompilationCacheEntry;
     } catch {
       return undefined;
