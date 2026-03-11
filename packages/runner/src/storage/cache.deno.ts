@@ -35,6 +35,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
       space,
       session: this.session(),
       subscription: this.#subscription,
+      memoryVersion: this.memoryVersion,
     });
   }
 
