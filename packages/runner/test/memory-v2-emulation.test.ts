@@ -61,16 +61,8 @@ describe("Memory v2 emulation", () => {
     }]);
 
     expect(result).toEqual({ ok: {} });
-
-    const query = storageManager.mount(space).query({
-      select: {
-        [uri]: {
-          "application/label+json": {},
-        },
-      },
+    expect(provider.get(uri)).toEqual({
+      value: { hello: "labels" },
     });
-
-    await query;
-    expect(query.facts).toEqual([]);
   });
 });
