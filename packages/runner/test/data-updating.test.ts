@@ -1304,7 +1304,10 @@ describe("data-updating", () => {
       cell.withTx(tx).setRaw({ value: 42 });
       const raw = cell.withTx(tx).getRaw();
       expect(raw?.value).toBe(42);
-      cell.withTx(tx).setRawUntyped(raw);
+      // getRaw() returns Immutable<T> (readonly), so use getRawMutable()
+      // for the typed round-trip through setRaw().
+      const mutableRaw = cell.withTx(tx).getRawMutable();
+      cell.withTx(tx).setRaw(mutableRaw!);
       expect(cell.withTx(tx).get().value).toBe(42);
     });
   });
