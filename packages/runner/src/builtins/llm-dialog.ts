@@ -2208,6 +2208,7 @@ async function startRequest(
   }
 
   const { system, maxTokens, model } = inputs.get();
+  const queueName = inputs.key("queue").get() as unknown as string | undefined;
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2322,7 +2323,11 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const resultPromise = client.sendRequest(llmParams, () => {}, abortSignal);
+  const doWork = () => client.sendRequest(llmParams, () => {}, abortSignal);
+
+  const resultPromise = queueName
+    ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
+    : doWork();
 
   resultPromise
     .then(async (llmResult) => {
