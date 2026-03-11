@@ -386,6 +386,60 @@ describe("CachedCompiler", () => {
     expect(stats.countEvictions).toBeGreaterThan(0);
   });
 
+  it("stale eviction alone can bring count under cap", async () => {
+    // cap=2, evictionInterval=1
+    const smallCompiler = new CachedCompiler(storage, "current-fp", 2, 1);
+
+    // Seed 2 stale entries via storage directly (wrong fingerprint)
+    await storage.set("stale1", {
+      jsScript: testJsScript,
+      fingerprint: "old-fp",
+      cachedAt: 1000,
+    });
+    await storage.set("stale2", {
+      jsScript: testJsScript2,
+      fingerprint: "old-fp",
+      cachedAt: 2000,
+    });
+
+    // Write 1 current entry — now at 3, over cap of 2
+    // Eviction should remove the 2 stale entries without needing evictOldest
+    await smallCompiler.set("current1", testJsScript);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(await storage.count()).toBe(1);
+    expect(await storage.get("current1")).toBeDefined();
+    expect(await storage.get("stale1")).toBeUndefined();
+    expect(await storage.get("stale2")).toBeUndefined();
+  });
+
+  it("does not evict when below eviction interval", async () => {
+    // cap=2, evictionInterval=10 — need 10 writes before eviction triggers
+    const smallCompiler = new CachedCompiler(storage, "fp", 2, 10);
+
+    // Seed entries to exceed cap
+    await storage.set("old1", {
+      jsScript: testJsScript,
+      fingerprint: "fp",
+      cachedAt: 1000,
+    });
+    await storage.set("old2", {
+      jsScript: testJsScript2,
+      fingerprint: "fp",
+      cachedAt: 2000,
+    });
+
+    // 3 writes through compiler — below interval of 10, no eviction
+    await smallCompiler.set("new1", testJsScript);
+    await smallCompiler.set("new2", testJsScript2);
+    await smallCompiler.set("new3", testJsScript);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // All 5 entries should still be present (no eviction triggered)
+    expect(await storage.count()).toBe(5);
+    expect(smallCompiler.getStats().countEvictions).toBe(0);
+  });
+
   it("clear removes everything", async () => {
     await compiler.set("hash1", testJsScript);
     await compiler.set("hash2", testJsScript2);
