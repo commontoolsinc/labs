@@ -128,7 +128,14 @@ if (safeToRestage.length > 0) {
 }
 
 // 2. Lint and type-check can run in parallel (both read-only)
-const tsFiles = files.filter((f) => /\.(ts|tsx)$/.test(f));
+// Exclude schema-generator test fixture inputs from type checking — they use
+// bare Cell/Stream/Writable types that are injected at runtime by a custom
+// TypeScript compiler host (see schema-generator/test/utils.ts CELL_BRAND_PRELUDE).
+const tsFiles = files.filter((f) =>
+  /\.(ts|tsx)$/.test(f) &&
+  !f.includes("schema-generator/test/fixtures/schema/") &&
+  !f.endsWith(".input.ts")
+);
 
 const errors = [
   fmtErr,
