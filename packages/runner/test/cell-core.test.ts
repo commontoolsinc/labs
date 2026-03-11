@@ -7,6 +7,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { StorableValue } from "@commontools/memory/interface";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
@@ -17,6 +18,9 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+const richSigner = await Identity.fromPassphrase("test rich raw");
+const richSpace = richSigner.did();
 
 describe("Cell", () => {
   let runtime: Runtime;
@@ -600,5 +604,167 @@ describe("Cell utility functions", () => {
     const proxy = c.getAsQueryResult();
     expect(isCellResult(proxy)).toBe(true);
     expect(isCellResult({})).toBe(false);
+  });
+
+  describe("getRawUntyped / setRawUntyped / getRawUntypedMutable", () => {
+    it("getRawUntyped returns the same value as getRaw for typed data", () => {
+      const cell = runtime.getCell<{ a: number }>(
+        space,
+        "getRawUntyped basic",
+        undefined,
+        tx,
+      );
+      cell.set({ a: 1 });
+      expect(cell.getRawUntyped()).toEqual(cell.getRaw());
+    });
+
+    it("setRawUntyped accepts a link value that does not match T", () => {
+      const target = runtime.getCell<number>(
+        space,
+        "setRawUntyped link target",
+        undefined,
+        tx,
+      );
+      target.set(99);
+
+      const cell = runtime.getCell<string>(
+        space,
+        "setRawUntyped link source",
+        undefined,
+        tx,
+      );
+      cell.set("hello");
+
+      // Write a sigil link via setRawUntyped — this would not type-check
+      // with setRaw because a link object is not assignable to string.
+      const link = target.getAsWriteRedirectLink();
+      cell.setRawUntyped(link as StorableValue);
+
+      // The raw untyped read should return the link structure.
+      const raw = cell.getRawUntyped();
+      expect(raw).toBeDefined();
+      expect(typeof raw === "object" && raw !== null && "/" in raw).toBe(true);
+    });
+
+    it("setRawUntyped accepts undefined", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "setRawUntyped undefined",
+        undefined,
+        tx,
+      );
+      cell.set(42);
+      cell.setRawUntyped(undefined);
+      expect(cell.getRawUntyped()).toBeUndefined();
+    });
+
+    it("getRawUntypedMutable returns undefined for an empty cell", () => {
+      const cell = runtime.getCell<{ x: number }>(
+        space,
+        "getRawUntypedMutable empty",
+        undefined,
+        tx,
+      );
+      expect(cell.getRawUntypedMutable()).toBeUndefined();
+    });
+
+    it("getRawUntypedMutable returns a value equal to getRaw", () => {
+      const cell = runtime.getCell<{ x: number; y: number }>(
+        space,
+        "getRawUntypedMutable basic",
+        undefined,
+        tx,
+      );
+      cell.set({ x: 10, y: 20 });
+      expect(cell.getRawUntypedMutable()).toEqual(cell.getRaw());
+    });
+  });
+});
+
+// Separate top-level describe with richStorableValues enabled for frozen-ness.
+describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: richSigner });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        richStorableValues: true,
+        canonicalHashing: true,
+      },
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("getRaw returns a frozen object", () => {
+    const cell = runtime.getCell<{ a: number; b: number[] }>(
+      richSpace,
+      "getRaw frozen",
+      undefined,
+      tx,
+    );
+    cell.set({ a: 1, b: [2, 3] });
+    const raw = cell.getRaw();
+    expect(raw).toBeDefined();
+    expect(Object.isFrozen(raw)).toBe(true);
+    expect(Object.isFrozen((raw as { b: number[] }).b)).toBe(true);
+  });
+
+  it("getRawUntyped returns a frozen object", () => {
+    const cell = runtime.getCell<{ x: number[] }>(
+      richSpace,
+      "getRawUntyped frozen",
+      undefined,
+      tx,
+    );
+    cell.set({ x: [1, 2] });
+    const raw = cell.getRawUntyped();
+    expect(raw).toBeDefined();
+    expect(Object.isFrozen(raw)).toBe(true);
+    expect(Object.isFrozen((raw as { x: number[] }).x)).toBe(true);
+  });
+
+  it("getRawUntypedMutable returns a mutable deep copy", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      richSpace,
+      "getRawUntypedMutable mutable",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [10, 20] });
+
+    const mutable = cell.getRawUntypedMutable() as { items: number[] };
+    expect(mutable).toBeDefined();
+    expect(Object.isFrozen(mutable)).toBe(false);
+    expect(Object.isFrozen(mutable.items)).toBe(false);
+
+    // Verify it's a copy — mutating doesn't affect the cell.
+    mutable.items.push(30);
+    expect((cell.getRaw() as { items: number[] }).items).toEqual([10, 20]);
+  });
+
+  it("getRaw and getRawUntyped agree, both frozen", () => {
+    const cell = runtime.getCell<{ v: string }>(
+      richSpace,
+      "raw agreement frozen",
+      undefined,
+      tx,
+    );
+    cell.set({ v: "hello" });
+    const typed = cell.getRaw();
+    const untyped = cell.getRawUntyped();
+    expect(typed).toEqual(untyped);
+    expect(Object.isFrozen(typed)).toBe(true);
+    expect(Object.isFrozen(untyped)).toBe(true);
   });
 });
