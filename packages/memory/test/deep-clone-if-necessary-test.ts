@@ -198,6 +198,35 @@ describe("deepCloneIfNecessary", () => {
       expect(1 in result).toBe(true);
       expect(Object.isFrozen(result)).toBe(true);
     });
+
+    // -- null prototype preservation --
+
+    it("preserves null prototype on objects", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const value = Object.create(null) as Record<string, unknown>;
+      value.a = 1;
+      value.b = "two";
+      const result = deepCloneIfNecessary(
+        value as StorableValue,
+      ) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(result)).toBe(null);
+      expect(result.a).toBe(1);
+      expect(result.b).toBe("two");
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("preserves null prototype when frozen=false", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const value = Object.create(null) as Record<string, unknown>;
+      value.x = 42;
+      const result = deepCloneIfNecessary(
+        value as StorableValue,
+        false,
+      ) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(result)).toBe(null);
+      expect(result.x).toBe(42);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
   });
 
   // --------------------------------------------------------------------------

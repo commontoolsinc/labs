@@ -650,53 +650,62 @@ export function deepCloneIfNecessaryRich(
 }
 
 /**
- * Internal recursive implementation for `deepCloneIfNecessaryRich`.
+ * Internal recursive implementation for `deepCloneIfNecessaryRich`. Uses
+ * `switch (tagFromNativeValue(value))` for type dispatch, consistent with
+ * `shallowCloneIfNecessary` and `toRichStorableValue`.
  */
 function deepCloneIfNecessaryInternal(
   value: StorableValue,
   frozen: boolean,
 ): StorableValue {
-  // Primitives (null, undefined, boolean, number, string, bigint) pass
-  // through -- frozenness doesn't apply.
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
+  switch (tagFromNativeValue(value)) {
+    // Primitives (null, undefined, boolean, number, string, bigint) pass
+    // through -- frozenness doesn't apply.
+    case NATIVE_TAGS.Primitive:
+    // Special primitives are always frozen, returned as-is.
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value;
 
-  // Special primitives are always frozen, returned as-is.
-  if (value instanceof SpecialPrimitiveValue) {
-    return value;
-  }
+    case NATIVE_TAGS.StorableInstance:
+      // Delegate to the protocol's shallowClone method.
+      return (value as StorableInstance).shallowClone(
+        frozen,
+      ) as StorableValue;
 
-  // StorableInstance -- delegate to the protocol's shallowClone.
-  if (isStorableInstance(value)) {
-    return (value as StorableInstance).shallowClone(
-      frozen,
-    ) as StorableValue;
-  }
-
-  if (Array.isArray(value)) {
-    const arr = value as StorableValue[];
-    const copy: StorableValue[] = new Array(arr.length);
-    for (let i = 0; i < arr.length; i++) {
-      if (i in arr) {
-        copy[i] = deepCloneIfNecessaryInternal(arr[i], frozen);
+    case NATIVE_TAGS.Array: {
+      const arr = value as StorableValue[];
+      const copy: StorableValue[] = new Array(arr.length);
+      for (let i = 0; i < arr.length; i++) {
+        if (i in arr) {
+          copy[i] = deepCloneIfNecessaryInternal(arr[i], frozen);
+        }
       }
+      if (frozen) Object.freeze(copy);
+      return copy as StorableValue;
     }
-    if (frozen) Object.freeze(copy);
-    return copy as StorableValue;
-  }
 
-  // Plain object.
-  const entries: [string, StorableValue][] = [];
-  for (const [key, val] of Object.entries(value)) {
-    entries.push([
-      key,
-      deepCloneIfNecessaryInternal(val as StorableValue, frozen),
-    ]);
+    case NATIVE_TAGS.Object: {
+      // Preserve null prototypes (e.g. Object.create(null)).
+      const proto = Object.getPrototypeOf(value);
+      const copy = Object.create(proto) as Record<string, StorableValue>;
+      for (const [key, val] of Object.entries(value as object)) {
+        copy[key] = deepCloneIfNecessaryInternal(val as StorableValue, frozen);
+      }
+      if (frozen) Object.freeze(copy);
+      return copy as StorableValue;
+    }
+
+    default:
+      // deepCloneIfNecessary operates on already-valid StorableValues.
+      // Unrecognized types should never reach here.
+      throw new Error(
+        `Cannot deep-clone: ${
+          (value as object).constructor?.name ?? typeof value
+        }`,
+      );
   }
-  const obj = Object.fromEntries(entries);
-  if (frozen) Object.freeze(obj);
-  return obj as StorableValue;
 }
 
 function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
