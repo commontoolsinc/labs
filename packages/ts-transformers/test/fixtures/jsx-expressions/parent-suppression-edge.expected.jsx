@@ -317,48 +317,8 @@ export default pattern((state) => {
                         theme: state.key("user").settings.theme
                     }
                 }
-            } }, ({ state }) => __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
-                                },
-                                settings: {
-                                    type: "object",
-                                    properties: {
-                                        theme: {
-                                            type: "string",
-                                            asOpaque: true
-                                        }
-                                    },
-                                    required: ["theme"]
-                                }
-                            },
-                            required: ["name", "settings"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                user: {
-                    name: state.user.name,
-                    settings: {
-                        theme: state.user.settings.theme
-                    }
-                }
             } }, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme) + " theme"), __ctHelpers.derive({
+            state.user.settings.theme + " theme"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

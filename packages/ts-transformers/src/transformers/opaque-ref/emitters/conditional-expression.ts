@@ -25,37 +25,36 @@ function processBranch(
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
 ): ts.Expression {
-  const rewritten = rewriteChildren(expr) || expr;
-  const rewrittenAnalysis = analyze(rewritten);
-  const rewrittenDataFlows = filterRelevantDataFlows(
+  const branchAnalysis = analyze(expr);
+  const branchDataFlows = filterRelevantDataFlows(
     normalizeDataFlows(
-      rewrittenAnalysis.graph,
-      rewrittenAnalysis.dataFlows,
+      branchAnalysis.graph,
+      branchAnalysis.dataFlows,
     ).all,
-    rewrittenAnalysis,
+    branchAnalysis,
     context,
   );
 
-  const pendingRewrite = rewrittenDataFlows.length > 0
-    ? findPendingComputeWrapCandidate(rewritten, analyze, context)
+  const pendingRewrite = branchDataFlows.length > 0
+    ? findPendingComputeWrapCandidate(expr, analyze, context)
     : undefined;
 
   if (pendingRewrite) {
     assertValidComputeWrapCandidate(
       pendingRewrite,
-      rewritten,
+      expr,
       "ternary branch",
       context,
     );
 
-    const plan = createBindingPlan(rewrittenDataFlows);
-    const derived = createComputedCallForExpression(rewritten, plan, context);
+    const plan = createBindingPlan(branchDataFlows);
+    const derived = createComputedCallForExpression(expr, plan, context);
     if (derived) {
       return derived;
     }
   }
 
-  return rewritten;
+  return rewriteChildren(expr) || expr;
 }
 
 export const emitConditionalExpression: Emitter = ({

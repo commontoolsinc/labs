@@ -1475,6 +1475,97 @@ export default pattern<{ items: Item[] }>((state) => {
 );
 
 Deno.test(
+  "Capability-first: ternary branch derive does not nest inner arithmetic derives",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: number;
+  price: number;
+}
+
+interface State {
+  items: Item[];
+  discount: number;
+  threshold: number;
+}
+
+export default pattern<State>((state) => ({
+  [UI]: (
+    <div>
+      {state.items.map((item) => (
+        <div>
+          {item.price > state.threshold
+            ? item.price * (1 - state.discount)
+            : item.price}
+        </div>
+      ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      2,
+    );
+    assertStringIncludes(
+      output,
+      "item.price * (1 - state.discount)",
+    );
+    assert(
+      !output.includes("item.price * (__ctHelpers.derive("),
+      "expected ternary branch derive to absorb inner arithmetic instead of nesting a second derive",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: ifElse predicate binary is not treated as a pattern-owned branch",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, UI } from "commontools";
+
+interface Field {
+  name: string;
+  validationIssue?: { message: string };
+}
+
+export default pattern<{ fields: Field[] }>((state) => ({
+  [UI]: (
+    <div>
+      {state.fields.map((field) => (
+        <div>
+          {ifElse(
+            field.validationIssue !== undefined,
+            <span>{field.validationIssue?.message}</span>,
+            null,
+          )}
+        </div>
+      ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(
+      output,
+      "=> field.validationIssue !== undefined",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: derive object-literal input preserves property schemas",
   async () => {
     const source = `/// <cts-enable />
