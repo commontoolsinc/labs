@@ -306,8 +306,11 @@ describe("wish built-in", () => {
     const after = Date.now();
     const nowValue = result.key("nowValue").get()?.result;
     expect(typeof nowValue).toBe("number");
-    expect(nowValue).toBeGreaterThanOrEqual(before);
+    // Coarsened to 1s resolution — floor(before) to floor(after+1s) range
+    const coarsenedBefore = Math.floor(before / 1000) * 1000;
+    expect(nowValue).toBeGreaterThanOrEqual(coarsenedBefore);
     expect(nowValue).toBeLessThanOrEqual(after);
+    expect(nowValue! % 1000).toBe(0);
   });
 
   it("resolves the space cell using slash target", async () => {
@@ -655,8 +658,11 @@ describe("wish built-in", () => {
       const after = Date.now();
       const nowValue = result.key("nowValue").get()?.result;
       expect(typeof nowValue).toBe("number");
-      expect(nowValue).toBeGreaterThanOrEqual(before);
+      // Coarsened to 1s resolution — floor(before) to after range
+      const coarsenedBefore = Math.floor(before / 1000) * 1000;
+      expect(nowValue).toBeGreaterThanOrEqual(coarsenedBefore);
       expect(nowValue).toBeLessThanOrEqual(after);
+      expect(nowValue! % 1000).toBe(0);
     });
 
     it("returns error for unknown tag", async () => {
@@ -2605,6 +2611,305 @@ describe("parseWishTarget", () => {
 
   it("throws on hash-only target", () => {
     expect(() => parseWishTarget("#")).toThrow("is not recognized");
+  });
+});
+
+describe("interval #now wish", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: ReturnType<Runtime["edit"]>;
+  let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    tx = runtime.edit();
+
+    const { commontools } = createBuilder();
+    ({ wish, pattern } = commontools);
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("#now one-shot is coarsened to 1s", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "coarsened now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // Coarsened to 1s — must be divisible by 1000
+    expect(nowValue! % 1000).toBe(0);
+  });
+
+  it("#now/5000 returns a cell with coarsened timestamp", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/5000" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "interval now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // Coarsened to 5s — must be divisible by 5000
+    expect(nowValue! % 5000).toBe(0);
+  });
+
+  it("#now/1 is clamped to minimum 1000ms", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "clamped now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // Clamped to 1000ms — must be divisible by 1000
+    expect(nowValue! % 1000).toBe(0);
+  });
+
+  it("#now/60000 values are coarsened to 60s boundary", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/60000" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "60s now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // Coarsened to 60s — must be divisible by 60000
+    expect(nowValue! % 60000).toBe(0);
+  });
+
+  it("#now/abc throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/abc" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "invalid now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("must be a finite positive number");
+  });
+
+  it("#now/5000/extra throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/5000/extra" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "extra path now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("is not recognized");
+  });
+
+  it("#now interval timer is cleaned up on stop", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1000" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "cleanup now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Stop the runner for this cell — should clear the timer without errors
+    runtime.runner.stop(resultCell);
+
+    // Wait briefly to confirm no timer errors after cleanup
+    await new Promise((r) => setTimeout(r, 100));
+  });
+
+  it("#now/Infinity throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/Infinity" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "infinity now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("must be a finite positive number");
+  });
+
+  it("#now/0 throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/0" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "zero now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("must be a finite positive number");
+  });
+
+  it("#now/-1 throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/-1" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "negative now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("must be a finite positive number");
+  });
+
+  it("#now/1000 ticks and updates value", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1000" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "ticking now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const initial = result.key("nowValue").get()?.result;
+    expect(typeof initial).toBe("number");
+    expect(initial! % 1000).toBe(0);
+
+    // Poll until value changes, with a generous deadline for CI
+    const deadline = Date.now() + 5000;
+    let updated = initial;
+    while (updated === initial && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      await result.pull();
+      updated = result.key("nowValue").get()?.result;
+    }
+    expect(updated).toBeGreaterThan(initial!);
+    expect(updated! % 1000).toBe(0);
+
+    // Clean up timer
+    runtime.runner.stop(resultCell);
   });
 });
 

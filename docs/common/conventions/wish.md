@@ -128,6 +128,32 @@ export default pattern<Input>(({ enableSearch }) => {
 This ensures the wish is established once. Conditional logic belongs in how you
 *use* the result, not in whether you *create* the wish.
 
+## Built-in Targets
+
+| Target          | Description                                          |
+|-----------------|------------------------------------------------------|
+| `#now`          | Current timestamp (one-shot, 1s resolution)          |
+| `#now/N`        | Reactive timestamp that ticks every N ms (min 1000)  |
+| `#favorites`    | User's favorites list (from home space)              |
+| `#default`      | Default pattern of the current space                 |
+| `#recent`       | Recently-used pieces in the current space            |
+| `#allPieces`    | All pieces in the current space                      |
+| `#mentionable`  | Mentionable pieces in the current space              |
+| `/`             | Current space cell                                   |
+| `/path/to/prop` | Nested property of the space cell                    |
+
+```tsx
+// One-shot: captures current time once, never updates
+const createdAt = wish<number>({ query: "#now" });
+
+// Reactive: updates every 60s, re-triggers downstream computed()
+const now = wish<number>({ query: "#now/60000" });
+const timeAgo = computed(() => {
+  const ms = now.result - message.sentAt;
+  return `${Math.floor(ms / 60000)} minutes ago`;
+});
+```
+
 ## Intended Usage
 
 Keep a handle to important information in a piece, e.g. google auth, user
