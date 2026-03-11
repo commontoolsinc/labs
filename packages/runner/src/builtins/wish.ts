@@ -530,7 +530,6 @@ function handleIntervalNow(
   ctx: WishContext,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
   addCancel: (cancel: () => void) => void,
-  _cause: Cell<any>[],
 ): boolean {
   if (parsed.key !== "#now" || parsed.path.length === 0) return false;
 
@@ -1007,7 +1006,6 @@ export function wish(
               ctx,
               sendResult,
               addCancel,
-              cause,
             )
           ) {
             return;
