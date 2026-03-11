@@ -15,6 +15,7 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME);
         store.createIndex("by-fingerprint", "fingerprint", { unique: false });
+        store.createIndex("by-cachedAt", "cachedAt", { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -75,44 +76,53 @@ export class IDBCompilationCache implements CompilationCacheStorage {
     const db = await this.getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    // Get all keys, then delete those with non-matching fingerprint.
-    // We can't use the index to find "not equal", so we iterate all entries.
-    const allKeys = await reqPromise(store.getAllKeys());
-    const allValues = await reqPromise(store.getAll());
+    const index = store.index("by-fingerprint");
 
-    let evicted = 0;
-    for (let i = 0; i < allKeys.length; i++) {
-      const entry = allValues[i] as CompilationCacheEntry;
-      if (entry.fingerprint !== currentFingerprint) {
-        store.delete(allKeys[i]);
-        evicted++;
-      }
+    // Get keys for all records that don't match current fingerprint
+    // IDBKeyRange can't do "not equal", but we can query the two ranges around it
+    const [below, above] = await Promise.all([
+      reqPromise(
+        index.getAllKeys(
+          IDBKeyRange.upperBound(currentFingerprint, /*exclude equal*/ true),
+        ),
+      ),
+      reqPromise(
+        index.getAllKeys(
+          IDBKeyRange.lowerBound(currentFingerprint, /*exclude equal*/ true),
+        ),
+      ),
+    ]);
+
+    const staleKeys = [...below, ...above];
+    for (const key of staleKeys) {
+      store.delete(key);
     }
 
     await txPromise(tx);
-    return evicted;
+    return staleKeys.length;
   }
 
   async evictOldest(keepCount: number): Promise<number> {
     const db = await this.getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const allKeys = await reqPromise(store.getAllKeys());
-    const allValues = await reqPromise(store.getAll());
+    const index = store.index("by-cachedAt");
 
-    if (allKeys.length <= keepCount) return 0;
+    const totalCount = await reqPromise(store.count());
+    const deleteCount = totalCount - keepCount;
+    if (deleteCount <= 0) return 0;
 
-    const entries = allKeys.map((key, i) => ({
-      key,
-      cachedAt: (allValues[i] as CompilationCacheEntry).cachedAt,
-    }));
-    entries.sort((a, b) => a.cachedAt - b.cachedAt);
-    const toRemove = entries.slice(0, entries.length - keepCount);
-    for (const { key } of toRemove) {
+    // Get only the keys we need to delete, sorted oldest-first by cachedAt
+    const keysToDelete = await reqPromise(
+      index.getAllKeys(null, deleteCount),
+    );
+
+    for (const key of keysToDelete) {
       store.delete(key);
     }
+
     await txPromise(tx);
-    return toRemove.length;
+    return keysToDelete.length;
   }
 
   async clear(): Promise<void> {

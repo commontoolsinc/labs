@@ -125,13 +125,13 @@ export class CachedCompiler {
     if (this.writesSinceEviction < this.evictionInterval) return;
     if (this.evicting) return;
     this.evicting = true;
-    this.doEviction().finally(() => {
+    this.doEvictionByCount().finally(() => {
       this.evicting = false;
       this.writesSinceEviction = 0;
     });
   }
 
-  private async doEviction(): Promise<void> {
+  private async doEvictionByCount(): Promise<void> {
     try {
       const count = await this.cache.count();
       if (count <= this.maxEntries) return;
