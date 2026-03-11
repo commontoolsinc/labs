@@ -84,6 +84,11 @@ export class Builder extends EventTarget {
         console.log(await esbuild.analyzeMetafile(result.metafile));
       }
 
+      // Generate build manifest with content hashes of output files.
+      // Used for compilation cache fingerprinting.
+      // See docs/specs/compilation-cache.md Phase 3.
+      await this.writeBuildManifest();
+
       const buildTime = Math.round(performance.now() - startTime);
       console.log(`   ${dim(`Total build time: ${buildTime}ms`)}`);
       this.dispatchEvent(new CustomEvent("build"));
@@ -94,6 +99,36 @@ export class Builder extends EventTarget {
       );
       throw error;
     }
+  }
+
+  /**
+   * Write a build manifest containing SHA-256 hashes of each output file.
+   * The manifest is used by the shell to fingerprint the worker bundle
+   * for compilation cache invalidation.
+   * See docs/specs/compilation-cache.md Phase 3.
+   */
+  private async writeBuildManifest(): Promise<void> {
+    const manifest: Record<string, string> = {};
+    for (const entry of this.manifest.entries) {
+      const outPath = `${entry.out}.js`;
+      try {
+        const content = await Deno.readFile(outPath);
+        const hash = await crypto.subtle.digest("SHA-256", content);
+        const hex = Array.from(new Uint8Array(hash))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+        // Store with path relative to outDir
+        const relPath = outPath.slice(this.manifest.outDir.length + 1);
+        manifest[relPath] = hex;
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          throw error;
+        }
+      }
+    }
+
+    const manifestPath = `${this.manifest.outDir}/build-manifest.json`;
+    await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
   }
 }
 

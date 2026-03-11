@@ -83,6 +83,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,
+      buildHash: options.buildHash,
     });
     return new RuntimeClient(initialized, options);
   }

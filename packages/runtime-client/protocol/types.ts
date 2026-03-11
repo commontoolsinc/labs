@@ -109,6 +109,10 @@ export interface InitializationData {
     storableProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
+  // Content hash of the worker bundle, used for compilation cache
+  // invalidation. If absent, the compilation cache is disabled.
+  // See docs/specs/compilation-cache.md Phase 3.
+  buildHash?: string;
 }
 
 export interface InitializeRequest extends BaseRequest {
