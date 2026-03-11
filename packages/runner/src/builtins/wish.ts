@@ -422,7 +422,7 @@ function handleIntervalNow(
   ctx: WishContext,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
   addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  _cause: Cell<any>[],
 ): boolean {
   if (parsed.key !== "#now" || parsed.path.length === 0) return false;
 
@@ -450,44 +450,83 @@ function handleIntervalNow(
   state.intervalMs = intervalMs;
 
   // Create a mutable cell for the ticking timestamp.
+  // All instances in the same space with the same interval share one cell,
+  // so multiple tabs don't create redundant cells/writes.
   if (!state.cell) {
     state.cell = ctx.runtime.getCell(
       ctx.parentCell.space,
-      { wish: { now: cause, interval: intervalMs } },
+      { wish: { now: true, interval: intervalMs } },
       undefined,
       ctx.tx,
     );
   }
 
-  // Set initial coarsened value.
-  state.cell.withTx(ctx.tx).send(
-    coarsenTimestamp(Date.now(), intervalMs),
-  );
+  // Read-before-write: only initialize if cell is empty or stale.
+  const existing = state.cell.withTx(ctx.tx).get() as
+    | { startTime: number; interval: number; lastTriggered: number }
+    | null
+    | undefined;
+  const currentCoarsened = coarsenTimestamp(Date.now(), intervalMs);
+
+  if (existing == null || existing.lastTriggered == null) {
+    // Cell is empty — first instance ever. Initialize with metadata.
+    state.cell.withTx(ctx.tx).send({
+      startTime: currentCoarsened,
+      interval: intervalMs,
+      lastTriggered: currentCoarsened,
+    });
+  } else if (existing.lastTriggered !== currentCoarsened) {
+    // Stale (e.g. after reload) — issue immediate update, fire and forget
+    void ctx.runtime.editWithRetry((editTx) => {
+      const current = state.cell!.withTx(editTx).get() as
+        | { startTime: number; interval: number; lastTriggered: number }
+        | null
+        | undefined;
+      const coarsened = coarsenTimestamp(Date.now(), intervalMs);
+      if (!current || current.lastTriggered !== coarsened) {
+        state.cell!.withTx(editTx).send({
+          ...(current ?? { startTime: coarsened, interval: intervalMs }),
+          lastTriggered: coarsened,
+        });
+      }
+    });
+  }
+  // If existing.lastTriggered === currentCoarsened, cell is fresh — do nothing.
 
   // Start aligned timer — ticks on wall-clock boundaries so patterns
   // cannot choose a phase offset to correlate with other operations.
   clearTimeout(state.timerId);
-  // TODO(perf): Each wish instance creates its own timer. If many patterns use
-  // #now/N with the same interval, consider a shared-timer-per-interval registry
-  // to avoid thundering-herd editWithRetry bursts.
+  // NOTE: The cell is shared across tabs/instances, but each instance still
+  // runs its own timer. A per-tab timer registry keyed by (space, interval)
+  // is a future optimization.
   const scheduleNextTick = (ms: number) => {
     const now = Date.now();
     const nextBoundary = (Math.floor(now / ms) + 1) * ms;
     const delay = nextBoundary - now;
-    state.timerId = setTimeout(async () => {
+    state.timerId = setTimeout(() => {
       const gen = state.generation;
-      const { error } = await ctx.runtime.editWithRetry((editTx) => {
+
+      // Fire and forget — first tab to commit wins
+      void ctx.runtime.editWithRetry((editTx) => {
         if (gen !== state.generation) return; // stale tick, skip
-        state.cell!.withTx(editTx).send(
-          coarsenTimestamp(Date.now(), ms),
-        );
+        const coarsened = coarsenTimestamp(Date.now(), ms);
+        const current = state.cell!.withTx(editTx).get() as
+          | { startTime: number; interval: number; lastTriggered: number }
+          | null
+          | undefined;
+        if (!current || current.lastTriggered !== coarsened) {
+          state.cell!.withTx(editTx).send({
+            ...(current ?? { startTime: coarsened, interval: ms }),
+            lastTriggered: coarsened,
+          });
+        }
+      }).then((outcome) => {
+        if (outcome.error) {
+          console.error("[wish] #now interval tick failed:", outcome.error);
+        }
       });
-      if (error) {
-        console.error(
-          "[wish] #now interval tick failed after retries:",
-          error,
-        );
-      }
+
+      // Schedule next tick immediately, don't wait for write
       if (gen === state.generation) {
         scheduleNextTick(ms);
       }
