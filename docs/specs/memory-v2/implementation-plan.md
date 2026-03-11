@@ -27,8 +27,16 @@
 - [x] Hard-cut the websocket protocol to `memory/v2` for v2 runtimes instead of preserving the old query/transact/subscription wire shape.
 - [x] Route v2 runtime traffic through the spec-native engine on both the real toolshed route and the emulated path.
 - [x] Reach parity for the main v1-used reactive flows already exercised on this branch: schema sync, linked-document propagation, deep link chains, reconnect resubscribe, scheduler pull reactivity, alias schema round-trip, and alias retargeting.
+- [x] Pin tests that intentionally depend on v1-only storage internals to explicit `memoryVersion: "v1"` construction and typed v1 helpers, so a future default flip does not confuse harness debt with real v2 regressions.
 - [ ] Finish reconnect parity when there is still outstanding local optimistic work.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
+
+## Test Split For Default Flip
+- [x] Keep the old v1-internal tests explicitly on v1 when they depend on structures that do not exist in v2, such as `StorageManagerEmulator.mount()`, `StorageManager.openConnection(...).provider`, or `Provider.replica.heap`.
+- [x] Treat linked-document propagation and deep link-chain reactivity as already covered on the v2 path by [memory-v2.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory/memory-v2.test.ts).
+- [x] Treat provider-visible non-branching behavior as already covered on the v2 path by [memory-v2-comparison.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-comparison.test.ts).
+- [x] Treat notification ordering and conflict-before-revert behavior as already covered on the v2 path by [memory-v2-subscription.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-subscription.test.ts).
+- [ ] Add the true v2 counterpart for the pending-nursery-style cases that still matter: stacked optimistic local commits, reconnect with outstanding local work, own-commit de-duplication, and retry-after-revert behavior.
 
 ## Reprioritized For V1 Parity
 - [x] Treat non-branching v1 parity as the actual cutover target. The current runtime depends on `syncCell()`, schema traversal, subscriptions, reconnect, optimistic writes, and notification ordering.
