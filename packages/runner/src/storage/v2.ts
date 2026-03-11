@@ -845,7 +845,9 @@ class SpaceReplica implements ISpaceReplica {
         confirmed.push({
           id: read.id as URI,
           path: ["value", ...read.path.map(String)],
-          seq: record?.confirmed.seq ?? 0,
+          seq: typeof read.meta?.seq === "number"
+            ? read.meta.seq
+            : record?.confirmed.seq ?? 0,
         });
       }
     }
@@ -942,12 +944,15 @@ class SpaceReplica implements ISpaceReplica {
     if (value === undefined) {
       return undefined;
     }
-    return assert({
-      the: DOCUMENT_MIME,
-      of: id,
-      is: value,
-      cause: null,
-    });
+    return {
+      ...assert({
+        the: DOCUMENT_MIME,
+        of: id,
+        is: value,
+        cause: null,
+      }),
+      since: this.#docs.get(id)?.confirmed.seq ?? 0,
+    } as State;
   }
 
   private notifySinks(changes: IMergedChanges): void {
