@@ -620,6 +620,85 @@ export function canBeStored(
 /**
  * Internal recursive implementation with cycle detection.
  */
+/**
+ * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
+ *
+ * Unlike `storableFromNativeValue` (which converts native JS values like
+ * `Error`, `Date`, `Map` into storable wrappers), this function assumes the
+ * input is already a valid `StorableValue` and only adjusts frozenness by
+ * cloning where necessary.
+ *
+ * - If `frozen` is `true` (default) and the value is already deep-frozen,
+ *   returns it as-is (identity optimization).
+ * - Primitives (including `SpecialPrimitiveValue`) pass through unchanged.
+ * - `StorableInstance` nodes delegate to the protocol's `shallowClone`.
+ * - Arrays and plain objects are recursively cloned only when frozenness
+ *   differs from the requested state.
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param frozen - When `true` (default), returns a deep-frozen copy.
+ *   When `false`, returns a mutable deep copy.
+ */
+export function deepCloneIfNecessaryRich(
+  value: StorableValue,
+  frozen = true,
+): StorableValue {
+  if (frozen && isDeepFrozenStorableValue(value)) {
+    return value;
+  }
+  return deepCloneIfNecessaryInternal(value, frozen);
+}
+
+/**
+ * Internal recursive implementation for `deepCloneIfNecessaryRich`.
+ */
+function deepCloneIfNecessaryInternal(
+  value: StorableValue,
+  frozen: boolean,
+): StorableValue {
+  // Primitives (null, undefined, boolean, number, string, bigint) pass
+  // through -- frozenness doesn't apply.
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+
+  // Special primitives are always frozen, returned as-is.
+  if (value instanceof SpecialPrimitiveValue) {
+    return value;
+  }
+
+  // StorableInstance -- delegate to the protocol's shallowClone.
+  if (isStorableInstance(value)) {
+    return (value as StorableInstance).shallowClone(
+      frozen,
+    ) as StorableValue;
+  }
+
+  if (Array.isArray(value)) {
+    const arr = value as StorableValue[];
+    const copy: StorableValue[] = new Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      if (i in arr) {
+        copy[i] = deepCloneIfNecessaryInternal(arr[i], frozen);
+      }
+    }
+    if (frozen) Object.freeze(copy);
+    return copy as StorableValue;
+  }
+
+  // Plain object.
+  const entries: [string, StorableValue][] = [];
+  for (const [key, val] of Object.entries(value)) {
+    entries.push([
+      key,
+      deepCloneIfNecessaryInternal(val as StorableValue, frozen),
+    ]);
+  }
+  const obj = Object.fromEntries(entries);
+  if (frozen) Object.freeze(obj);
+  return obj as StorableValue;
+}
+
 function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
   // Primitives: null, boolean, string, number (finite), bigint, undefined.
   if (value === null || value === undefined) return true;

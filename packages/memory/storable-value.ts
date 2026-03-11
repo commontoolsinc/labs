@@ -6,6 +6,7 @@ import type {
 } from "./interface.ts";
 import {
   canBeStored as canBeStoredRich,
+  deepCloneIfNecessaryRich,
   isRichStorableValue,
   toDeepRichStorableValue,
   toRichStorableValue,
@@ -58,6 +59,27 @@ export let storableFromNativeValue: (
  *   passthrough regardless.
  */
 export let nativeFromStorableValue: (
+  value: StorableValue,
+  frozen?: boolean,
+) => StorableValue;
+
+/**
+ * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
+ *
+ * Unlike `storableFromNativeValue` (which converts native JS values into
+ * storable wrappers), this function assumes the input is already a valid
+ * `StorableValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Flag ON (rich): delegates to `deepCloneIfNecessaryRich` which deep-clones
+ * and adjusts frozenness. Flag OFF (legacy): identity passthrough (legacy
+ * values are not frozen).
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param frozen - When `true` (default), returns a deep-frozen copy.
+ *   When `false`, returns a mutable deep copy. Only applies when
+ *   `richStorableValues` is ON.
+ */
+export let deepCloneIfNecessary: (
   value: StorableValue,
   frozen?: boolean,
 ) => StorableValue;
@@ -138,6 +160,13 @@ function configureDispatch(): void {
     ): StorableValue => {
       return deepNativeValueFromStorableValue(value, frozen) as StorableValue;
     };
+
+    deepCloneIfNecessary = (
+      value: StorableValue,
+      frozen = true,
+    ): StorableValue => {
+      return deepCloneIfNecessaryRich(value, frozen);
+    };
   } else {
     // ----- Legacy conversion (flag OFF) -----
 
@@ -146,6 +175,10 @@ function configureDispatch(): void {
     };
 
     nativeFromStorableValue = (value: StorableValue): StorableValue => {
+      return value;
+    };
+
+    deepCloneIfNecessary = (value: StorableValue): StorableValue => {
       return value;
     };
   }
