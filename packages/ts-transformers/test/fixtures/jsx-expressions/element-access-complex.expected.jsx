@@ -561,12 +561,16 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 b: state.key("b")
-            } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
+            } }, ({ state }) => state.items[state.b])!, state.key("items", "0")!)}
         </p>
 
         {/* Element access in boolean expression */}

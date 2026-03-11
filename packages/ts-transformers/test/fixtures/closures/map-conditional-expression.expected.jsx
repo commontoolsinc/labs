@@ -94,7 +94,26 @@ export default pattern((state) => {
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
+                }, ({ item, state }) => item.price * (__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, { state: {
+                        discount: state.discount
+                    } }, ({ state }) => 1 - state.discount))), item.key("price"))}
           </div>);
             }, {
                 type: "object",

@@ -257,7 +257,26 @@ export default pattern((__ct_pattern_input) => {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, { tag: {
                             name: tag.name
-                        } }, ({ tag }) => `(${tag.name})`), "")))}
+                        } }, ({ tag }) => __ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            tag: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["name"]
+                            }
+                        },
+                        required: ["tag"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, { tag: {
+                            name: tag.name
+                        } }, ({ tag }) => `(${tag.name})`)), "")))}
                   </li>);
                 }, {
                     type: "object",

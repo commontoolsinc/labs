@@ -1307,7 +1307,7 @@ export default pattern<State>((state) => ({
 );
 
 Deno.test(
-  "Capability-first: ternary branch derive keeps nested map in compute context",
+  "Capability-first: ternary branch keeps pure JSX map in pattern context",
   async () => {
     const source = `/// <cts-enable />
 import { pattern, UI } from "commontools";
@@ -1339,17 +1339,82 @@ export default pattern<{ recentEvents: TagEvent[] }>(({ recentEvents }) => ({
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(
-      output,
-      "({ recentEvents }) => (<div>",
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      1,
     );
     assertStringIncludes(
       output,
-      "recentEvents.map((event: TagEvent, idx: number) =>",
+      "recentEvents.mapWithPattern(",
     );
     assert(
-      !output.includes("recentEvents.mapWithPattern("),
-      "expected nested map inside derive-wrapped ternary branch to stay plain .map()",
+      !output.includes("recentEvents.map((event: TagEvent, idx: number) =>"),
+      "expected pure JSX branch map to be rewritten to mapWithPattern without an extra derive branch",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: compute writable branch keeps nested maps in pattern callbacks",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI, Writable } from "commontools";
+
+interface TagEvent {
+  label: string;
+  tags: string[];
+}
+
+export default pattern<{
+  showEmpty: boolean;
+  recentEvents: Writable<TagEvent[]>;
+}>(({ showEmpty, recentEvents }) => ({
+  [UI]: (
+    <div>
+      {showEmpty
+        ? <span>No events yet</span>
+        : recentEvents.get() && recentEvents.map((event: TagEvent) => (
+          <ct-vstack>
+            <span>{event.label}</span>
+            {event.tags.map((tag: string) => <span>{tag}</span>)}
+          </ct-vstack>
+        ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertGreater(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      0,
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.get()",
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.mapWithPattern(",
+    );
+    assertStringIncludes(
+      output,
+      '.key("tags").mapWithPattern(',
+    );
+    assertEquals(
+      output.match(/mapWithPattern\(/g)?.length ?? 0,
+      2,
+    );
+    assert(
+      !output.includes("recentEvents.map((event: TagEvent) =>"),
+      "expected writable branch outer map to stay in pattern mode",
+    );
+    assert(
+      !output.includes('.key("tags").map((tag: string) =>'),
+      "expected writable branch nested map to stay in pattern mode",
     );
   },
 );

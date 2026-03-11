@@ -24,7 +24,6 @@ export class CommonToolsTransformerPipeline extends Pipeline {
     const ops: TransformationOptions = {
       typeRegistry: new WeakMap(),
       mapCallbackRegistry: new WeakSet(),
-      reactiveContextOverrideRegistry: new WeakMap(),
       schemaHints: new WeakMap(),
       capabilitySummaryRegistry: new WeakMap(),
       ...options,

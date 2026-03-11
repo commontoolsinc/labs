@@ -77,65 +77,12 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                card: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string",
-                            asOpaque: true
-                        },
-                        description: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["title", "description"]
-                },
-                hasDescription: {
-                    type: "boolean",
-                    asOpaque: true
-                },
-                startEditing: {
-                    asStream: true
-                }
-            },
-            required: ["card", "hasDescription", "startEditing"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            card: {
-                title: card.key("title"),
-                description: card.key("description")
-            },
-            hasDescription: hasDescription,
-            startEditing: startEditing
-        }, ({ card, hasDescription, startEditing }) => (<div>
-            <span>{card.title}</span>
+        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+            <span>{card.key("title")}</span>
             {/* Nested ternary with computed - triggers derive wrapper */}
             {__ctHelpers.ifElse({
-            type: "boolean"
+            type: "boolean",
+            asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -152,10 +99,10 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
+        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
             {/* Action in SAME branch - must be captured by the derive! */}
             <ct-button onClick={startEditing}>Edit</ct-button>
-          </div>)))}
+          </div>)}
       </ct-card>),
         card,
     };
