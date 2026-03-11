@@ -8,6 +8,7 @@ import {
   deepCloneIfNecessary,
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
+  storableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -1238,7 +1239,12 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
+    // Sanitize input: convert native types (Error, Date, Map, Cell via
+    // toJSON, etc.) into proper storable form. Historically setRaw did
+    // JSON.parse(JSON.stringify()); storableFromNativeValue is the modern
+    // equivalent.
+    const storable = storableFromNativeValue(value);
+    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(storable));
   }
 
   getSourceCell<T>(
