@@ -40,6 +40,7 @@ function fetchBuildHash(): Promise<string | undefined> {
         );
         if (resp.ok) {
           const manifest = await resp.json();
+          // Key must match the worker entry's `out` path in felt.config.ts.
           return manifest["scripts/worker-runtime.js"] as string | undefined;
         }
       } catch {

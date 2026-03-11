@@ -110,6 +110,7 @@ export class Builder extends EventTarget {
   private async writeBuildManifest(): Promise<void> {
     const manifest: Record<string, string> = {};
     for (const entry of this.manifest.entries) {
+      // esbuild appends .js to entry.out; only .js outputs are hashed.
       const outPath = `${entry.out}.js`;
       try {
         const content = await Deno.readFile(outPath);
@@ -128,7 +129,10 @@ export class Builder extends EventTarget {
     }
 
     const manifestPath = `${this.manifest.outDir}/build-manifest.json`;
-    await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+    await Deno.writeTextFile(
+      manifestPath,
+      JSON.stringify(manifest, null, 2) + "\n",
+    );
   }
 }
 
