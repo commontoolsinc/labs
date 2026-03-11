@@ -432,15 +432,14 @@ async compile(
   });
 }
 
-// New method: evaluate pre-compiled JS
+// New method: evaluate pre-compiled JS.
+// `id` is the content-derived prefix from compile(); `files` are the
+// original source files for the export map.
 async evaluate(
-  program: RuntimeProgram,
+  id: string,
   jsScript: JsScript,
-  options?: TypeScriptHarnessProcessOptions,
+  files: Source[],
 ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
-  // Recompute id from program — deterministic, same as compile() would produce.
-  // Needed to strip the /${id} prefix from export filenames in the export map.
-  const id = options?.identifier ?? computeId(program);
   const { isolate, runtimeExports, exportsCallback } = await this.getInternals();
   const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
   // ... handle exports mapping using id prefix (existing code from process()) ...
@@ -448,12 +447,12 @@ async evaluate(
 
 // Existing method: refactored to use compile + evaluate
 async process(program, options) {
-  const output = await this.compile(program, options);
+  const { id, jsScript } = await this.compile(program, options);
   if (!options?.noRun) {
-    const { main, exportMap } = await this.evaluate(program, output, options);
-    return { output, main, exportMap };
+    const { main, exportMap } = await this.evaluate(id, jsScript, program.files);
+    return { output: jsScript, main, exportMap };
   }
-  return { output };
+  return { output: jsScript };
 }
 ```
 
@@ -474,8 +473,11 @@ async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
   if (this.cachedCompiler) {
     const cached = await this.cachedCompiler.get(programHash);
     if (cached) {
-      // Skip compilation, go straight to evaluation
-      const { main } = await this.runtime.harness.evaluate(program, cached);
+      // Skip compilation, go straight to evaluation.
+      // cached is a CompileResult { id, jsScript }.
+      const { main } = await this.runtime.harness.evaluate(
+        cached.id, cached.jsScript, program.files
+      );
       const pattern = main![program.mainExport ?? "default"] as Pattern;
       pattern.program = program;
       return pattern;
@@ -487,7 +489,7 @@ async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
   const pattern = main![program.mainExport ?? "default"] as Pattern;
   pattern.program = program;
 
-  // Persist to cache
+  // Persist to cache (output is CompileResult { id, jsScript })
   if (this.cachedCompiler) {
     // Fire-and-forget: don't block on cache write
     this.cachedCompiler.set(programHash, output).catch((err) =>
@@ -537,10 +539,10 @@ interface Harness extends EventTarget {
   run(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<Pattern>;
   resolve(source: ProgramResolver): Promise<Program>;
 
-  // New: compile without evaluation
-  compile(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<JsScript>;
-  // New: evaluate pre-compiled JS
-  evaluate(source: RuntimeProgram, jsScript: JsScript, options?: TypeScriptHarnessProcessOptions): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }>;
+  // Compile without evaluation — returns CompileResult { id, jsScript }
+  compile(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<CompileResult>;
+  // Evaluate pre-compiled JS — id and files from compile(), not recomputed
+  evaluate(id: string, jsScript: JsScript, files: Source[]): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }>;
 
   invoke(fn: () => any): any;
   getInvocation(source: string): HarnessedFunction;
