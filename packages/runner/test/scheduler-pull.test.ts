@@ -723,9 +723,11 @@ describe("pull mode with references", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const profileName = source.key("profile").key("name").asSchema({
-      type: "string",
-    } as const satisfies JSONSchema);
+    const profileName = source.key("profile").key("name").asSchema(
+      {
+        type: "string",
+      } as const satisfies JSONSchema,
+    );
 
     const seen: Array<string | undefined> = [];
     const cancel = profileName.sink((value) => {
@@ -762,9 +764,11 @@ describe("pull mode with references", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const profileName = source.key("profile").key("name").asSchema({
-      type: "string",
-    } as const satisfies JSONSchema);
+    const profileName = source.key("profile").key("name").asSchema(
+      {
+        type: "string",
+      } as const satisfies JSONSchema,
+    );
 
     const seen: Array<string | undefined> = [];
     const cancel = profileName.sink((value) => {
