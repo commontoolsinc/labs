@@ -1936,64 +1936,126 @@ export class Scheduler {
   }
 
   /**
-   * Collects all dirty computations that an action depends on (transitively).
-   * Used in pull mode to build the complete work set before execution.
+   * Collects computations that must run before `action` can observe up-to-date
+   * values. This includes explicitly dirty computations and clean intermediates
+   * whose own inputs flow from dirty upstream computations.
+   *
+   * Returns whether `action` itself is stale with respect to the current dirty
+   * set.
    */
   private collectDirtyDependencies(
     action: Action,
     workSet: Set<Action>,
-  ): void {
+  ): boolean {
     const log = this.dependencies.get(action);
 
-    // Check for cycle: if action is already in the collection stack, skip
-    if (this.collectStack.has(action)) return;
+    if (this.collectStack.has(action)) {
+      return this.dirty.has(action) || workSet.has(action);
+    }
 
-    // Add to collection stack before processing
     this.collectStack.add(action);
+
+    let actionNeedsRun = this.dirty.has(action);
 
     // Walk explicit reverse dependencies first so we can reach dirty
     // computations hidden behind currently-clean intermediates.
     const explicitDependencies = this.reverseDependencies.get(action);
     if (explicitDependencies) {
       for (const dependency of explicitDependencies) {
-        if (workSet.has(dependency)) continue;
         if (dependency === action) continue;
 
-        if (this.dirty.has(dependency)) {
-          workSet.add(dependency);
+        const dependencyNeedsRun = this.collectDirtyDependencies(
+          dependency,
+          workSet,
+        );
+        if (dependencyNeedsRun) {
+          actionNeedsRun = true;
+          if (this.computations.has(dependency)) {
+            workSet.add(dependency);
+          }
         }
-        this.collectDirtyDependencies(dependency, workSet);
       }
     }
 
-    if (!log) {
-      this.collectStack.delete(action);
-      return;
-    }
+    if (log) {
+      // Find dirty computations that write to entities this action reads
+      for (const computation of this.dirty) {
+        if (computation === action) continue;
 
-    // Find dirty computations that write to entities this action reads
-    for (const computation of this.dirty) {
-      if (workSet.has(computation)) continue; // Already added
-      if (computation === action) continue;
+        const computationWrites = this.mightWrite.get(computation) ?? [];
+        if (computationWrites.length === 0) continue;
 
-      const computationWrites = this.mightWrite.get(computation) ?? [];
-      if (computationWrites.length === 0) continue;
-
-      if (
-        this.readsOverlapWrites(
-          log.reads,
-          log.shallowReads,
-          computationWrites,
-        )
-      ) {
-        workSet.add(computation);
-        // Recursively collect deps of this computation
-        this.collectDirtyDependencies(computation, workSet);
+        if (
+          this.readsOverlapWrites(
+            log.reads,
+            log.shallowReads,
+            computationWrites,
+          )
+        ) {
+          actionNeedsRun = true;
+          if (this.computations.has(computation)) {
+            workSet.add(computation);
+          }
+          this.collectDirtyDependencies(computation, workSet);
+        }
       }
     }
 
-    // Remove from collection stack after processing
     this.collectStack.delete(action);
+
+    if (actionNeedsRun && this.computations.has(action)) {
+      workSet.add(action);
+    }
+
+    return actionNeedsRun;
+  }
+
+  private collectDirtyDependenciesForLog(
+    log: ReactivityLog,
+    workSet: Set<Action>,
+  ): boolean {
+    const directWriters = new Set<Action>();
+
+    for (const read of log.reads) {
+      const entity = `${read.space}/${read.id}` as SpaceAndURI;
+      const writers = this.writersByEntity.get(entity);
+      if (!writers) continue;
+
+      for (const writer of writers) {
+        if (this.effects.has(writer)) continue;
+        const writes = this.mightWrite.get(writer) ?? [];
+        if (this.readsOverlapWrites([read], [], writes)) {
+          directWriters.add(writer);
+        }
+      }
+    }
+
+    for (const read of log.shallowReads) {
+      const entity = `${read.space}/${read.id}` as SpaceAndURI;
+      const writers = this.writersByEntity.get(entity);
+      if (!writers) continue;
+
+      for (const writer of writers) {
+        if (this.effects.has(writer)) continue;
+        const writes = this.mightWrite.get(writer) ?? [];
+        if (this.readsOverlapWrites([], [read], writes)) {
+          directWriters.add(writer);
+        }
+      }
+    }
+
+    let hasDirtyDependencies = false;
+    for (const writer of directWriters) {
+      const writerNeedsRun = this.collectDirtyDependencies(writer, workSet);
+      if (writerNeedsRun) {
+        hasDirtyDependencies = true;
+        if (this.computations.has(writer)) {
+          workSet.add(writer);
+        }
+      }
+    }
+
+    return hasDirtyDependencies;
   }
 
   /**
@@ -2767,31 +2829,14 @@ export class Scheduler {
         // Commit even though we only read - the tx has no writes so this is safe
         depTx.commit();
 
-        // Check if any dependencies are dirty (have pending computations)
-        // We need to find dirty actions that WRITE to the entities we're reading
-        const dirtyDeps: Action[] = [];
-        for (const read of deps.reads) {
-          for (const action of this.dirty) {
-            const writes = this.mightWrite.get(action);
-            if (writes) {
-              for (const write of writes) {
-                if (
-                  write.space === read.space &&
-                  write.id === read.id &&
-                  arraysOverlap(write.path, read.path)
-                ) {
-                  if (!dirtyDeps.includes(action)) {
-                    dirtyDeps.push(action);
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        }
+        const dirtyDeps = new Set<Action>();
+        const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
+          deps,
+          dirtyDeps,
+        );
 
         // If there are dirty dependencies, add them to pending and re-queue event
-        if (dirtyDeps.length > 0) {
+        if (hasDirtyDependencies) {
           for (const dep of dirtyDeps) {
             this.pending.add(dep);
             eventBlockingDeps.add(dep); // Track for workSet inclusion

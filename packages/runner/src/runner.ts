@@ -527,6 +527,11 @@ export class Runner {
       throw new Error("Cannot start: no pattern ID ($TYPE)");
     }
 
+    // A started piece/page is an exported result boundary. Keep the root
+    // result consumed explicitly so pull mode continues to propagate UI and
+    // handler-facing updates, without making internal sub-pattern runs hot.
+    addCancel(resultCell.sink(() => {}));
+
     // Determine initial pattern
     if (givenPattern) {
       currentPatternId = initialPatternId;
