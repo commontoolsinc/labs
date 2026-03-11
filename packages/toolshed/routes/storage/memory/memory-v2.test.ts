@@ -75,6 +75,51 @@ Deno.test("memory websocket supports a runtime using the v2 cutover path", async
   }
 });
 
+Deno.test("memory websocket persists v2 runtime data across fresh runtimes", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-persist");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+  const address = new URL("/api/storage/memory", base);
+  const cause = `memory-v2-toolshed-persist-${Date.now()}`;
+
+  try {
+    const runtime1 = new Runtime({
+      apiUrl: base,
+      storageManager: StorageManager.open({
+        as: identity,
+        address,
+        memoryVersion: "v2",
+      }),
+      memoryVersion: "v2",
+    });
+    const tx = runtime1.edit();
+    const writer = runtime1.getCell(identity.did(), cause, undefined, tx);
+    writer.set({ persisted: true, count: 1 });
+    await tx.commit();
+    await runtime1.idle();
+    await runtime1.dispose();
+
+    const runtime2 = new Runtime({
+      apiUrl: base,
+      storageManager: StorageManager.open({
+        as: identity,
+        address,
+        memoryVersion: "v2",
+      }),
+      memoryVersion: "v2",
+    });
+    const reader = runtime2.getCell(identity.did(), cause);
+    await reader.sync();
+    await runtime2.storageManager.synced();
+
+    assertEquals(reader.get(), { persisted: true, count: 1 });
+
+    await runtime2.dispose();
+  } finally {
+    await server.shutdown();
+  }
+});
+
 Deno.test("memory websocket negotiates a v2 session", async () => {
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
