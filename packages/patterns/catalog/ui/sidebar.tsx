@@ -79,6 +79,39 @@ export default pattern<SidebarInput, SidebarOutput>(
             </div>
           </div>
 
+          {/* Overview */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Overview
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "kitchen-sink" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "kitchen-sink"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "kitchen-sink" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "kitchen-sink", selected })}
+            >
+              Kitchen Sink
+            </div>
+          </div>
+
           {/* Inputs */}
           <div style={{ marginBottom: "8px" }}>
             <div
@@ -126,6 +159,23 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "checkbox", selected })}
             >
               Checkbox
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "code-editor" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "code-editor"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "code-editor" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "code-editor", selected })}
+            >
+              Code Editor
             </div>
             <div
               style={{

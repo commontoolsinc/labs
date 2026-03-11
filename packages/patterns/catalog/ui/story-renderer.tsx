@@ -3,6 +3,7 @@ import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 import ButtonStory from "../stories/ct-button-story.tsx";
 import CheckboxStory from "../stories/ct-checkbox-story.tsx";
+import CodeEditorStory from "../stories/ct-code-editor-story.tsx";
 import InputStory from "../stories/ct-input-story.tsx";
 import SelectStory from "../stories/ct-select-story.tsx";
 import SwitchStory from "../stories/ct-switch-story.tsx";
@@ -30,6 +31,7 @@ import CollapsibleStory from "../stories/ct-collapsible-story.tsx";
 import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
+import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
 
 interface StoryRendererInput {
   selected: Writable<string>;
@@ -41,14 +43,22 @@ interface StoryRendererOutput {
   controls: VNode;
 }
 
+type CatalogStory = {
+  [NAME]: string;
+  [UI]: VNode;
+  controls?: VNode;
+} | null;
+
 export default pattern<StoryRendererInput, StoryRendererOutput>(
   ({ selected }) => {
-    const story = computed(() => {
+    const story = computed<CatalogStory>(() => {
       switch (selected.get()) {
         case "button":
           return ButtonStory({});
         case "checkbox":
           return CheckboxStory({});
+        case "code-editor":
+          return CodeEditorStory({});
         case "input":
           return InputStory({});
         case "select":
@@ -103,6 +113,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChartStory({});
         case "note":
           return NoteStory({});
+        case "kitchen-sink":
+          return KitchenSinkStory({});
         default:
           return null;
       }

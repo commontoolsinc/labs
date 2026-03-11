@@ -34,10 +34,15 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
             selected={selectedStory}
             categories={[
               {
+                name: "Overview",
+                items: [{ id: "kitchen-sink", label: "Kitchen Sink" }],
+              },
+              {
                 name: "Inputs",
                 items: [
                   { id: "button", label: "Button" },
                   { id: "checkbox", label: "Checkbox" },
+                  { id: "code-editor", label: "Code Editor" },
                   { id: "input", label: "Input" },
                   { id: "textarea", label: "Textarea" },
                   { id: "select", label: "Select" },
