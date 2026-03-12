@@ -1397,15 +1397,22 @@ class MemoryProviderSession<
       const address = this.parseDocKey(docKey);
       if (address === undefined) continue;
       for (const schemaSelector of schemaSelectors) {
-        evaluateDocumentLinks(
-          spaceSession,
-          address,
-          schemaSelector,
-          classification,
-          this.sharedSchemaTracker,
-          sharedManager,
-          sharedMemo,
-        );
+        try {
+          evaluateDocumentLinks(
+            spaceSession,
+            address,
+            schemaSelector,
+            classification,
+            this.sharedSchemaTracker,
+            sharedManager,
+            sharedMemo,
+          );
+        } catch (error) {
+          logger.warn("incremental-update", () => [
+            `Error evaluating document links for ${docKey}, skipping`,
+            error,
+          ]);
+        }
       }
     }
 
