@@ -267,7 +267,9 @@ export class Runtime {
 
     // Fire-and-forget startup eviction for compilation cache
     if (this.cachedCompiler) {
-      this.cachedCompiler.evictStale().catch(() => {});
+      this.cachedCompiler.evictStale().catch((err) => {
+        console.warn("Compilation cache eviction failed:", err);
+      });
     }
 
     if (options.debug) {
