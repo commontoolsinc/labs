@@ -66,7 +66,7 @@ export function navigateTo(
       // Sync the target cell to ensure data is loaded before navigation
       await resolvedTarget.sync();
 
-      runtime.navigateCallback(resolvedTarget);
+      await runtime.navigateCallback(resolvedTarget);
 
       navigated = true;
       resultCell.set(true);

@@ -116,31 +116,23 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 );
 
 // Menu: New Note
-const menuNewNote = handler<
-  void,
-  { menuOpen: Writable<boolean>; allPieces: Writable<MentionablePiece[]> }
->(
-  (_, { menuOpen, allPieces }) => {
+const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
+  (_, { menuOpen }) => {
     menuOpen.set(false);
-    const note = Note({
-      title: "New Note",
-      content: "",
-    });
-    allPieces.push(note);
-    return navigateTo(note);
+    return navigateTo(
+      Note({
+        title: "New Note",
+        content: "",
+      }),
+    );
   },
 );
 
 // Menu: New Notebook
-const menuNewNotebook = handler<
-  void,
-  { menuOpen: Writable<boolean>; allPieces: Writable<MentionablePiece[]> }
->(
-  (_, { menuOpen, allPieces }) => {
+const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
+  (_, { menuOpen }) => {
     menuOpen.set(false);
-    const notebook = Notebook({ title: "New Notebook" });
-    allPieces.push(notebook);
-    return navigateTo(notebook);
+    return navigateTo(Notebook({ title: "New Notebook" }));
   },
 );
 
@@ -392,14 +384,14 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             >
               <ct-button
                 variant="ghost"
-                onClick={menuNewNote({ menuOpen, allPieces })}
+                onClick={menuNewNote({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📝 New Note
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={menuNewNotebook({ menuOpen, allPieces })}
+                onClick={menuNewNotebook({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📓 New Notebook

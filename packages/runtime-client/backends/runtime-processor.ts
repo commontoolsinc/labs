@@ -300,26 +300,34 @@ export class RuntimeProcessor {
         return args;
       },
 
-      navigateCallback: (target) => {
+      navigateCallback: async (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
         // Add to the space's piece list here if it's from the
         // same space.
         if (link.space !== space) {
           console.warn("Navigating cross-space, not adding to pieces list.");
         } else {
-          pieceManager!.add([target]);
+          try {
+            await pieceManager!.add([target]);
+          } catch (e: unknown) {
+            console.error(
+              "[RuntimeProcessor] Failed to register navigated piece:",
+              {
+                error: e instanceof Error ? e.message : e,
+              },
+            );
+          }
 
-          // Track as recently used (async, fire-and-forget)
-          RuntimeProcessor.trackRecentPiece(pieceManager!, target).catch(
-            (e: unknown) => {
-              console.error(
-                "[RuntimeProcessor] Failed to track recent piece:",
-                {
-                  error: e instanceof Error ? e.message : e,
-                },
-              );
-            },
-          );
+          try {
+            await RuntimeProcessor.trackRecentPiece(pieceManager!, target);
+          } catch (e: unknown) {
+            console.error(
+              "[RuntimeProcessor] Failed to track recent piece:",
+              {
+                error: e instanceof Error ? e.message : e,
+              },
+            );
+          }
         }
 
         self.postMessage({

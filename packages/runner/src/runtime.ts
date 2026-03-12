@@ -82,7 +82,7 @@ export type ErrorWithContext = Error & {
 };
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
-export type NavigateCallback = (target: Cell<any>) => void;
+export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**

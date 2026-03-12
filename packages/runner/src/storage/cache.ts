@@ -1,5 +1,8 @@
 import { fromString, refer } from "@commontools/memory/reference";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -24,7 +27,7 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, unclaimed } from "@commontools/memory/fact";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
@@ -56,6 +59,7 @@ import {
   MemoryVersion,
   OptStorageValue,
   PullError,
+  PushError,
   Retract,
   StorageValue,
   URI,
