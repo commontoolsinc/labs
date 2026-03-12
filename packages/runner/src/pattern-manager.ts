@@ -348,13 +348,16 @@ export class PatternManager {
       jsScript,
       program.files,
     );
+    if (!main) {
+      throw new Error("Pattern compilation produced no exports.");
+    }
     const exportName = program.mainExport ?? "default";
-    if (main && !(exportName in main)) {
+    if (!(exportName in main)) {
       throw new Error(
         `No "${exportName}" export found in compiled pattern.`,
       );
     }
-    const pattern = main![exportName] as Pattern;
+    const pattern = main[exportName] as Pattern;
     pattern.program = program;
     return pattern;
   }

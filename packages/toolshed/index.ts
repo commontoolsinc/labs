@@ -22,7 +22,7 @@ const initializeRuntime = async () => {
     // Construct server-side compilation cache if enabled.
     // Fingerprint is derived from git state; returns undefined when not
     // in a git repo (e.g. Docker), which also disables the cache.
-    let cachedCompiler: InstanceType<typeof CachedCompiler> | undefined;
+    let cachedCompiler: CachedCompiler | undefined;
     if (env.COMPILATION_CACHE_SERVER) {
       const fingerprint = await computeGitFingerprint();
       if (fingerprint) {
