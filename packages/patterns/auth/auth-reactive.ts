@@ -3,6 +3,11 @@
  */
 import { Writable } from "commontools";
 
+export function isMissingCellSpaceError(error: unknown): error is Error {
+  return error instanceof Error &&
+    error.message.includes("Cannot create cell link - space required");
+}
+
 /**
  * Start a reactive clock that updates a Writable cell with Date.now()
  * at a fixed interval. This makes time-dependent computeds reactive.
@@ -15,10 +20,17 @@ export function startReactiveClock(
   cell: Writable<number>,
   intervalMs = 30_000,
 ): void {
-  setInterval(
-    () => cell.set(Date.now()),
-    intervalMs,
-  );
+  const intervalId = setInterval(() => {
+    try {
+      cell.set(Date.now());
+    } catch (error) {
+      if (isMissingCellSpaceError(error)) {
+        clearInterval(intervalId);
+        return;
+      }
+      throw error;
+    }
+  }, intervalMs);
 }
 
 /** Token expiry threshold (10 minutes) — used for both refresh gating and UI warnings */
