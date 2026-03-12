@@ -787,6 +787,7 @@ function deepCloneWithForce(
         throw new Error("Cannot deep-clone circular reference");
       }
       seen.add(obj);
+      // Preserve null prototypes (e.g. Object.create(null)).
       const proto = Object.getPrototypeOf(obj);
       const copy = Object.create(proto) as Record<string, StorableValue>;
       for (const [key, val] of Object.entries(obj)) {
@@ -803,6 +804,7 @@ function deepCloneWithForce(
     }
 
     default:
+      // All valid StorableValue types are handled above.
       throw new Error(
         `Cannot deep-clone: ${
           (value as object).constructor?.name ?? typeof value
