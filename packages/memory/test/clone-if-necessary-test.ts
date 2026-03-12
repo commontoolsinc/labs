@@ -361,6 +361,32 @@ describe("cloneIfNecessary", () => {
       expect(result.x).toBe(42);
       expect(Object.isFrozen(result)).toBe(false);
     });
+
+    it("preserves null prototype on shallow clone", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const value = Object.create(null) as Record<string, unknown>;
+      value.a = 1;
+      const result = cloneIfNecessary(
+        value as StorableValue,
+        { deep: false },
+      ) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(result)).toBe(null);
+      expect(result.a).toBe(1);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("preserves null prototype on shallow clone when frozen=false", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      const value = Object.create(null) as Record<string, unknown>;
+      value.b = 2;
+      const result = cloneIfNecessary(
+        value as StorableValue,
+        { frozen: false, deep: false },
+      ) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(result)).toBe(null);
+      expect(result.b).toBe(2);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
   });
 
   // --------------------------------------------------------------------------

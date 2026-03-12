@@ -710,7 +710,11 @@ function shallowCloneWithForce(
 
     case NATIVE_TAGS.Object: {
       if (!force && Object.isFrozen(value) === frozen) return value;
-      const copy = { ...(value as Record<string, unknown>) };
+      const proto = Object.getPrototypeOf(value);
+      const copy = Object.assign(
+        Object.create(proto),
+        value as Record<string, unknown>,
+      );
       return (frozen ? Object.freeze(copy) : copy) as StorableValue;
     }
 
