@@ -22,6 +22,31 @@ describe("cloneIfNecessary", () => {
   });
 
   // --------------------------------------------------------------------------
+  // Error cases (both legacy and rich -- validation runs before flag dispatch)
+  // --------------------------------------------------------------------------
+
+  for (const richMode of [false, true]) {
+    const label = richMode ? "rich" : "legacy";
+    describe(`error cases (${label} path)`, () => {
+      if (richMode) {
+        beforeEach(() => setStorableValueConfig({ richStorableValues: true }));
+      }
+
+      it("throws for frozen=true, force=true", () => {
+        const value = { a: 1 } as StorableValue;
+        expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
+          .toThrow("frozen: true, force: true");
+      });
+
+      it("throws for frozen=false, force=false, deep=true", () => {
+        const value = { a: 1 } as StorableValue;
+        expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
+          .toThrow("frozen: false, force: false, deep: true");
+      });
+    });
+  }
+
+  // --------------------------------------------------------------------------
   // Default state (flag OFF / legacy) -- identity passthrough
   // --------------------------------------------------------------------------
 
@@ -179,31 +204,6 @@ describe("cloneIfNecessary", () => {
       expect(Object.isFrozen(innerResult)).toBe(false);
     });
   });
-
-  // --------------------------------------------------------------------------
-  // Error cases
-  // --------------------------------------------------------------------------
-
-  for (const richMode of [false, true]) {
-    const label = richMode ? "rich" : "legacy";
-    describe(`error cases (${label} path)`, () => {
-      if (richMode) {
-        beforeEach(() => setStorableValueConfig({ richStorableValues: true }));
-      }
-
-      it("throws for frozen=true, force=true", () => {
-        const value = { a: 1 } as StorableValue;
-        expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
-          .toThrow("frozen: true, force: true");
-      });
-
-      it("throws for frozen=false, force=false, deep=true", () => {
-        const value = { a: 1 } as StorableValue;
-        expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
-          .toThrow("frozen: false, force: false, deep: true");
-      });
-    });
-  }
 
   // --------------------------------------------------------------------------
   // shallow clone (deep=false)
