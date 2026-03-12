@@ -30,12 +30,21 @@ export class CTCard extends BaseElement {
       --ct-card-animation-duration: var(--ct-theme-animation-duration, 150ms);
       --ct-card-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
       --ct-card-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
-      --ct-card-color-border: var(--border, hsl(0, 0%, 89%));
-      --ct-card-color-surface: var(--card, hsl(0, 0%, 100%));
-      --ct-card-color-text: var(--card-foreground, hsl(0, 0%, 9%));
-      --ct-card-color-hover-surface: var(--accent, hsl(0, 0%, 96%));
-      --ct-card-color-focus-ring: var(--ring, hsl(212, 100%, 47%));
-      --ct-card-color-muted-text: var(--muted-foreground, hsl(0, 0%, 45%));
+      --ct-card-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
+      --ct-card-color-surface: var(--ct-theme-color-surface, hsl(0, 0%, 100%));
+      --ct-card-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --ct-card-color-hover-surface: var(
+        --ct-theme-color-surface-hover,
+        hsl(0, 0%, 96%)
+      );
+      --ct-card-color-focus-ring: var(
+        --ct-theme-color-primary,
+        hsl(212, 100%, 47%)
+      );
+      --ct-card-color-muted-text: var(
+        --ct-theme-color-text-muted,
+        hsl(0, 0%, 45%)
+      );
 
       display: block;
       box-sizing: border-box;
