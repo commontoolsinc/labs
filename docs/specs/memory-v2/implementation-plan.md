@@ -49,7 +49,7 @@
 ## Immediate Next Slice
 - [x] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
 - [ ] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
-- [ ] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
+- [x] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
 - [ ] Port the remaining high-value runner integration suites that still only exercise v1 onto `memoryVersion: "v2"`, especially reconnect-heavy flows.
 
 ## Public Interfaces And Cutover Boundary
@@ -83,7 +83,7 @@
 - [x] Reconnect the shared v2 client and resubscribe active `graph.query` views after websocket loss.
 - [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
 - [x] Finish pending-first replica behavior for reconnect with outstanding local commits, including replay of in-flight and queued local writes.
-- [ ] Add stronger proof for own-commit de-duplication when local replay and remote integrate race after reconnect.
+- [x] Add stronger proof for own-commit de-duplication when local replay and remote integrate race after reconnect.
 - [ ] Do not gate cutover on direct patch emission from `Cell.set()`. Leave true patch generation for the post-cutover phase.
 
 ## Cutover Exit Criteria
@@ -92,7 +92,7 @@
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
 - [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
-- [ ] Add the remaining focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
+- [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
