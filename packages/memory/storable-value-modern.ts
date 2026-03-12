@@ -669,82 +669,33 @@ export function cloneIfNecessaryRich(
   deep: boolean,
   force: boolean,
 ): StorableValue {
-  if (deep) {
-    return deepCloneHelper(value, frozen, force, null);
-  }
-  return shallowCloneHelper(value, frozen, force);
+  return cloneHelper(value, frozen, deep, force, null);
 }
 
 /**
- * Shallow clone respecting the `force` flag.
+ * Unified clone helper for both shallow and deep modes.
+ *
+ * When `deep` is true, recursively clones containers and detects circular
+ * references via `seen`. When `deep` is false, copies only the top-level
+ * container (children are shared by reference).
  *
  * When `force` is false, returns the value as-is if its frozenness already
  * matches the requested state. When `force` is true, always copies (unless
  * the value is a primitive or special primitive).
- */
-function shallowCloneHelper(
-  value: StorableValue,
-  frozen: boolean,
-  force: boolean,
-): StorableValue {
-  const tag = tagFromNativeValue(value);
-
-  switch (tag) {
-    // Primitives are inherently immutable -- no cloning needed regardless
-    // of force.
-    case NATIVE_TAGS.Primitive:
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentId:
-      return value;
-
-    case NATIVE_TAGS.Array: {
-      if (!force && Object.isFrozen(value) === frozen) return value;
-      const arr = value as unknown[];
-      const copy = new Array(arr.length);
-      for (let i = 0; i < arr.length; i++) {
-        if (i in arr) copy[i] = arr[i];
-      }
-      return (frozen ? Object.freeze(copy) : copy) as StorableValue;
-    }
-
-    case NATIVE_TAGS.Object: {
-      if (!force && Object.isFrozen(value) === frozen) return value;
-      const proto = Object.getPrototypeOf(value);
-      const copy = Object.assign(
-        Object.create(proto),
-        value as Record<string, unknown>,
-      );
-      return (frozen ? Object.freeze(copy) : copy) as StorableValue;
-    }
-
-    case NATIVE_TAGS.StorableInstance:
-      if (!force && Object.isFrozen(value) === frozen) return value;
-      return (value as StorableInstance).shallowClone(frozen) as StorableValue;
-
-    default:
-      throw new Error(
-        `Cannot shallow-clone: ${
-          (value as object).constructor?.name ?? typeof value
-        }`,
-      );
-  }
-}
-
-/**
- * Deep clone respecting the `force` flag.
  *
- * When `force` is false and `frozen` is true, uses the deep-frozen identity
- * optimization. When `force` is true, always recurses and copies.
+ * Deep mode uses `isDeepFrozenStorableValue` for identity optimization;
+ * shallow mode uses `Object.isFrozen(value) === frozen`.
  */
-function deepCloneHelper(
+function cloneHelper(
   value: StorableValue,
   frozen: boolean,
+  deep: boolean,
   force: boolean,
   seen: Set<object> | null,
 ): StorableValue {
   switch (tagFromNativeValue(value)) {
-    // Inherently immutable types -- frozenness is irrelevant.
+    // Inherently immutable types -- frozenness is irrelevant, no cloning
+    // needed regardless of force.
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
@@ -753,54 +704,84 @@ function deepCloneHelper(
 
     case NATIVE_TAGS.StorableInstance:
       // Identity optimization: already-correct frozenness needs no clone.
-      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
-      if (!force && !frozen && !Object.isFrozen(value)) return value;
-      return (value as StorableInstance).shallowClone(frozen);
+      if (!force) {
+        if (deep) {
+          if (frozen && isDeepFrozenStorableValue(value)) return value;
+          if (!frozen && !Object.isFrozen(value)) return value;
+        } else {
+          if (Object.isFrozen(value) === frozen) return value;
+        }
+      }
+      return (value as StorableInstance).shallowClone(frozen) as StorableValue;
 
     case NATIVE_TAGS.Array: {
       // Identity optimizations when force is off:
-      // - frozen+deep-frozen: already correct, return as-is.
-      // - mutable+mutable: caller accepts sharing risk, return as-is.
-      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
-      if (!force && !frozen && !Object.isFrozen(value)) return value;
-      const arr = value as StorableValue[];
-      seen ??= new Set();
-      if (seen.has(arr)) {
-        throw new Error("Cannot deep-clone circular reference");
+      // - deep+frozen+deep-frozen: already correct, return as-is.
+      // - deep+mutable+mutable: caller accepts sharing risk, return as-is.
+      // - shallow: frozenness matches requested state, return as-is.
+      if (!force) {
+        if (deep) {
+          if (frozen && isDeepFrozenStorableValue(value)) return value;
+          if (!frozen && !Object.isFrozen(value)) return value;
+        } else {
+          if (Object.isFrozen(value) === frozen) return value;
+        }
       }
-      seen.add(arr);
+      const arr = value as StorableValue[];
+      if (deep) {
+        seen ??= new Set();
+        if (seen.has(arr)) {
+          throw new Error("Cannot deep-clone circular reference");
+        }
+        seen.add(arr);
+      }
       const copy: StorableValue[] = new Array(arr.length);
       for (let i = 0; i < arr.length; i++) {
         if (i in arr) {
-          copy[i] = deepCloneHelper(arr[i], frozen, force, seen);
+          copy[i] = deep
+            ? cloneHelper(arr[i], frozen, deep, force, seen)
+            : arr[i];
         }
       }
-      seen.delete(arr);
+      if (deep) seen!.delete(arr);
       if (frozen) Object.freeze(copy);
       return copy;
     }
 
     case NATIVE_TAGS.Object: {
-      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
-      if (!force && !frozen && !Object.isFrozen(value)) return value;
-      const obj = value as object;
-      seen ??= new Set();
-      if (seen.has(obj)) {
-        throw new Error("Cannot deep-clone circular reference");
+      if (!force) {
+        if (deep) {
+          if (frozen && isDeepFrozenStorableValue(value)) return value;
+          if (!frozen && !Object.isFrozen(value)) return value;
+        } else {
+          if (Object.isFrozen(value) === frozen) return value;
+        }
       }
-      seen.add(obj);
+      const obj = value as object;
+      if (deep) {
+        seen ??= new Set();
+        if (seen.has(obj)) {
+          throw new Error("Cannot deep-clone circular reference");
+        }
+        seen.add(obj);
+      }
       // Preserve null prototypes (e.g. Object.create(null)).
       const proto = Object.getPrototypeOf(obj);
       const copy = Object.create(proto) as Record<string, StorableValue>;
-      for (const [key, val] of Object.entries(obj)) {
-        copy[key] = deepCloneHelper(
-          val as StorableValue,
-          frozen,
-          force,
-          seen,
-        );
+      if (deep) {
+        for (const [key, val] of Object.entries(obj)) {
+          copy[key] = cloneHelper(
+            val as StorableValue,
+            frozen,
+            deep,
+            force,
+            seen,
+          );
+        }
+        seen!.delete(obj);
+      } else {
+        Object.assign(copy, value as Record<string, unknown>);
       }
-      seen.delete(obj);
       if (frozen) Object.freeze(copy);
       return copy;
     }
@@ -808,9 +789,7 @@ function deepCloneHelper(
     default:
       // All valid StorableValue types are handled above.
       throw new Error(
-        `Cannot deep-clone: ${
-          (value as object).constructor?.name ?? typeof value
-        }`,
+        `Cannot clone: ${(value as object).constructor?.name ?? typeof value}`,
       );
   }
 }
