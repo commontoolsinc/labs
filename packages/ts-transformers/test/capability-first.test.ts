@@ -2,6 +2,7 @@ import {
   assert,
   assertEquals,
   assertGreater,
+  assertMatch,
   assertStringIncludes,
 } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
@@ -1683,6 +1684,10 @@ export default pattern<{
     assertStringIncludes(
       output,
       "=> f.validationIssue !== undefined",
+    );
+    assertMatch(
+      output,
+      /__ctHelpers\.derive\([\s\S]*validationIssue: f\.validationIssue[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
     );
   },
 );
