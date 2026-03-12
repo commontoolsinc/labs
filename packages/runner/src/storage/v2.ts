@@ -856,7 +856,11 @@ class SpaceReplica implements ISpaceReplica {
     if (!record) {
       return undefined;
     }
-    return record.pending.at(-1)?.value ?? record.confirmed.value;
+    const pending = record.pending.at(-1);
+    if (pending !== undefined) {
+      return pending.value;
+    }
+    return record.confirmed.value;
   }
 
   private getState(id: URI): State | undefined {
