@@ -16,6 +16,7 @@ import {
 // ============================================================================
 
 describe("cloneIfNecessary", () => {
+  // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
     resetStorableValueConfig();
   });
@@ -108,11 +109,15 @@ describe("cloneIfNecessary", () => {
 
     it("preserves deep-frozen subtrees as-is within unfrozen parent", () => {
       setStorableValueConfig({ richStorableValues: true });
+      // `frozenChild` is a deep-frozen subtree.
       const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
+      // `value` is NOT frozen (unfrozen parent), so it must be cloned.
       const value = { a: frozenChild, b: "mutable" } as StorableValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
+      // The outer object is a new frozen clone.
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(true);
+      // The deep-frozen subtree is preserved by identity -- not re-cloned.
       expect(result.a).toBe(frozenChild);
       expect(result.b).toBe("mutable");
     });
@@ -153,6 +158,7 @@ describe("cloneIfNecessary", () => {
       expect(result).not.toBe(value);
       expect(result).toEqual({ a: { x: 1 }, b: [2, 3] });
       expect(Object.isFrozen(result)).toBe(false);
+      // Nested values are also cloned.
       expect(result.a).not.toBe(inner);
     });
 
@@ -463,6 +469,7 @@ describe("cloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const shared = { x: 1 };
       const value = { a: shared, b: shared } as StorableValue;
+      // Shared (non-circular) references should not throw.
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result).toEqual({ a: { x: 1 }, b: { x: 1 } });
       expect(Object.isFrozen(result)).toBe(true);
@@ -478,11 +485,11 @@ describe("cloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1 } as StorableValue;
       const richResult = cloneIfNecessary(value);
-      expect(richResult).not.toBe(value);
+      expect(richResult).not.toBe(value); // rich path clones
 
       resetStorableValueConfig();
       const legacyResult = cloneIfNecessary(value);
-      expect(legacyResult).toBe(value);
+      expect(legacyResult).toBe(value); // legacy path is identity
     });
   });
 });
