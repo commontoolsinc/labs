@@ -242,6 +242,7 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
+    await this.synced();
     await Promise.all([...this.#providers.values()].map((provider) =>
       provider.destroy()
     ));
@@ -535,6 +536,7 @@ class Provider implements IStorageProviderWithReplica {
       return;
     }
     this.#destroyed = true;
+    await this.replica.synced();
     await this.replica.close();
   }
 
@@ -621,6 +623,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async close(): Promise<void> {
+    await this.synced();
     const { client } = await this.#sessionHandle;
     await client.close();
   }

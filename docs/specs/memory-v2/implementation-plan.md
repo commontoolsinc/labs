@@ -28,7 +28,7 @@
 - [x] Route v2 runtime traffic through the spec-native engine on both the real toolshed route and the emulated path.
 - [x] Reach parity for the main v1-used reactive flows already exercised on this branch: schema sync, linked-document propagation, deep link chains, reconnect resubscribe, scheduler pull reactivity, alias schema round-trip, and alias retargeting.
 - [x] Pin tests that intentionally depend on v1-only storage internals to explicit `memoryVersion: "v1"` construction and typed v1 helpers, so a future default flip does not confuse harness debt with real v2 regressions.
-- [ ] Finish reconnect parity when there is still outstanding local optimistic work.
+- [x] Finish the client/session replay path for reconnect when there is still outstanding local optimistic work, including in-flight and queued commit replay by `localSeq`.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
 
 ## Test Split For Default Flip
@@ -47,7 +47,7 @@
 - [x] Preserve the v1-visible notification contract at the runtime boundary: optimistic `"commit"`, synchronous `"revert"` before the promise resolves, and async `"integrate"` for remote updates.
 
 ## Immediate Next Slice
-- [ ] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
+- [x] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
 - [ ] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
 - [ ] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
 - [ ] Port the remaining high-value runner integration suites that still only exercise v1 onto `memoryVersion: "v2"`, especially reconnect-heavy flows.
@@ -82,7 +82,7 @@
 - [x] Preserve basic notification timing for optimistic commit, revert, integrate, `load`, `pull`, and `reset`, with explicit coverage for conflict-before-revert ordering.
 - [x] Reconnect the shared v2 client and resubscribe active `graph.query` views after websocket loss.
 - [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
-- [ ] Finish pending-first replica behavior for reconnect with outstanding local commits, including replay of in-flight and queued local writes.
+- [x] Finish pending-first replica behavior for reconnect with outstanding local commits, including replay of in-flight and queued local writes.
 - [ ] Add stronger proof for own-commit de-duplication when local replay and remote integrate race after reconnect.
 - [ ] Do not gate cutover on direct patch emission from `Cell.set()`. Leave true patch generation for the post-cutover phase.
 
@@ -92,7 +92,7 @@
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
 - [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
-- [ ] Add focused client and provider tests for stacked pending commits, reconnect replay of local commits, own-commit de-duplication, and retry-after-revert behavior.
+- [ ] Add the remaining focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
