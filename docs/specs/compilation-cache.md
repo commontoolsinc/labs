@@ -686,7 +686,7 @@ All phases are complete.
 
 1. Split `Engine.process()` into `compile()` + `evaluate()`.
 2. Update `Harness` interface with `CompileResult` type.
-3. `run()` and `process()` removed from Engine and Harness interface.
+3. `run()` removed from the Harness interface, and `run()`/`process()` removed from `Engine`.
 4. All existing tests pass.
 
 ### Phase 2: Cache Infrastructure -- DONE
