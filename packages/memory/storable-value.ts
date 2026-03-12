@@ -148,8 +148,6 @@ export function cloneIfNecessary(
   value: StorableValue,
   options?: CloneOptions,
 ): StorableValue {
-  if (!currentConfig.richStorableValues) return value;
-
   const frozen = options?.frozen ?? true;
   const deep = options?.deep ?? true;
   const force = options?.force ?? (frozen ? false : true);
@@ -167,6 +165,8 @@ export function cloneIfNecessary(
         "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
     );
   }
+
+  if (!currentConfig.richStorableValues) return value;
 
   return cloneIfNecessaryRich(value, frozen, deep, force);
 }
