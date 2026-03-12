@@ -619,30 +619,39 @@ Deno.bench(
   },
 );
 
-Deno.bench("Cell proxy - property writes schemaless (100x)", async () => {
-  const { runtime, storageManager } = setup();
+Deno.bench(
+  "Cell proxy - property writes schemaless (100x)",
+  {
+    // Schemaless cells are read-only; proxy writes require a schema with
+    // Writable<> types, so this benchmark tests intentionally unsupported
+    // behavior.
+    ignore: true,
+  },
+  async () => {
+    const { runtime, storageManager } = setup();
 
-  const cell = runtime.getCell<{
-    x: number;
-    y: number;
-  }>(space, "bench-proxy-write", undefined);
+    const cell = runtime.getCell<{
+      x: number;
+      y: number;
+    }>(space, "bench-proxy-write", undefined);
 
-  // Initialize with a committed value first
-  const initTx = runtime.edit();
-  cell.withTx(initTx).set({ x: 1, y: 2 });
-  initTx.commit();
+    // Initialize with a committed value first
+    const initTx = runtime.edit();
+    cell.withTx(initTx).set({ x: 1, y: 2 });
+    initTx.commit();
 
-  // Measure proxy writes
-  for (let i = 0; i < 100; i++) {
-    const tx = runtime.edit();
-    const proxy = cell.withTx(tx).getAsQueryResult();
-    proxy.x = i;
-    proxy.y = i * 2;
-    tx.commit();
-  }
+    // Measure proxy writes
+    for (let i = 0; i < 100; i++) {
+      const tx = runtime.edit();
+      const proxy = cell.withTx(tx).getAsQueryResult();
+      proxy.x = i;
+      proxy.y = i * 2;
+      tx.commit();
+    }
 
-  await cleanup(runtime, storageManager);
-});
+    await cleanup(runtime, storageManager);
+  },
+);
 
 // Schema-based get operations for complex objects
 Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
