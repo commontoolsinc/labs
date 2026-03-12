@@ -1,4 +1,3 @@
-import { type Pattern } from "../builder/types.ts";
 import type {
   JsScript,
   Program,
@@ -17,8 +16,6 @@ export type RuntimeProgram = Program & {
 export interface TypeScriptHarnessProcessOptions {
   // Disables typechecking of the program.
   noCheck?: boolean;
-  // Does not evaluate the pattern.
-  noRun?: boolean;
   // An identifer to use to uniquely identify the compiled
   // code when applying source maps.
   identifier?: string;
@@ -44,12 +41,6 @@ export interface CompileResult {
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
-  // TODO(@mpsalisbury): No longer called — remove from interface and Engine.
-  run(
-    source: RuntimeProgram,
-    options?: TypeScriptHarnessProcessOptions,
-  ): Promise<Pattern>;
-
   // Compiles `source` to JS without evaluation.
   compile(
     source: RuntimeProgram,

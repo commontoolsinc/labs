@@ -50,18 +50,23 @@ export async function process(
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;
-  const { output, main } = await engine.process(program, {
+  const { jsScript, id } = await engine.compile(program, {
     noCheck: !options.check,
-    noRun: !options.run,
     filename,
     getTransformedProgram,
     verboseErrors: options.verboseErrors,
   });
 
   if (options.output) {
-    await Deno.writeTextFile(options.output, output.js);
+    await Deno.writeTextFile(options.output, jsScript.js);
   }
-  return { output, main };
+
+  if (!options.run) {
+    return { output: jsScript };
+  }
+
+  const { main } = await engine.evaluate(id, jsScript, program.files);
+  return { output: jsScript, main };
 }
 
 function renderTransformed(program: Program) {

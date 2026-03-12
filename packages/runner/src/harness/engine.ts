@@ -1,4 +1,3 @@
-import { Pattern } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import {
   type CompileResult,
@@ -125,25 +124,6 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // TODO(@mpsalisbury): No longer called — PatternManager now uses compile() +
-  // evaluate() directly. Remove from Engine and Harness interface.
-  async run(
-    program: RuntimeProgram,
-    options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<Pattern> {
-    const { main: exports, exportMap: _ } = await this.process(
-      program,
-      options,
-    );
-
-    const exportName = program.mainExport ?? "default";
-    if (exports && !(exportName in exports)) {
-      throw new Error(`No "${exportName}" export found in compiled pattern.`);
-    }
-
-    return exports![exportName] as Pattern;
-  }
-
   // Compile source to JS without evaluation.
   async compile(
     program: RuntimeProgram,
@@ -227,26 +207,6 @@ export class Engine extends EventTarget implements Harness {
       return { main, exportMap };
     }
     return {};
-  }
-
-  // TODO(@mpsalisbury): Only called by run() above — remove together with run().
-  async process(
-    program: RuntimeProgram,
-    options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<
-    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
-  > {
-    const { jsScript, id } = await this.compile(program, options);
-
-    if (!options.noRun) {
-      const { main, exportMap } = await this.evaluate(
-        id,
-        jsScript,
-        program.files,
-      );
-      return { output: jsScript, main, exportMap };
-    }
-    return { output: jsScript };
   }
 
   // Invokes a function that should've came from this isolate (unverifiable).

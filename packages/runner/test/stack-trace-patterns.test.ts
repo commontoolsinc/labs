@@ -47,7 +47,10 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
     "});", //                                                 line 12
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { id, jsScript } = await runtime.harness.compile(program);
+  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -114,7 +117,10 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
     "});", //                                                         line 13
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { id, jsScript } = await runtime.harness.compile(program);
+  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;
@@ -184,7 +190,10 @@ Deno.test("lift error stack has multiple frames with correct source line", async
     "});", //                                                  line 10
   ].join("\n");
 
-  const patternFn = await runtime.harness.run(makeProgram(source));
+  const program = makeProgram(source);
+  const { id, jsScript } = await runtime.harness.compile(program);
+  const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+  const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
   const errorHandlers = (runtime.scheduler as any).errorHandlers;

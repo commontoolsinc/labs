@@ -547,10 +547,8 @@ export async function runTestPattern(
     const program = await engine.resolve(
       new FileSystemProgramResolver(testPath, options.root),
     );
-    const { main } = await engine.process(program, {
-      noCheck: false,
-      noRun: false,
-    });
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
 
     if (!main?.default) {
       throw new Error(
