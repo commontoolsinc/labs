@@ -463,6 +463,7 @@ class Provider implements IStorageProviderWithReplica {
 type SyncTask = {
   promise: Promise<Result<Unit, PullError>>;
   iterator?: AsyncIterator<GraphQueryResult>;
+  updates?: Promise<void>;
 };
 
 class SpaceReplica implements ISpaceReplica {
@@ -476,6 +477,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<Result<Unit, StorageTransactionRejected>>>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
+  readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<URI, Set<(value: StorageValue) => void>>();
   #nextLocalSeq = 1;
 
@@ -541,6 +543,8 @@ class SpaceReplica implements ISpaceReplica {
     await this.synced();
     const { client } = await this.#sessionHandle;
     await client.close();
+    await Promise.allSettled([...this.#updatePromises]);
+    this.#syncTasks.clear();
   }
 
   async load(
@@ -573,8 +577,10 @@ class SpaceReplica implements ISpaceReplica {
       return await existing.promise;
     }
 
-    const promise = this.startSync(entries);
-    this.#syncTasks.set(key, { promise });
+    const task = { promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>) };
+    const promise = this.startSync(entries, task);
+    task.promise = promise;
+    this.#syncTasks.set(key, task);
     this.#syncPromises.add(promise);
     try {
       return await promise;
@@ -616,6 +622,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private async startSync(
     entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
+    task: SyncTask,
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.#sessionHandle;
@@ -629,7 +636,11 @@ class SpaceReplica implements ISpaceReplica {
 
       this.applyQueryResult(view.entities, "pull");
       const iterator = view.subscribe();
-      void this.consumeUpdates(iterator);
+      task.iterator = iterator;
+      const updates = this.consumeUpdates(iterator)
+        .finally(() => this.#updatePromises.delete(updates));
+      this.#updatePromises.add(updates);
+      task.updates = updates;
       return { ok: {} };
     } catch (error) {
       return { error: toConnectionError(error) };
