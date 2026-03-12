@@ -154,7 +154,7 @@ describe("cloneIfNecessary", () => {
         string,
         unknown
       >;
-      // Must be a different reference even though input is already mutable.
+      // Must be a different reference, even though input is already mutable.
       expect(result).not.toBe(value);
       expect(result).toEqual({ a: { x: 1 }, b: [2, 3] });
       expect(Object.isFrozen(result)).toBe(false);
