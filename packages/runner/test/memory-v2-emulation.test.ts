@@ -6,6 +6,14 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Cell } from "../src/cell.ts";
 
+type TestProvider = {
+  get(uri: string): { value: unknown } | undefined;
+  send(
+    batch: { uri: string; value: { value: unknown; labels?: unknown } }[],
+  ): Promise<{ ok?: {}; error?: { name?: string; message?: string } }>;
+  sync(uri: string): Promise<unknown>;
+};
+
 const signer = await Identity.fromPassphrase("memory-v2-emulation");
 const space = signer.did();
 
@@ -41,7 +49,7 @@ describe("Memory v2 emulation", () => {
     await tx.commit();
     await runtime.idle();
 
-    const provider = storageManager.open(space);
+    const provider = storageManager.open(space) as unknown as TestProvider;
     await provider.sync(cell.getAsNormalizedFullLink().id);
     await storageManager.synced();
 
@@ -51,7 +59,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("ignores legacy label side-writes on the v2 path", async () => {
-    const provider = storageManager.open(space);
+    const provider = storageManager.open(space) as unknown as TestProvider;
     const uri = `of:memory-v2-labels-${Date.now()}` as const;
 
     const result = await provider.send([{
