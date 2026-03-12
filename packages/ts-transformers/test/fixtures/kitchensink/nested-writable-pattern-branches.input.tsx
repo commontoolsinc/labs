@@ -67,6 +67,7 @@ export default pattern<{
                     {section.tasks.map((task, taskIndex) => (
                       <div>
                         <button
+                          type="button"
                           onClick={selectTask({
                             selectedTaskId,
                             hoveredSectionId,

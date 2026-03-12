@@ -224,7 +224,7 @@ export default pattern((state) => {
                         const sectionIndex = __ct_pattern_input.key("params", "sectionIndex");
                         const state = __ct_pattern_input.key("params", "state");
                         return (<div>
-                        <button onClick={selectTask({
+                        <button type="button" onClick={selectTask({
                                 selectedTaskId,
                                 hoveredSectionId,
                                 sectionId: section.key("id"),

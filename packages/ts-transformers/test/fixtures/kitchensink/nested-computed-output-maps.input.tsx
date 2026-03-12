@@ -82,6 +82,7 @@ export default pattern<{
           {visibleComments.map((comment, innerIndex) => (
             <div>
               <button
+                type="button"
                 onClick={jumpToComment({
                   selectedCommentId,
                   threadId: thread.id,

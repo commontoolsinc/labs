@@ -396,7 +396,7 @@ export default pattern((state) => {
         return (<article>
           <h2>{thread.title}</h2>
           {visibleComments.map((comment, innerIndex) => (<div>
-              <button onClick={jumpToComment({
+              <button type="button" onClick={jumpToComment({
                     selectedCommentId: selectedCommentId,
                     threadId: thread.id,
                     commentId: comment.id,
