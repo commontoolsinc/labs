@@ -29,6 +29,7 @@
 - [x] Reach parity for the main v1-used reactive flows already exercised on this branch: schema sync, linked-document propagation, deep link chains, reconnect resubscribe, scheduler pull reactivity, alias schema round-trip, and alias retargeting.
 - [x] Pin tests that intentionally depend on v1-only storage internals to explicit `memoryVersion: "v1"` construction and typed v1 helpers, so a future default flip does not confuse harness debt with real v2 regressions.
 - [x] Finish the client/session replay path for reconnect when there is still outstanding local optimistic work, including in-flight and queued commit replay by `localSeq`.
+- [x] Replace the old reconnect harness with a real v2 runner integration test that survives an actual server restart and resumes subscribed runtime updates.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
 
 ## Test Split For Default Flip
@@ -48,9 +49,9 @@
 
 ## Immediate Next Slice
 - [x] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
-- [ ] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
+- [x] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
 - [x] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
-- [ ] Port the remaining high-value runner integration suites that still only exercise v1 onto `memoryVersion: "v2"`, especially reconnect-heavy flows.
+- [ ] Port the remaining high-value runner integration suites that still only exercise v1 onto `memoryVersion: "v2"`, beyond the reconnect-heavy flow that is already covered.
 
 ## Public Interfaces And Cutover Boundary
 - [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` and thread the resolved value into storage-manager construction and emulation.

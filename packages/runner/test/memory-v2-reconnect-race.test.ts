@@ -307,11 +307,15 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
     await waitFor(() => getObjectValue(provider, localUri)?.local === 2);
     await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 9);
 
+    const notificationTypes = notifications.notifications.map((notification) =>
+      notification.type
+    );
     const integrateChanges = notificationChanges(
       notifications.notifications,
       "integrate",
     );
 
+    assertEquals(notificationTypes, ["commit", "commit", "integrate"]);
     assertEquals(
       integrateChanges.some((change) => change.address.id === localUri),
       false,
