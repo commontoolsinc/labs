@@ -15,7 +15,9 @@ describe("StorageTransaction", () => {
   let transaction: ReturnType<typeof Transaction.create>;
 
   beforeEach(() => {
-    storage = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
+    // the memory-v2-* tests that exercise the document-envelope model directly.
+    storage = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
     transaction = Transaction.create(storage);
   });
 

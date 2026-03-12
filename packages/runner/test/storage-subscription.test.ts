@@ -54,11 +54,14 @@ describe("Storage Subscription", () => {
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 notification
+    // coverage lives in memory-v2-subscription.test.ts.
+    storageManager = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
     });
 
     tx = runtime.edit();
@@ -468,11 +471,15 @@ describe("Storage Subscription", () => {
     let tx: IExtendedStorageTransaction;
 
     beforeEach(() => {
-      storageManager = StorageManager.emulate({ as: signer });
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
+        memoryVersion: "v1",
       });
 
       tx = runtime.edit();
