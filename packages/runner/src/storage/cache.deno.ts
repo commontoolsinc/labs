@@ -1,6 +1,7 @@
 import * as MemoryProvider from "@commontools/memory/provider";
 import * as Consumer from "@commontools/memory/consumer";
 import * as V2Storage from "./v2.ts";
+import * as V2Emulate from "./v2-emulate.ts";
 import {
   DEFAULT_MEMORY_VERSION,
   type Options,
@@ -77,15 +78,15 @@ export class StorageManager extends BaseStorageManager {
   ): StorageManager | StorageManagerEmulator;
   static override open(
     options: V2StorageManagerOptions,
-  ): V2Storage.StorageManager | V2Storage.EmulatedStorageManager;
+  ): V2Storage.StorageManager | V2Emulate.EmulatedStorageManager;
   static override open(
     options: Options,
   ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
-    V2Storage.EmulatedStorageManager;
+    V2Emulate.EmulatedStorageManager;
   static override open(
     options: Options,
   ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
-    V2Storage.EmulatedStorageManager {
+    V2Emulate.EmulatedStorageManager {
     const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
     if (memoryVersion === "v2") {
       if (options.address.protocol === "memory:") {
@@ -104,16 +105,16 @@ export class StorageManager extends BaseStorageManager {
   ): StorageManagerEmulator;
   static emulate(
     options: Omit<V2StorageManagerOptions, "address">,
-  ): V2Storage.EmulatedStorageManager;
+  ): V2Emulate.EmulatedStorageManager;
   static emulate(
     options: Omit<Options, "address">,
-  ): StorageManagerEmulator | V2Storage.EmulatedStorageManager;
+  ): StorageManagerEmulator | V2Emulate.EmulatedStorageManager;
   static emulate(
     options: Omit<Options, "address">,
-  ): StorageManagerEmulator | V2Storage.EmulatedStorageManager {
+  ): StorageManagerEmulator | V2Emulate.EmulatedStorageManager {
     const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
     if (memoryVersion === "v2") {
-      return V2Storage.EmulatedStorageManager.emulate(options);
+      return V2Emulate.EmulatedStorageManager.emulate(options);
     }
     return new StorageManagerEmulator({
       ...options,

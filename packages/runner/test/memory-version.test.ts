@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { StorageManager as RemoteStorageManager } from "../src/storage/cache.ts";
 import * as V2Storage from "../src/storage/v2.ts";
+import * as V2Emulate from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   DEFAULT_MEMORY_VERSION,
@@ -45,7 +46,7 @@ describe("memoryVersion cutover seam", () => {
 
     expect(DEFAULT_MEMORY_VERSION).toBe("v2");
     expect(Object.getPrototypeOf(emulated).constructor).toBe(
-      V2Storage.EmulatedStorageManager,
+      V2Emulate.EmulatedStorageManager,
     );
     expect(Object.getPrototypeOf(remote).constructor).toBe(
       V2Storage.StorageManager,
