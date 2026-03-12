@@ -8,7 +8,6 @@ import {
   canBeStoredRich,
   cloneIfNecessaryRich,
   type CloneOptions,
-  deepCloneIfNecessaryRich,
   isStorableValueRich,
   shallowStorableFromNativeValueRich,
   storableFromNativeValueRich,
@@ -115,31 +114,6 @@ export function nativeFromStorableValue(
 ): StorableValue {
   return currentConfig.richStorableValues
     ? nativeFromStorableValueRich(value, frozen) as StorableValue
-    : value;
-}
-
-/**
- * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
- *
- * Unlike `storableFromNativeValue` (which converts native JS values into
- * storable wrappers), this function assumes the input is already a valid
- * `StorableValue` and only adjusts frozenness by cloning where necessary.
- *
- * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
- * Flag ON (rich): delegates to `deepCloneIfNecessaryRich` which deep-clones
- * and adjusts frozenness.
- *
- * @param value - An already-valid `StorableValue`.
- * @param frozen - When `true` (default), returns a deep-frozen copy.
- *   When `false`, returns a mutable deep copy. Only applies when
- *   `richStorableValues` is ON.
- */
-export function deepCloneIfNecessary(
-  value: StorableValue,
-  frozen = true,
-): StorableValue {
-  return currentConfig.richStorableValues
-    ? deepCloneIfNecessaryRich(value, frozen)
     : value;
 }
 
