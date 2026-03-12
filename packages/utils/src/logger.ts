@@ -194,6 +194,9 @@ export interface TimingStats {
   max: number; // Maximum time (ms)
   totalTime: number; // Sum for average calculation
   average: number; // totalTime / count
+  countSinceBaseline: number; // Measurements since most recent baseline reset
+  totalTimeSinceBaseline: number; // Sum of measurements since baseline reset
+  averageSinceBaseline: number; // totalTimeSinceBaseline / countSinceBaseline
   p50: number; // Median (50th percentile)
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
@@ -221,7 +224,9 @@ class TimingDataStore {
   private lastTime = 0;
   private lastTimestamp = 0;
   private samples: number[] = [];
+  private hasBaseline = false;
   private baselineCount = 0;
+  private baselineTotalTime = 0;
   private deltaSamples: number[] = []; // Reservoir for samples since baseline
   private deltaCount = 0; // Count of samples since baseline
 
@@ -249,7 +254,7 @@ class TimingDataStore {
     }
 
     // Also record to delta reservoir if baseline is set
-    if (this.baselineCount > 0) {
+    if (this.hasBaseline) {
       this.deltaCount++;
       if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
         this.deltaSamples.push(elapsed);
@@ -267,7 +272,9 @@ class TimingDataStore {
    * After calling this, new samples will be tracked separately for delta CDF.
    */
   setBaseline(): void {
+    this.hasBaseline = true;
     this.baselineCount = this.count;
+    this.baselineTotalTime = this.totalTime;
     this.deltaSamples = [];
     this.deltaCount = 0;
   }
@@ -283,6 +290,9 @@ class TimingDataStore {
         max: 0,
         totalTime: 0,
         average: 0,
+        countSinceBaseline: 0,
+        totalTimeSinceBaseline: 0,
+        averageSinceBaseline: 0,
         p50: 0,
         p95: 0,
         lastTime: 0,
@@ -308,12 +318,25 @@ class TimingDataStore {
       cdfSinceBaseline = this.calculateCDF(deltaSorted);
     }
 
+    const countSinceBaseline = this.hasBaseline
+      ? this.count - this.baselineCount
+      : 0;
+    const totalTimeSinceBaseline = this.hasBaseline
+      ? this.totalTime - this.baselineTotalTime
+      : 0;
+    const averageSinceBaseline = countSinceBaseline > 0
+      ? totalTimeSinceBaseline / countSinceBaseline
+      : 0;
+
     return {
       count: this.count,
       min: this.min,
       max: this.max,
       totalTime: this.totalTime,
       average: this.totalTime / this.count,
+      countSinceBaseline,
+      totalTimeSinceBaseline,
+      averageSinceBaseline,
       p50: median,
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
       lastTime: this.lastTime,
@@ -518,6 +541,7 @@ export class Logger {
   private _lastLoggedAt: number;
   private _timingsByKey: Map<string, TimingDataStore> = new Map();
   private _activeTimers: Map<string, number> = new Map();
+  private _timingBaselineActive = false;
   private _countBaseline: {
     debug: number;
     info: number;
@@ -854,6 +878,9 @@ export class Logger {
     let store = this._timingsByKey.get(path);
     if (!store) {
       store = new TimingDataStore();
+      if (this._timingBaselineActive) {
+        store.setBaseline();
+      }
       this._timingsByKey.set(path, store);
     }
     store.record(elapsed);
@@ -891,6 +918,7 @@ export class Logger {
   resetTimeStats(): void {
     this._timingsByKey.clear();
     this._activeTimers.clear();
+    this._timingBaselineActive = false;
   }
 
   // ============================================================
@@ -910,6 +938,7 @@ export class Logger {
    * After calling this, CDF delta curves will show samples since this baseline.
    */
   resetTimingBaseline(): void {
+    this._timingBaselineActive = true;
     for (const store of this._timingsByKey.values()) {
       store.setBaseline();
     }

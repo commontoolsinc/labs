@@ -44,6 +44,10 @@ export const test = new Command()
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
   )
+  .option(
+    "--stats-include <prefixes:string>",
+    "Comma-separated timing categories to always print in verbose stats output (exact or prefix match).",
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -102,6 +106,12 @@ export const test = new Command()
 
     // Resolve root path if provided
     const root = options.root ? resolve(Deno.cwd(), options.root) : undefined;
+    const statsInclude = options.statsInclude
+      ? String(options.statsInclude)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+      : undefined;
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
@@ -109,6 +119,7 @@ export const test = new Command()
       verbose: options.verbose,
       root,
       statsThreshold: options.statsThreshold,
+      statsInclude,
     });
 
     // Exit with error code if any tests failed

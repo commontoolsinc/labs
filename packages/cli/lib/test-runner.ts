@@ -96,6 +96,8 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+  /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
+  statsInclude?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -212,10 +214,17 @@ function cdfPercentile(cdf: CDFPoint[], p: number): number {
   return cdf[cdf.length - 1]?.x ?? 0;
 }
 
+function matchesTimingPrefix(name: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) =>
+    name === prefix || name.startsWith(`${prefix}/`)
+  );
+}
+
 function printLoggerStats(
   elapsedMs: number,
   useDelta: boolean,
   label?: string,
+  statsInclude: string[] = [],
 ): void {
   const counts = useDelta ? getGlobalLogCountDeltas() : getGlobalLogCounts();
   const dp = useDelta ? "Δ" : "";
@@ -230,6 +239,8 @@ function printLoggerStats(
   const entries: {
     name: string;
     n: number;
+    total: number;
+    avg: number;
     p50: number;
     p95: number;
     max: number;
@@ -238,22 +249,26 @@ function printLoggerStats(
   for (const [loggerName, timings] of Object.entries(breakdown)) {
     for (const [key, timing] of Object.entries(timings)) {
       if (useDelta) {
-        if (!timing.cdfSinceBaseline || timing.cdfSinceBaseline.length === 0) {
+        if (timing.countSinceBaseline === 0) {
           continue;
         }
-        const cdf = timing.cdfSinceBaseline;
+        const cdf = timing.cdfSinceBaseline ?? [];
         entries.push({
           name: `${loggerName}/${key}`,
-          n: cdf.length,
-          p50: cdfPercentile(cdf, 0.5),
-          p95: cdfPercentile(cdf, 0.95),
-          max: cdf[cdf.length - 1].x,
+          n: timing.countSinceBaseline,
+          total: timing.totalTimeSinceBaseline,
+          avg: timing.averageSinceBaseline,
+          p50: cdf.length > 0 ? cdfPercentile(cdf, 0.5) : 0,
+          p95: cdf.length > 0 ? cdfPercentile(cdf, 0.95) : 0,
+          max: cdf.length > 0 ? cdf[cdf.length - 1].x : 0,
         });
       } else {
         if (timing.count === 0) continue;
         entries.push({
           name: `${loggerName}/${key}`,
           n: timing.count,
+          total: timing.totalTime,
+          avg: timing.average,
           p50: timing.p50,
           p95: timing.p95,
           max: timing.max,
@@ -263,18 +278,42 @@ function printLoggerStats(
   }
 
   if (entries.length > 0) {
-    entries.sort((a, b) => b.p95 - a.p95);
-    console.log(`           Timings (top 10 by p95):`);
-    for (const entry of entries.slice(0, 10)) {
+    entries.sort((a, b) => b.total - a.total);
+    const topEntries = entries.slice(0, 10);
+    const topNames = new Set(topEntries.map((entry) => entry.name));
+    const includedEntries = statsInclude.length > 0
+      ? entries.filter((entry) =>
+        !topNames.has(entry.name) &&
+        matchesTimingPrefix(entry.name, statsInclude)
+      )
+      : [];
+
+    console.log(`           Timings (top 10 by total time):`);
+    for (const entry of topEntries) {
       const name = entry.name.padEnd(35);
       const np = useDelta ? "Δn" : " n";
       console.log(
-        `             ${name} ${np}=${String(entry.n).padStart(5)} p50=${
-          fmtMs(entry.p50).padStart(7)
-        } p95=${fmtMs(entry.p95).padStart(7)} max=${
-          fmtMs(entry.max).padStart(7)
+        `             ${name} ${np}=${String(entry.n).padStart(5)} total=${
+          fmtMs(entry.total).padStart(7)
+        } avg=${fmtMs(entry.avg).padStart(7)} p95=${
+          fmtMs(entry.p95).padStart(7)
         }`,
       );
+    }
+
+    if (includedEntries.length > 0) {
+      console.log(`           Included Timings:`);
+      for (const entry of includedEntries) {
+        const name = entry.name.padEnd(35);
+        const np = useDelta ? "Δn" : " n";
+        console.log(
+          `             ${name} ${np}=${String(entry.n).padStart(5)} total=${
+            fmtMs(entry.total).padStart(7)
+          } avg=${fmtMs(entry.avg).padStart(7)} p95=${
+            fmtMs(entry.p95).padStart(7)
+          }`,
+        );
+      }
     }
   }
 
@@ -638,7 +677,12 @@ export async function runTestPattern(
 
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
-      printLoggerStats(performance.now() - startTime, false, "Setup");
+      printLoggerStats(
+        performance.now() - startTime,
+        false,
+        "Setup",
+        options.statsInclude,
+      );
       printSettleStats(runtime.scheduler.getSettleStats());
       resetAllCountBaselines();
       resetAllTimingBaselines();
@@ -961,6 +1005,7 @@ export async function runTestPattern(
             performance.now() - startTime,
             true,
             `${stepLabel} took ${fmtMs(stepDuration)}`,
+            options.statsInclude,
           );
           printSettleStats(runtime.scheduler.getSettleStats());
         }
