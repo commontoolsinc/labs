@@ -160,6 +160,7 @@ describe("cloneIfNecessary", () => {
       expect(Object.isFrozen(result)).toBe(false);
       // Nested values are also cloned.
       expect(result.a).not.toBe(inner);
+      expect(result.b).not.toBe((value as Record<string, unknown>).b);
     });
 
     it("deep-unfreezes nested structures", () => {
