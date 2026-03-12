@@ -67,7 +67,7 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     personCell.set({ name: "Alice" });
     await tx.commit();
     await runtime1.storageManager.synced();
-    const addressEntityId = JSON.parse(JSON.stringify(addressCell.entityId));
+    const addressLink = structuredClone(addressCell.getAsLink());
     await runtime1.dispose();
 
     const runtime2 = createRuntime(identity, base);
@@ -87,11 +87,9 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     const personCell3 = runtime3.getCell(space, "runner-v2-link-person", personSchema);
     await personCell3.sync();
     tx = runtime3.edit();
-    personCell3.withTx(tx).setRaw({
+    personCell3.withTx(tx).setRawUntyped({
       name: "Alice",
-      address: {
-        "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
-      },
+      address: addressLink,
     });
     await tx.commit();
     await runtime3.storageManager.synced();
@@ -142,15 +140,13 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
     await tx.commit();
     await addressCell.sync();
     await runtime1.storageManager.synced();
-    const addressEntityId = JSON.parse(JSON.stringify(addressCell.entityId));
+    const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
     const personCell = runtime1.getCell(space, "runner-v2-linked-person", personSchema, tx);
-    personCell.setRaw({
+    personCell.setRawUntyped({
       name: "Bob",
-      address: {
-        "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
-      },
+      address: addressLink,
     });
     await tx.commit();
     await runtime1.storageManager.synced();
@@ -236,28 +232,24 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     await tx.commit();
     await cityCell.sync();
     await runtime1.storageManager.synced();
-    const cityEntityId = JSON.parse(JSON.stringify(cityCell.entityId));
+    const cityLink = structuredClone(cityCell.getAsLink());
 
     tx = runtime1.edit();
     const addressCell = runtime1.getCell(space, "runner-v2-deep-address", addressSchema, tx);
-    addressCell.setRaw({
+    addressCell.setRawUntyped({
       street: "123 Main St",
-      city: {
-        "/": { "link@1": { id: `of:${cityEntityId["/"]}`, path: [] } },
-      },
+      city: cityLink,
     });
     await tx.commit();
     await addressCell.sync();
     await runtime1.storageManager.synced();
-    const addressEntityId = JSON.parse(JSON.stringify(addressCell.entityId));
+    const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
     const personCell = runtime1.getCell(space, "runner-v2-deep-person", personSchema, tx);
-    personCell.setRaw({
+    personCell.setRawUntyped({
       name: "Charlie",
-      address: {
-        "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
-      },
+      address: addressLink,
     });
     await tx.commit();
     await runtime1.storageManager.synced();

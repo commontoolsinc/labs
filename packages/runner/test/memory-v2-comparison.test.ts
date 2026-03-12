@@ -2,6 +2,13 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
+type TestProvider = {
+  get(uri: string): { value: unknown } | undefined;
+  send(
+    batch: { uri: string; value: { value: unknown } }[],
+  ): Promise<{ ok?: {}; error?: { name?: string; message?: string } }>;
+};
+
 const mulberry32 = (seed: number) => {
   let current = seed >>> 0;
   return () => {
@@ -35,8 +42,8 @@ Deno.test("memory v2 matches v1 provider-visible behavior for a randomized basic
   const space = signer.did();
   const v1 = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
   const v2 = StorageManager.emulate({ as: signer, memoryVersion: "v2" });
-  const v1Provider = v1.open(space);
-  const v2Provider = v2.open(space);
+  const v1Provider = v1.open(space) as unknown as TestProvider;
+  const v2Provider = v2.open(space) as unknown as TestProvider;
   const random = mulberry32(0x5eedc0de);
   const uris = Array.from(
     { length: 6 },

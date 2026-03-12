@@ -7,6 +7,7 @@ import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import {
+  type IStorageProviderWithReplica,
   type IStorageNotification,
   type StorageNotification,
 } from "../src/storage/interface.ts";
@@ -19,6 +20,13 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
+
+type TestProvider = IStorageProviderWithReplica & {
+  get(uri: URI): { value: unknown } | undefined;
+  send(
+    batch: { uri: URI; value: { value: Record<string, unknown> } }[],
+  ): Promise<{ ok?: {}; error?: { name?: string; message?: string } }>;
+};
 
 class NotificationRecorder implements IStorageNotification {
   notifications: StorageNotification[] = [];
@@ -243,7 +251,7 @@ const notificationChanges = (
     );
 
 const getObjectValue = (
-  provider: { get(uri: URI): { value: unknown } | undefined },
+  provider: TestProvider,
   uri: URI,
 ): Record<string, unknown> | undefined => {
   const value = provider.get(uri)?.value;
@@ -268,7 +276,7 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
     transport: MemoryV2Client.loopback(server),
   });
   const writer = await writerClient.mount(space);
-  const provider = storageManager.open(space);
+  const provider = storageManager.open(space) as TestProvider;
   const localUri = `of:memory-v2-local-${crypto.randomUUID()}` as URI;
   const remoteUri = `of:memory-v2-remote-${crypto.randomUUID()}` as URI;
 
@@ -351,7 +359,7 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
     transport: MemoryV2Client.loopback(server),
   });
   const writer = await writerClient.mount(space);
-  const provider = storageManager.open(space);
+  const provider = storageManager.open(space) as TestProvider;
   const localUri = `of:memory-v2-stacked-local-${crypto.randomUUID()}` as URI;
   const remoteUri = `of:memory-v2-stacked-remote-${crypto.randomUUID()}` as URI;
 
@@ -429,7 +437,7 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     memoryVersion: "v2",
   });
   const notifications = new NotificationRecorder();
-  const provider = storageManager.open(space);
+  const provider = storageManager.open(space) as TestProvider;
   const uri = `of:memory-v2-retry-after-revert-${crypto.randomUUID()}` as URI;
   const address = { id: uri, type: DOCUMENT_MIME as MIME };
 
@@ -515,7 +523,7 @@ Deno.test("memory v2 runner keeps later independent pending commits after an ear
     memoryVersion: "v2",
   }, sessionFactory);
   const notifications = new NotificationRecorder();
-  const provider = storageManager.open(space);
+  const provider = storageManager.open(space) as TestProvider;
   const rejectedUri = `of:memory-v2-rejected-${crypto.randomUUID()}` as URI;
   const confirmedUri = `of:memory-v2-confirmed-${crypto.randomUUID()}` as URI;
 
