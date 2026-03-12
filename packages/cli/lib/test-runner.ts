@@ -72,6 +72,41 @@ export interface NavigationEvent {
   afterActionIndex: number;
 }
 
+/** Performance metrics collected during a test run for tracking over time. */
+export interface TestPerfStats {
+  /** Whether pull-based scheduling was active */
+  pullMode: boolean;
+  /** Number of scheduler effects (sinks) */
+  effects: number;
+  /** Number of scheduler computations */
+  computations: number;
+  /** Scheduler timing: total time spent in execute() */
+  schedulerExecuteMs: TimingSummary | null;
+  /** Scheduler timing: total time spent in individual action runs */
+  schedulerRunMs: TimingSummary | null;
+  /** Scheduler timing: settle loop */
+  schedulerSettleMs: TimingSummary | null;
+  /** Scheduler timing: commit */
+  schedulerCommitMs: TimingSummary | null;
+  /** Top actions by total time */
+  topActions: {
+    id: string;
+    preview?: string;
+    runs: number;
+    totalMs: number;
+    avgMs: number;
+  }[];
+}
+
+export interface TimingSummary {
+  count: number;
+  min: number;
+  max: number;
+  average: number;
+  p50: number;
+  p95: number;
+}
+
 export interface TestRunResult {
   path: string;
   results: TestResult[];
@@ -87,6 +122,8 @@ export interface TestRunResult {
   nonIdempotent: string[];
   /** If true, non-idempotent computations are expected and should not fail the test */
   expectNonIdempotent?: boolean;
+  /** Performance metrics for tracking over time */
+  perf?: TestPerfStats;
 }
 
 export interface TestRunnerOptions {
@@ -96,6 +133,8 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+  /** Print per-test scheduler performance summary. Enabled by --perf-stats or --verbose. */
+  perfStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +531,122 @@ function printActionStatsTable(runtime: Runtime): void {
 }
 
 /**
+ * Collect performance stats from the runtime for tracking over time.
+ */
+function collectPerfStats(runtime: Runtime): TestPerfStats {
+  const schedulerStats = runtime.scheduler.getStats();
+  const pullMode = runtime.scheduler.isPullModeEnabled();
+
+  // Extract timing summaries from the logger
+  const breakdown = getTimingStatsBreakdown();
+  const schedulerTimings = breakdown["scheduler"] ?? {};
+
+  function toSummary(
+    key: string,
+  ): TimingSummary | null {
+    const t = schedulerTimings[key];
+    if (!t || t.count === 0) return null;
+    return {
+      count: t.count,
+      min: t.min,
+      max: t.max,
+      average: t.average,
+      p50: t.p50,
+      p95: t.p95,
+    };
+  }
+
+  // Collect top actions by total time
+  const snapshot = runtime.scheduler.getGraphSnapshot();
+  const seen = new Map<
+    string,
+    {
+      stats: NonNullable<(typeof snapshot.nodes)[0]["stats"]>;
+      preview?: string;
+      childIds: Set<string>;
+    }
+  >();
+  for (const node of snapshot.nodes) {
+    if (!node.stats || node.stats.runCount === 0) continue;
+    const existing = seen.get(node.id);
+    if (!existing) {
+      seen.set(node.id, {
+        stats: node.stats,
+        preview: node.preview,
+        childIds: new Set(),
+      });
+    }
+  }
+  for (const node of snapshot.nodes) {
+    if (node.parentId && seen.has(node.parentId) && seen.has(node.id)) {
+      seen.get(node.parentId)!.childIds.add(node.id);
+    }
+  }
+  const allChildIds = new Set<string>();
+  for (const entry of seen.values()) {
+    for (const cid of entry.childIds) allChildIds.add(cid);
+  }
+
+  const topActions: TestPerfStats["topActions"] = [];
+  for (const [id, entry] of seen) {
+    if (allChildIds.has(id)) continue;
+    let totalMs = entry.stats.totalTime;
+    let runs = entry.stats.runCount;
+    for (const cid of entry.childIds) {
+      const child = seen.get(cid);
+      if (child) {
+        totalMs += child.stats.totalTime;
+        runs += child.stats.runCount;
+      }
+    }
+    topActions.push({
+      id,
+      preview: entry.preview,
+      runs,
+      totalMs,
+      avgMs: runs > 0 ? totalMs / runs : 0,
+    });
+  }
+  topActions.sort((a, b) => b.totalMs - a.totalMs);
+
+  return {
+    pullMode,
+    effects: schedulerStats.effects,
+    computations: schedulerStats.computations,
+    schedulerExecuteMs: toSummary("scheduler/execute"),
+    schedulerRunMs: toSummary("scheduler/run"),
+    schedulerSettleMs: toSummary("scheduler/execute/settle"),
+    schedulerCommitMs: toSummary("scheduler/run/commit"),
+    topActions: topActions.slice(0, 10),
+  };
+}
+
+/**
+ * Print a compact perf summary line for a test run.
+ */
+function printPerfSummary(perf: TestPerfStats, path: string): void {
+  const mode = perf.pullMode ? "pull" : "push";
+  const exec = perf.schedulerExecuteMs;
+  const run = perf.schedulerRunMs;
+  const parts = [
+    `mode=${mode}`,
+    `effects=${perf.effects}`,
+    `computations=${perf.computations}`,
+  ];
+  if (exec) {
+    parts.push(
+      `execute: n=${exec.count} p50=${fmtMs(exec.p50)} p95=${fmtMs(exec.p95)}`,
+    );
+  }
+  if (run) {
+    parts.push(
+      `run: n=${run.count} p50=${fmtMs(run.p50)} p95=${fmtMs(run.p95)}`,
+    );
+  }
+  console.log(`  [PERF] ${basename(path)}: ${parts.join(", ")}`);
+}
+
+/**
  * Run a single test pattern file.
  */
 export async function runTestPattern(
@@ -539,8 +694,18 @@ export async function runTestPattern(
   }
   const engine = new Engine(runtime);
 
-  // Track sink subscription for cleanup
+  // Track sink subscriptions for cleanup
   let sinkCancel: (() => void) | undefined;
+  const assertionSinkCancels: (() => void)[] = [];
+
+  // Catch unhandled errors from async pattern code (e.g. wish() using setTimeout).
+  // Without this, patterns that throw in async callbacks crash the process.
+  const uncaughtErrors: string[] = [];
+  const globalErrorHandler = (e: ErrorEvent) => {
+    e.preventDefault();
+    uncaughtErrors.push(e.error?.message ?? e.message);
+  };
+  globalThis.addEventListener("error", globalErrorHandler);
 
   try {
     // 2. Compile the test pattern
@@ -620,6 +785,31 @@ export async function runTestPattern(
     // 4. Get the tests array from pattern output
     const testsCell = patternResult.key("tests") as Cell<unknown>;
     const testsValue = testsCell.get();
+
+    // In pull mode, assertion computations are stored as cell references in the
+    // tests array. The patternResult sink doesn't deeply dereference them, so
+    // their computations have no effect in the dependency chain and never
+    // re-execute when inputs change. Sink each assertion cell individually so
+    // pull mode keeps them reactive.
+    if (
+      Array.isArray(testsValue) && runtime.scheduler.isPullModeEnabled()
+    ) {
+      for (let i = 0; i < testsValue.length; i++) {
+        const step = testsValue[i] as { assertion?: unknown };
+        if ("assertion" in step) {
+          try {
+            const assertCell = testsCell.key(i).key(
+              "assertion",
+            ) as Cell<unknown>;
+            assertionSinkCancels.push(assertCell.sink(() => {}));
+          } catch {
+            // Some assertion cells may not support sink
+          }
+        }
+      }
+      // Let the new sinks settle so dependency graph is up to date
+      await runtime.idle();
+    }
 
     // Validate it's an array
     if (!Array.isArray(testsValue)) {
@@ -920,8 +1110,119 @@ export async function runTestPattern(
           const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
           const value = assertCell.get();
           passed = value === true;
+          // Debug: on failure, also read the raw cell to see what state it's in
+          if (!passed && options.verbose) {
+            const stepCell = testsCell.key(i) as Cell<unknown>;
+            const stepVal = stepCell.get();
+            console.log(
+              `    [CELL] step[${i}] = ${
+                JSON.stringify(stepVal, null, 0)?.slice(0, 200)
+              }`,
+            );
+          }
           if (!passed) {
             error = `Expected true, got ${JSON.stringify(value)}`;
+            // Debug: dump assertion computation state and dirty actions
+            if (options.verbose && runtime.scheduler.isPullModeEnabled()) {
+              const snap = runtime.scheduler.getGraphSnapshot();
+              const shortenPath = (p: string) => {
+                const ofIdx = p.indexOf("/of:");
+                if (ofIdx < 0) return p.slice(-50);
+                const rest = p.slice(ofIdx + 4);
+                const slashIdx = rest.indexOf("/");
+                if (slashIdx < 0) return rest.slice(-30);
+                return rest.slice(0, 10) + "…" + rest.slice(slashIdx);
+              };
+              // Find assertion computation (writes to tests/N/assertion)
+              const assertCompNode = snap.nodes.find((n) =>
+                n.writes?.some((w) => w.includes(`tests/${i}/assertion`))
+              );
+              if (assertCompNode) {
+                console.log(
+                  `    [DEBUG] assert comp: dirty=${assertCompNode.isDirty} pending=${assertCompNode.isPending} type=${assertCompNode.type}`,
+                );
+                console.log(
+                  `      reads: [${
+                    (assertCompNode.reads ?? []).map(shortenPath).join(", ")
+                  }]`,
+                );
+                console.log(
+                  `      writes: [${
+                    (assertCompNode.writes ?? []).map(shortenPath).join(", ")
+                  }]`,
+                );
+              } else {
+                console.log(
+                  `    [DEBUG] assert comp NOT FOUND for tests/${i}/assertion`,
+                );
+                // Dump all nodes that write to anything with "assertion"
+                const assertionWriters = snap.nodes.filter((n) =>
+                  n.writes?.some((w) => w.includes("assertion"))
+                );
+                console.log(
+                  `      ${assertionWriters.length} nodes write to *assertion*`,
+                );
+                for (const c of assertionWriters.slice(0, 5)) {
+                  console.log(
+                    `      ${c.type} d=${c.isDirty} p=${c.isPending} w=[${
+                      (c.writes ?? []).map(shortenPath).join(", ")
+                    }]`,
+                  );
+                }
+                // Also check if ANY node mentions tests/
+                const testsWriters = snap.nodes.filter((n) =>
+                  n.writes?.some((w) => w.includes("tests/"))
+                );
+                console.log(
+                  `      ${testsWriters.length} nodes write to *tests/*`,
+                );
+              }
+              // Show dirty/pending count and total
+              const dirtyCount = snap.nodes.filter((n) => n.isDirty).length;
+              const pendingCount = snap.nodes.filter((n) => n.isPending).length;
+              console.log(
+                `    [DEBUG] ${snap.nodes.length} total nodes, ${dirtyCount} dirty, ${pendingCount} pending`,
+              );
+              // Find the assertion sink and what entity/path it reads
+              const assertSink = snap.nodes.find((n) =>
+                n.type === "effect" &&
+                n.reads?.some((r) => r.includes(`tests/${i}/`))
+              );
+              if (assertSink) {
+                // Extract the internal path from the sink's reads
+                const internalReads = assertSink.reads?.filter((r) =>
+                  r.includes("/internal/")
+                ) ?? [];
+                for (const ir of internalReads.slice(0, 3)) {
+                  // Find who writes to this path
+                  const writer = snap.nodes.find((n) =>
+                    n.writes?.some((w) => ir.startsWith(w) || w.startsWith(ir))
+                  );
+                  console.log(
+                    `    [DEBUG] sink reads ${shortenPath(ir)}`,
+                  );
+                  if (writer) {
+                    console.log(
+                      `      writer: ${writer.type} d=${writer.isDirty} p=${writer.isPending} id=${
+                        writer.id.slice(0, 50)
+                      }`,
+                    );
+                    console.log(
+                      `        w=[${
+                        (writer.writes ?? []).map(shortenPath).join(", ")
+                      }]`,
+                    );
+                    console.log(
+                      `        r=[${
+                        (writer.reads ?? []).map(shortenPath).join(", ")
+                      }]`,
+                    );
+                  } else {
+                    console.log(`      NO WRITER FOUND`);
+                  }
+                }
+              }
+            }
           }
         } catch (err) {
           passed = false;
@@ -972,11 +1273,19 @@ export async function runTestPattern(
       printActionStatsTable(runtime);
     }
 
+    // Collect perf stats before cleanup
+    const perf = collectPerfStats(runtime);
+
     // Collect idempotency violations detected during normal execution
     const nonIdempotent = runtime.getIdempotencyViolations()
       .map((r) => r.actionInfo?.patternName ?? r.actionId);
 
     const errorMessages = runtimeErrors.map((e) => String(e));
+    if (uncaughtErrors.length > 0) {
+      errorMessages.push(
+        ...uncaughtErrors.map((e) => `[uncaught async] ${e}`),
+      );
+    }
     return {
       path: testPath,
       results,
@@ -986,6 +1295,7 @@ export async function runTestPattern(
       allowRuntimeErrors,
       nonIdempotent,
       expectNonIdempotent,
+      perf,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -1001,6 +1311,11 @@ export async function runTestPattern(
     }
 
     const errorMessages = runtimeErrors.map((e) => String(e));
+    if (uncaughtErrors.length > 0) {
+      errorMessages.push(
+        ...uncaughtErrors.map((e) => `[uncaught async] ${e}`),
+      );
+    }
     return {
       path: testPath,
       results: [],
@@ -1012,6 +1327,8 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
+    globalThis.removeEventListener("error", globalErrorHandler);
+    for (const cancel of assertionSinkCancels) cancel();
     sinkCancel?.();
     engine.dispose();
     await storageManager.close();
@@ -1112,6 +1429,17 @@ export async function runTests(
             console.log(`    ${truncated}`);
           }
         }
+      }
+    }
+  }
+
+  // Performance summary (only with --verbose or --perf-stats)
+  if (options.perfStats) {
+    const resultsWithPerf = allResults.filter((r) => r.perf);
+    if (resultsWithPerf.length > 0) {
+      console.log(`\n--- Performance Summary ---`);
+      for (const result of resultsWithPerf) {
+        printPerfSummary(result.perf!, result.path);
       }
     }
   }
