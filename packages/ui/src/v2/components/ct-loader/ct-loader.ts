@@ -46,10 +46,6 @@ export type LoaderSize = "sm" | "md" | "lg";
 export class CTLoader extends BaseElement {
   static override styles = css`
     :host {
-      display: inline-flex;
-      align-items: center;
-      vertical-align: middle;
-      gap: 0.375rem;
       --ct-loader-color-track: var(
         --ct-theme-color-border,
         var(--ct-colors-gray-300, #e0e0e0)
@@ -70,6 +66,11 @@ export class CTLoader extends BaseElement {
         --ct-theme-color-error,
         var(--ct-colors-error, #dc2626)
       );
+
+      display: inline-flex;
+      align-items: center;
+      vertical-align: middle;
+      gap: 0.375rem;
     }
 
     *,

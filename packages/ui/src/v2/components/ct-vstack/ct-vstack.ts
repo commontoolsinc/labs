@@ -24,7 +24,6 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CTVStack extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
       --ct-vstack-gap-0: 0;
       --ct-vstack-gap-1: 0.25rem;
       --ct-vstack-gap-2: 0.5rem;
@@ -51,6 +50,8 @@ export class CTVStack extends BaseElement {
       --ct-vstack-padding-16: 4rem;
       --ct-vstack-padding-20: 5rem;
       --ct-vstack-padding-24: 6rem;
+
+      display: block;
     }
 
     .stack {

@@ -97,8 +97,6 @@ export class CTTextarea extends BaseElement {
 
   static override styles = css`
     :host {
-      display: block;
-      width: 100%;
       --ct-textarea-color-background: var(--ct-theme-color-background, #ffffff);
       --ct-textarea-color-text: var(--ct-theme-color-text, #0f172a);
       --ct-textarea-color-border: var(--ct-theme-color-border, #e2e8f0);
@@ -127,6 +125,9 @@ export class CTTextarea extends BaseElement {
       --textarea-line-height: 1.25rem;
       --textarea-border-radius: var(--ct-textarea-border-radius, 0.375rem);
       --textarea-min-height: 5rem;
+
+      display: block;
+      width: 100%;
     }
 
     textarea {

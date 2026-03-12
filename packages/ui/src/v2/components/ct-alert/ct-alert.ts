@@ -35,8 +35,6 @@ export type AlertVariant =
 export class CTAlert extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
-
       /* Default color values if not provided */
       --ct-alert-color-background: var(--ct-theme-color-background, #ffffff);
       --ct-alert-color-foreground: var(--ct-theme-color-text, #0f172a);
@@ -63,12 +61,13 @@ export class CTAlert extends BaseElement {
       --ct-alert-color-info-foreground: #eff6ff;
       --ct-alert-color-border: var(--ct-theme-color-border, #e2e8f0);
       --ct-alert-color-ring: var(--ct-theme-color-primary, #94a3b8);
+
+      display: block;
     }
 
     .alert {
       position: relative;
       display: flex;
-      width: 100%;
       border-radius: 0.5rem;
       border: 1px solid;
       padding: 1rem;

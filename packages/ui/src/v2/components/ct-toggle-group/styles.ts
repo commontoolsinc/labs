@@ -4,10 +4,11 @@
 
 export const toggleGroupStyles = `
   :host {
-    display: inline-flex;
     --ct-toggle-group-gap: 0;
     --ct-toggle-group-color-border: var(--ct-theme-color-border, #e2e8f0);
     --ct-toggle-group-color-background: var(--ct-theme-color-background, #ffffff);
+
+    display: inline-flex;
   }
 
   .toggle-group {

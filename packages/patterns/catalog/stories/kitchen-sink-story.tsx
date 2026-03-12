@@ -23,6 +23,7 @@ import HeadingStory from "./ct-heading-story.tsx";
 import LabelStory from "./ct-label-story.tsx";
 import ChipStory from "./ct-chip-story.tsx";
 import BadgeStory from "./ct-badge-story.tsx";
+import AlertStory from "./ct-alert-story.tsx";
 import SeparatorStory from "./ct-separator-story.tsx";
 import MarkdownStory from "./ct-markdown-story.tsx";
 import LoaderStory from "./ct-loader-story.tsx";
@@ -62,6 +63,7 @@ export default pattern<KitchenSinkStoryInput, KitchenSinkStoryOutput>(() => {
     { label: "Label", node: LabelStory({}) },
     { label: "Chip", node: ChipStory({}) },
     { label: "Badge", node: BadgeStory({}) },
+    { label: "Alert", node: AlertStory({}) },
     { label: "Separator", node: SeparatorStory({}) },
     { label: "Markdown", node: MarkdownStory({}) },
     { label: "Loader", node: LoaderStory({}) },

@@ -4,9 +4,6 @@
 
 export const progressStyles = `
   :host {
-    display: block;
-    width: 100%;
-    
     /* Default color values if not provided */
     --ct-progress-color-background: #ffffff;
     --ct-progress-color-foreground: #0f172a;
@@ -20,6 +17,9 @@ export const progressStyles = `
     /* Progress dimensions */
     --progress-height: 0.5rem; /* h-2 equivalent */
     --progress-border-radius: 9999px; /* rounded-full */
+
+    display: block;
+    width: 100%;
   }
 
   * {

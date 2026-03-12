@@ -36,8 +36,6 @@ export class CTToolbar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
-        box-sizing: border-box;
         --ct-toolbar-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
         --ct-toolbar-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
         --ct-toolbar-color-surface: var(
@@ -49,6 +47,9 @@ export class CTToolbar extends BaseElement {
           --ct-theme-color-border,
           var(--ct-colors-gray-200, #e5e7eb)
         );
+
+        display: block;
+        box-sizing: border-box;
       }
 
       .toolbar {

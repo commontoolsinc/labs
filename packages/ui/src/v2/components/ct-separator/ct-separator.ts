@@ -45,9 +45,10 @@ export type SeparatorOrientation = "horizontal" | "vertical";
 export class CTSeparator extends BaseElement {
   static override styles = css`
     :host {
+      --ct-separator-color-border: var(--border, hsl(0, 0%, 89%));
+
       display: block;
       box-sizing: border-box;
-      --ct-separator-color-border: var(--border, hsl(0, 0%, 89%));
     }
 
     *,

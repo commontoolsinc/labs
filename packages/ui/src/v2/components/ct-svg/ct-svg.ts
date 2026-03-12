@@ -25,10 +25,11 @@ export class CTSvg extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
-        box-sizing: border-box;
         --ct-svg-width: 100%;
         --ct-svg-height: auto;
+
+        display: block;
+        box-sizing: border-box;
       }
 
       *,

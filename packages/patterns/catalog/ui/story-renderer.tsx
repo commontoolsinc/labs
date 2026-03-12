@@ -23,6 +23,7 @@ import HeadingStory from "../stories/ct-heading-story.tsx";
 import LabelStory from "../stories/ct-label-story.tsx";
 import ChipStory from "../stories/ct-chip-story.tsx";
 import BadgeStory from "../stories/ct-badge-story.tsx";
+import AlertStory from "../stories/ct-alert-story.tsx";
 import SeparatorStory from "../stories/ct-separator-story.tsx";
 import MarkdownStory from "../stories/ct-markdown-story.tsx";
 import LoaderStory from "../stories/ct-loader-story.tsx";
@@ -97,6 +98,8 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChipStory({});
         case "badge":
           return BadgeStory({});
+        case "alert":
+          return AlertStory({});
         case "separator":
           return SeparatorStory({});
         case "markdown":

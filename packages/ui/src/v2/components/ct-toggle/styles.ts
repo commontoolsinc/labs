@@ -4,7 +4,6 @@
 
 export const toggleStyles = `
   :host {
-    display: inline-block;
     --ct-toggle-height: 2.5rem;
     --ct-toggle-height-sm: 2.25rem;
     --ct-toggle-height-lg: 2.75rem;
@@ -24,6 +23,8 @@ export const toggleStyles = `
     --ct-toggle-color-accent-foreground: var(--ct-theme-color-text, #0f172a);
     --ct-toggle-color-border: var(--ct-theme-color-border, #e2e8f0);
     --ct-toggle-color-ring: var(--ct-theme-color-primary, #94a3b8);
+
+    display: inline-block;
   }
 
   button {

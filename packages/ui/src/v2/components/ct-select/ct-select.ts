@@ -64,9 +64,6 @@ export class CTSelect extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: inline-block;
-        width: 100%;
-        box-sizing: border-box;
         --ct-select-color-text: var(--ct-theme-color-text, #111827);
         --ct-select-color-background: var(--ct-theme-color-background, #ffffff);
         --ct-select-color-border: var(--ct-theme-color-border, #e5e7eb);
@@ -78,6 +75,10 @@ export class CTSelect extends BaseElement {
         );
         --ct-select-animation-duration: var(--ct-theme-animation-duration, 150ms);
         --ct-select-font-family: var(--ct-theme-font-family, inherit);
+
+        display: inline-block;
+        width: 100%;
+        box-sizing: border-box;
       }
 
       select {

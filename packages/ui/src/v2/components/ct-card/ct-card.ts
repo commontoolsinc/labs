@@ -26,8 +26,6 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CTCard extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
-      box-sizing: border-box;
       --ct-card-border-radius: var(--ct-theme-border-radius, 0.5rem);
       --ct-card-animation-duration: var(--ct-theme-animation-duration, 150ms);
       --ct-card-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
@@ -38,6 +36,9 @@ export class CTCard extends BaseElement {
       --ct-card-color-hover-surface: var(--accent, hsl(0, 0%, 96%));
       --ct-card-color-focus-ring: var(--ring, hsl(212, 100%, 47%));
       --ct-card-color-muted-text: var(--muted-foreground, hsl(0, 0%, 45%));
+
+      display: block;
+      box-sizing: border-box;
     }
 
     *,

@@ -567,6 +567,23 @@ export default pattern<SidebarInput, SidebarOutput>(
                 margin: "1px 8px",
                 borderRadius: "4px",
                 fontSize: "13px",
+                color: current === "alert" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "alert"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "alert" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "alert", selected })}
+            >
+              Alert
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
                 color: current === "progress" ? "#1ea7fd" : "#2e3438",
                 backgroundColor: current === "progress"
                   ? "#e8f4fd"

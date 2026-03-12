@@ -42,13 +42,14 @@ export class CTHScroll extends BaseElement {
 
   static override styles = css`
     :host {
-      display: block;
-      position: relative;
-      overflow: hidden;
       --ct-hscroll-color-surface: var(--muted, #f1f5f9);
       --ct-hscroll-color-thumb: var(--muted-foreground, #64748b);
       --ct-hscroll-color-thumb-hover: var(--foreground, #475569);
       --ct-hscroll-color-background: var(--background, white);
+
+      display: block;
+      position: relative;
+      overflow: hidden;
     }
 
     .scroll-wrapper {

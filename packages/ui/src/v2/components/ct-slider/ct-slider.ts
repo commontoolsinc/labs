@@ -35,10 +35,6 @@ export class CTSlider extends BaseElement {
   };
   static override styles = css`
     :host {
-      display: inline-block;
-      width: 100%;
-      min-width: 200px;
-
       /* Default color values if not provided */
       --ct-slider-color-background: var(--ct-theme-color-background, #ffffff);
       --ct-slider-color-foreground: var(--ct-theme-color-text, #0f172a);
@@ -60,6 +56,10 @@ export class CTSlider extends BaseElement {
       --ct-slider-track-height: 0.5rem;
       --ct-slider-thumb-size: 1.25rem;
       --ct-slider-border-radius: 9999px;
+
+      display: inline-block;
+      width: 100%;
+      min-width: 200px;
     }
 
     :host([orientation="vertical"]) {

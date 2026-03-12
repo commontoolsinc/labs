@@ -8,7 +8,6 @@ import { css } from "lit";
 
 export const modalStyles = css`
   :host {
-    display: contents;
     --ct-modal-color-background: var(--ct-theme-color-background, white);
     --ct-modal-color-border: var(--ct-theme-color-border, #e5e7eb);
     --ct-modal-color-surface: var(--ct-theme-color-surface, #fafafa);
@@ -31,6 +30,8 @@ export const modalStyles = css`
     --_width-lg: var(--ct-modal-width-lg, 700px);
     --_max-height: var(--ct-modal-max-height, 90vh);
     --_animation-duration: var(--ct-modal-animation-duration, 200ms);
+
+    display: contents;
   }
 
   /* ===== Hidden State ===== */

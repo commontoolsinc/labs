@@ -25,7 +25,6 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CTHStack extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
       --ct-hstack-gap-0: 0;
       --ct-hstack-gap-1: 0.25rem;
       --ct-hstack-gap-2: 0.5rem;
@@ -52,6 +51,8 @@ export class CTHStack extends BaseElement {
       --ct-hstack-padding-16: 4rem;
       --ct-hstack-padding-20: 5rem;
       --ct-hstack-padding-24: 6rem;
+
+      display: block;
     }
 
     .stack {

@@ -22,8 +22,6 @@ export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 export class CTBadge extends BaseElement {
   static override styles = css`
     :host {
-      display: inline-block;
-      box-sizing: border-box;
       --ct-badge-color-primary: var(
         --ct-theme-color-primary,
         hsl(212, 100%, 47%)
@@ -51,6 +49,9 @@ export class CTBadge extends BaseElement {
       --ct-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
       --ct-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
       --ct-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
+
+      display: inline-block;
+      box-sizing: border-box;
     }
 
     *,

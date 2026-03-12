@@ -22,10 +22,11 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CTLabel extends BaseElement {
   static override styles = css`
     :host {
-      display: inline-block;
-      box-sizing: border-box;
       --ct-label-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
       --ct-label-color-required: var(--ct-theme-color-error, hsl(0, 100%, 50%));
+
+      display: inline-block;
+      box-sizing: border-box;
     }
 
     *,

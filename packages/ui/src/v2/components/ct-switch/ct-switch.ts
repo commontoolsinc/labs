@@ -28,11 +28,6 @@ import { createBooleanCellController } from "../../core/cell-controller.ts";
 export class CTSwitch extends BaseElement {
   static override styles = css`
     :host {
-      display: inline-block;
-      position: relative;
-      cursor: pointer;
-      line-height: 0;
-
       /* Default color values if not provided */
       --ct-switch-color-background: var(--ct-theme-color-background, #ffffff);
       --ct-switch-color-foreground: var(--ct-theme-color-text, #0f172a);
@@ -44,6 +39,11 @@ export class CTSwitch extends BaseElement {
       --ct-switch-color-border: var(--ct-theme-color-border, #e2e8f0);
       --ct-switch-color-ring: var(--ct-theme-color-primary, #94a3b8);
       --ct-switch-color-input: var(--ct-theme-color-border, #e2e8f0);
+
+      display: inline-block;
+      position: relative;
+      cursor: pointer;
+      line-height: 0;
     }
 
     :host([disabled]) {

@@ -125,8 +125,6 @@ export const INPUT_PATTERNS = {
 export class CTInput extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
-      box-sizing: border-box;
       --ct-input-color-text: var(--ct-theme-color-text, #111827);
       --ct-input-color-background: var(--ct-theme-color-background, #ffffff);
       --ct-input-color-border: var(--ct-theme-color-border, #e5e7eb);
@@ -141,6 +139,9 @@ export class CTInput extends BaseElement {
       );
       --ct-input-animation-duration: var(--ct-theme-animation-duration, 150ms);
       --ct-input-font-family: var(--ct-theme-font-family, inherit);
+
+      display: block;
+      box-sizing: border-box;
     }
 
     *,

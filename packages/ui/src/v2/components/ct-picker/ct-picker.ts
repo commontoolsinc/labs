@@ -37,9 +37,6 @@ export class CTPicker extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
-        width: 100%;
-        position: relative;
         --ct-picker-border-radius: var(--ct-theme-border-radius, 0.5rem);
         --ct-picker-color-surface: var(--ct-theme-color-surface, #ffffff);
         --ct-picker-color-text: var(--ct-theme-color-text, #111827);
@@ -50,6 +47,10 @@ export class CTPicker extends BaseElement {
           --ct-theme-color-text-secondary,
           #6b7280
         );
+
+        display: block;
+        width: 100%;
+        position: relative;
       }
 
       .picker-container {

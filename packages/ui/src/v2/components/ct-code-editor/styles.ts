@@ -2,12 +2,6 @@ import { css } from "lit";
 
 export const styles = css`
   :host {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    min-height: var(--ct-code-editor-min-height, 200px);
-
     --ct-code-editor-border-color: var(--ct-theme-color-border, #e5e7eb);
     --ct-code-editor-border-radius: var(--ct-theme-border-radius, 0.375rem);
     --ct-code-editor-font-size: var(--ct-theme-font-size, 0.875rem);
@@ -92,6 +86,12 @@ export const styles = css`
       --ct-color-warning-700,
       hsl(45, 80%, 35%)
     );
+
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: var(--ct-code-editor-min-height, 200px);
   }
 
   .code-editor {
