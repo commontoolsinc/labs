@@ -1,12 +1,12 @@
 import type { JsScript } from "@commontools/js-compiler";
 
 export interface CompilationCacheEntry {
-  /** Full JsScript including source maps. */
-  jsScript: JsScript;
   /** Content-derived id used as the filename prefix during compilation.
    *  Must be passed to evaluate() so it can correctly strip the prefix
    *  from export map keys. */
   id: string;
+  /** Full JsScript including source maps. */
+  jsScript: JsScript;
   fingerprint: string;
   /** Timestamp for diagnostics / count-based eviction. */
   cachedAt: number;

@@ -58,8 +58,8 @@ function storageTests(
 
     it("stores and retrieves an entry", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp1",
         cachedAt: 1000,
       });
@@ -73,14 +73,14 @@ function storageTests(
 
     it("overwrites existing entry", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp1",
         cachedAt: 1000,
       });
       await storage.set("hash1", {
-        jsScript: testJsScript2,
         id: "id2",
+        jsScript: testJsScript2,
         fingerprint: "fp2",
         cachedAt: 2000,
       });
@@ -92,20 +92,20 @@ function storageTests(
 
     it("evictStale removes entries with non-matching fingerprint", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "old-fp",
         cachedAt: 1000,
       });
       await storage.set("hash2", {
-        jsScript: testJsScript2,
         id: "id2",
+        jsScript: testJsScript2,
         fingerprint: "current-fp",
         cachedAt: 2000,
       });
       await storage.set("hash3", {
-        jsScript: testJsScript,
         id: "id3",
+        jsScript: testJsScript,
         fingerprint: "old-fp",
         cachedAt: 3000,
       });
@@ -120,8 +120,8 @@ function storageTests(
 
     it("evictStale returns 0 when all entries match", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp",
         cachedAt: 1000,
       });
@@ -133,14 +133,14 @@ function storageTests(
 
     it("clear removes all entries", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp1",
         cachedAt: 1000,
       });
       await storage.set("hash2", {
-        jsScript: testJsScript2,
         id: "id2",
+        jsScript: testJsScript2,
         fingerprint: "fp2",
         cachedAt: 2000,
       });
@@ -154,20 +154,20 @@ function storageTests(
 
     it("evictOldest removes oldest entries by cachedAt", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp",
         cachedAt: 1000,
       });
       await storage.set("hash2", {
-        jsScript: testJsScript2,
         id: "id2",
+        jsScript: testJsScript2,
         fingerprint: "fp",
         cachedAt: 3000,
       });
       await storage.set("hash3", {
-        jsScript: testJsScript,
         id: "id3",
+        jsScript: testJsScript,
         fingerprint: "fp",
         cachedAt: 2000,
       });
@@ -184,8 +184,8 @@ function storageTests(
 
     it("evictOldest returns 0 when under keepCount", async () => {
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp",
         cachedAt: 1000,
       });
@@ -199,16 +199,16 @@ function storageTests(
       expect(await storage.count()).toBe(0);
 
       await storage.set("hash1", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp1",
         cachedAt: 1000,
       });
       expect(await storage.count()).toBe(1);
 
       await storage.set("hash2", {
-        jsScript: testJsScript2,
         id: "id2",
+        jsScript: testJsScript2,
         fingerprint: "fp1",
         cachedAt: 2000,
       });
@@ -275,8 +275,8 @@ describe("FileSystem: path traversal validation", () => {
   it("rejects on set as well", async () => {
     await expect(
       storage.set("../../escape", {
-        jsScript: testJsScript,
         id: "id1",
+        jsScript: testJsScript,
         fingerprint: "fp",
         cachedAt: 1000,
       }),
@@ -388,20 +388,20 @@ describe("CachedCompiler", () => {
 
     // Seed 3 entries with hardcoded timestamps via storage directly
     await storage.set("hash1", {
-      jsScript: testJsScript,
       id: "id1",
+      jsScript: testJsScript,
       fingerprint: "fp",
       cachedAt: 1000,
     });
     await storage.set("hash2", {
-      jsScript: testJsScript2,
       id: "id2",
+      jsScript: testJsScript2,
       fingerprint: "fp",
       cachedAt: 3000,
     });
     await storage.set("hash3", {
-      jsScript: testJsScript,
       id: "id3",
+      jsScript: testJsScript,
       fingerprint: "fp",
       cachedAt: 2000,
     });
@@ -427,14 +427,14 @@ describe("CachedCompiler", () => {
 
     // Seed 2 stale entries via storage directly (wrong fingerprint)
     await storage.set("stale1", {
-      jsScript: testJsScript,
       id: "id1",
+      jsScript: testJsScript,
       fingerprint: "old-fp",
       cachedAt: 1000,
     });
     await storage.set("stale2", {
-      jsScript: testJsScript2,
       id: "id2",
+      jsScript: testJsScript2,
       fingerprint: "old-fp",
       cachedAt: 2000,
     });
@@ -456,14 +456,14 @@ describe("CachedCompiler", () => {
 
     // Seed entries to exceed cap
     await storage.set("old1", {
-      jsScript: testJsScript,
       id: "id1",
+      jsScript: testJsScript,
       fingerprint: "fp",
       cachedAt: 1000,
     });
     await storage.set("old2", {
-      jsScript: testJsScript2,
       id: "id2",
+      jsScript: testJsScript2,
       fingerprint: "fp",
       cachedAt: 2000,
     });

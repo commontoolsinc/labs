@@ -77,8 +77,8 @@ export class CachedCompiler {
   async set(programHash: string, result: CompileResult): Promise<void> {
     try {
       await this.cache.set(programHash, {
-        jsScript: result.jsScript,
         id: result.id,
+        jsScript: result.jsScript,
         fingerprint: this.fingerprint,
         cachedAt: Date.now(),
       });
