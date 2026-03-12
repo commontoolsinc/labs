@@ -744,6 +744,7 @@ function deepCloneWithForce(
   seen: Set<object> | null,
 ): StorableValue {
   switch (tagFromNativeValue(value)) {
+    // Inherently immutable types -- frozenness is irrelevant.
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
@@ -751,6 +752,7 @@ function deepCloneWithForce(
       return value;
 
     case NATIVE_TAGS.StorableInstance:
+      // Identity optimization: already-correct frozenness needs no clone.
       if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
       if (!force && !frozen && !Object.isFrozen(value)) return value;
       return (value as StorableInstance).shallowClone(frozen);
