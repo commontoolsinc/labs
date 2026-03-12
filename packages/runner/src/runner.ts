@@ -212,24 +212,12 @@ export class Runner {
 
     let pattern: Pattern;
 
-    // If this is a module, not a pattern, wrap it in a pattern that just runs,
-    // passing arguments in unmodified and passing all results through as is
+    // If this is a module, wrap it first and register the wrapped Pattern.
+    // start() resolves the stored $TYPE back through PatternManager and will
+    // compare against that wrapped Pattern's ID, so registering the raw Module
+    // here creates a mismatched identity on restart.
     if (isModule(patternOrModule)) {
-      const module = patternOrModule as Module;
-      patternId ??= this.runtime.patternManager.registerPattern(module);
-
-      pattern = {
-        argumentSchema: module.argumentSchema ?? {},
-        resultSchema: module.resultSchema ?? {},
-        result: { $alias: { path: ["internal"] } },
-        nodes: [
-          {
-            module,
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal"] } },
-          },
-        ],
-      } satisfies Pattern;
+      pattern = this.moduleToPattern(patternOrModule as Module);
     } else {
       pattern = patternOrModule as Pattern;
     }
@@ -572,6 +560,9 @@ export class Runner {
     resultCell: Cell<T>,
     seenCells: Set<Cell> = new Set(),
   ): Promise<boolean> {
+    const wasSyncedAtEntry =
+      (resultCell as Cell<any> & { synced?: boolean }).synced === true;
+
     // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
     const rootCell = link.path.length > 0
@@ -642,6 +633,22 @@ export class Runner {
     }
 
     const resolvedPattern = this.resolveToPattern(pattern);
+
+    // Fast path for pieces prepared in the current runtime via setup()/run().
+    // Those writes are already present locally, so we should preserve the
+    // historical synchronous start() behavior. The dependency sync below is
+    // specifically for resumed pieces that came from storage.
+    if (!wasSyncedAtEntry) {
+      try {
+        this.startCore(rootCell, processCell, {
+          givenPattern: resolvedPattern,
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+
+      return Promise.resolve(true);
+    }
 
     // Step 6: Sync the cells this running pattern depends on before wiring the
     // scheduler back up in a fresh runtime. Without this, resumed pieces can
