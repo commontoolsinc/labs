@@ -1,4 +1,5 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
+import type { Immutable } from "@commontools/utils/types";
 import type {
   StorableNativeObject,
   StorableValue,
@@ -6,11 +7,13 @@ import type {
 } from "./interface.ts";
 import {
   canBeStoredRich,
-  deepCloneIfNecessaryRich,
+  cloneIfNecessaryRich,
+  type CloneOptions,
   isStorableValueRich,
   shallowStorableFromNativeValueRich,
   storableFromNativeValueRich,
 } from "./storable-value-modern.ts";
+export type { CloneOptions } from "./storable-value-modern.ts";
 import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
@@ -116,28 +119,56 @@ export function nativeFromStorableValue(
 }
 
 /**
- * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
+ * Clone an already-valid `StorableValue` to achieve a desired frozenness,
+ * with control over depth and copy semantics.
  *
  * Unlike `storableFromNativeValue` (which converts native JS values into
  * storable wrappers), this function assumes the input is already a valid
  * `StorableValue` and only adjusts frozenness by cloning where necessary.
  *
  * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
- * Flag ON (rich): delegates to `deepCloneIfNecessaryRich` which deep-clones
- * and adjusts frozenness.
+ * Flag ON (rich): delegates to `cloneIfNecessaryRich`.
  *
  * @param value - An already-valid `StorableValue`.
- * @param frozen - When `true` (default), returns a deep-frozen copy.
- *   When `false`, returns a mutable deep copy. Only applies when
- *   `richStorableValues` is ON.
+ * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
  */
-export function deepCloneIfNecessary(
+export function cloneIfNecessary(
   value: StorableValue,
-  frozen = true,
+  options?: CloneOptions & { frozen?: true },
+): Immutable<StorableValue>;
+export function cloneIfNecessary(
+  value: StorableValue,
+  options: CloneOptions & { frozen: false },
+): StorableValue;
+export function cloneIfNecessary(
+  value: StorableValue,
+  options?: CloneOptions,
+): StorableValue;
+export function cloneIfNecessary(
+  value: StorableValue,
+  options?: CloneOptions,
 ): StorableValue {
-  return currentConfig.richStorableValues
-    ? deepCloneIfNecessaryRich(value, frozen)
-    : value;
+  const frozen = options?.frozen ?? true;
+  const deep = options?.deep ?? true;
+  const force = options?.force ?? (frozen ? false : true);
+
+  if (frozen && force) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
+        "(pointless to force-copy an immutable value)",
+    );
+  }
+
+  if (!frozen && !force && deep) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
+        "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
+    );
+  }
+
+  if (!currentConfig.richStorableValues) return value;
+
+  return cloneIfNecessaryRich(value, frozen, deep, force);
 }
 
 // ---------------------------------------------------------------------------
