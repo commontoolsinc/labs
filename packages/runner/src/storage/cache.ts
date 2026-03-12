@@ -2161,7 +2161,8 @@ export class StorageManager implements IStorageManager {
   static open(options: V1StorageManagerOptions): StorageManager;
   static open(options: V2StorageManagerOptions): V2Storage.StorageManager;
   static open(options: Options): StorageManager | V2Storage.StorageManager {
-    if (options.memoryVersion === "v2") {
+    const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    if (memoryVersion === "v2") {
       return V2Storage.StorageManager.open(options);
     }
     if (options.address.protocol === "memory:") {
