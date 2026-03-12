@@ -641,15 +641,23 @@ export class Runner {
         });
     }
 
-    // Step 6: Start the pattern
-    try {
-      this.startCore(rootCell, processCell);
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    const resolvedPattern = this.resolveToPattern(pattern);
 
-    // Success!
-    return Promise.resolve(true);
+    // Step 6: Sync the cells this running pattern depends on before wiring the
+    // scheduler back up in a fresh runtime. Without this, resumed pieces can
+    // observe the last persisted result but miss subsequent input updates.
+    return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
+      .then(() => {
+        try {
+          this.startCore(rootCell, processCell, {
+            givenPattern: resolvedPattern,
+          });
+        } catch (err) {
+          return Promise.reject(err);
+        }
+
+        return true;
+      });
   }
 
   private startWithTx<T = any>(
