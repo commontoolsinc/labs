@@ -466,7 +466,7 @@ describe("Schema - AnyOf Support", () => {
           type: "vnode",
           name: "div",
           props: {
-            style: styleCell,
+            style: styleCell.getAsLink(),
           },
           children: [
             { type: "text", value: "single" },
