@@ -172,4 +172,48 @@ if ! ct piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
   error "Piece did not appear in list of space pieces."
 fi
 
+echo "Testing piece link..."
+
+# Create a second piece from the same pattern
+PIECE_ID2=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+echo "Created second piece: $PIECE_ID2"
+
+# Initialize piece2 with value 0 and step so output is computed
+echo '0' | ct piece set $SPACE_ARGS --piece $PIECE_ID2 value --input
+ct piece step $SPACE_ARGS --piece $PIECE_ID2
+
+# Verify piece2 starts with value 0
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value)
+if [ "$RESULT" != "0" ]; then
+  error "Piece2 value should be 0 before linking, got: $RESULT"
+fi
+
+# Link piece1's output value to piece2's input value
+ct piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/value
+
+# Read back piece2's input value - should be piece1's output value (10)
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value --input)
+if [ "$RESULT" != "10" ]; then
+  error "After linking, piece2's input value should be 10 (from piece1), got: $RESULT"
+fi
+
+# Step piece2 to recompute with linked input
+ct piece step $SPACE_ARGS --piece $PIECE_ID2
+
+# Verify piece2's output value is now 10 (from piece1 via link)
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value)
+if [ "$RESULT" != "10" ]; then
+  error "After linking and stepping, piece2's output value should be 10, got: $RESULT"
+fi
+
+# Call increment handler on piece2 — since its value is linked to piece1's
+# output cell, this should update piece1's value too
+ct piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
+
+# Verify piece1's value is now 11 (was 10, incremented via piece2's handler)
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
+if [ "$RESULT" != "11" ]; then
+  error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
+fi
+
 echo "Successfully ran integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."

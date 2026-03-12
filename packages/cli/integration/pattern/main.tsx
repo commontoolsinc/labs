@@ -17,6 +17,8 @@ export const customPatternExport = pattern(
           <ct-button onClick={increment(cell)}>+</ct-button>
         </div>
       ),
+      increment: increment(cell),
+      decrement: decrement(cell),
       value: cell.value,
       stringField: cell.stringField,
       numberField: cell.numberField,
