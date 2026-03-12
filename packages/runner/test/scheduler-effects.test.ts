@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { TYPE } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action } from "../src/scheduler.ts";
@@ -391,5 +392,75 @@ describe("effect/computation tracking", () => {
 
     const updatedDependents = runtime.scheduler.getDependents(computation);
     expect(updatedDependents.has(effect)).toBe(true);
+  });
+
+  it("should prune ignored scheduling writes from mightWrite and dependents", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const output = runtime.getCell<number>(
+      space,
+      "ignored-scheduling-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+
+    const childProcess = runtime.getCell<Record<string, unknown>>(
+      space,
+      "ignored-scheduling-child-process",
+      undefined,
+      tx,
+    );
+    childProcess.set({});
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action & {
+      ignoredSchedulingWrites?: ReturnType<
+        typeof childProcess.getAsNormalizedFullLink
+      >[];
+    } = (actionTx) => {
+      output.withTx(actionTx).set(1);
+      childProcess.withTx(actionTx).setRaw({
+        [TYPE]: "child-pattern",
+      });
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [output.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    await runtime.scheduler.run(action);
+
+    const childProcessId = childProcess.getAsNormalizedFullLink().id;
+    expect(
+      runtime.scheduler.getMightWrite(action)?.some((write) =>
+        write.id === childProcessId
+      ),
+    ).toBe(true);
+
+    const effect: Action = (effectTx) => {
+      childProcess.withTx(effectTx).key(TYPE).get();
+    };
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    expect(runtime.scheduler.getDependents(action).has(effect)).toBe(true);
+
+    action.ignoredSchedulingWrites = [childProcess.getAsNormalizedFullLink()];
+    await runtime.scheduler.run(action);
+
+    expect(
+      runtime.scheduler.getMightWrite(action)?.some((write) =>
+        write.id === childProcessId
+      ),
+    ).toBe(false);
+    expect(runtime.scheduler.getDependents(action).has(effect)).toBe(false);
   });
 });

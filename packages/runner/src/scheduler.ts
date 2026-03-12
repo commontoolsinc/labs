@@ -68,6 +68,7 @@ export interface TelemetryAnnotations {
   module: Module;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
+  ignoredSchedulingWrites?: NormalizedFullLink[];
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
@@ -114,6 +115,28 @@ export type ReactivityLog = {
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
 };
+
+function addressMatchesLinkPrefix(
+  address: IMemorySpaceAddress,
+  link: NormalizedFullLink,
+): boolean {
+  return address.space === link.space &&
+    address.id === link.id &&
+    arraysOverlap(link.path, address.path);
+}
+
+function filterIgnoredAddresses(
+  addresses: readonly IMemorySpaceAddress[] | undefined,
+  ignoredWrites: readonly NormalizedFullLink[],
+): IMemorySpaceAddress[] {
+  if (!addresses?.length || ignoredWrites.length === 0) {
+    return addresses ? [...addresses] : [];
+  }
+
+  return addresses.filter((address) =>
+    !ignoredWrites.some((link) => addressMatchesLinkPrefix(address, link))
+  );
+}
 
 const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
@@ -192,7 +215,6 @@ export class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
-  private ignorePendingDependencyWakeup = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
   private pullMode = false;
 
@@ -610,7 +632,6 @@ export class Scheduler {
       noDebounce?: boolean;
       throttle?: number;
       changeGroup?: ChangeGroup;
-      ignorePendingDependencyWakeup?: boolean;
     } = {},
   ): Cancel {
     // Handle backwards-compatible ReactivityLog argument
@@ -629,7 +650,6 @@ export class Scheduler {
       debounce,
       noDebounce,
       throttle,
-      ignorePendingDependencyWakeup,
     } = options;
 
     this.updateChangeGroup(action, options);
@@ -649,12 +669,6 @@ export class Scheduler {
     const actionIsEffect = this.updateActionType(action, isEffect, {
       queueExecution: true,
     });
-    if (ignorePendingDependencyWakeup !== undefined) {
-      this.ignorePendingDependencyWakeup.set(
-        action,
-        ignorePendingDependencyWakeup,
-      );
-    }
 
     // Track parent-child relationship if action is created during another action's execution
     this.registerParentChild(action);
@@ -693,11 +707,11 @@ export class Scheduler {
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
     if (immediateLog) {
-      const { reads, shallowReads } = this.setDependencies(
+      const { reads, shallowReads, log: schedulingLog } = this.setDependencies(
         action,
         immediateLog,
       );
-      this.updateDependents(action, immediateLog);
+      this.updateDependents(action, schedulingLog);
       const { entities } = this.addTriggerPaths(
         action,
         reads,
@@ -755,21 +769,19 @@ export class Scheduler {
     options: {
       isEffect?: boolean;
       changeGroup?: ChangeGroup;
-      ignorePendingDependencyWakeup?: boolean;
     } = {},
   ): void {
     const { isEffect } = options;
-    const ignorePendingDependencyWakeup = options
-      .ignorePendingDependencyWakeup ??
-      this.ignorePendingDependencyWakeup.get(action) ??
-      false;
 
     this.updateChangeGroup(action, options);
 
-    const { reads, shallowReads } = this.setDependencies(action, log);
+    const { reads, shallowReads, log: schedulingLog } = this.setDependencies(
+      action,
+      log,
+    );
 
     // Update reverse dependency graph
-    if (this.pullMode) this.updateDependents(action, log);
+    if (this.pullMode) this.updateDependents(action, schedulingLog);
 
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect
@@ -809,16 +821,11 @@ export class Scheduler {
     if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
       const effectReads = log.reads ?? [];
       let shouldMarkDirty = false;
-      let dirtyReason: string | undefined;
 
       // If there are pending computations whose dependencies haven't been collected yet,
       // we can't know what they write. Be conservative and assume they might affect this effect.
-      if (
-        !ignorePendingDependencyWakeup &&
-        this.pendingDependencyCollection.size > 0
-      ) {
+      if (this.pendingDependencyCollection.size > 0) {
         shouldMarkDirty = true;
-        dirtyReason = "pendingDependencyCollection";
       }
 
       // Use writersByEntity index for efficient lookup
@@ -843,7 +850,6 @@ export class Scheduler {
                 arraysOverlap(write.path, read.path)
               ) {
                 shouldMarkDirty = true;
-                dirtyReason = `writerOverlap:${this.getActionId(writer)}`;
                 break;
               }
             }
@@ -854,12 +860,6 @@ export class Scheduler {
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
-        if (actionId.includes("/$TYPE")) {
-          logger.warn(
-            "type-watcher-resubscribe-dirty",
-            `${actionId} reason=${dirtyReason ?? "unknown"}`,
-          );
-        }
         this.dirty.add(action);
         this.pending.add(action);
         this.queueExecution();
@@ -1288,12 +1288,6 @@ export class Scheduler {
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
-                    if (this.getActionId(action).includes("/$TYPE")) {
-                      logger.warn(
-                        "type-watcher-storage-trigger",
-                        `${this.getActionId(action)} change=${spaceAndURI}/${change.address.path.join("/")}`,
-                      );
-                    }
                     this.scheduleWithDebounce(action);
                   } else {
                     // Mark computation as dirty and schedule affected effects
@@ -1332,19 +1326,37 @@ export class Scheduler {
   ): {
     reads: IMemorySpaceAddress[];
     shallowReads: IMemorySpaceAddress[];
+    log: ReactivityLog;
   } {
     const reads = sortAndCompactPaths(log.reads);
     const shallowReads = sortAndCompactPaths(log.shallowReads, false);
-    const writes = sortAndCompactPaths(log.writes);
-    this.dependencies.set(action, { reads, shallowReads, writes });
+    const ignoredSchedulingWrites =
+      (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
+    const writes = sortAndCompactPaths(
+      filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+    );
+    const potentialWrites = sortAndCompactPaths(
+      filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
+    );
+    const schedulingLog: ReactivityLog = {
+      reads,
+      shallowReads,
+      writes,
+      ...(potentialWrites.length > 0 ? { potentialWrites } : {}),
+    };
+    this.dependencies.set(action, schedulingLog);
 
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
-    const existingMightWrite = this.mightWrite.get(action) ?? [];
+    const rawExistingMightWrite = this.mightWrite.get(action) ?? [];
+    const existingMightWrite = filterIgnoredAddresses(
+      rawExistingMightWrite,
+      ignoredSchedulingWrites,
+    );
     const newMightWrite = sortAndCompactPaths([
       ...existingMightWrite,
       ...writes,
-      ...(log.potentialWrites ?? []),
+      ...potentialWrites,
     ]);
     this.mightWrite.set(action, newMightWrite);
 
@@ -1357,17 +1369,40 @@ export class Scheduler {
         arraysOverlap(existing.path, write.path)
       )
     );
+    const removedWrites = rawExistingMightWrite.filter((write) =>
+      !newMightWrite.some((existing) =>
+        existing.space === write.space &&
+        existing.id === write.id &&
+        existing.type === write.type &&
+        existing.path.length <= write.path.length &&
+        arraysOverlap(existing.path, write.path)
+      )
+    );
 
     // Update writersByEntity index for fast dependency lookup
     // Collect new entities from writes
-    const existingEntities = this.actionWriteEntities.get(action);
+    const existingEntities = this.actionWriteEntities.get(action) ?? new Set();
     const nextEntities = new Set<SpaceAndURI>();
     const addedEntities = new Set<SpaceAndURI>();
+    const removedEntities = new Set<SpaceAndURI>();
     for (const write of newMightWrite) {
       const entity: SpaceAndURI = `${write.space}/${write.id}`;
       nextEntities.add(entity);
-      if (!existingEntities?.has(entity)) {
+      if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
+      }
+    }
+    for (const entity of existingEntities) {
+      if (!nextEntities.has(entity)) {
+        removedEntities.add(entity);
+      }
+    }
+
+    for (const entity of removedEntities) {
+      const writers = this.writersByEntity.get(entity);
+      writers?.delete(action);
+      if (writers && writers.size === 0) {
+        this.writersByEntity.delete(entity);
       }
     }
 
@@ -1383,12 +1418,16 @@ export class Scheduler {
     }
     this.actionWriteEntities.set(action, nextEntities);
 
+    if (removedWrites.length > 0) {
+      this.pruneDependentsForCurrentWrites(action, newMightWrite);
+    }
+
     if (this.pullMode && addedWrites.length > 0) {
       // Backfill reverse edges when new writers appear after readers are already subscribed.
       this.backfillDependentsForNewWrites(action, addedWrites);
     }
 
-    return { reads, shallowReads };
+    return { reads, shallowReads, log: schedulingLog };
   }
 
   private addTriggerPaths(
@@ -1497,9 +1536,12 @@ export class Scheduler {
       log = populateDependencies;
     }
 
-    const { reads, shallowReads } = this.setDependencies(action, log);
+    const { reads, shallowReads, log: schedulingLog } = this.setDependencies(
+      action,
+      log,
+    );
     if (options.updateDependents ?? true) {
-      this.updateDependents(action, log);
+      this.updateDependents(action, schedulingLog);
     }
 
     const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
@@ -1521,6 +1563,7 @@ export class Scheduler {
    * For each action that writes to paths this action reads, add this action as a dependent.
    */
   private updateDependents(action: Action, log: ReactivityLog): void {
+    const actionId = this.getActionId(action);
     const previousDependencies = this.reverseDependencies.get(action);
     if (previousDependencies) {
       for (const dependency of previousDependencies) {
@@ -1601,7 +1644,6 @@ export class Scheduler {
     }
 
     // Emit telemetry for dependency updates
-    const actionId = this.getActionId(action);
     this.runtime.telemetry.submit({
       type: "scheduler.dependencies.update",
       actionId,
@@ -1648,6 +1690,35 @@ export class Scheduler {
 
     for (const effect of this.effects) scanAction(effect);
     for (const computation of this.computations) scanAction(computation);
+  }
+
+  private pruneDependentsForCurrentWrites(
+    writer: Action,
+    writes: IMemorySpaceAddress[],
+  ): void {
+    const dependents = this.dependents.get(writer);
+    if (!dependents) return;
+
+    for (const dependent of [...dependents]) {
+      const log = this.dependencies.get(dependent);
+      if (
+        log &&
+        this.readsOverlapWrites(log.reads, log.shallowReads, writes)
+      ) {
+        continue;
+      }
+
+      dependents.delete(dependent);
+      const reverse = this.reverseDependencies.get(dependent);
+      reverse?.delete(writer);
+      if (reverse && reverse.size === 0) {
+        this.reverseDependencies.delete(dependent);
+      }
+    }
+
+    if (dependents.size === 0) {
+      this.dependents.delete(writer);
+    }
   }
 
   private readsOverlapWrites(
@@ -2151,12 +2222,6 @@ export class Scheduler {
       findEffects(computation);
 
       for (const effect of toSchedule) {
-        if (this.getActionId(effect).includes("/$TYPE")) {
-          logger.warn(
-            "type-watcher-scheduleAffectedEffects",
-            `${this.getActionId(effect)} from=${this.getActionId(computation)}`,
-          );
-        }
         this.scheduleWithDebounce(effect);
       }
     } finally {
