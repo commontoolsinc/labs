@@ -24,6 +24,38 @@ export class CaptureCollector {
     return { captures, captureTree };
   }
 
+  analyzeCurrentAndOriginal(
+    func: ts.FunctionLikeDeclaration,
+  ): CaptureAnalysis {
+    const current = this.analyze(func);
+    const original = ts.getOriginalNode(func);
+    if (
+      !this.isFunctionLikeDeclaration(original) ||
+      original === func
+    ) {
+      return current;
+    }
+
+    // Earlier rewrites can hand later closure strategies a cloned callback node
+    // whose current body no longer exposes all authored captures. Merge the
+    // current and authored-original capture sets so the generated callback
+    // params satisfy both the transformed body and its source-level closure
+    // requirements.
+    const originalAnalysis = this.analyze(original);
+    if (originalAnalysis.captures.size === 0) {
+      return current;
+    }
+
+    const captures = new Set(current.captures);
+    for (const capture of originalAnalysis.captures) {
+      captures.add(capture);
+    }
+    return {
+      captures,
+      captureTree: groupCapturesByRoot(captures),
+    };
+  }
+
   /**
    * Detects captured variables in a function using TypeScript's symbol table.
    * Returns all captured expressions (both reactive and non-reactive).

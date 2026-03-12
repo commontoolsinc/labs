@@ -1688,6 +1688,388 @@ export default pattern<{
 );
 
 Deno.test(
+  "Capability-first: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, ifElse, pattern, UI } from "commontools";
+
+interface Field {
+  targetModule: string;
+  fieldName: string;
+}
+
+export default pattern<{
+  inputFields: Field[];
+  showPreview: boolean;
+}>((state) => {
+  const preview = computed(() => ({ fields: state.inputFields }));
+  const fieldCheckStates = computed((): Record<string, boolean> => ({
+    "record-title.name": true,
+  }));
+
+  return {
+    [UI]: ifElse(
+      state.showPreview,
+      <div>
+        {preview?.fields?.map((f: Field) => {
+          const fieldKey = f.targetModule + "." + f.fieldName;
+          const isChecked = fieldCheckStates[fieldKey] === true;
+          return <span>{isChecked}</span>;
+        })}
+      </div>,
+      null,
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      mode: "error",
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "=> fieldCheckStates[fieldKey] === true");
+    assert(
+      !output.includes(
+        "const isChecked = fieldCheckStates[fieldKey] === true;",
+      ),
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: computed array map preserves captures used in lowered control branches",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+
+const openNoteEditor = handler<{
+  subPieces: string[];
+  editingNoteIndex: number | undefined;
+  editingNoteText: string | undefined;
+  index: number;
+}>((_event, state) => state);
+const openSettings = handler<{
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const toggleExpanded = handler<{
+  expandedIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const trashSubPiece = handler<{
+  subPieces: string[];
+  trashedSubPieces: string[];
+  expandedIndex: number | undefined;
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+
+interface Item {
+  collapsed?: boolean;
+  pinned?: boolean;
+  allowMultiple: boolean;
+}
+
+export default pattern<{
+  items: Item[];
+  subPieces: string[];
+  trashedSubPieces: string[];
+}>(({ items, subPieces, trashedSubPieces }) => {
+  const editingNoteIndex = Writable.of<number | undefined>();
+  const editingNoteText = Writable.of<string | undefined>();
+  const expandedIndex = Writable.of<number | undefined>();
+  const settingsModuleIndex = Writable.of<number | undefined>();
+
+  const allEntries = computed(() =>
+    items.map((entry, index) => ({
+      entry,
+      index,
+      isExpanded: index === 0,
+      isPinned: entry.pinned || false,
+      allowMultiple: entry.allowMultiple,
+    }))
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {allEntries.map(({ entry, index, isExpanded, isPinned, allowMultiple }) =>
+          ifElse(
+            computed(() => !entry.collapsed),
+            <div>
+              {ifElse(
+                allowMultiple,
+                <button
+                  onClick={openNoteEditor({
+                    subPieces,
+                    editingNoteIndex,
+                    editingNoteText,
+                    index,
+                  })}
+                >
+                  note
+                </button>,
+                null,
+              )}
+              {!isExpanded && ifElse(
+                true,
+                <button
+                  onClick={openSettings({ settingsModuleIndex, index })}
+                >
+                  settings
+                </button>,
+                null,
+              )}
+              <button
+                onClick={toggleExpanded({ expandedIndex, index })}
+                style={{ background: isPinned ? "a" : "b" }}
+              >
+                expand
+              </button>
+              {!isExpanded && (
+                <button
+                  onClick={trashSubPiece({
+                    subPieces,
+                    trashedSubPieces,
+                    expandedIndex,
+                    settingsModuleIndex,
+                    index,
+                  })}
+                >
+                  trash
+                </button>
+              )}
+            </div>,
+            null,
+          )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(
+      output,
+      'const subPieces = __ct_pattern_input.key("params", "subPieces");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteIndex = __ct_pattern_input.key("params", "editingNoteIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteText = __ct_pattern_input.key("params", "editingNoteText");',
+    );
+    assertStringIncludes(
+      output,
+      'const settingsModuleIndex = __ct_pattern_input.key("params", "settingsModuleIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const expandedIndex = __ct_pattern_input.key("params", "expandedIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: computed array map preserves authored captures used by branch-lowered UI chunks",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+
+const openNoteEditor = handler<{
+  subPieces: string[];
+  editingNoteIndex: number | undefined;
+  editingNoteText: string;
+  index: number;
+}>((_event, state) => state);
+const openSettings = handler<{
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const toggleExpanded = handler<{
+  expandedIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const trashSubPiece = handler<{
+  subPieces: string[];
+  trashedSubPieces: string[];
+  expandedIndex: number | undefined;
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+
+interface Item {
+  note?: string;
+  collapsed?: boolean;
+  pinned?: boolean;
+  allowMultiple: boolean;
+}
+
+export default pattern<{
+  items: Item[];
+  subPieces: string[];
+  trashedSubPieces: string[];
+}>(({ items, subPieces, trashedSubPieces }) => {
+  const editingNoteIndex = Writable.of<number | undefined>();
+  const editingNoteText = Writable.of("");
+  const expandedIndex = Writable.of<number | undefined>();
+  const settingsModuleIndex = Writable.of<number | undefined>();
+
+  const allEntries = computed(() =>
+    items.map((entry, index) => ({
+      entry,
+      index,
+      isExpanded: index === 0,
+      isPinned: entry.pinned || false,
+      allowMultiple: entry.allowMultiple,
+    }))
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {allEntries.map(({ entry, index, isExpanded, isPinned, allowMultiple }) =>
+          ifElse(
+            computed(() => !entry.collapsed),
+            <div>
+              {!isExpanded && (
+                <button
+                  onClick={openNoteEditor({
+                    subPieces,
+                    editingNoteIndex,
+                    editingNoteText,
+                    index,
+                  })}
+                  style={computed(() => ({
+                    fontWeight: entry?.note ? "700" : "400",
+                  }))}
+                  title={computed(() => entry?.note || "Add note...")}
+                >
+                  note
+                </button>
+              )}
+              {!isExpanded && ifElse(
+                allowMultiple,
+                <button
+                  onClick={openSettings({ settingsModuleIndex, index })}
+                >
+                  settings
+                </button>,
+                null,
+              )}
+              <button
+                onClick={toggleExpanded({ expandedIndex, index })}
+                style={{ background: isPinned ? "a" : "b" }}
+              >
+                expand
+              </button>
+              {!isExpanded && (
+                <button
+                  onClick={trashSubPiece({
+                    subPieces,
+                    trashedSubPieces,
+                    expandedIndex,
+                    settingsModuleIndex,
+                    index,
+                  })}
+                >
+                  trash
+                </button>
+              )}
+            </div>,
+            null,
+          )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(
+      output,
+      'const subPieces = __ct_pattern_input.key("params", "subPieces");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteIndex = __ct_pattern_input.key("params", "editingNoteIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteText = __ct_pattern_input.key("params", "editingNoteText");',
+    );
+    assertStringIncludes(
+      output,
+      'const settingsModuleIndex = __ct_pattern_input.key("params", "settingsModuleIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const expandedIndex = __ct_pattern_input.key("params", "expandedIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: self-improving classifier examples map keeps examples capture",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/self-improving-classifier.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const mapStart = output.indexOf("{examples.mapWithPattern(");
+    assert(
+      mapStart >= 0,
+      "expected transformed examples.mapWithPattern callback",
+    );
+    const mapWindow = output.slice(mapStart, mapStart + 5000);
+
+    assertStringIncludes(
+      mapWindow,
+      'const selectedExampleId = __ct_pattern_input.key("params", "selectedExampleId");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const currentItem = __ct_pattern_input.key("params", "currentItem");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const examples = __ct_pattern_input.key("params", "examples");',
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse rewrites condition and branches uniformly",
   async () => {
     const source = `/// <cts-enable />

@@ -709,7 +709,7 @@ export function transformArrayMethodCallback(
 
   // Collect captured variables from the callback
   const collector = new CaptureCollector(checker);
-  const { captureTree } = collector.analyze(callback);
+  const { captureTree } = collector.analyzeCurrentAndOriginal(callback);
 
   // Get callback parameters
   const originalParams = callback.parameters;

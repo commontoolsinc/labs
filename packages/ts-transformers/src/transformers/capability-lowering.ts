@@ -1,8 +1,10 @@
 import ts from "typescript";
 import {
+  createDataFlowAnalyzer,
   detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
+  normalizeDataFlows,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
@@ -24,6 +26,15 @@ import {
   type DestructureBinding,
   type PathSegment,
 } from "./destructuring-lowering.ts";
+import { createBindingPlan } from "./opaque-ref/bindings.ts";
+import {
+  createComputedCallForExpression,
+  filterRelevantDataFlows,
+} from "./opaque-ref/helpers.ts";
+import {
+  assertValidComputeWrapCandidate,
+  findPendingComputeWrapCandidate,
+} from "./opaque-ref/emitters/compute-wrap-invariants.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",
@@ -377,6 +388,7 @@ function rewritePatternBody(
   };
 
   const diagnosticsSeen = new Set<number>();
+  const analyze = createDataFlowAnalyzer(context.checker);
   const reportOnce = (
     node: ts.Node,
     type: "computation" | "optional",
@@ -393,6 +405,80 @@ function rewritePatternBody(
   };
 
   const callTargets = new WeakSet<ts.Node>();
+
+  const findDynamicOpaqueAccess = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    let culprit: ts.Expression | undefined;
+
+    const visit = (node: ts.Node): void => {
+      if (culprit) return;
+      if (
+        (ts.isPropertyAccessExpression(node) ||
+          ts.isElementAccessExpression(node)) &&
+        isTopmostMemberAccess(node)
+      ) {
+        const info = getAccessInfo(node, context);
+        if (
+          info.dynamic &&
+          isOpaqueRootInfo(
+            info,
+            activeOpaqueRoots,
+            opaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(expression);
+    return culprit;
+  };
+
+  const maybeWrapDynamicInitializer = (
+    initializer: ts.Expression,
+  ): ts.Expression | undefined => {
+    if (!ts.isBinaryExpression(initializer)) {
+      return undefined;
+    }
+
+    if (!findDynamicOpaqueAccess(initializer)) {
+      return undefined;
+    }
+
+    const analysis = analyze(initializer);
+    const relevantDataFlows = filterRelevantDataFlows(
+      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
+      analysis,
+      context,
+    );
+    if (relevantDataFlows.length === 0) {
+      return undefined;
+    }
+
+    const pendingWrap = findPendingComputeWrapCandidate(
+      initializer,
+      analyze,
+      context,
+    );
+    if (!pendingWrap) {
+      return undefined;
+    }
+
+    assertValidComputeWrapCandidate(
+      pendingWrap,
+      initializer,
+      "pattern callback initializer",
+      context,
+    );
+
+    const plan = createBindingPlan(relevantDataFlows);
+    return createComputedCallForExpression(initializer, plan, context);
+  };
 
   const visit = (node: ts.Node): ts.Node => {
     if (ts.isFunctionLike(node)) {
@@ -413,6 +499,40 @@ function rewritePatternBody(
     // without relying on parent pointers (which are absent on synthetic nodes).
     if (ts.isCallExpression(node)) {
       callTargets.add(node.expression);
+    }
+
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isExpression(node.initializer)
+    ) {
+      const rewrittenInitializer = maybeWrapDynamicInitializer(
+        node.initializer,
+      );
+      if (rewrittenInitializer) {
+        const rewrittenDeclaration = context.factory.updateVariableDeclaration(
+          node,
+          node.name,
+          node.exclamationToken,
+          node.type,
+          rewrittenInitializer,
+        );
+        const initializerIsOpaque = isOpaqueSourceExpression(
+          rewrittenInitializer,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        );
+        setBindingOpaqueState(rewrittenDeclaration.name, initializerIsOpaque);
+        if (initializerIsOpaque) {
+          addBindingTargetSymbols(
+            rewrittenDeclaration.name,
+            opaqueRootSymbols,
+            context.checker,
+          );
+        }
+        return rewrittenDeclaration;
+      }
     }
 
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
