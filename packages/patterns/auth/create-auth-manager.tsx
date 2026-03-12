@@ -34,6 +34,7 @@ import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
 import { STATUS_COLORS, STATUS_MESSAGES } from "./auth-manager-descriptor.ts";
 import { formatTimeRemaining } from "./auth-ui-helpers.tsx";
 import {
+  isMissingCellSpaceError,
   startReactiveClock,
   TOKEN_EXPIRY_THRESHOLD_MS,
 } from "./auth-reactive.ts";
@@ -138,9 +139,15 @@ const attemptRefresh = handler<
   // hot-reloaded, but CTS pattern lifecycle matches page lifecycle so
   // there is no practical risk of accessing a stale Writable here.
   setTimeout(() => {
-    if (refreshing.get()) {
-      refreshing.set(false);
-      refreshFailed.set(true);
+    try {
+      if (refreshing.get()) {
+        refreshing.set(false);
+        refreshFailed.set(true);
+      }
+    } catch (error) {
+      if (!isMissingCellSpaceError(error)) {
+        throw error;
+      }
     }
   }, REFRESH_FAILURE_TIMEOUT_MS);
 });
@@ -331,7 +338,7 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const now = Writable.of(Date.now());
+      const now = Writable.of(Date.now()).for("auth clock");
       startReactiveClock(now);
 
       // Normalize the wish-provided UI into a local render-node contract so
@@ -353,11 +360,11 @@ export function createAuthManager<T, R>(
       const tokenExpiryDisplay = authState.tokenExpiryDisplay;
 
       // Refresh state
+      const refreshing = Writable.of(false).for("auth refreshing");
       const refreshStream = authState.refreshStream;
-      const refreshing = Writable.of(false);
       const isRefreshing = computed(() => refreshing.get());
-      const refreshFailed = Writable.of(false);
-      const refreshStartedAt = Writable.of(0);
+      const refreshFailed = Writable.of(false).for("auth refresh failed");
+      const refreshStartedAt = Writable.of(0).for("auth refresh started at");
 
       // Reactive watcher: detect when a refresh succeeds
       computed(() => {
