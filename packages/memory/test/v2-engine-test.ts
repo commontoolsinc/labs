@@ -257,6 +257,44 @@ Deno.test("memory v2 engine persists set and delete commits", async () => {
   }
 });
 
+Deno.test("memory v2 engine preserves source-only entity documents", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:source-only",
+      invocation: {
+        iss: "did:key:alice",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: "did:key:space",
+      },
+      authorization: {
+        signature: "sig:alice",
+        access: { "proof:1": {} },
+      },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:piece:1",
+          value: {
+            source: toSourceLink("process:1"),
+          } as any,
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "of:piece:1" }), {
+      source: toSourceLink("process:1"),
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine allows multiple commits to reuse the same invocation", async () => {
   const { engine, path } = await createEngine();
 
