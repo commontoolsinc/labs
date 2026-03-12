@@ -31,6 +31,19 @@ import { type DID } from "@commontools/identity";
 
 /** A mounted space instance with both low-level and high-level access. */
 type MountedSpace = Space.SpaceInstance<Subject>;
+const V1_MEMORY_VERSION: MemoryVersion = "v1";
+
+const v1OnlyEntryPointMessage = (
+  entryPoint: string,
+  memoryVersion: MemoryVersion,
+) =>
+  `${entryPoint} is a legacy memory/v1 entry point and does not support memoryVersion=${memoryVersion}. Use the memory/v2 engine instead.`;
+
+const toSystemError = (message: string): SystemError => ({
+  name: "SystemError",
+  code: 500,
+  message,
+});
 
 interface Session {
   store: URL;
@@ -49,8 +62,13 @@ export class Memory implements Session, MemorySession {
     public subscribers: Set<Subscriber> = new Set(),
     public spaces: Map<Subject, MountedSpace> = new Map(),
   ) {
+    if (options.memoryVersion === "v2") {
+      throw new globalThis.Error(
+        v1OnlyEntryPointMessage("memory.Memory", "v2"),
+      );
+    }
     this.store = options.store;
-    this.memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    this.memoryVersion = options.memoryVersion ?? V1_MEMORY_VERSION;
     this.ready = Promise.resolve();
     this.#serviceDid = options.serviceDid;
   }
@@ -344,6 +362,15 @@ export const open = async (
     addMemoryAttributes(span, { operation: "open" });
     span.setAttribute("memory.store_url", options.store.toString());
 
+    if (options.memoryVersion === "v2") {
+      return {
+        error: Error.connection(
+          options.store,
+          toSystemError(v1OnlyEntryPointMessage("memory.open", "v2")),
+        ),
+      };
+    }
+
     try {
       if (options.store.protocol === "file:") {
         // Check if path has a file extension (single-file mode) or is a directory
@@ -356,9 +383,6 @@ export const open = async (
         } else {
           // Ensure directory exists for directory mode
           await FS.ensureDir(options.store);
-          if (options.memoryVersion === "v2") {
-            await FS.ensureDir(new URL("./v2/", options.store));
-          }
         }
       }
       return { ok: await new Memory(options) };
@@ -375,6 +399,7 @@ export const open = async (
 export const emulate = (options: ServiceOptions) =>
   new Memory({
     ...options,
+    memoryVersion: options.memoryVersion ?? V1_MEMORY_VERSION,
     store: new URL("memory://"),
   });
 
