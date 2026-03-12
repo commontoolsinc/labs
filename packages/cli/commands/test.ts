@@ -48,6 +48,11 @@ export const test = new Command()
     "--stats-include <prefixes:string>",
     "Comma-separated timing categories to always print in verbose stats output (exact or prefix match).",
   )
+  .option(
+    "--stats-action-limit <count:number>",
+    "Number of per-step scheduler action deltas to print in verbose mode.",
+    { default: 10 },
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -120,6 +125,7 @@ export const test = new Command()
       root,
       statsThreshold: options.statsThreshold,
       statsInclude,
+      statsActionLimit: options.statsActionLimit,
     });
 
     // Exit with error code if any tests failed

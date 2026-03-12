@@ -98,6 +98,8 @@ export interface TestRunnerOptions {
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
   statsInclude?: string[];
+  /** Number of per-step scheduler action deltas to print. Default 10. */
+  statsActionLimit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +846,7 @@ export async function runTestPattern(
           if (deltas.length > 0) {
             deltas.sort((a, b) => b.delta - a.delta);
             const totalDelta = deltas.reduce((s, d) => s + d.delta, 0);
+            const actionLimit = options.statsActionLimit ?? 10;
             console.log(
               `    ⟳ ${totalDelta} scheduler runs across ${deltas.length} actions:`,
             );
@@ -899,7 +902,7 @@ export async function runTestPattern(
               }
             }
 
-            for (const d of deltas.slice(0, 10)) {
+            for (const d of deltas.slice(0, actionLimit)) {
               const label = d.preview
                 ? d.preview.split("\n")[0].trim().slice(0, 50)
                 : d.id;
@@ -941,11 +944,11 @@ export async function runTestPattern(
                 console.log(`      ${String(count).padStart(4)}× ${entity}`);
               }
             }
-            if (deltas.length > 10) {
-              const rest = deltas.slice(10).reduce((s, d) => s + d.delta, 0);
+            if (deltas.length > actionLimit) {
+              const rest = deltas.slice(actionLimit).reduce((s, d) => s + d.delta, 0);
               console.log(
                 `      ${String(rest).padStart(4)}× (${
-                  deltas.length - 10
+                  deltas.length - actionLimit
                 } more actions)`,
               );
             }

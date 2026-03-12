@@ -1814,6 +1814,15 @@ export class Runner {
     });
     (action as Action & { src?: string }).src = rawName;
 
+    // Seed raw actions with their pattern/module/write metadata so pull-mode
+    // scheduling can discover pending computations before their first run.
+    Object.assign(action, {
+      reads: inputCells,
+      writes: outputCells,
+      module,
+      pattern,
+    });
+
     // Create populateDependencies callback.
     // If builtin provides custom reads, use that; otherwise read all inputs.
     // Always register output writes so collectDirtyDependencies() can find this
