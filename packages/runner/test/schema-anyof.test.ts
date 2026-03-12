@@ -422,14 +422,6 @@ describe("Schema - AnyOf Support", () => {
           ],
         });
 
-        const styleCell = runtime.getCell<{ color: string }>(
-          space,
-          "should work for the vdom schema with $ref 2",
-          undefined,
-          tx,
-        );
-        styleCell.setRaw({ color: "red" });
-
         const innerTextCell = runtime.getCell<{ type: string; value: string }>(
           space,
           "should work for the vdom schema with $ref 4",
@@ -466,7 +458,7 @@ describe("Schema - AnyOf Support", () => {
           type: "vnode",
           name: "div",
           props: {
-            style: styleCell.getAsLink(),
+            style: { color: "red" },
           },
           children: [
             { type: "text", value: "single" },
