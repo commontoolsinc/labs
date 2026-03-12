@@ -13,7 +13,7 @@ import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
 import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
 import {
-  deepNativeValueFromStorableValue,
+  nativeFromStorableValueRich,
   nativeValueFromStorableValue,
   StorableEpochDays,
   StorableEpochNsec,
@@ -1546,10 +1546,10 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // deepNativeValueFromStorableValue
+  // nativeFromStorableValueRich
   // --------------------------------------------------------------------------
 
-  describe("deepNativeValueFromStorableValue", () => {
+  describe("nativeFromStorableValueRich", () => {
     it("deeply unwraps StorableError in objects (frozen)", () => {
       const err = new Error("deep");
       const se = new StorableError(err);
@@ -1557,7 +1557,7 @@ describe("json encoding", () => {
         error: se,
         code: 500,
       } as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -1572,7 +1572,7 @@ describe("json encoding", () => {
       const err = new Error("array");
       const se = new StorableError(err);
       const arr = [1, se, 3] as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(arr) as unknown[];
+      const result = nativeFromStorableValueRich(arr) as unknown[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(Error);
       expect((result[1] as Error).message).toBe("array");
@@ -1586,7 +1586,7 @@ describe("json encoding", () => {
         a: 1,
         b: "two",
       }) as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj, false) as Record<
+      const result = nativeFromStorableValueRich(obj, false) as Record<
         string,
         unknown
       >;
@@ -1598,7 +1598,7 @@ describe("json encoding", () => {
 
     it("output is frozen when frozen=true (default)", () => {
       const obj = { a: 1, b: "two" } as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -1610,7 +1610,7 @@ describe("json encoding", () => {
       arr[0] = 1;
       arr[2] = 3;
       Object.freeze(arr);
-      const result = deepNativeValueFromStorableValue(
+      const result = nativeFromStorableValueRich(
         arr as StorableValue,
       ) as unknown[];
       expect(result.length).toBe(3);
@@ -1622,7 +1622,7 @@ describe("json encoding", () => {
     it("passes through non-native StorableInstance", () => {
       const us = new UnknownStorable("Test@1", null);
       const obj = { thing: us } as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -1635,7 +1635,7 @@ describe("json encoding", () => {
       ] as [StorableValue, StorableValue][]);
       const sm = new StorableMap(map);
       const obj = { data: sm } as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -1647,7 +1647,7 @@ describe("json encoding", () => {
       const set = new Set<StorableValue>([42] as StorableValue[]);
       const ss = new StorableSet(set);
       const arr = [ss] as unknown as StorableValue;
-      const result = deepNativeValueFromStorableValue(arr) as unknown[];
+      const result = nativeFromStorableValueRich(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenSet);
       expect((result[0] as Set<number>).has(42)).toBe(true);
     });
@@ -1663,7 +1663,7 @@ describe("json encoding", () => {
       );
       const outerSe = new StorableError(outerErr);
 
-      const result = deepNativeValueFromStorableValue(
+      const result = nativeFromStorableValueRich(
         outerSe as StorableValue,
       ) as Error;
       expect(result).toBeInstanceOf(Error);
@@ -1683,7 +1683,7 @@ describe("json encoding", () => {
       outerErr.cause = innerSe;
       const outerSe = new StorableError(outerErr);
 
-      const result = deepNativeValueFromStorableValue(
+      const result = nativeFromStorableValueRich(
         outerSe as StorableValue,
         false,
       ) as Error;

@@ -40,7 +40,7 @@ import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
  *   callers must resolve them before calling this function.
  *
  * This centralizes the clone-for-frozenness logic that was previously
- * sprinkled across `toRichStorableValue`.
+ * sprinkled across `shallowStorableFromNativeValueRich`.
  */
 function shallowCloneIfNecessary(
   value: StorableValueLayer,
@@ -125,7 +125,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
  *   object or array. When `false`, wrapping and validation still occur but
  *   the result is left mutable.
  */
-export function toRichStorableValue(
+export function shallowStorableFromNativeValueRich(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
@@ -184,7 +184,7 @@ export function toRichStorableValue(
       // Objects (or arrays/class instances) with a toJSON() method.
       // Call toJSON() and validate the result.
       const converted = (value as { toJSON: () => unknown }).toJSON();
-      if (!isRichStorableValue(converted)) {
+      if (!isStorableValueRich(converted)) {
         throw new Error(
           `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
         );
@@ -230,7 +230,7 @@ export function toRichStorableValue(
         case "function":
           if (hasToJSONMethod(value)) {
             const converted = value.toJSON();
-            if (!isRichStorableValue(converted)) {
+            if (!isStorableValueRich(converted)) {
               throw new Error(
                 `\`toJSON()\` on function returned something other than a storable value`,
               );
@@ -296,7 +296,7 @@ const PROCESSING = Symbol("PROCESSING");
  *   When `false`, wrapping and validation still occur but the result is
  *   left mutable.
  */
-export function toDeepRichStorableValue(
+export function storableFromNativeValueRich(
   value: unknown,
   freeze = true,
 ): StorableValue {
@@ -375,7 +375,7 @@ function toDeepRichStorableValueInternal(
   // results; the shallow converter should not freeze anything.
   let value: StorableValueLayer;
   try {
-    value = toRichStorableValue(original, false);
+    value = shallowStorableFromNativeValueRich(original, false);
   } catch (e) {
     if (isOriginalRecord) {
       converted.delete(original);
@@ -541,7 +541,7 @@ function convertErrorInternals(
  *
  * Used when the `richStorableValues` flag is ON.
  */
-export function isRichStorableValue(
+export function isStorableValueRich(
   value: unknown,
 ): value is StorableValueLayer {
   switch (typeof value) {
@@ -597,21 +597,21 @@ export function isRichStorableValue(
 // ---------------------------------------------------------------------------
 
 /**
- * Returns `true` if `toDeepStorableValue()` would succeed on the value --
+ * Returns `true` if `storableFromNativeValue()` would succeed on the value --
  * i.e., the value is a `StorableValue`, a `StorableNativeObject`, or a deep
  * tree thereof.
  *
- * The distinction from `isStorableValue()` / `isRichStorableValue()`:
- * - `isRichStorableValue(x)` -- "is x already a `StorableValue`?"
+ * The distinction from `isStorableValue()` / `isStorableValueRich()`:
+ * - `isStorableValueRich(x)` -- "is x already a `StorableValue`?"
  * - `canBeStored(x)` -- "could x be converted to a `StorableValue` via
- *   `toDeepStorableValue()`?"
+ *   `storableFromNativeValue()`?"
  *
  * `canBeStored` additionally accepts `StorableNativeObject` types (Error, Map,
  * Set, Date, Uint8Array, Blob) and objects/functions with `toJSON()` methods
  * that return storable values. It checks recursively, so all nested values in
  * arrays and objects must also be storable or convertible.
  */
-export function canBeStored(
+export function canBeStoredRich(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
   return canBeStoredInternal(value, new Set());
@@ -649,7 +649,7 @@ export function deepCloneIfNecessaryRich(
 /**
  * Internal recursive implementation for `deepCloneIfNecessaryRich`. Uses
  * `switch (tagFromNativeValue(value))` for type dispatch, consistent with
- * `shallowCloneIfNecessary` and `toRichStorableValue`.
+ * `shallowCloneIfNecessary` and `shallowStorableFromNativeValueRich`.
  *
  * Each container/instance case checks `frozen && isDeepFrozenStorableValue`
  * so that partial deep-frozen subtrees within a larger structure are preserved
@@ -762,7 +762,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
       if (isStorableInstance(value)) return true;
 
       // StorableNativeObject types: Error, Map, Set, Date, Uint8Array.
-      // These would be wrapped by toDeepStorableValue().
+      // These would be wrapped by storableFromNativeValue().
       if (isConvertibleNativeInstance(value)) {
         return true;
       }

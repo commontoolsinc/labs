@@ -1553,31 +1553,39 @@ The module also re-exports flag-dispatched type-check functions
 
 /**
  * Convert a native JS value to storable form (deep, recursive).
- * When the flag is ON, wraps native types (Error, Date, RegExp, etc.)
- * into storable wrappers and deep-freezes. When OFF, performs legacy
- * deep conversion via `toDeepStorableValueLegacy`.
+ * Flag OFF (legacy): performs deep conversion via `storableFromNativeValueLegacy`.
+ * Flag ON (rich): wraps native types into storable wrappers and deep-freezes
+ * via `storableFromNativeValueRich`.
  */
-let storableFromNativeValue: (value: unknown, freeze?: boolean) => StorableValue;
+export function storableFromNativeValue(value: unknown, freeze?: boolean): StorableValue {
+  return currentConfig.richStorableValues
+    ? storableFromNativeValueRich(value, freeze)
+    : storableFromNativeValueLegacy(value);
+}
 
 /**
- * Convert a storable value back to native form. When the flag is ON,
- * deeply unwraps storable wrappers (StorableError, StorableMap, etc.)
- * back to native JS types. When OFF, identity passthrough.
+ * Convert a storable value back to native form.
+ * Flag OFF (legacy): identity passthrough.
+ * Flag ON (rich): unwraps storable wrappers via `nativeFromStorableValueRich`.
  */
-let nativeFromStorableValue: (value: StorableValue, frozen?: boolean) => StorableValue;
+export function nativeFromStorableValue(value: StorableValue, frozen?: boolean): StorableValue {
+  return currentConfig.richStorableValues
+    ? nativeFromStorableValueRich(value, frozen) as StorableValue
+    : value;
+}
 ```
 
-The dispatch is configured by `setStorableValueConfig(config)` /
+The dispatch flag is set by `setStorableValueConfig(config)` /
 `resetStorableValueConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 
 - **Flag OFF (default):** `storableFromNativeValue` routes through
-  `toDeepStorableValueLegacy` (the legacy conversion function).
+  `storableFromNativeValueLegacy` (the legacy conversion function).
   `nativeFromStorableValue` is an identity passthrough.
 - **Flag ON:** `storableFromNativeValue` routes through
-  `toDeepRichStorableValue` (which wraps native objects into
+  `storableFromNativeValueRich` (which wraps native objects into
   `StorableInstance` wrappers per Section 8.2). `nativeFromStorableValue`
-  routes through `deepNativeValueFromStorableValue` (which unwraps
+  routes through `nativeFromStorableValueRich` (which unwraps
   `StorableInstance` wrappers back to native JS types per Section 8.5).
 
 #### Module structure
@@ -1587,10 +1595,10 @@ The implementation is split across several files for separation of concerns:
 | File | Purpose |
 |------|---------|
 | `storable-value.ts` | Dispatch module: flag-gated public API, config lifecycle |
-| `storable-value-modern.ts` | Rich (flag-ON) conversion: `toRichStorableValue`, `toDeepRichStorableValue`, `isRichStorableValue`, `canBeStored` |
-| `storable-value-legacy.ts` | Legacy (flag-OFF) conversion: `toDeepStorableValueLegacy`, `isStorableValueLegacy`, `canBeStoredLegacy` |
+| `storable-value-modern.ts` | Rich (flag-ON) conversion: `shallowStorableFromNativeValueRich`, `storableFromNativeValueRich`, `isStorableValueRich`, `canBeStoredRich` |
+| `storable-value-legacy.ts` | Legacy (flag-OFF) conversion: `storableFromNativeValueLegacy`, `isStorableValueLegacy`, `canBeStoredLegacy` |
 | `storable-value-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
-| `storable-native-instances.ts` | Native object wrapper classes (`StorableError`, `StorableMap`, etc.) and unwrap functions (`nativeValueFromStorableValue`, `deepNativeValueFromStorableValue`) |
+| `storable-native-instances.ts` | Native object wrapper classes (`StorableError`, `StorableMap`, etc.) and unwrap functions (`nativeValueFromStorableValue`, `nativeFromStorableValueRich`) |
 
 In the `Cell` implementation:
 
@@ -2184,7 +2192,7 @@ There are two directions:
 - **JS wild west -> `StorableValue`:** `toStorableValue()`,
   `toDeepStorableValue()`, and `toStorableValueOrThrow()`.
 - **`StorableValue` -> JS wild west:** `nativeValueFromStorableValue()` and
-  `deepNativeValueFromStorableValue()`.
+  `nativeFromStorableValueRich()`.
 
 ### 8.2 `toStorableValue()` and `toDeepStorableValue()`
 
@@ -2510,7 +2518,7 @@ export function nativeValueFromStorableValue(
  * The `freeze` parameter controls whether immutable variants are used for
  * collections and binary data (default: `true`).
  */
-export function deepNativeValueFromStorableValue(
+export function nativeFromStorableValueRich(
   value: StorableValue,
   freeze?: boolean, // default: true
 ): StorableValue | StorableNativeObject;
@@ -2568,7 +2576,7 @@ For the **shallow** function, non-wrapper values (arrays and plain objects) may
 be copied to match the `frozen` argument. Primitives pass through unchanged.
 
 **Deep variant recurses into `StorableError` internals.** The deep variant
-(`deepNativeValueFromStorableValue`) recurses into `StorableError` internals —
+(`nativeFromStorableValueRich`) recurses into `StorableError` internals —
 specifically, the `cause` chain and custom enumerable properties — unwrapping any
 nested `StorableInstance` values. This ensures the output is fully "native JS"
 with no storable wrappers at any depth. Without this recursion, an Error's
@@ -2613,7 +2621,7 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 For any supported value `v`:
 
 ```
-deepNativeValueFromStorableValue(toDeepStorableValue(v))
+nativeFromStorableValue(storableFromNativeValue(v))
 ```
 
 produces a value that is structurally equivalent to `v` — the same data at the
@@ -2632,7 +2640,7 @@ argument.
 Similarly, for any `StorableValue` `sv`:
 
 ```
-toDeepStorableValue(deepNativeValueFromStorableValue(sv))
+storableFromNativeValue(nativeFromStorableValue(sv))
 ```
 
 produces a `StorableValue` that is structurally equivalent to `sv`.

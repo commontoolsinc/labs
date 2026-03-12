@@ -5,84 +5,23 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import {
-  canBeStored as canBeStoredRich,
+  canBeStoredRich,
   deepCloneIfNecessaryRich,
-  isRichStorableValue,
-  toDeepRichStorableValue,
-  toRichStorableValue,
+  isStorableValueRich,
+  shallowStorableFromNativeValueRich,
+  storableFromNativeValueRich,
 } from "./storable-value-modern.ts";
-import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
+import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
   isStorableValueLegacy,
   shallowStorableFromNativeValueLegacy,
-  toDeepStorableValueLegacy,
+  storableFromNativeValueLegacy,
 } from "./storable-value-legacy.ts";
 export {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
 } from "./storable-value-utils.ts";
-
-// ---------------------------------------------------------------------------
-// Flag-dispatched public API
-//
-// These two symbols are reassigned by `configureDispatch()` whenever the
-// storable value conversion flag changes. When OFF (default),
-// `storableFromNativeValue` routes through `toDeepStorableValueLegacy` (legacy
-// conversion) and `nativeFromStorableValue` is an identity passthrough. When ON, they
-// route through the rich storable value conversion functions.
-// ---------------------------------------------------------------------------
-
-/**
- * Convert a native JS value to storable form (deep, recursive).
- *
- * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
- * storable wrappers and deep-freezes. When OFF, performs legacy deep
- * conversion via `toDeepStorableValueLegacy`.
- *
- * @param freeze - When `true` (default), deep-freezes the result. Only
- *   applies when `richStorableValues` is ON; the legacy path does not
- *   freeze.
- */
-export let storableFromNativeValue: (
-  value: unknown,
-  freeze?: boolean,
-) => StorableValue;
-
-/**
- * Convert a storable value back to native form. When the flag is ON,
- * unwraps storable wrappers (StorableError, StorableMap, etc.) back to
- * native JS types. When OFF, identity passthrough.
- *
- * @param frozen - When `true` (default), deep-freezes the result. Only
- *   applies when `richStorableValues` is ON; the legacy path is a
- *   passthrough regardless.
- */
-export let nativeFromStorableValue: (
-  value: StorableValue,
-  frozen?: boolean,
-) => StorableValue;
-
-/**
- * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
- *
- * Unlike `storableFromNativeValue` (which converts native JS values into
- * storable wrappers), this function assumes the input is already a valid
- * `StorableValue` and only adjusts frozenness by cloning where necessary.
- *
- * Flag ON (rich): delegates to `deepCloneIfNecessaryRich` which deep-clones
- * and adjusts frozenness. Flag OFF (legacy): identity passthrough (legacy
- * values are not frozen).
- *
- * @param value - An already-valid `StorableValue`.
- * @param frozen - When `true` (default), returns a deep-frozen copy.
- *   When `false`, returns a mutable deep copy. Only applies when
- *   `richStorableValues` is ON.
- */
-export let deepCloneIfNecessary: (
-  value: StorableValue,
-  frozen?: boolean,
-) => StorableValue;
 
 // ---------------------------------------------------------------------------
 // Experimental storable value configuration
@@ -116,7 +55,6 @@ export function setStorableValueConfig(
   config: Partial<ExperimentalStorableConfig>,
 ): void {
   currentConfig = { ...defaultConfig, ...config };
-  configureDispatch();
 }
 
 /** Returns the current experimental storable-value configuration. */
@@ -131,57 +69,75 @@ export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
  */
 export function resetStorableValueConfig(): void {
   currentConfig = { ...defaultConfig };
-  configureDispatch();
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch configuration
+// Flag-dispatched deep conversion
 // ---------------------------------------------------------------------------
 
 /**
- * Reassign the public API symbols based on the current value of
- * `currentConfig.richStorableValues`. Called at module load and whenever
- * the config changes.
+ * Convert a native JS value to storable form (deep, recursive).
+ *
+ * Flag OFF (legacy): performs deep conversion via `storableFromNativeValueLegacy`.
+ * Flag ON (rich): wraps native types (Error, Date, RegExp, etc.) into
+ * storable wrappers and deep-freezes via `storableFromNativeValueRich`.
+ *
+ * @param freeze - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path does not
+ *   freeze.
  */
-function configureDispatch(): void {
-  if (currentConfig.richStorableValues) {
-    // ----- Rich storable value implementations -----
+export function storableFromNativeValue(
+  value: unknown,
+  freeze = true,
+): StorableValue {
+  return currentConfig.richStorableValues
+    ? storableFromNativeValueRich(value, freeze)
+    : storableFromNativeValueLegacy(value);
+}
 
-    storableFromNativeValue = (
-      value: unknown,
-      freeze = true,
-    ): StorableValue => {
-      return toDeepRichStorableValue(value, freeze);
-    };
+/**
+ * Convert a storable value back to native form.
+ *
+ * Flag OFF (legacy): identity passthrough. Flag ON (rich): unwraps storable
+ * wrappers (StorableError, StorableMap, etc.) back to native JS types via
+ * `nativeFromStorableValueRich`.
+ *
+ * @param frozen - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path is a
+ *   passthrough regardless.
+ */
+export function nativeFromStorableValue(
+  value: StorableValue,
+  frozen = true,
+): StorableValue {
+  return currentConfig.richStorableValues
+    ? nativeFromStorableValueRich(value, frozen) as StorableValue
+    : value;
+}
 
-    nativeFromStorableValue = (
-      value: StorableValue,
-      frozen = true,
-    ): StorableValue => {
-      return deepNativeValueFromStorableValue(value, frozen) as StorableValue;
-    };
-
-    deepCloneIfNecessary = (
-      value: StorableValue,
-      frozen = true,
-    ): StorableValue => {
-      return deepCloneIfNecessaryRich(value, frozen);
-    };
-  } else {
-    // ----- Legacy conversion (flag OFF) -----
-
-    storableFromNativeValue = (value: unknown): StorableValue => {
-      return toDeepStorableValueLegacy(value);
-    };
-
-    nativeFromStorableValue = (value: StorableValue): StorableValue => {
-      return value;
-    };
-
-    deepCloneIfNecessary = (value: StorableValue): StorableValue => {
-      return value;
-    };
-  }
+/**
+ * Deep-clone an already-valid `StorableValue` to achieve a desired frozenness.
+ *
+ * Unlike `storableFromNativeValue` (which converts native JS values into
+ * storable wrappers), this function assumes the input is already a valid
+ * `StorableValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
+ * Flag ON (rich): delegates to `deepCloneIfNecessaryRich` which deep-clones
+ * and adjusts frozenness.
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param frozen - When `true` (default), returns a deep-frozen copy.
+ *   When `false`, returns a mutable deep copy. Only applies when
+ *   `richStorableValues` is ON.
+ */
+export function deepCloneIfNecessary(
+  value: StorableValue,
+  frozen = true,
+): StorableValue {
+  return currentConfig.richStorableValues
+    ? deepCloneIfNecessaryRich(value, frozen)
+    : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +150,7 @@ function configureDispatch(): void {
  * not recursively validate nested values in arrays or objects.
  *
  * Flag OFF (legacy): storable values are JSON-encodable values plus
- * `undefined`. Flag ON (rich): delegates to `isRichStorableValue` which
+ * `undefined`. Flag ON (rich): delegates to `isStorableValueRich` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
@@ -203,10 +159,9 @@ function configureDispatch(): void {
 export function isStorableValue(
   value: unknown,
 ): value is StorableValueLayer {
-  if (currentConfig.richStorableValues) {
-    return isRichStorableValue(value);
-  }
-  return isStorableValueLegacy(value);
+  return currentConfig.richStorableValues
+    ? isStorableValueRich(value)
+    : isStorableValueLegacy(value);
 }
 
 /**
@@ -224,10 +179,9 @@ export function isStorableValue(
 export function canBeStored(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
-  if (currentConfig.richStorableValues) {
-    return canBeStoredRich(value);
-  }
-  return canBeStoredLegacy(value);
+  return currentConfig.richStorableValues
+    ? canBeStoredRich(value)
+    : canBeStoredLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +194,7 @@ export function canBeStored(
  * converted via `toJSON()` if available.
  *
  * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
- * `toRichStorableValue` which handles the extended type system.
+ * `shallowStorableFromNativeValueRich` which handles the extended type system.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
@@ -252,10 +206,9 @@ export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  if (currentConfig.richStorableValues) {
-    return toRichStorableValue(value, freeze);
-  }
-  return shallowStorableFromNativeValueLegacy(value);
+  return currentConfig.richStorableValues
+    ? shallowStorableFromNativeValueRich(value, freeze)
+    : shallowStorableFromNativeValueLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,14 +226,7 @@ export function shallowStorableFromNativeValue(
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
-  if (currentConfig.richStorableValues) {
-    return deepEqual(a, b);
-  }
-  return JSON.stringify(a) === JSON.stringify(b);
+  return currentConfig.richStorableValues
+    ? deepEqual(a, b)
+    : JSON.stringify(a) === JSON.stringify(b);
 }
-
-// ---------------------------------------------------------------------------
-// Initialize dispatch to legacy conversion mode at module load.
-// ---------------------------------------------------------------------------
-
-configureDispatch();

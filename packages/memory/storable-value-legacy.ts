@@ -224,7 +224,7 @@ const PROCESSING = Symbol("PROCESSING");
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function toDeepStorableValueLegacy(value: unknown): StorableValue {
+export function storableFromNativeValueLegacy(value: unknown): StorableValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).

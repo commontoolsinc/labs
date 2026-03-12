@@ -102,8 +102,8 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/memory/rich-storable-value.ts`** — `toRichStorableValue` and
-  `toDeepRichStorableValue` use `i in arr` checks.
+- **`packages/memory/storable-value-modern.ts`** — `shallowStorableFromNativeValueRich` and
+  `storableFromNativeValueRich` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
 - **`packages/memory/canonical-hash.ts`** — Handles holes in hash computation.

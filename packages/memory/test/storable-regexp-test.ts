@@ -220,7 +220,7 @@ describe("StorableRegExp", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Conversion: toRichStorableValue
+  // Conversion: shallowStorableFromNativeValueRich
   // --------------------------------------------------------------------------
 
   describe("shallowStorableFromNativeValue (rich path)", () => {
