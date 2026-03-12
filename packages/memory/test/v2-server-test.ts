@@ -117,6 +117,95 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
   await server.close();
 });
 
+Deno.test("memory v2 server graph queries follow source lineage from source-only docs", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-source-lineage"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-source-lineage";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:process:1",
+        value: {
+          value: {
+            "$TYPE": "pattern:1",
+          },
+        },
+      }, {
+        op: "set",
+        id: "of:piece:1",
+        value: {
+          source: { "/": "process:1" },
+        },
+      }],
+    },
+  }));
+  const committed = assertResponse(shiftMessage(messages));
+  assertEquals((committed.ok as any)?.seq, 1);
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      roots: [{
+        id: "of:piece:1",
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    },
+  }));
+
+  const query = assertResponse(shiftMessage(messages));
+  assertEquals((query.ok as any)?.entities.map((entity: any) => ({
+    id: entity.id,
+    document: entity.document,
+  })), [{
+    id: "of:piece:1",
+    document: {
+      source: { "/": "process:1" },
+    },
+  }, {
+    id: "of:process:1",
+    document: {
+      value: {
+        "$TYPE": "pattern:1",
+      },
+    },
+  }]);
+
+  await server.close();
+});
+
 Deno.test("memory v2 server pushes graph query subscription updates", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-server-subscribe"),
