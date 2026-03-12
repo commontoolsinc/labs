@@ -381,6 +381,7 @@ function parseDenoTestLog(log: string): JUnitTestSuite[] {
   const cleanLine = (s: string) =>
     s
       .replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, "")
+      // deno-lint-ignore no-control-regex
       .replace(/\x1b\[[0-9;]*m/g, "")
       .replace(/\[[\d;]*m/g, "")
       .trim();
