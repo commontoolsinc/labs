@@ -399,18 +399,19 @@ describe("cloneIfNecessary", () => {
       const epoch = new StorableEpochNsec(1234567890n);
       Object.freeze(epoch);
       const result = cloneIfNecessary(epoch as unknown as StorableValue);
-      expect(result).toBe(epoch);
+      expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
     it("passes through StorableEpochNsec when frozen=false", () => {
       setStorableValueConfig({ richStorableValues: true });
       const epoch = new StorableEpochNsec(42n);
       Object.freeze(epoch);
+      // frozen parameter is irrelevant for special primitives
       const result = cloneIfNecessary(
         epoch as unknown as StorableValue,
         { frozen: false },
       );
-      expect(result).toBe(epoch);
+      expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
     it("passes through StorableEpochNsec nested in an object", () => {
@@ -420,7 +421,7 @@ describe("cloneIfNecessary", () => {
       const value = { time: epoch, label: "test" } as StorableValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
-      expect(result.time).toBe(epoch);
+      expect(result.time).toBe(epoch); // same instance -- not cloned
       expect(result.label).toBe("test");
     });
   });
