@@ -6,6 +6,10 @@ import {
   createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
+import {
+  assertValidComputeWrapCandidate,
+  findPendingComputeWrapCandidate,
+} from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
   registerSyntheticCallType,
@@ -53,6 +57,7 @@ export const emitBinaryExpression: Emitter = ({
   dataFlows,
   analysis,
   context,
+  analyze,
   rewriteChildren,
   inSafeContext,
   reactiveContextKind,
@@ -232,6 +237,20 @@ export const emitBinaryExpression: Emitter = ({
   ) {
     return undefined;
   }
+
+  const pendingWrap = findPendingComputeWrapCandidate(
+    expression,
+    analyze,
+    context,
+  );
+  if (!pendingWrap) return undefined;
+
+  assertValidComputeWrapCandidate(
+    pendingWrap,
+    expression,
+    "binary expression",
+    context,
+  );
 
   const plan = createBindingPlan(relevantDataFlows);
   return createComputedCallForExpression(expression, plan, context);

@@ -3,58 +3,55 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
-  isReactiveArrayMethodCall,
+  normalizeDataFlows,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import type { NormalizedDataFlowSet } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
+import {
+  assertValidComputeWrapCandidate,
+  findPendingComputeWrapCandidate,
+} from "./compute-wrap-invariants.ts";
 
-// Helper to process a conditional branch (whenTrue/whenFalse)
 function processBranch(
   expr: ts.Expression,
-  dataFlows: NormalizedDataFlowSet,
-  analysis: ReturnType<Parameters<Emitter>[0]["analyze"]>,
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
 ): ts.Expression {
+  // Branch wrapping needs a branch-local view of data flow, so we intentionally
+  // re-analyze the authored branch here instead of reusing the outer
+  // conditional's aggregate analysis. The important invariant is that the wrap
+  // decision still runs on the authored subtree before recursive rewriting;
+  // otherwise we start reasoning about a partially lowered branch and can
+  // introduce nested derives or mixed pattern/compute lowering.
+  const branchAnalysis = analyze(expr);
   const branchDataFlows = filterRelevantDataFlows(
-    selectDataFlowsReferencedIn(dataFlows, expr),
-    analysis,
+    normalizeDataFlows(
+      branchAnalysis.graph,
+      branchAnalysis.dataFlows,
+    ).all,
+    branchAnalysis,
     context,
   );
 
-  const branchAnalysis = analyze(expr);
+  const pendingRewrite = branchDataFlows.length > 0
+    ? findPendingComputeWrapCandidate(expr, analyze, context)
+    : undefined;
 
-  // Skip derive wrapping for reactive array method calls - they will be
-  // transformed to their WithPattern variant by ClosureTransformer, which is
-  // already reactive. Wrapping in derive would incorrectly put the callback in
-  // a "safe context", preventing nested calls from being transformed.
-  // Note: We need to unwrap parenthesized expressions to find the actual call.
-  let unwrappedExpr: ts.Expression = expr;
-  while (ts.isParenthesizedExpression(unwrappedExpr)) {
-    unwrappedExpr = unwrappedExpr.expression;
-  }
-  const isReactiveMap = ts.isCallExpression(unwrappedExpr) &&
-    isReactiveArrayMethodCall(
-      unwrappedExpr,
-      context.checker,
-      context.options.typeRegistry,
-      context.options.logger,
+  if (pendingRewrite) {
+    assertValidComputeWrapCandidate(
+      pendingRewrite,
+      expr,
+      "ternary branch",
+      context,
     );
 
-  if (
-    branchDataFlows.length > 0 &&
-    branchAnalysis.requiresRewrite &&
-    !isSimpleOpaqueRefAccess(expr, context.checker) &&
-    !isReactiveMap
-  ) {
     const plan = createBindingPlan(branchDataFlows);
     const derived = createComputedCallForExpression(expr, plan, context);
     if (derived) {
@@ -62,15 +59,12 @@ function processBranch(
     }
   }
 
-  // Fallback: rewrite children
-  const rewritten = rewriteChildren(expr);
-  return rewritten || expr;
+  return rewriteChildren(expr) || expr;
 }
 
 export const emitConditionalExpression: Emitter = ({
   expression,
   dataFlows,
-  analysis,
   context,
   analyze,
   rewriteChildren,
@@ -105,8 +99,6 @@ export const emitConditionalExpression: Emitter = ({
 
   const whenTrue = processBranch(
     expression.whenTrue,
-    dataFlows,
-    analysis,
     context,
     analyze,
     rewriteChildren,
@@ -114,8 +106,6 @@ export const emitConditionalExpression: Emitter = ({
 
   const whenFalse = processBranch(
     expression.whenFalse,
-    dataFlows,
-    analysis,
     context,
     analyze,
     rewriteChildren,
@@ -133,8 +123,6 @@ export const emitConditionalExpression: Emitter = ({
     },
   });
 
-  // Register the result type for schema injection
-  // The result type is the union of whenTrue and whenFalse types (from the original ternary)
   if (context.options.typeRegistry) {
     const resultType = context.checker.getTypeAtLocation(expression);
     registerSyntheticCallType(

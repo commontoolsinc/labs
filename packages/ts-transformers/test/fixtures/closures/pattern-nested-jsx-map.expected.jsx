@@ -173,33 +173,7 @@ export default pattern((__ct_pattern_input) => {
                         item: {
                             selectedIndex: item.key("selectedIndex")
                         }
-                    }, ({ i, item }) => __ctHelpers.derive({
-                        type: "object",
-                        properties: {
-                            i: {
-                                type: "number",
-                                asOpaque: true
-                            },
-                            item: {
-                                type: "object",
-                                properties: {
-                                    selectedIndex: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["selectedIndex"]
-                            }
-                        },
-                        required: ["i", "item"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        i: i,
-                        item: {
-                            selectedIndex: item.selectedIndex
-                        }
-                    }, ({ i, item }) => i === item.selectedIndex)), "* ", "")}
+                    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
                     {tag.key("name")}
                   </li>);
                 }, {

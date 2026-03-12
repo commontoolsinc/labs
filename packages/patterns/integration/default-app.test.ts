@@ -28,13 +28,13 @@ describe("default-app flow test", () => {
     // Wait for "Notes" dropdown button to appear and click it
     console.log("Click notes drop down...");
     await waitFor(async () => {
-      return await clickButtonWithText(page, "Notes");
+      return !!(await clickButtonWithText(page, "Notes"));
     });
 
     // Wait for dropdown to open and click "New Note"
     console.log("Click 'New Note'...");
     await waitFor(async () => {
-      return await clickButtonWithText(page, "New Note");
+      return !!(await clickButtonWithText(page, "New Note"));
     });
 
     // Wait for the note page to load by checking for the note title
@@ -50,8 +50,9 @@ describe("default-app flow test", () => {
     // Navigate back to the space page and wait for new note to appear
     console.log("Navigate back to space page...");
     await waitFor(async () => {
-      return await clickButtonWithText(page, spaceName);
+      return await clickPieceLinkWithText(page, spaceName);
     });
+    await shell.waitForState({ view: { spaceName }, identity });
 
     // Check that the list contains a note item
     console.log("Wait for note in list...");
@@ -83,15 +84,6 @@ async function clickButtonWithText(
         return true;
       }
     }
-    // Also check x-piece-link elements
-    const links = await page.$$("x-piece-link", { strategy: "pierce" });
-    for (const link of links) {
-      const text = await link.innerText();
-      if (text?.trim().includes(searchText)) {
-        await link.click();
-        return true;
-      }
-    }
     return false;
   } catch (_) {
     return false;
@@ -120,6 +112,44 @@ async function findNoteInList(page: Page): Promise<boolean> {
       }
       return search(document);
     });
+  } catch (_) {
+    return false;
+  }
+}
+
+async function clickPieceLinkWithText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  try {
+    return await page.evaluate((text) => {
+      function search(root: Document | ShadowRoot): boolean {
+        const pieceLinks = root.querySelectorAll("x-piece-link");
+        for (const el of pieceLinks) {
+          const content = el.textContent?.trim();
+          const anchor = el.shadowRoot?.querySelector("a");
+          if (
+            content?.includes(text) &&
+            anchor instanceof HTMLAnchorElement
+          ) {
+            anchor.click();
+            return true;
+          }
+        }
+
+        const allElements = root.querySelectorAll("*");
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            if (search(el.shadowRoot)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      return search(document);
+    }, { args: [searchText] });
   } catch (_) {
     return false;
   }

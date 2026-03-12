@@ -2,6 +2,7 @@ import {
   assert,
   assertEquals,
   assertGreater,
+  assertMatch,
   assertStringIncludes,
 } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
@@ -48,6 +49,156 @@ const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => l
 
     assertStringIncludes(output, "list.map((item) => item)");
     assert(!output.includes(".mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: direct computed result map inside computed stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => inner.map((item) => item.toUpperCase()));
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "=> inner.map((item) => item.toUpperCase())");
+    assert(!output.includes("inner.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: direct pattern property access map inside computed stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) =>
+  computed(() => state.items.map((item) => item.toUpperCase()))
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(
+      output,
+      "=> state.items.map((item) => item.toUpperCase())",
+    );
+    assert(!output.includes("state.items.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: direct derive callback parameter map stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) =>
+  derive({ items: state.items }, ({ items }) => items.map((item) => item.toUpperCase()))
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(
+      output,
+      "({ items }) => items.map((item) => item.toUpperCase())",
+    );
+    assert(!output.includes("items.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: local computed alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = computed(() => inner);
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: local lifted alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, lift, pattern } from "commontools";
+const passthrough = lift((items: string[]) => items);
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = passthrough(inner);
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: local wish result alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, Default, pattern, wish } from "commontools";
+const p = pattern<Record<string, never>>(() => {
+  return computed(() => {
+    const foo = wish<Default<string[], []>>({ query: "#items" }).result!;
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: transformed filter output alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = computed(() => inner);
+    const filtered = foo.filter((item) => item.length > 1);
+    return filtered.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "foo.filterWithPattern(");
+    assertStringIncludes(output, "filtered.mapWithPattern(");
+    assert(
+      !output.includes("return filtered.map((item) => item.toUpperCase())"),
+    );
   },
 );
 
@@ -1303,6 +1454,835 @@ export default pattern<State>((state) => ({
       "expected ifElse condition schema to stay boolean after key(...) lowering",
     );
     assert(!output.includes("__ctHelpers.ifElse(true as const"));
+  },
+);
+
+Deno.test(
+  "Capability-first: ternary branch keeps pure JSX map in pattern context",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface TagEvent {
+  label: string;
+}
+
+export default pattern<{ recentEvents: TagEvent[] }>(({ recentEvents }) => ({
+  [UI]: (
+    <div>
+      {recentEvents.length === 0
+        ? <span>No events yet</span>
+        : (
+          <div>
+            {recentEvents.map((event: TagEvent, idx: number) => (
+              <ct-hstack key={idx} gap="2">
+                <span>{event.label}</span>
+              </ct-hstack>
+            ))}
+          </div>
+        )}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      1,
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.mapWithPattern(",
+    );
+    assert(
+      !output.includes("recentEvents.map((event: TagEvent, idx: number) =>"),
+      "expected pure JSX branch map to be rewritten to mapWithPattern without an extra derive branch",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: compute writable branch keeps nested maps in pattern callbacks",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI, Writable } from "commontools";
+
+interface TagEvent {
+  label: string;
+  tags: string[];
+}
+
+export default pattern<{
+  showEmpty: boolean;
+  recentEvents: Writable<TagEvent[]>;
+}>(({ showEmpty, recentEvents }) => ({
+  [UI]: (
+    <div>
+      {showEmpty
+        ? <span>No events yet</span>
+        : recentEvents.get() && recentEvents.map((event: TagEvent) => (
+          <ct-vstack>
+            <span>{event.label}</span>
+            {event.tags.map((tag: string) => <span>{tag}</span>)}
+          </ct-vstack>
+        ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertGreater(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      0,
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.get()",
+    );
+    assertStringIncludes(
+      output,
+      "recentEvents.mapWithPattern(",
+    );
+    assertStringIncludes(
+      output,
+      '.key("tags").mapWithPattern(',
+    );
+    assertEquals(
+      output.match(/mapWithPattern\(/g)?.length ?? 0,
+      2,
+    );
+    assert(
+      !output.includes("recentEvents.map((event: TagEvent) =>"),
+      "expected writable branch outer map to stay in pattern mode",
+    );
+    assert(
+      !output.includes('.key("tags").map((tag: string) =>'),
+      "expected writable branch nested map to stay in pattern mode",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: computed array map in ternary branch stays pattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI, Writable } from "commontools";
+
+interface Item {
+  name: string;
+  value: number;
+}
+
+export default pattern<{ items: Item[] }>((state) => {
+  const showList = Writable.of(true);
+
+  const sorted = computed(() =>
+    [...state.items].sort((a, b) => a.value - b.value)
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {showList
+          ? (
+            <div>
+              {sorted.map((item: Item) => (
+                <span>{item.name}</span>
+              ))}
+            </div>
+          )
+          : <span>Hidden</span>}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      1,
+    );
+    assertStringIncludes(
+      output,
+      "sorted.mapWithPattern(",
+    );
+    assert(
+      !output.includes("sorted.map((item: Item) =>"),
+      "expected computed array map in ternary branch to stay pattern-lowered",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: ternary branch derive does not nest inner arithmetic derives",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: number;
+  price: number;
+}
+
+interface State {
+  items: Item[];
+  discount: number;
+  threshold: number;
+}
+
+export default pattern<State>((state) => ({
+  [UI]: (
+    <div>
+      {state.items.map((item) => (
+        <div>
+          {item.price > state.threshold
+            ? item.price * (1 - state.discount)
+            : item.price}
+        </div>
+      ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(
+      output.match(/__ctHelpers\.derive\(/g)?.length ?? 0,
+      2,
+    );
+    assertStringIncludes(
+      output,
+      "item.price * (1 - state.discount)",
+    );
+    assert(
+      !output.includes("item.price * (__ctHelpers.derive("),
+      "expected ternary branch derive to absorb inner arithmetic instead of nesting a second derive",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: ifElse predicate binary is not treated as a pattern-owned branch",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, UI } from "commontools";
+
+interface Field {
+  name: string;
+  validationIssue?: { message: string };
+}
+
+export default pattern<{ fields: Field[] }>((state) => ({
+  [UI]: (
+    <div>
+      {state.fields.map((field) => (
+        <div>
+          {ifElse(
+            field.validationIssue !== undefined,
+            <span>{field.validationIssue?.message}</span>,
+            null,
+          )}
+        </div>
+      ))}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(
+      output,
+      "=> field.validationIssue !== undefined",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: nested authored ifElse predicate in helper-owned branch lowers to derive",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, ifElse, pattern, UI } from "commontools";
+
+interface ValidationIssue {
+  message: string;
+  severity: "error" | "warning";
+}
+
+interface ExtractedField {
+  targetModule: string;
+  fieldName: string;
+  confidenceLevel?: "high" | "medium" | "low";
+  validationIssue?: ValidationIssue;
+  explanation?: string;
+}
+
+interface Preview {
+  fields?: ExtractedField[];
+}
+
+export default pattern<{
+  inputFields: ExtractedField[];
+  fieldCheckStates: Record<string, boolean>;
+  showPreview: boolean;
+}>((state) => {
+  const preview = computed((): Preview | null => ({ fields: state.inputFields }));
+
+  return {
+    [UI]: (
+      <div>
+        {ifElse(
+          state.showPreview,
+          <div>
+            {preview?.fields?.map((f: ExtractedField, idx: number) => {
+              const fieldKey = f.targetModule + "." + f.fieldName;
+              const isChecked = state.fieldCheckStates[fieldKey] === true;
+              const confidenceBg = f.confidenceLevel === "high"
+                ? "#dcfce7"
+                : f.confidenceLevel === "medium"
+                ? "#fef9c3"
+                : f.confidenceLevel === "low"
+                ? "#fee2e2"
+                : "transparent";
+              const confidenceColor = f.confidenceLevel === "high"
+                ? "#166534"
+                : f.confidenceLevel === "medium"
+                ? "#854d0e"
+                : f.confidenceLevel === "low"
+                ? "#991b1b"
+                : "#6b7280";
+              const confidenceIcon = f.confidenceLevel === "high"
+                ? "✓"
+                : f.confidenceLevel === "medium"
+                ? "~"
+                : f.confidenceLevel === "low"
+                ? "!"
+                : "";
+              const confidenceLabel = f.confidenceLevel === "high"
+                ? "High"
+                : f.confidenceLevel === "medium"
+                ? "Med"
+                : f.confidenceLevel === "low"
+                ? "Low"
+                : "";
+              const hasConfidence = f.confidenceLevel !== undefined;
+
+              return (
+                <div key={idx} style={{ opacity: isChecked ? 1 : 0.6 }}>
+                  {ifElse(
+                    hasConfidence,
+                    <span style={{ background: confidenceBg, color: confidenceColor }}>
+                      {confidenceIcon} {confidenceLabel}
+                    </span>,
+                    null,
+                  )}
+                  {ifElse(
+                    f.validationIssue !== undefined,
+                    <span
+                      style={{
+                        background: f.validationIssue?.severity === "error"
+                          ? "#fee2e2"
+                          : "#fef3c7",
+                        color: f.validationIssue?.severity === "error"
+                          ? "#991b1b"
+                          : "#92400e",
+                      }}
+                    >
+                      {f.validationIssue?.message}
+                    </span>,
+                    null,
+                  )}
+                  {ifElse(
+                    f.explanation !== undefined && f.explanation !== "",
+                    <div>{f.explanation}</div>,
+                    null,
+                  )}
+                </div>
+              );
+            })}
+          </div>,
+          null,
+        )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "=> f.validationIssue !== undefined",
+    );
+    assertMatch(
+      output,
+      /__ctHelpers\.derive\([\s\S]*validationIssue: f\.validationIssue[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, ifElse, pattern, UI } from "commontools";
+
+interface Field {
+  targetModule: string;
+  fieldName: string;
+}
+
+export default pattern<{
+  inputFields: Field[];
+  showPreview: boolean;
+}>((state) => {
+  const preview = computed(() => ({ fields: state.inputFields }));
+  const fieldCheckStates = computed((): Record<string, boolean> => ({
+    "record-title.name": true,
+  }));
+
+  return {
+    [UI]: ifElse(
+      state.showPreview,
+      <div>
+        {preview?.fields?.map((f: Field) => {
+          const fieldKey = f.targetModule + "." + f.fieldName;
+          const isChecked = fieldCheckStates[fieldKey] === true;
+          return <span>{isChecked}</span>;
+        })}
+      </div>,
+      null,
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      mode: "error",
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "=> fieldCheckStates[fieldKey] === true");
+    assert(
+      !output.includes(
+        "const isChecked = fieldCheckStates[fieldKey] === true;",
+      ),
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: computed array map preserves captures used in lowered control branches",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+
+const openNoteEditor = handler<{
+  subPieces: string[];
+  editingNoteIndex: number | undefined;
+  editingNoteText: string | undefined;
+  index: number;
+}>((_event, state) => state);
+const openSettings = handler<{
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const toggleExpanded = handler<{
+  expandedIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const trashSubPiece = handler<{
+  subPieces: string[];
+  trashedSubPieces: string[];
+  expandedIndex: number | undefined;
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+
+interface Item {
+  collapsed?: boolean;
+  pinned?: boolean;
+  allowMultiple: boolean;
+}
+
+export default pattern<{
+  items: Item[];
+  subPieces: string[];
+  trashedSubPieces: string[];
+}>(({ items, subPieces, trashedSubPieces }) => {
+  const editingNoteIndex = Writable.of<number | undefined>();
+  const editingNoteText = Writable.of<string | undefined>();
+  const expandedIndex = Writable.of<number | undefined>();
+  const settingsModuleIndex = Writable.of<number | undefined>();
+
+  const allEntries = computed(() =>
+    items.map((entry, index) => ({
+      entry,
+      index,
+      isExpanded: index === 0,
+      isPinned: entry.pinned || false,
+      allowMultiple: entry.allowMultiple,
+    }))
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {allEntries.map(({ entry, index, isExpanded, isPinned, allowMultiple }) =>
+          ifElse(
+            computed(() => !entry.collapsed),
+            <div>
+              {ifElse(
+                allowMultiple,
+                <button
+                  onClick={openNoteEditor({
+                    subPieces,
+                    editingNoteIndex,
+                    editingNoteText,
+                    index,
+                  })}
+                >
+                  note
+                </button>,
+                null,
+              )}
+              {!isExpanded && ifElse(
+                true,
+                <button
+                  onClick={openSettings({ settingsModuleIndex, index })}
+                >
+                  settings
+                </button>,
+                null,
+              )}
+              <button
+                onClick={toggleExpanded({ expandedIndex, index })}
+                style={{ background: isPinned ? "a" : "b" }}
+              >
+                expand
+              </button>
+              {!isExpanded && (
+                <button
+                  onClick={trashSubPiece({
+                    subPieces,
+                    trashedSubPieces,
+                    expandedIndex,
+                    settingsModuleIndex,
+                    index,
+                  })}
+                >
+                  trash
+                </button>
+              )}
+            </div>,
+            null,
+          )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(
+      output,
+      'const subPieces = __ct_pattern_input.key("params", "subPieces");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteIndex = __ct_pattern_input.key("params", "editingNoteIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteText = __ct_pattern_input.key("params", "editingNoteText");',
+    );
+    assertStringIncludes(
+      output,
+      'const settingsModuleIndex = __ct_pattern_input.key("params", "settingsModuleIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const expandedIndex = __ct_pattern_input.key("params", "expandedIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: computed array map preserves authored captures used by branch-lowered UI chunks",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+
+const openNoteEditor = handler<{
+  subPieces: string[];
+  editingNoteIndex: number | undefined;
+  editingNoteText: string;
+  index: number;
+}>((_event, state) => state);
+const openSettings = handler<{
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const toggleExpanded = handler<{
+  expandedIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+const trashSubPiece = handler<{
+  subPieces: string[];
+  trashedSubPieces: string[];
+  expandedIndex: number | undefined;
+  settingsModuleIndex: number | undefined;
+  index: number;
+}>((_event, state) => state);
+
+interface Item {
+  note?: string;
+  collapsed?: boolean;
+  pinned?: boolean;
+  allowMultiple: boolean;
+}
+
+export default pattern<{
+  items: Item[];
+  subPieces: string[];
+  trashedSubPieces: string[];
+}>(({ items, subPieces, trashedSubPieces }) => {
+  const editingNoteIndex = Writable.of<number | undefined>();
+  const editingNoteText = Writable.of("");
+  const expandedIndex = Writable.of<number | undefined>();
+  const settingsModuleIndex = Writable.of<number | undefined>();
+
+  const allEntries = computed(() =>
+    items.map((entry, index) => ({
+      entry,
+      index,
+      isExpanded: index === 0,
+      isPinned: entry.pinned || false,
+      allowMultiple: entry.allowMultiple,
+    }))
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {allEntries.map(({ entry, index, isExpanded, isPinned, allowMultiple }) =>
+          ifElse(
+            computed(() => !entry.collapsed),
+            <div>
+              {!isExpanded && (
+                <button
+                  onClick={openNoteEditor({
+                    subPieces,
+                    editingNoteIndex,
+                    editingNoteText,
+                    index,
+                  })}
+                  style={computed(() => ({
+                    fontWeight: entry?.note ? "700" : "400",
+                  }))}
+                  title={computed(() => entry?.note || "Add note...")}
+                >
+                  note
+                </button>
+              )}
+              {!isExpanded && ifElse(
+                allowMultiple,
+                <button
+                  onClick={openSettings({ settingsModuleIndex, index })}
+                >
+                  settings
+                </button>,
+                null,
+              )}
+              <button
+                onClick={toggleExpanded({ expandedIndex, index })}
+                style={{ background: isPinned ? "a" : "b" }}
+              >
+                expand
+              </button>
+              {!isExpanded && (
+                <button
+                  onClick={trashSubPiece({
+                    subPieces,
+                    trashedSubPieces,
+                    expandedIndex,
+                    settingsModuleIndex,
+                    index,
+                  })}
+                >
+                  trash
+                </button>
+              )}
+            </div>,
+            null,
+          )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(
+      output,
+      'const subPieces = __ct_pattern_input.key("params", "subPieces");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteIndex = __ct_pattern_input.key("params", "editingNoteIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const editingNoteText = __ct_pattern_input.key("params", "editingNoteText");',
+    );
+    assertStringIncludes(
+      output,
+      'const settingsModuleIndex = __ct_pattern_input.key("params", "settingsModuleIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const expandedIndex = __ct_pattern_input.key("params", "expandedIndex");',
+    );
+    assertStringIncludes(
+      output,
+      'const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: self-improving classifier examples map keeps examples capture",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/self-improving-classifier.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const mapStart = output.indexOf("{examples.mapWithPattern(");
+    assert(
+      mapStart >= 0,
+      "expected transformed examples.mapWithPattern callback",
+    );
+    const mapWindow = output.slice(mapStart, mapStart + 5000);
+
+    assertStringIncludes(
+      mapWindow,
+      'const selectedExampleId = __ct_pattern_input.key("params", "selectedExampleId");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const currentItem = __ct_pattern_input.key("params", "currentItem");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const examples = __ct_pattern_input.key("params", "examples");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: shopping-list sorted ifElse branch does not wrap mapped results in derive",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/shopping-list.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "itemsWithAisles.mapWithPattern(");
+    assert(
+      !output.includes(
+        'required: ["itemsWithAisles", "items", "correctionIndex", "correctionTitle", "hasConnectedStore"]',
+      ),
+      "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: authored ifElse rewrites condition and branches uniformly",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, UI } from "commontools";
+
+interface Item {
+  name: string;
+}
+
+export default pattern<{ items: Item[]; limit: number }>(({ items, limit }) => ({
+  [UI]: (
+    <div>
+      {ifElse(
+        limit > 0,
+        items.map((item: Item) => <span>{item.name}</span>),
+        <span>Hidden</span>,
+      )}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "=> limit > 0",
+    );
+    assertStringIncludes(
+      output,
+      "items.mapWithPattern(",
+    );
+    assert(
+      !output.includes("items.map((item: Item) =>"),
+      "expected authored ifElse branch map to stay pattern-lowered",
+    );
   },
 );
 

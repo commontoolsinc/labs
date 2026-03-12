@@ -94,6 +94,8 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
+
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
   // non-synthetic (original source) nodes by gracefully handling cases where
@@ -835,6 +837,11 @@ export function createDataFlowAnalyzer(
   };
 
   return (expression: ts.Expression) => {
+    const cached = analysisCache.get(expression);
+    if (cached) {
+      return cached;
+    }
+
     const context: AnalyzerContext = {
       nextNodeId: 0,
       nextScopeId: 0,
@@ -844,7 +851,7 @@ export function createDataFlowAnalyzer(
     };
     const rootScope = createScope(context, null, []);
     const result = analyzeExpression(expression, rootScope, context);
-    return {
+    const analysis = {
       ...result,
       graph: {
         nodes: context.collectedNodes,
@@ -852,5 +859,8 @@ export function createDataFlowAnalyzer(
         rootScopeId: rootScope.id,
       },
     };
+
+    analysisCache.set(expression, analysis);
+    return analysis;
   };
 }
