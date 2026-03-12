@@ -219,12 +219,20 @@ Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   // Create a link from A to A/foo using setRaw to bypass cycle detection on write
   cellA.setRaw(cellA.key("foo").getAsLink());
 
-  // This should detect the growing path cycle and return the empty document
-  const resolved = resolveLink(runtime, tx, cellA.getAsNormalizedFullLink());
+  // resolveLink throws when it hits the iteration limit for growing path cycles
+  let threw = false;
+  try {
+    resolveLink(runtime, tx, cellA.getAsNormalizedFullLink());
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("iteration limit")) {
+      threw = true;
+    } else {
+      throw e;
+    }
+  }
 
-  // Verify it returned the empty document
-  if (resolved.id !== "data:application/json,{}") {
-    throw new Error("Expected empty document for growing path cycle");
+  if (!threw) {
+    throw new Error("Expected resolveLink to throw iteration limit error");
   }
 
   tx.commit();

@@ -92,28 +92,45 @@ jobs:
       - name: 🧪 Run end-to-end runner integration tests
         working-directory: packages/runner
         run: |
+          mkdir -p ../../test-results
           API_URL=http://localhost:8000/ \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runner.xml" \
           deno task integration
 
       - name: 🧪 Run end-to-end runtime-client integration tests
         working-directory: packages/runtime-client
         run: |
+          mkdir -p ../../test-results
           API_URL=http://localhost:8000/ \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runtime-client.xml" \
           deno task integration
 
       - name: 🧪 Run end-to-end shell integration tests
         working-directory: packages/shell
         run: |
+          mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/shell.xml" \
           deno task integration
 
       - name: 🧪 Run background worker integration tests
         working-directory: packages/background-charm-service
         run: |
+          mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/background-charm-service.xml" \
           deno task integration
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-package-integration
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
 
   cli-integration-test:
     name: "CLI Integration Tests"
@@ -173,9 +190,20 @@ jobs:
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
+          mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/patterns.xml" \
           deno task integration
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-pattern-integration
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
 
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
@@ -214,7 +242,19 @@ jobs:
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
-        run: deno task integration
+        run: |
+          mkdir -p ../../test-results
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/generated-patterns.xml" \
+          deno task integration
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-generated-patterns
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
 
   attest-binaries:
     name: "Attest and Upload Binaries"
