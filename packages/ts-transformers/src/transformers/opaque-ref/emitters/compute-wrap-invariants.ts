@@ -21,7 +21,24 @@ function isTransparentWrapContainer(node: ts.Expression): boolean {
   );
 }
 
-function isSupportedPatternBoundary(
+function isHelperRewriteBoundary(
+  node: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  if (!ts.isCallExpression(node)) return false;
+
+  const callKind = detectCallKind(node, context.checker);
+  return (
+    callKind?.kind === "array-method" ||
+    callKind?.kind === "derive" ||
+    callKind?.kind === "builder" ||
+    callKind?.kind === "ifElse" ||
+    callKind?.kind === "when" ||
+    callKind?.kind === "unless"
+  );
+}
+
+function isOwnedPatternBoundary(
   node: ts.Expression,
   context: TransformationContext,
 ): boolean {
@@ -90,7 +107,7 @@ function findSupportedPatternBoundaryAncestor(
     }
 
     if (ts.isExpression(current)) {
-      if (isSupportedPatternBoundary(current, context)) {
+      if (isOwnedPatternBoundary(current, context)) {
         return current;
       }
 
@@ -181,7 +198,7 @@ export function findPendingComputeWrapCandidate(
       return;
     }
 
-    if (isSupportedPatternBoundary(node, context)) {
+    if (isHelperRewriteBoundary(node, context)) {
       return;
     }
 

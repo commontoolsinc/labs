@@ -2070,6 +2070,26 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability-first: shopping-list sorted ifElse branch does not wrap mapped results in derive",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/shopping-list.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "itemsWithAisles.mapWithPattern(");
+    assert(
+      !output.includes(
+        'required: ["itemsWithAisles", "items", "correctionIndex", "correctionTitle", "hasConnectedStore"]',
+      ),
+      "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse rewrites condition and branches uniformly",
   async () => {
     const source = `/// <cts-enable />
