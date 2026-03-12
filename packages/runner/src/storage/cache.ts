@@ -46,9 +46,10 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type {
+import {
   Assert,
   Claim,
+  DEFAULT_MEMORY_VERSION,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -1510,7 +1511,14 @@ export class ProviderConnection implements IStorageProvider {
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
-    { id, address, provider, inspector, spaceIdentity, memoryVersion = "v1" }:
+    {
+      id,
+      address,
+      provider,
+      inspector,
+      spaceIdentity,
+      memoryVersion = DEFAULT_MEMORY_VERSION,
+    }:
       ProviderConnectionOptions,
   ) {
     this.address = address;
@@ -1903,7 +1911,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
     spaceIdentity,
-    memoryVersion = "v1",
+    memoryVersion = DEFAULT_MEMORY_VERSION,
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
@@ -2179,7 +2187,7 @@ export class StorageManager implements IStorageManager {
       address,
       as,
       id = crypto.randomUUID(),
-      memoryVersion = "v1",
+      memoryVersion = DEFAULT_MEMORY_VERSION,
       settings = defaultSettings,
       spaceIdentity,
     }: Options,

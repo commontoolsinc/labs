@@ -12,6 +12,7 @@ import {
 import {
   AsyncResult,
   ConnectionError,
+  DEFAULT_MEMORY_VERSION,
   MemorySession,
   MemorySpace as Subject,
   Query,
@@ -49,7 +50,7 @@ export class Memory implements Session, MemorySession {
     public spaces: Map<Subject, MountedSpace> = new Map(),
   ) {
     this.store = options.store;
-    this.memoryVersion = options.memoryVersion ?? "v1";
+    this.memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
     this.ready = Promise.resolve();
     this.#serviceDid = options.serviceDid;
   }
@@ -313,7 +314,7 @@ export interface Options extends ServiceOptions {
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: Subject,
-  memoryVersion: MemoryVersion = "v1",
+  memoryVersion: MemoryVersion = DEFAULT_MEMORY_VERSION,
 ): URL => {
   const isFile = Path.extname(store.pathname) !== "";
 
