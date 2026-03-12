@@ -1202,13 +1202,21 @@ export class CellImpl<T extends StorableValue>
   }
 
   getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
-    return this._getRawUntyped(options, true) as Immutable<StorableValue>;
+    return this._getRawUntyped(options, true);
   }
 
   getRawUntypedMutable(options?: IReadOptions): StorableValue {
     return this._getRawUntyped(options, false);
   }
 
+  private _getRawUntyped(
+    options: IReadOptions | undefined,
+    frozen: true,
+  ): Immutable<StorableValue>;
+  private _getRawUntyped(
+    options: IReadOptions | undefined,
+    frozen: false,
+  ): StorableValue;
   private _getRawUntyped(
     options: IReadOptions | undefined,
     frozen: boolean,
