@@ -216,4 +216,41 @@ if [ "$RESULT" != "11" ]; then
   error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
 fi
 
+echo "Testing piece link with invented piece ID..."
+
+# Use an invented piece ID (not created via ct piece new) as a data source
+INVENTED_ID="baedreizzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+
+# Write a value to the invented piece
+echo '42' | ct piece set $SPACE_ARGS --piece $INVENTED_ID value
+
+# Create a third piece and link the invented piece's value to its input
+PIECE_ID3=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+echo "Created third piece: $PIECE_ID3"
+
+ct piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value
+
+# Read back piece3's input value - should be 42 from the invented piece
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID3 value --input)
+if [ "$RESULT" != "42" ]; then
+  error "After linking invented piece, piece3's input value should be 42, got: $RESULT"
+fi
+
+# Step piece3 to recompute with linked input
+ct piece step $SPACE_ARGS --piece $PIECE_ID3
+
+# Verify piece3's output value is 42
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID3 value)
+if [ "$RESULT" != "42" ]; then
+  error "After stepping piece3 with invented link, output value should be 42, got: $RESULT"
+fi
+
+# Call increment on piece3 and verify the invented piece's value updates
+ct piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
+
+RESULT=$(ct piece get $SPACE_ARGS --piece $INVENTED_ID value)
+if [ "$RESULT" != "43" ]; then
+  error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
+fi
+
 echo "Successfully ran integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."
