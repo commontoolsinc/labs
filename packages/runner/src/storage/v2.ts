@@ -845,7 +845,9 @@ class SpaceReplica implements ISpaceReplica {
 
   private dropPending(localSeq: number): void {
     for (const record of this.#docs.values()) {
-      record.pending = record.pending.filter((entry) => entry.localSeq < localSeq);
+      record.pending = record.pending.filter((entry) =>
+        entry.localSeq !== localSeq
+      );
     }
   }
 

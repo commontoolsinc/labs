@@ -19,7 +19,7 @@ export interface SourceLink {
 }
 
 export interface EntityDocument {
-  value: JSONValue;
+  value?: JSONValue;
   source?: SourceLink;
 }
 
@@ -246,9 +246,12 @@ export const isSourceLink = (value: unknown): value is SourceLink => {
 };
 
 export const toEntityDocument = (
-  value: JSONValue,
+  value: JSONValue | undefined,
   source?: SourceLink,
 ): EntityDocument => {
+  if (source && value === undefined) {
+    return { source };
+  }
   return source ? { value, source } : { value };
 };
 
