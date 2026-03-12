@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   cloneIfNecessary,
@@ -184,21 +184,26 @@ describe("cloneIfNecessary", () => {
   // Error cases
   // --------------------------------------------------------------------------
 
-  describe("rich path: error cases", () => {
-    it("throws for frozen=true, force=true", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1 } as StorableValue;
-      expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
-        .toThrow("frozen: true, force: true");
-    });
+  for (const richMode of [false, true]) {
+    const label = richMode ? "rich" : "legacy";
+    describe(`error cases (${label} path)`, () => {
+      if (richMode) {
+        beforeEach(() => setStorableValueConfig({ richStorableValues: true }));
+      }
 
-    it("throws for frozen=false, force=false, deep=true", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1 } as StorableValue;
-      expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
-        .toThrow("frozen: false, force: false, deep: true");
+      it("throws for frozen=true, force=true", () => {
+        const value = { a: 1 } as StorableValue;
+        expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
+          .toThrow("frozen: true, force: true");
+      });
+
+      it("throws for frozen=false, force=false, deep=true", () => {
+        const value = { a: 1 } as StorableValue;
+        expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
+          .toThrow("frozen: false, force: false, deep: true");
+      });
     });
-  });
+  }
 
   // --------------------------------------------------------------------------
   // shallow clone (deep=false)
