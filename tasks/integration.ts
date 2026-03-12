@@ -337,6 +337,11 @@ async function runPackageIntegration(
       args.push("--trace-leaks", "--parallel");
     }
 
+    // Add JUnit output if --junit-dir was specified
+    if (junitDir) {
+      args.push(`--junit-path=${path.join(junitDir, `${pkg}.xml`)}`);
+    }
+
     args.push(globPattern);
     result = await runCommand(["deno", ...args], {
       cwd: packageDir,
@@ -376,7 +381,7 @@ Options:
                     after tests complete. If not set, picks a random offset
                     and cleans up servers after tests.
   --junit-dir=DIR   Write JUnit XML results per package to DIR (e.g.,
-                    --junit-dir=test-results creates test-results/runner.xml).
+                    --junit-dir=test-results creates test-results/<package>.xml).
   --help, -h        Show this help message.
 
 Arguments:

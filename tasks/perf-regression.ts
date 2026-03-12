@@ -438,7 +438,7 @@ function parseDenoTestLog(log: string): JUnitTestSuite[] {
     // Subtest results: "TestName ... ok (Nms)" or "Executes: foo.tsx ... ok (1s)"
     // These are individual test cases within a file.
     const subtestMatch = line.match(
-      /^(.+?) \.{3} ok \((\d+(?:\.\d+)?(?:m\s*\d+)?)(ms|s)\)$/,
+      /^(.+?) \.{3} ok \((\d+(?:\.\d+)?)(ms|s)\)$/,
     );
     if (subtestMatch && currentFile) {
       const testName = subtestMatch[1];
@@ -462,7 +462,7 @@ function parseDenoTestLog(log: string): JUnitTestSuite[] {
 
     // Overall summary: "ok | N passed ... | N failed (Nms)" or with steps
     const summaryMatch = line.match(
-      /^ok \| \d+ passed.*\((\d+(?:\.\d+)?(?:m\s*\d+)?)(ms|s)\)/,
+      /^ok \| \d+ passed.*\((\d+(?:\.\d+)?)(ms|s)\)/,
     );
     if (summaryMatch) {
       const dur = parseDuration(summaryMatch[1], summaryMatch[2]);
@@ -1091,6 +1091,16 @@ async function main() {
           // Benchmark artifacts may not exist yet
         }
       });
+      // Re-sort benchmark timelines since concurrent artifact fetches may have
+      // appended samples out of chronological order.
+      for (const [name, timeline] of timelines) {
+        if (name.startsWith("bench:")) {
+          timeline.samples.sort((a, b) =>
+            a.createdAt.localeCompare(b.createdAt)
+          );
+        }
+      }
+
       console.log(
         `  Found ${benchRuns.length} benchmark runs, ${benchRunsProcessed} with results.`,
       );
