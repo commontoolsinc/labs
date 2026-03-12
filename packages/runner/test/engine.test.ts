@@ -281,7 +281,7 @@ describe("Engine compile + evaluate", () => {
     expect(main!["default"].nodes).toBeDefined();
   });
 
-  it("evaluate throws for missing named export", async () => {
+  it("evaluate returns undefined for missing named export", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       mainExport: "nonExistent",
