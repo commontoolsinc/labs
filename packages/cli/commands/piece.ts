@@ -15,8 +15,10 @@ import {
   newPiece,
   PieceConfig,
   removePiece,
+  resetHomePattern,
   savePiecePattern,
   setCellValue,
+  setHomePattern,
   setPiecePattern,
   SpaceConfig,
 } from "../lib/piece.ts";
@@ -623,6 +625,63 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     const pieceConfig = parsePieceOptions(options);
     await removePiece(pieceConfig);
     render(`Removed piece ${pieceConfig.piece}`);
+  })
+  /* piece set-home */
+  .command(
+    "set-home",
+    "Deploy a custom home pattern or reset to system default.",
+  )
+  .example(
+    `ct piece set-home ${EX_ID} -a http://localhost:8000 ./my-home.tsx`,
+    `Deploy a custom home pattern.`,
+  )
+  .example(
+    `ct piece set-home ${EX_ID} -a http://localhost:8000 --reset`,
+    `Reset to the system default home pattern.`,
+  )
+  .option("--reset", "Reset to the system default home pattern")
+  .option(
+    "--main-export <export:string>",
+    'Named export from entry for pattern definition. Defaults to "default".',
+  )
+  .option(
+    "--root <path:string>",
+    "Root directory for resolving imports.",
+  )
+  .arguments("[main:string]")
+  .action(async (options, main?: string) => {
+    setQuietMode(!!options.quiet);
+
+    if (!options.reset && !main) {
+      throw new ValidationError(
+        "Provide a pattern file path or use --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && main) {
+      throw new ValidationError(
+        "Cannot use --reset with a pattern file path.",
+        { exitCode: 1 },
+      );
+    }
+
+    const baseConfig = parseSetHomeOptions(options);
+
+    if (options.reset) {
+      await resetHomePattern(baseConfig);
+      render("Reset home pattern to system default.");
+    } else {
+      await setHomePattern(baseConfig, {
+        mainPath: absPath(main!),
+        mainExport: options.mainExport,
+        rootPath: options.root ? absPath(options.root) : undefined,
+      });
+      render("Deployed custom home pattern.");
+    }
+
+    hint(`NEXT STEPS:
+  → Open home in browser: ${baseConfig.apiUrl}
+  → Reset to default:     ct piece set-home --reset ...`);
   });
 
 interface PieceCLIOptions {
@@ -631,6 +690,25 @@ interface PieceCLIOptions {
   identity?: string;
   space?: string;
   url?: string;
+}
+
+function parseSetHomeOptions(
+  input: PieceCLIOptions,
+): Omit<SpaceConfig, "space"> {
+  if (!input.identity) {
+    throw new ValidationError(
+      `Missing required option: "--identity", or "CT_IDENTITY".`,
+      { exitCode: 1 },
+    );
+  }
+  const apiUrl = input.apiUrl;
+  if (!apiUrl) {
+    throw new ValidationError(
+      `Missing required option: "--api-url", or "CT_API_URL".`,
+      { exitCode: 1 },
+    );
+  }
+  return { identity: absPath(input.identity), apiUrl };
 }
 
 export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {

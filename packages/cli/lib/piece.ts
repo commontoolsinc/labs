@@ -603,3 +603,32 @@ function isVNodeLike(value: unknown): value is VNode {
   }
   return (value as VNode)?.type === "vnode";
 }
+
+/**
+ * Deploy a custom home pattern from a local file.
+ * Automatically targets the home space (user's identity DID).
+ */
+export async function setHomePattern(
+  config: Omit<SpaceConfig, "space">,
+  entry: EntryConfig,
+): Promise<void> {
+  const identity = await loadIdentity(config.identity);
+  const homeConfig: SpaceConfig = { ...config, space: identity.did() };
+  const manager = await loadManager(homeConfig);
+  const program = await getProgramFromFile(manager, entry);
+  const pieces = new PiecesController(manager);
+  await pieces.recreateDefaultPattern({ customProgram: program });
+}
+
+/**
+ * Reset the home pattern to the system default.
+ */
+export async function resetHomePattern(
+  config: Omit<SpaceConfig, "space">,
+): Promise<void> {
+  const identity = await loadIdentity(config.identity);
+  const homeConfig: SpaceConfig = { ...config, space: identity.did() };
+  const manager = await loadManager(homeConfig);
+  const pieces = new PiecesController(manager);
+  await pieces.recreateDefaultPattern();
+}
