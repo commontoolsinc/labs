@@ -125,7 +125,8 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // Compile and run a `Program`, returning the export default pattern.
+  // TODO(@mpsalisbury): No longer called — PatternManager now uses compile() +
+  // evaluate() directly. Remove from Engine and Harness interface.
   async run(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
@@ -228,8 +229,7 @@ export class Engine extends EventTarget implements Harness {
     return {};
   }
 
-  // Compile and run a `Program` with options, returning the compiled
-  // result and evaluated exports.
+  // TODO(@mpsalisbury): Only called by run() above — remove together with run().
   async process(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},

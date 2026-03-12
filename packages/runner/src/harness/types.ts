@@ -44,8 +44,7 @@ export interface CompileResult {
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
-  // Compiles and executes `source`, returning the default export
-  // of that module.
+  // TODO(@mpsalisbury): No longer called — remove from interface and Engine.
   run(
     source: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
