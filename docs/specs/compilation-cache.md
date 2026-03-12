@@ -1,6 +1,6 @@
 # Compilation Cache Design
 
-**Status**: Draft
+**Status**: Implemented
 **Author**: Mike
 **Date**: 2026-03-09
 
@@ -108,14 +108,16 @@ PatternManager.compileOrGetPattern(program)
   │
   ├─ in-memory LRU hit? → return cached Pattern
   │
-  └─ CompilationCache.get(programHash, fingerprint)
+  └─ compilePattern(program)
        │
-       ├─ persistent cache hit? → evaluate JsScript → Pattern
-       │
-       └─ cache miss → Engine.compile(program) → JsScript
-                          │
-                          ├─ CompilationCache.set(programHash, fingerprint, jsScript)
-                          └─ evaluate JsScript → Pattern
+       └─ CachedCompiler.get(programHash)
+            │
+            ├─ cache hit? → CompileResult → evaluateToPattern() → Pattern
+            │
+            └─ cache miss → Engine.compile(program) → CompileResult
+                              │
+                              ├─ CachedCompiler.set(programHash, CompileResult)
+                              └─ evaluateToPattern() → Pattern
 ```
 
 Two new components, all external to the compiler:
@@ -242,12 +244,18 @@ async function computeGitFingerprint(): Promise<string | undefined> {
 }
 ```
 
-**Disabling the cache**: If no fingerprint is available (e.g., `buildHash` not
-provided in `InitializationData`, or no git repo on the server), simply don't
-construct a `CachedCompiler`. All cache code paths are guarded by
+**Disabling the cache**: Two independent env flags control caching, both
+defaulting to `false` (off):
+
+- `COMPILATION_CACHE_SERVER=true` — enables server-side caching in toolshed.
+- `COMPILATION_CACHE_CLIENT=true` — enables client-side caching in the browser
+  (injected at build time via esbuild define in `felt.config.ts`).
+
+If no fingerprint is available (e.g., `buildHash` not provided in
+`InitializationData`, or no git repo on the server), the cache is also disabled
+even if the flag is set. All cache code paths are guarded by
 `if (this.cachedCompiler)` checks, so the absence of the object means no
-caching — identical to today's behavior. An environment variable
-(`COMPILATION_CACHE=off`) can also force this.
+caching — identical to today's behavior.
 
 #### CompilationCacheStorage (interface)
 
@@ -257,22 +265,28 @@ caching — identical to today's behavior. An environment variable
 import { JsScript } from "@commontools/js-compiler";
 
 interface CompilationCacheEntry {
-  /** Full JsScript including source maps. We cache source maps alongside
-   *  compiled JS — they're valuable for debugging and the space overhead
-   *  is manageable (see Cache Size Estimation). */
+  /** Content-derived id used as the filename prefix during compilation.
+   *  Must be passed to evaluate() so it can correctly strip the prefix
+   *  from export map keys. */
+  id: string;
+  /** Full JsScript including source maps. */
   jsScript: JsScript;
   fingerprint: string;
-  /** Timestamp for diagnostics / TTL eviction. */
+  /** Timestamp for diagnostics / count-based eviction. */
   cachedAt: number;
 }
 
 interface CompilationCacheStorage {
   get(programHash: string): Promise<CompilationCacheEntry | undefined>;
   set(programHash: string, entry: CompilationCacheEntry): Promise<void>;
-  /** Delete all entries not matching the given fingerprint. */
-  evictStale(currentFingerprint: string): Promise<void>;
+  /** Delete all entries not matching the given fingerprint. Returns number evicted. */
+  evictStale(currentFingerprint: string): Promise<number>;
+  /** Delete oldest entries until at most `keepCount` remain. Returns number evicted. */
+  evictOldest(keepCount: number): Promise<number>;
   /** Delete all entries. */
   clear(): Promise<void>;
+  /** Return the number of entries in the cache. */
+  count(): Promise<number>;
 }
 ```
 
@@ -314,10 +328,9 @@ class FileSystemCompilationCache implements CompilationCacheStorage {
   // Writes JSON files to a cache directory, keyed by programHash.
   // e.g., ${cacheDir}/${programHash}.json
   //
-  // cacheDir could be:
-  //   - An env var (COMPILATION_CACHE_DIR)
-  //   - A default like ${XDG_CACHE_HOME}/commontools/compiled/
-  //   - A temp dir relative to the toolshed data directory
+  // cacheDir is configured via COMPILATION_CACHE_FS_DIR env var
+  // (default: /tmp/ct-compilation-cache). In multi-process environments
+  // (e.g. common-cluster), use distinct directories per process.
   //
   // evictStale(): iterate directory, read fingerprint from each entry,
   //   delete non-matching files.
@@ -346,157 +359,168 @@ class CachedCompiler {
   constructor(
     private cache: CompilationCacheStorage,
     private fingerprint: string,
+    maxEntries?: number,        // default 500
+    evictionInterval?: number,  // default 50 (writes between count checks)
   ) {}
 
   /**
-   * Returns cached JsScript for the given program, or undefined on miss.
+   * Returns cached CompileResult for the given program, or undefined on miss.
    * Caller is responsible for compilation on miss and calling set().
+   * Tracks miss reasons: notFound vs fingerprintMismatch.
    */
-  async get(programHash: string): Promise<JsScript | undefined> {
+  async get(programHash: string): Promise<CompileResult | undefined> {
     const entry = await this.cache.get(programHash);
-    if (entry && entry.fingerprint === this.fingerprint) {
-      return entry.jsScript;
+    if (!entry) {
+      this.stats.misses++;
+      this.stats.missReasons.notFound++;
+      return undefined;
     }
-    return undefined;
+    if (entry.fingerprint !== this.fingerprint) {
+      this.stats.misses++;
+      this.stats.missReasons.fingerprintMismatch++;
+      return undefined;
+    }
+    this.stats.hits++;
+    return { id: entry.id, jsScript: entry.jsScript };
   }
 
-  async set(programHash: string, jsScript: JsScript): Promise<void> {
+  async set(programHash: string, result: CompileResult): Promise<void> {
+    // Logs errors internally via logger.warn — caller swallows rejection.
     await this.cache.set(programHash, {
-      jsScript,
+      id: result.id,
+      jsScript: result.jsScript,
       fingerprint: this.fingerprint,
       cachedAt: Date.now(),
     });
+    this.stats.writes++;
+    this.maybeEvictByCount();  // fire-and-forget count-based eviction
   }
 
-  /** Evict entries from previous compiler versions. */
-  async evictStale(): Promise<void> {
-    await this.cache.evictStale(this.fingerprint);
-  }
+  /** Evict entries from previous compiler versions. Call on startup. */
+  async evictStale(): Promise<void> { ... }
+
+  /** Get current stats snapshot. */
+  getStats(): Readonly<CachedCompilerStats> { ... }
+
+  /** Get the fingerprint in use. */
+  getFingerprint(): string { ... }
 }
 ```
 
 Construction differs per environment, but the `CachedCompiler` itself is
-environment-agnostic:
+environment-agnostic. Both are gated on opt-in env flags:
 
 ```typescript
 // Browser (in RuntimeProcessor.initialize):
+// Only constructed when COMPILATION_CACHE_CLIENT=true AND buildHash is present.
 const cachedCompiler = data.buildHash
   ? new CachedCompiler(new IDBCompilationCache(), data.buildHash)
   : undefined;
 
 // Server (in toolshed startup):
+// Only constructed when COMPILATION_CACHE_SERVER=true AND git fingerprint available.
 const fingerprint = await computeGitFingerprint();
 const cachedCompiler = fingerprint
-  ? new CachedCompiler(new FileSystemCompilationCache(cacheDir), fingerprint)
+  ? new CachedCompiler(
+      new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),
+      fingerprint,
+    )
   : undefined;
 ```
 
 ### Engine Refactor
 
-`Engine.process()` currently interleaves compilation and evaluation. To allow
+`Engine.process()` originally interleaved compilation and evaluation. To allow
 the cache to intercept compilation without infecting Engine internals, we split
-`process()` into two phases:
+`process()` into two phases that return a `CompileResult`:
 
 ```typescript
-// New method: compile only, no evaluation
+/** Result of compile(): the compiled JS and the id used for prefix stripping. */
+interface CompileResult {
+  /** Content-derived id used as the filename prefix during compilation.
+   *  Must be passed to evaluate() so it can correctly strip the prefix
+   *  from export map keys. */
+  id: string;
+  jsScript: JsScript;
+}
+
+// Compile only, no evaluation. Returns CompileResult (id + jsScript).
 async compile(
   program: RuntimeProgram,
   options?: TypeScriptHarnessProcessOptions,
-): Promise<JsScript> {
+): Promise<CompileResult> {
   const id = options?.identifier ?? computeId(program);
-  const filename = options?.filename ?? `${id}.js`;
-  const mappedProgram = pretransformProgram(program, id);
-  const resolver = new EngineProgramResolver(mappedProgram, this.ctRuntime.staticCache);
-  const { compiler } = await this.getInternals();
-  const resolvedProgram = await this.resolve(resolver);
-
-  const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
-    verbose: options?.verboseErrors,
-  });
-
-  return compiler.compile(resolvedProgram, {
-    filename,
-    noCheck: options?.noCheck,
-    injectedScript: INJECTED_SCRIPT,
-    runtimeModules: Engine.runtimeModuleNames(),
-    bundleExportAll: true,
-    getTransformedProgram: options?.getTransformedProgram,
-    diagnosticMessageTransformer,
-    beforeTransformers: (program) => {
-      const pipeline = new CommonToolsTransformerPipeline();
-      return {
-        factories: pipeline.toFactories(program),
-        getDiagnostics: () => pipeline.getDiagnostics(),
-      };
-    },
-  });
+  // ... resolve, transform, compile ...
+  return { id, jsScript };
 }
 
-// New method: evaluate pre-compiled JS.
-// `id` is the content-derived prefix from compile(); `files` are the
-// original source files for the export map.
+// Evaluate pre-compiled JS.
+// `id` and `files` are the values from compilation — pass them through.
 async evaluate(
   id: string,
   jsScript: JsScript,
   files: Source[],
 ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
-  const { isolate, runtimeExports, exportsCallback } = await this.getInternals();
-  const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
-  // ... handle exports mapping using id prefix (existing code from process()) ...
+  // ... execute jsScript, build export map, strip id prefix ...
 }
 
-// Existing method: refactored to use compile + evaluate
-async process(program, options) {
-  const { id, jsScript } = await this.compile(program, options);
-  if (!options?.noRun) {
-    const { main, exportMap } = await this.evaluate(id, jsScript, program.files);
-    return { output: jsScript, main, exportMap };
-  }
-  return { output: jsScript };
-}
+// TODO(@mpsalisbury): run() and process() are no longer called by
+// PatternManager — it now uses compile() + evaluate() directly.
+// Remove from Engine and Harness interface.
 ```
+
+The `id` field is critical: `compile()` derives a content-based id (via
+`refer()`) that becomes a filename prefix in the compiled output.
+`evaluate()` needs this same id to strip the prefix from export map keys.
+Caching `CompileResult` (not just `JsScript`) ensures the id travels with the
+compiled output and is never recomputed — avoiding mismatches if the hash
+function changes.
 
 This refactor is valuable independent of caching — it makes the compilation
 pipeline more testable and composable.
 
 ### Integration with PatternManager
 
-The cache integrates at `PatternManager.compilePattern()`, which currently calls
-`this.runtime.harness.run(program)`:
+The cache integrates at `PatternManager.compilePattern()`. Both the cache-hit
+and cache-miss paths use the same `evaluateToPattern()` helper, which calls
+`harness.evaluate()` and extracts the named export:
 
 ```typescript
 async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
   let program: RuntimeProgram = /* normalize input */;
-  const programHash = createRef({ src: program }, "pattern source").toString();
 
-  // Check persistent cache
-  if (this.cachedCompiler) {
-    const cached = await this.cachedCompiler.get(programHash);
-    if (cached) {
-      // Skip compilation, go straight to evaluation.
-      // cached is a CompileResult { id, jsScript }.
-      const { main } = await this.runtime.harness.evaluate(
-        cached.id, cached.jsScript, program.files
-      );
-      const pattern = main![program.mainExport ?? "default"] as Pattern;
-      pattern.program = program;
-      return pattern;
+  const { cachedCompiler } = this.runtime;
+  if (cachedCompiler) {
+    const programHash = createRef({ src: program }, "pattern source").toString();
+    let compileResult = await cachedCompiler.get(programHash);
+    if (!compileResult) {
+      compileResult = await this.runtime.harness.compile(program);
+      // Fire-and-forget cache write.
+      // CachedCompiler.set() logs errors internally via logger.warn,
+      // so the caller swallows the rejection silently.
+      cachedCompiler.set(programHash, compileResult).catch(() => {});
     }
+    return this.evaluateToPattern(compileResult, program);
   }
 
-  // Cache miss: full compile + evaluate
-  const { output, main } = await this.runtime.harness.process(program);
-  const pattern = main![program.mainExport ?? "default"] as Pattern;
+  // No persistent cache — compile and evaluate directly
+  const compileResult = await this.runtime.harness.compile(program);
+  return this.evaluateToPattern(compileResult, program);
+}
+
+private async evaluateToPattern(
+  { id, jsScript }: CompileResult,
+  program: RuntimeProgram,
+): Promise<Pattern> {
+  const { main } = await this.runtime.harness.evaluate(
+    id, jsScript, program.files,
+  );
+  const exportName = program.mainExport ?? "default";
+  if (main && !(exportName in main)) {
+    throw new Error(`No "${exportName}" export found in compiled pattern.`);
+  }
+  const pattern = main![exportName] as Pattern;
   pattern.program = program;
-
-  // Persist to cache (output is CompileResult { id, jsScript })
-  if (this.cachedCompiler) {
-    // Fire-and-forget: don't block on cache write.
-    // CachedCompiler.set() logs errors internally via logger.warn,
-    // so the caller swallows the rejection silently.
-    this.cachedCompiler.set(programHash, output).catch(() => {});
-  }
-
   return pattern;
 }
 ```
@@ -536,14 +560,15 @@ to the interface is safe. The `Harness` interface (`harness/types.ts`) gains
 
 ```typescript
 interface Harness extends EventTarget {
+  // TODO(@mpsalisbury): No longer called — remove from interface and Engine.
   run(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<Pattern>;
-  resolve(source: ProgramResolver): Promise<Program>;
 
   // Compile without evaluation — returns CompileResult { id, jsScript }
   compile(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<CompileResult>;
   // Evaluate pre-compiled JS — id and files from compile(), not recomputed
   evaluate(id: string, jsScript: JsScript, files: Source[]): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }>;
 
+  resolve(source: ProgramResolver): Promise<Program>;
   invoke(fn: () => any): any;
   getInvocation(source: string): HarnessedFunction;
 }
@@ -570,15 +595,17 @@ degradation, identical to today's behavior).
 
 ### Cache Lifecycle
 
-1. **Initialization**: When the runtime starts, compute the fingerprint string
-   and create `CachedCompiler` with the appropriate storage backend. If no
-   fingerprint is available, skip — no `CachedCompiler` means no caching.
-2. **Eager eviction**: On startup, call `evictStale()` to clear entries from
-   previous compiler versions. This is async and non-blocking — compilation can
-   proceed while eviction runs.
+1. **Initialization**: The `CachedCompiler` is created externally (in toolshed
+   startup or the runtime worker) and passed to `Runtime` via the
+   `cachedCompiler` option. `Runtime` stores it and makes it available to
+   `PatternManager` via `this.runtime.cachedCompiler`.
+2. **Eager eviction**: The `Runtime` constructor fires `evictStale()` as a
+   fire-and-forget promise. Errors are logged via `console.warn` but do not
+   block startup. This clears entries from previous compiler versions.
 3. **Reads**: On every `compilePattern()` call, check persistent cache after
    in-memory miss.
 4. **Writes**: After successful compilation, write to cache (fire-and-forget).
+   `CachedCompiler.set()` logs write errors internally via `logger.warn`.
 5. **Size management**: See [Eviction Strategy](#eviction-strategy).
 
 ### Eviction Strategy
@@ -589,14 +616,12 @@ we manage our own. The strategy is the same for both backends:
 - **Fingerprint-based eviction**: On startup, delete all entries whose
   fingerprint doesn't match the current one. This is the primary invalidation
   mechanism.
-- **Count-based cap**: If the cache exceeds N entries (default 500, configurable
-  via `COMPILATION_CACHE_MAX_ENTRIES`), delete the oldest by `cachedAt`. This
-  prevents unbounded growth from accumulating many distinct patterns over time.
-  Every count-based eviction is logged at `warn` level with the number of entries
-  evicted and the current cap. A per-session counter tracks total count-based
-  evictions; if it exceeds a threshold (e.g., 50), log a prominent warning
-  suggesting the cap may need to be increased. This makes it easy to notice when
-  the working set has outgrown the cache.
+- **Count-based cap**: `CachedCompiler` checks the entry count every N writes
+  (default 50, configurable via constructor). If the cache exceeds the max
+  entries (default 500, configurable via constructor), it first tries stale
+  eviction, then evicts oldest entries by `cachedAt` via `evictOldest()`.
+  Every count-based eviction is logged at `warn` level with the number of
+  entries evicted and the current cap.
 - **Manual clear**: Expose a `clearCompilationCache()` for debugging. Could be
   wired to a dev tools button in the browser, or a CLI command for the server.
 
@@ -605,35 +630,49 @@ freshness. If the fingerprint matches, the entry is valid regardless of age.
 
 ### Disabling the Cache
 
-The cache is disabled by not constructing a `CachedCompiler`:
+The cache is disabled by not constructing a `CachedCompiler`. Both environments
+require an explicit opt-in env flag (defaulting to `false`):
 
-- **Browser**: If `InitializationData.buildHash` is absent, no cache is created.
-  This happens naturally if the Felt manifest hasn't been set up yet.
-- **Server**: Set `COMPILATION_CACHE=off` in the environment to skip cache
-  construction.
+- **Browser**: Set `COMPILATION_CACHE_CLIENT=true` to enable. The flag is
+  injected at build time via esbuild define in `felt.config.ts`. Even when
+  enabled, if `InitializationData.buildHash` is absent (no build manifest),
+  no cache is created.
+- **Server**: Set `COMPILATION_CACHE_SERVER=true` to enable. Even when enabled,
+  if no git fingerprint is available, no cache is created. The cache directory
+  is configurable via `COMPILATION_CACHE_FS_DIR` (default:
+  `/tmp/ct-compilation-cache`).
 - **Tests**: Don't provide a `CachedCompiler` to the Runtime — tests run with
   no persistent cache by default (same as today).
 
 ### Observability
 
-Cache state must not be invisible. The `CachedCompiler` tracks the following
-stats and exposes them via `RuntimeTelemetry` events:
+Cache state must not be invisible. `CachedCompiler` tracks stats internally
+and exposes them via `getStats()`:
 
-- **Hits / misses / miss reason** (fingerprint mismatch vs not found)
-- **Time saved** (estimated: hits × average compilation time)
-- **Current entry count** and **storage size estimate**
-- **Count-based evictions** this session (with warning if excessive)
-- **Fingerprint** in use (for debugging "which build am I running?")
+```typescript
+interface CachedCompilerStats {
+  hits: number;
+  misses: number;
+  missReasons: { notFound: number; fingerprintMismatch: number };
+  writes: number;
+  writeErrors: number;
+  countEvictions: number;
+}
+```
 
-These stats are reported as `RuntimeTelemetryMarker`s so they're available to
-any subscriber — the existing scheduler inspector UI, browser console, or future
-dashboards. On each cache hit or miss, emit a telemetry event. On startup (after
-eviction), emit a summary event with entry count and fingerprint.
-
-Additionally, log a one-line summary at `info` level on startup:
+On startup, `evictStale()` logs a one-line summary at `info` level:
 ```
 [compilation-cache] fingerprint=a1b2c3 entries=142 evicted=38
 ```
+
+Both client and server log whether the cache is enabled or disabled at startup:
+```
+Compilation cache enabled (server), fingerprint=a1b2c3d4
+Compilation cache disabled (client): COMPILATION_CACHE_CLIENT not set
+```
+
+Future work: expose stats via `RuntimeTelemetryMarker` events for the scheduler
+inspector UI and dashboards.
 
 ### Error Caching
 
@@ -650,41 +689,38 @@ observability stats above so growth can be monitored.
 
 ## Implementation Plan
 
-### Phase 1: Engine Refactor (no caching yet)
+All phases are complete.
+
+### Phase 1: Engine Refactor (no caching yet) -- DONE
 
 1. Split `Engine.process()` into `compile()` + `evaluate()`.
-2. Update `Harness` interface.
-3. Refactor `process()` and `run()` to use the new methods.
-4. Verify all existing tests pass — this is a pure refactor.
+2. Update `Harness` interface with `CompileResult` type.
+3. `run()` and `process()` remain but are marked for removal (TODO).
+4. All existing tests pass.
 
-### Phase 2: Cache Infrastructure
+### Phase 2: Cache Infrastructure -- DONE
 
-1. Define `CompilationCacheStorage` interface.
-2. Implement `CachedCompiler` (takes a storage backend + fingerprint string).
-3. Implement `IDBCompilationCache` (browser).
-4. Implement `FileSystemCompilationCache` (server / Deno).
-5. Implement `MemoryCompilationCache` (for tests).
-6. Implement `computeGitFingerprint()` for server-side fingerprint.
+1. `CompilationCacheStorage` interface with `evictStale`, `evictOldest`, `count`.
+2. `CachedCompiler` with stats tracking, count-based eviction, miss reasons.
+3. `IDBCompilationCache` (browser).
+4. `FileSystemCompilationCache` (server / Deno).
+5. `MemoryCompilationCache` (for tests).
+6. `computeGitFingerprint()` for server-side fingerprint.
 
-After Phase 2, the server has a working persistent cache (fingerprint via git).
-The browser has the `IDBCompilationCache` implementation ready but no
-fingerprint source yet — caching is inactive in the browser until Phase 3.
+### Phase 3: Browser Fingerprint -- DONE
 
-### Phase 3: Browser Fingerprint
-
-1. Add post-build manifest generation to Felt's `Builder.build()`.
-2. Add `buildHash` field to `InitializationData`.
+1. Post-build manifest generation in Felt's `Builder.build()`.
+2. `buildHash` field on `InitializationData`.
 3. Shell reads manifest at startup, passes hash to worker.
 
-After Phase 3, the browser cache is active — the build manifest provides the
-fingerprint that was missing.
+### Phase 4: Integration -- DONE
 
-### Phase 4: Integration
-
-1. Wire `CachedCompiler` into `PatternManager` (optional dependency).
-2. Integrate cache checks into `compilePattern()`.
-3. Add startup eviction.
-4. Add logging/metrics (cache hit rate, time saved).
+1. `CachedCompiler` wired into `PatternManager` via `Runtime.cachedCompiler`.
+2. `compilePattern()` uses unified `compile()` + `evaluateToPattern()` flow.
+3. Startup eviction via fire-and-forget `evictStale()` in Runtime constructor.
+4. Opt-in env flags: `COMPILATION_CACHE_SERVER`, `COMPILATION_CACHE_CLIENT`.
+5. Startup logging on both client and server.
+6. Integration tests for cache hit/miss and fingerprint mismatch.
 
 ## File Layout
 
