@@ -1,4 +1,5 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
+import type { Immutable } from "@commontools/utils/types";
 import type {
   StorableNativeObject,
   StorableValue,
@@ -131,6 +132,18 @@ export function nativeFromStorableValue(
  * @param value - An already-valid `StorableValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
  */
+export function cloneIfNecessary(
+  value: StorableValue,
+  options?: CloneOptions & { frozen?: true },
+): Immutable<StorableValue>;
+export function cloneIfNecessary(
+  value: StorableValue,
+  options: CloneOptions & { frozen: false },
+): StorableValue;
+export function cloneIfNecessary(
+  value: StorableValue,
+  options?: CloneOptions,
+): StorableValue;
 export function cloneIfNecessary(
   value: StorableValue,
   options?: CloneOptions,
