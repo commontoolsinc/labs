@@ -124,6 +124,91 @@ class SingleSessionFactory implements SessionFactory {
   }
 }
 
+class RejectThenSucceedTransport implements MemoryV2Client.Transport {
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  async send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      commit?: { localSeq?: number };
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond({
+          type: "hello.ok",
+          protocol: "memory/v2",
+        });
+        return;
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:reject-then-succeed",
+            serverSeq: 0,
+          },
+        });
+        return;
+      case "transact": {
+        const localSeq = message.commit?.localSeq ?? -1;
+        if (localSeq === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          this.#respond({
+            type: "response",
+            requestId: message.requestId!,
+            error: {
+              name: "ConflictError",
+              message: "synthetic conflict",
+            },
+          });
+          return;
+        }
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            seq: localSeq,
+            hash: `commit:${localSeq}`,
+            branch: "",
+            facts: [{
+              hash: `fact:${localSeq}:0`,
+              id: `of:doc:${localSeq}`,
+              valueRef: `value:${localSeq}:0`,
+              parent: null,
+              branch: "",
+              seq: localSeq,
+              commitSeq: localSeq,
+              factType: "set",
+            }],
+          },
+        });
+        return;
+      }
+      default:
+        throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+  }
+
+  async close(): Promise<void> {
+    this.#closeReceiver();
+  }
+
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
+  }
+}
+
 class TestStorageManager extends V2StorageManager {
   static create(options: V2Options, sessionFactory: SessionFactory) {
     return new TestStorageManager(options, sessionFactory);
@@ -416,6 +501,57 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
 
     assertEquals(revertNotifications.length, 1);
     assertEquals(commitNotifications.length >= 2, true);
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("memory v2 runner keeps later independent pending commits after an earlier conflict", async () => {
+  const transport = new RejectThenSucceedTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-reject-then-succeed"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const notifications = new NotificationRecorder();
+  const provider = storageManager.open(space);
+  const rejectedUri = `of:memory-v2-rejected-${crypto.randomUUID()}` as URI;
+  const confirmedUri = `of:memory-v2-confirmed-${crypto.randomUUID()}` as URI;
+
+  storageManager.subscribe(notifications);
+
+  try {
+    const rejected = provider.send([{
+      uri: rejectedUri,
+      value: { value: { rejected: 1 } },
+    }]);
+    const confirmed = provider.send([{
+      uri: confirmedUri,
+      value: { value: { confirmed: 2 } },
+    }]);
+
+    const rejectedResult = await rejected;
+    const confirmedResult = await confirmed;
+    await storageManager.synced();
+
+    assertEquals(rejectedResult.error?.name, "ConflictError");
+    assertEquals(confirmedResult, { ok: {} });
+    assertEquals(provider.get(rejectedUri), undefined);
+    assertEquals(provider.get(confirmedUri), { value: { confirmed: 2 } });
+
+    const revertChanges = notificationChanges(
+      notifications.notifications,
+      "revert",
+    );
+    assertEquals(
+      revertChanges.some((change) => change.address.id === rejectedUri),
+      true,
+    );
+    assertEquals(
+      revertChanges.some((change) => change.address.id === confirmedUri),
+      false,
+    );
   } finally {
     await storageManager.close();
   }
