@@ -24,6 +24,7 @@ pair of files:
 | Directory | What it tests |
 |---|---|
 | `closures/` | Closure extraction: map/filter/flatMap to WithPattern, computed, derive, handler, action |
+| `kitchensink/` | Deeply nested cross-feature regressions spanning closures, JSX, helper branches, and computed maps |
 | `jsx-expressions/` | JSX expression handling: derive wrapping, conditionals, method chains |
 | `schema-injection/` | Schema argument injection for Cell.of, derive, lift, etc. |
 | `schema-transform/` | Schema generation from TypeScript types |

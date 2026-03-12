@@ -53,6 +53,148 @@ const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => l
 );
 
 Deno.test(
+  "Capability-first: direct computed result map inside computed stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => inner.map((item) => item.toUpperCase()));
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "=> inner.map((item) => item.toUpperCase())");
+    assert(!output.includes("inner.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: direct pattern property access map inside computed stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) =>
+  computed(() => state.items.map((item) => item.toUpperCase()))
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "=> state.items.map((item) => item.toUpperCase())");
+    assert(!output.includes("state.items.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: direct derive callback parameter map stays plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) =>
+  derive({ items: state.items }, ({ items }) => items.map((item) => item.toUpperCase()))
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "({ items }) => items.map((item) => item.toUpperCase())");
+    assert(!output.includes("items.mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: local computed alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = computed(() => inner);
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: local lifted alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, lift, pattern } from "commontools";
+const passthrough = lift((items: string[]) => items);
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = passthrough(inner);
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: local wish result alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, Default, pattern, wish } from "commontools";
+const p = pattern<Record<string, never>>(() => {
+  return computed(() => {
+    const foo = wish<Default<string[], []>>({ query: "#items" }).result!;
+    return foo.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "foo.mapWithPattern(");
+    assert(!output.includes("return foo.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
+  "Capability-first: transformed filter output alias inside computed regains mapWithPattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern<{ items: string[] }>((state) => {
+  const inner = computed(() => state.items);
+  return computed(() => {
+    const foo = computed(() => inner);
+    const filtered = foo.filter((item) => item.length > 1);
+    return filtered.map((item) => item.toUpperCase());
+  });
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "foo.filterWithPattern(");
+    assertStringIncludes(output, "filtered.mapWithPattern(");
+    assert(!output.includes("return filtered.map((item) => item.toUpperCase())"));
+  },
+);
+
+Deno.test(
   "Capability-first: nested block shadowing does not leak opaque alias roots",
   async () => {
     const source = `/// <cts-enable />

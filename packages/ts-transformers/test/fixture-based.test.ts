@@ -65,6 +65,11 @@ const configs: FixtureConfig[] = [
     ],
   },
   {
+    directory: "kitchensink",
+    describe: "Nested Kitchensinks",
+    formatTestName: (name) => `exercises ${name.replace(/-/g, " ")}`,
+  },
+  {
     directory: "schema-injection",
     describe: "Schema Injection with Literal Widening",
     formatTestName: (name) => {

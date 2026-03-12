@@ -89,6 +89,120 @@ export function buildCapturePropertyAssignments(
   return properties;
 }
 
+function getEnclosingFunctionLike(
+  node: ts.Node,
+): ts.FunctionLikeDeclaration | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current) ||
+      ts.isMethodDeclaration(current) ||
+      ts.isGetAccessorDeclaration(current) ||
+      ts.isSetAccessorDeclaration(current) ||
+      ts.isConstructorDeclaration(current)
+    ) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function createsReactiveCollectionInPlace(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const current = unwrapExpression(expression);
+
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    return createsReactiveCollectionInPlace(current.expression, context);
+  }
+
+  if (!ts.isCallExpression(current)) {
+    return false;
+  }
+
+  const currentType = getTypeAtLocationWithFallback(
+    current,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  if (
+    classifyReactiveReceiverKind(currentType, context.checker) !== "plain"
+  ) {
+    return true;
+  }
+
+  if (shouldTransformArrayMethod(current, context)) {
+    return true;
+  }
+
+  const callKind = detectCallKind(current, context.checker);
+  if (callKind?.kind === "derive" || callKind?.kind === "wish") {
+    return true;
+  }
+
+  return callKind?.kind === "builder" &&
+    (
+      callKind.builderName === "computed" ||
+      callKind.builderName === "lift" ||
+      callKind.builderName === "handler" ||
+      callKind.builderName === "action"
+    );
+}
+
+function isLocalReactiveRewrapAlias(
+  expression: ts.Expression,
+  scope: ts.FunctionLikeDeclaration,
+  context: TransformationContext,
+  seenSymbols: Set<ts.Symbol> = new Set(),
+): boolean {
+  const current = unwrapExpression(expression);
+
+  if (createsReactiveCollectionInPlace(current, context)) {
+    return true;
+  }
+
+  if (!ts.isIdentifier(current)) {
+    return false;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(current);
+  if (!symbol || seenSymbols.has(symbol)) {
+    return false;
+  }
+  seenSymbols.add(symbol);
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
+      continue;
+    }
+
+    if (getEnclosingFunctionLike(declaration) !== scope) {
+      continue;
+    }
+
+    if (
+      isLocalReactiveRewrapAlias(
+        declaration.initializer,
+        scope,
+        context,
+        seenSymbols,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Check if an array method call should be transformed to its WithPattern variant.
  *
@@ -97,7 +211,9 @@ export function buildCapturePropertyAssignments(
  * 2. Inside safe wrappers (computed/derive/etc), OpaqueRef gets auto-unwrapped
  *    to a plain array, so we should NOT transform OpaqueRef method calls there.
  *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
- * 3. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
+ * 3. Local aliases created by nested computed()/derive() calls inside the current
+ *    compute callback become opaque again and should transform.
+ * 4. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
  */
 function shouldTransformArrayMethod(
   methodCall: ts.CallExpression,
@@ -130,6 +246,15 @@ function shouldTransformArrayMethod(
 
   if (
     contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
+  ) {
+    return true;
+  }
+
+  const enclosingFunction = getEnclosingFunctionLike(methodCall);
+  if (
+    contextInfo.kind === "compute" &&
+    enclosingFunction &&
+    isLocalReactiveRewrapAlias(mapTarget, enclosingFunction, context)
   ) {
     return true;
   }
