@@ -188,6 +188,16 @@ if [ "$RESULT" != "0" ]; then
   error "Piece2 value should be 0 before linking, got: $RESULT"
 fi
 
+# Linking from a nonexistent source path should fail
+if ct piece link $SPACE_ARGS $PIECE_ID/nonexistent $PIECE_ID2/value 2>/dev/null; then
+  error "Linking from nonexistent source path should have failed"
+fi
+
+# Linking to a nonexistent target path should fail
+if ct piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/nonexistent 2>/dev/null; then
+  error "Linking to nonexistent target path should have failed"
+fi
+
 # Link piece1's output value to piece2's input value
 ct piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/value
 
@@ -228,7 +238,13 @@ echo '42' | ct piece set $SPACE_ARGS --piece $INVENTED_ID value
 PIECE_ID3=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
 echo "Created third piece: $PIECE_ID3"
 
-ct piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value
+# Linking from invented piece should fail without --allow-non-existing
+if ct piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
+  error "Linking from invented piece should have failed without --allow-non-existing"
+fi
+
+# Now link with --allow-non-existing
+ct piece link $SPACE_ARGS --allow-non-existing $INVENTED_ID/value $PIECE_ID3/value
 
 # Read back piece3's input value - should be 42 from the invented piece
 RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID3 value --input)
