@@ -395,6 +395,13 @@ export class SpaceSession {
       if (this.#flushing === flushing) {
         this.#flushing = null;
       }
+      if (
+        this.client.isConnected() &&
+        this.#outstandingCommits.size > 0 &&
+        this.#flushing === null
+      ) {
+        void this.flushOutstandingCommits();
+      }
     });
     this.#flushing = flushing;
 
