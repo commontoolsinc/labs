@@ -159,10 +159,9 @@ export function deepCloneIfNecessary(
 export function isStorableValue(
   value: unknown,
 ): value is StorableValueLayer {
-  if (currentConfig.richStorableValues) {
-    return isRichStorableValue(value);
-  }
-  return isStorableValueLegacy(value);
+  return currentConfig.richStorableValues
+    ? isRichStorableValue(value)
+    : isStorableValueLegacy(value);
 }
 
 /**
@@ -180,10 +179,9 @@ export function isStorableValue(
 export function canBeStored(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
-  if (currentConfig.richStorableValues) {
-    return canBeStoredRich(value);
-  }
-  return canBeStoredLegacy(value);
+  return currentConfig.richStorableValues
+    ? canBeStoredRich(value)
+    : canBeStoredLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,10 +206,9 @@ export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  if (currentConfig.richStorableValues) {
-    return toRichStorableValue(value, freeze);
-  }
-  return shallowStorableFromNativeValueLegacy(value);
+  return currentConfig.richStorableValues
+    ? toRichStorableValue(value, freeze)
+    : shallowStorableFromNativeValueLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,8 +226,7 @@ export function shallowStorableFromNativeValue(
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
-  if (currentConfig.richStorableValues) {
-    return deepEqual(a, b);
-  }
-  return JSON.stringify(a) === JSON.stringify(b);
+  return currentConfig.richStorableValues
+    ? deepEqual(a, b)
+    : JSON.stringify(a) === JSON.stringify(b);
 }
