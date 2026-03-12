@@ -16,6 +16,7 @@ import {
   type PatchOp,
   type Reference,
   type SessionId,
+  isSourceLink,
 } from "../v2.ts";
 
 const PRAGMAS = `
@@ -922,7 +923,7 @@ const applyPatchDocument = (
 ): EntityDocument => {
   return {
     ...document,
-    value: applyPatch(document.value, patches),
+    value: applyPatch(document.value ?? {}, patches),
   };
 };
 
@@ -940,7 +941,13 @@ const isEntityDocument = (
   return value !== null &&
     typeof value === "object" &&
     !Array.isArray(value) &&
-    Object.hasOwn(value, "value");
+    (
+      Object.hasOwn(value, "value") ||
+      (
+        Object.hasOwn(value, "source") &&
+        isSourceLink((value as { source?: unknown }).source)
+      )
+    );
 };
 
 const hashBlob = (value: Uint8Array): Reference => {
