@@ -1091,14 +1091,10 @@ async function main() {
           // Benchmark artifacts may not exist yet
         }
       });
-      // Re-sort benchmark timelines since concurrent artifact fetches may have
+      // Re-sort all timelines since concurrent artifact fetches may have
       // appended samples out of chronological order.
-      for (const [name, timeline] of timelines) {
-        if (name.startsWith("bench:")) {
-          timeline.samples.sort((a, b) =>
-            a.createdAt.localeCompare(b.createdAt)
-          );
-        }
+      for (const timeline of timelines.values()) {
+        timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       }
 
       console.log(

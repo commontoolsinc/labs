@@ -10,6 +10,7 @@ jobs:
     name: "Check for Performance Regressions"
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
       actions: read
     steps:
