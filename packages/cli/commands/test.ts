@@ -53,6 +53,11 @@ export const test = new Command()
     "Number of per-step scheduler action deltas to print in verbose mode.",
     { default: 10 },
   )
+  .option(
+    "--scheduler-mode <mode:string>",
+    "Scheduler mode for test runtimes: default, push, or pull.",
+    { default: "default" },
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -126,6 +131,7 @@ export const test = new Command()
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,
+      schedulerMode: options.schedulerMode,
     });
 
     // Exit with error code if any tests failed
