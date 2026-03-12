@@ -303,7 +303,7 @@ export class Runner {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRaw({
+    processCell.withTx(tx).setRawUntyped({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: patternId || "unknown",
       resultRef: pattern.resultSchema !== undefined
@@ -318,7 +318,7 @@ export class Runner {
         }),
       internal,
       ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
-    });
+    } as StorableValue);
     if (argument) {
       diffAndUpdate(
         this.runtime,
@@ -342,7 +342,7 @@ export class Runner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRaw(result);
+      resultCell.withTx(tx).setRawUntyped(result as StorableValue);
     }
 
     // [unsafe closures:] For patterns from closures, add a materialize factory

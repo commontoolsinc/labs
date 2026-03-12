@@ -5,10 +5,9 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
+  deepCloneIfNecessary,
   isArrayIndexPropertyName,
-  nativeFromStorableValue,
   shallowStorableFromNativeValue,
-  storableFromNativeValue,
 } from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -185,7 +184,26 @@ declare module "@commontools/api" {
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
-    setRaw(value: any): void;
+    /**
+     * Reads the cell's raw storable value as `Immutable<StorableValue>`, bypassing the
+     * cell's type parameter `T`. Use this when the stored data may not
+     * conform to `T` (e.g., `SigilLink` references, stream markers).
+     *
+     * Prefer `getRaw()` when the value is expected to match `T`.
+     */
+    getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
+    /** Read the cell's raw storable value as a mutable deep copy. */
+    getRawUntypedMutable(options?: IReadOptions): StorableValue;
+    setRaw(value: (NoInfer<T> & StorableValue) | undefined): void;
+    /**
+     * Sets the raw cell value to any `StorableValue`, bypassing the cell's
+     * type parameter `T`. Use this when writing pre-formed storable data
+     * (e.g., `SigilLink` references, stream markers) that is valid at the
+     * storage layer but does not conform to the cell's schema type.
+     *
+     * Prefer `setRaw()` when the value matches `T`.
+     */
+    setRawUntyped(value: StorableValue): void;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -289,7 +307,10 @@ const cellMethods = new Set<
   "getAsLink",
   "getAsWriteRedirectLink",
   "getRaw",
+  "getRawUntyped",
+  "getRawUntypedMutable",
   "setRaw",
+  "setRawUntyped",
   "getSourceCell",
   "setSourceCell",
   "getArgumentCell",
@@ -1177,27 +1198,46 @@ export class CellImpl<T extends StorableValue>
   }
 
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    return this.getRawUntyped(options) as Immutable<T> | undefined;
+  }
 
+  getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
+    return this._getRawUntyped(options, true) as Immutable<StorableValue>;
+  }
+
+  getRawUntypedMutable(options?: IReadOptions): StorableValue {
+    return this._getRawUntyped(options, false);
+  }
+
+  private _getRawUntyped(
+    options: IReadOptions | undefined,
+    frozen: boolean,
+  ): StorableValue {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
-    // Resolve all links ON THE WAY to the target, but don't resolve the final link
+    // Resolve all links ON THE WAY to the target, but don't resolve the final
+    // link.
     const value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
     );
-    return nativeFromStorableValue(value as StorableValue) as
-      | Immutable<T>
-      | undefined;
+    // Deep-copy with desired frozenness, without native unwrapping — getRaw()
+    // and getRawUntyped() return storable-layer values, not native ("wild
+    // west") values.
+    return deepCloneIfNecessary(value, frozen);
   }
 
-  setRaw(value: any): void {
+  setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
+    this.setRawUntyped(value);
+  }
+
+  setRawUntyped(value: StorableValue): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = storableFromNativeValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

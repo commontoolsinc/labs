@@ -341,7 +341,7 @@ export function runSyncLoop(
             if (canonicalId) {
               const canonicalCell = CellConstructor.of(canonicalId);
               const resolved = tempCell.resolveAsCell();
-              resolved.setRaw(
+              resolved.setRawUntyped(
                 canonicalCell.getAsWriteRedirectLink({ base: resolved }),
               );
               tempRefs.delete(editIdx);

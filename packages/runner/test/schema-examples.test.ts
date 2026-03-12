@@ -7,6 +7,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import { SigilLink } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -137,10 +138,10 @@ describe("Schema - Examples", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      cell.withTx(tx).setRaw({
+      cell.withTx(tx).setRawUntyped({
         value: "root",
         current: innerCell.getAsLink(),
-      });
+      } as StorableValue);
 
       tx.commit();
       tx = runtime.edit();

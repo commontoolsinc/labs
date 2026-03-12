@@ -1,3 +1,4 @@
+import type { StorableValue } from "@commontools/memory/interface";
 import { isRecord } from "@commontools/utils/types";
 import {
   DEFAULT_MODEL_NAME,
@@ -1987,14 +1988,16 @@ export function llmDialog(
       //
       // We are carrying the existing pending state over, in case the result
       // cell was already loaded. We don't want to overwrite it.
-      result.setRaw({
+      // Stream markers ({$stream: true}) don't match the schema type, so use
+      // setRawUntyped to bypass T.
+      result.setRawUntyped({
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
         pinCell: { $stream: true },
         unpinAllCells: { $stream: true },
         pinnedCells: [],
-      });
+      } as StorableValue);
 
       // Declare `addMessage` handler and register
       createHandler<BuiltInLLMMessage>(

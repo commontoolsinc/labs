@@ -6,6 +6,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -421,14 +422,6 @@ describe("Schema - AnyOf Support", () => {
           ],
         });
 
-        const styleCell = runtime.getCell<{ color: string }>(
-          space,
-          "should work for the vdom schema with $ref 2",
-          undefined,
-          tx,
-        );
-        styleCell.setRaw({ color: "red" });
-
         const innerTextCell = runtime.getCell<{ type: string; value: string }>(
           space,
           "should work for the vdom schema with $ref 4",
@@ -461,18 +454,18 @@ describe("Schema - AnyOf Support", () => {
           undefined,
           tx,
         );
-        withLinks.setRaw({
+        withLinks.setRawUntyped({
           type: "vnode",
           name: "div",
           props: {
-            style: styleCell,
+            style: { color: "red" },
           },
           children: [
             { type: "text", value: "single" },
             childrenArrayCell.getAsLink(),
             "or just text",
           ],
-        });
+        } as unknown as StorableValue);
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",

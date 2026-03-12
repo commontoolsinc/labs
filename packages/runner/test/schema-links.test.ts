@@ -7,6 +7,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createDataCellURI } from "../src/link-utils.ts";
@@ -989,7 +990,7 @@ describe("Schema - Link Resolution", () => {
         cellDSchema, // same as cellD
         tx,
       );
-      cellC.setRaw(cellD.getAsLink());
+      cellC.setRawUntyped(cellD.getAsLink());
 
       // of:baedreifyl2zipph2s75lxkbi6tttr4euo5bsmt53xwznkoc43tk5jqayse
       const cellB = runtime.getCell<
@@ -1003,7 +1004,9 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellB.set({ foo: { baz: { bar: { text: "initial" } } } });
       // Then set up the link
-      cellB.key("foo").setRaw(cellC.key("baz").getAsWriteRedirectLink());
+      cellB.key("foo").setRawUntyped(
+        cellC.key("baz").getAsWriteRedirectLink(),
+      );
 
       // of:baedreib4ycxtyccm5w2jmi2l6kx6hehjsnkwq6tu4end2kyaz7mzmmhtru
       const cellA = runtime.getCell<{ text: string }>(
@@ -1013,7 +1016,7 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
       // Then set up the link
-      cellA.setRaw(
+      cellA.setRawUntyped(
         cellB.key("foo").key("bar").getAsWriteRedirectLink(),
       );
 
@@ -1050,7 +1053,7 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
       cellC.set({ value: { baz: { text: "dummy" } } });
-      cellC.key("value").setRaw(cellD.key("value").getAsLink());
+      cellC.key("value").setRawUntyped(cellD.key("value").getAsLink());
 
       const cellB = runtime.getCell<
         { label: { bar: { baz: { text: string } } } }
@@ -1064,7 +1067,7 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellB.set({ label: { bar: { baz: { text: "initial" } } } });
       // Then set up the link
-      cellB.key("label").key("bar").setRaw(
+      cellB.key("label").key("bar").setRawUntyped(
         cellC.key("value").getAsLink(),
       );
 
@@ -1079,7 +1082,7 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellA.set({ foo: { bar: { baz: { text: "initial" } } } });
       // Then set up the link
-      cellA.key("foo").setRaw(
+      cellA.key("foo").setRawUntyped(
         cellB.key("label").getAsWriteRedirectLink(),
       );
 
@@ -1181,7 +1184,7 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
       cellC.set({ value: { baz: { text: "dummy" } } });
-      cellC.key("value").setRaw(cellD.key("value").getAsLink());
+      cellC.key("value").setRawUntyped(cellD.key("value").getAsLink());
 
       // of:baedreifyl2zipph2s75lxkbi6tttr4euo5bsmt53xwznkoc43tk5jqayse
       const cellB = runtime.getCell<
@@ -1196,7 +1199,7 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellB.set({ label: { bar: { baz: { text: "initial" } } } });
       // Then set up the link
-      cellB.key("label").key("bar").setRaw(
+      cellB.key("label").key("bar").setRawUntyped(
         cellC.key("value").getAsLink(),
       );
 
@@ -1212,7 +1215,7 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellA.set({ foo: { bar: { baz: { text: "initial" } } } });
       // Then set up the link
-      cellA.key("foo").setRaw(
+      cellA.key("foo").setRawUntyped(
         cellB.key("label").getAsWriteRedirectLink(),
       );
 
@@ -1296,7 +1299,7 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
       //const cellCLink = cellC.getAsNormalizedFullLink();
-      cellC.setRaw(cellD.getAsLink());
+      cellC.setRawUntyped(cellD.getAsLink());
 
       // of:baedreifyl2zipph2s75lxkbi6tttr4euo5bsmt53xwznkoc43tk5jqayse
       const cellB = runtime.getCell<
@@ -1310,7 +1313,9 @@ describe("Schema - Link Resolution", () => {
       // Set a valid starter value
       cellB.set({ foo: { baz: { bar: { text: "initial" } } } });
       // Then set up the link
-      cellB.key("foo").setRaw(cellC.key("baz").getAsWriteRedirectLink());
+      cellB.key("foo").setRawUntyped(
+        cellC.key("baz").getAsWriteRedirectLink(),
+      );
 
       // of:baedreib4ycxtyccm5w2jmi2l6kx6hehjsnkwq6tu4end2kyaz7mzmmhtru
       const cellA = runtime.getCell<{ text: string }>(
@@ -1320,7 +1325,7 @@ describe("Schema - Link Resolution", () => {
         tx,
       );
       // Then set up the link
-      cellA.setRaw(
+      cellA.setRawUntyped(
         cellB.key("foo").key("bar").getAsWriteRedirectLink(),
       );
 
@@ -1374,7 +1379,7 @@ describe("Schema - Link Resolution", () => {
       );
       const cellBLink = cellB.getAsNormalizedFullLink();
       // cellB's argument.system points to cellC's internal.__#1
-      cellB.setRaw({
+      cellB.setRawUntyped({
         "argument": {
           "system": {
             "$alias": {
@@ -1383,7 +1388,7 @@ describe("Schema - Link Resolution", () => {
             },
           },
         },
-      });
+      } as StorableValue);
 
       // data cell's system points to cellB's argument.system
       const dataCellURI = createDataCellURI({
