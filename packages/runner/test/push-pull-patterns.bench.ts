@@ -54,10 +54,42 @@ const numberElementArgumentSchema = {
   additionalProperties: false,
 } as const satisfies JSONSchema;
 
+const numberObjectSchema = {
+  type: "object",
+  properties: {
+    value: numberSchema,
+  },
+  required: ["value"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
+const numberObjectElementArgumentSchema = {
+  type: "object",
+  properties: {
+    element: numberObjectSchema,
+  },
+  required: ["element"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
 const numberListInputSchema = {
   type: "object",
   properties: {
     values: numberArraySchema,
+  },
+  required: ["values"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
+const numberObjectArraySchema = {
+  type: "array",
+  items: numberObjectSchema,
+} as const satisfies JSONSchema;
+
+const numberObjectListInputSchema = {
+  type: "object",
+  properties: {
+    values: numberObjectArraySchema,
   },
   required: ["values"],
   additionalProperties: false,
@@ -118,8 +150,8 @@ type BenchEnv = {
 };
 
 type ListScenario = {
-  targetCell: Cell<number>;
   outputCell: Cell<number[]>;
+  updateValue: (value: number) => Promise<void>;
 };
 
 type FanoutScenario = {
@@ -336,6 +368,18 @@ function unaryNumberListOpPattern(
   );
 }
 
+function unaryNumberObjectListOpPattern(
+  env: BenchEnv,
+  fn: (element: unknown) => unknown,
+  resultSchema: JSONSchema,
+) {
+  return env.pattern<{ element: { value: number } }, unknown>(
+    ({ element }) => fn(element),
+    numberObjectElementArgumentSchema,
+    resultSchema,
+  );
+}
+
 async function createNumberCells(
   runtime: Runtime,
   prefix: string,
@@ -360,9 +404,43 @@ async function createNumberCells(
   return cells;
 }
 
+async function createNumberObjectCells(
+  runtime: Runtime,
+  prefix: string,
+  size: number,
+  valueAt: (index: number) => number,
+): Promise<Cell<{ value: number }>[]> {
+  const tx = runtime.edit();
+  const cells: Cell<{ value: number }>[] = [];
+
+  for (let i = 0; i < size; i++) {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      `${prefix}:item:${i}`,
+      numberObjectSchema,
+      tx,
+    );
+    cell.set({ value: valueAt(i) });
+    cells.push(cell);
+  }
+
+  await tx.commit();
+  return cells;
+}
+
 async function setNumber(runtime: Runtime, cell: Cell<number>, value: number) {
   const tx = runtime.edit();
   cell.withTx(tx).set(value);
+  await tx.commit();
+}
+
+async function setNestedNumber(
+  runtime: Runtime,
+  cell: Cell<{ value: number }>,
+  value: number,
+) {
+  const tx = runtime.edit();
+  cell.withTx(tx).key("value").set(value);
   await tx.commit();
 }
 
@@ -423,8 +501,8 @@ async function setupMapScenario(
   await tx.commit();
 
   return {
-    targetCell: values[TARGET_INDEX],
     outputCell: result.key("mapped") as Cell<number[]>,
+    updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
   };
 }
 
@@ -471,8 +549,8 @@ async function setupFilterScenario(
   await tx.commit();
 
   return {
-    targetCell: values[TARGET_INDEX],
     outputCell: result.key("filtered") as Cell<number[]>,
+    updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
   };
 }
 
@@ -519,8 +597,151 @@ async function setupFlatMapScenario(
   await tx.commit();
 
   return {
-    targetCell: values[TARGET_INDEX],
     outputCell: result.key("flat") as Cell<number[]>,
+    updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
+  };
+}
+
+async function setupObjectMapScenario(
+  env: BenchEnv,
+  prefix: string,
+): Promise<ListScenario> {
+  const values = await createNumberObjectCells(
+    env.runtime,
+    `${prefix}:values`,
+    LIST_SIZE,
+    (index) => index + 1,
+  );
+
+  const double = env.lift(numberSchema, numberSchema, (x: number) => x * 2);
+  const doublePattern = unaryNumberObjectListOpPattern(
+    env,
+    // deno-lint-ignore no-explicit-any
+    (element) => double((element as any).value),
+    numberSchema,
+  );
+
+  const mapPattern = env.pattern<{ values: Array<{ value: number }> }>(
+    ({ values }) => ({
+      // deno-lint-ignore no-explicit-any
+      mapped: values.mapWithPattern(doublePattern as any, {}),
+    }),
+    numberObjectListInputSchema,
+    mappedResultSchema,
+  );
+
+  const tx = env.runtime.edit();
+  const resultCell = env.runtime.getCell<{ mapped: number[] }>(
+    space,
+    `${prefix}:result`,
+    mappedResultSchema,
+    tx,
+  );
+  const result = env.runtime.run(tx, mapPattern, { values }, resultCell);
+  await tx.commit();
+
+  return {
+    outputCell: result.key("mapped") as Cell<number[]>,
+    updateValue: (value) =>
+      setNestedNumber(env.runtime, values[TARGET_INDEX], value),
+  };
+}
+
+async function setupObjectFilterScenario(
+  env: BenchEnv,
+  prefix: string,
+): Promise<ListScenario> {
+  const values = await createNumberObjectCells(
+    env.runtime,
+    `${prefix}:values`,
+    LIST_SIZE,
+    (index) => (index === TARGET_INDEX ? -1 : index + 1),
+  );
+
+  const isPositive = env.lift(
+    numberSchema,
+    booleanSchema,
+    (x: number) => x > 0,
+  );
+  const filterPatternFn = unaryNumberObjectListOpPattern(
+    env,
+    // deno-lint-ignore no-explicit-any
+    (element) => isPositive((element as any).value),
+    booleanSchema,
+  );
+
+  const filterPattern = env.pattern<{ values: Array<{ value: number }> }>(
+    ({ values }) => ({
+      // deno-lint-ignore no-explicit-any
+      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+    }),
+    numberObjectListInputSchema,
+    filteredResultSchema,
+  );
+
+  const tx = env.runtime.edit();
+  const resultCell = env.runtime.getCell<{ filtered: number[] }>(
+    space,
+    `${prefix}:result`,
+    filteredResultSchema,
+    tx,
+  );
+  const result = env.runtime.run(tx, filterPattern, { values }, resultCell);
+  await tx.commit();
+
+  return {
+    outputCell: result.key("filtered") as Cell<number[]>,
+    updateValue: (value) =>
+      setNestedNumber(env.runtime, values[TARGET_INDEX], value),
+  };
+}
+
+async function setupObjectFlatMapScenario(
+  env: BenchEnv,
+  prefix: string,
+): Promise<ListScenario> {
+  const values = await createNumberObjectCells(
+    env.runtime,
+    `${prefix}:values`,
+    LIST_SIZE,
+    (index) => (index === TARGET_INDEX ? 0 : index + 1),
+  );
+
+  const expand = env.lift(
+    numberSchema,
+    numberArraySchema,
+    (x: number) => (x > 0 ? [x, x * 10] : []),
+  );
+  const flatMapPatternFn = unaryNumberObjectListOpPattern(
+    env,
+    // deno-lint-ignore no-explicit-any
+    (element) => expand((element as any).value),
+    numberArraySchema,
+  );
+
+  const flatMapPattern = env.pattern<{ values: Array<{ value: number }> }>(
+    ({ values }) => ({
+      // deno-lint-ignore no-explicit-any
+      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+    }),
+    numberObjectListInputSchema,
+    flatMappedResultSchema,
+  );
+
+  const tx = env.runtime.edit();
+  const resultCell = env.runtime.getCell<{ flat: number[] }>(
+    space,
+    `${prefix}:result`,
+    flatMappedResultSchema,
+    tx,
+  );
+  const result = env.runtime.run(tx, flatMapPattern, { values }, resultCell);
+  await tx.commit();
+
+  return {
+    outputCell: result.key("flat") as Cell<number[]>,
+    updateValue: (value) =>
+      setNestedNumber(env.runtime, values[TARGET_INDEX], value),
   };
 }
 
@@ -593,7 +814,7 @@ async function runPullBench(
 
     b.start();
     for (let i = 0; i < (options.rounds ?? UPDATE_ROUNDS); i++) {
-      await setNumber(env.runtime, scenario.targetCell, options.nextValue(i));
+      await scenario.updateValue(options.nextValue(i));
       consumeArray(await scenario.outputCell.pull());
     }
     b.end();
@@ -633,7 +854,7 @@ async function runSinkBench(
     try {
       b.start();
       for (let i = 0; i < (options.rounds ?? SINK_ROUNDS); i++) {
-        await setNumber(env.runtime, scenario.targetCell, options.nextValue(i));
+        await scenario.updateValue(options.nextValue(i));
         await env.runtime.idle();
       }
       b.end();
@@ -761,6 +982,58 @@ for (const pullMode of [false, true]) {
         pullMode,
         prefix: `bench:map:sink:${mode}`,
         setupScenario: setupMapScenario,
+        nextValue: (round) => LIST_SIZE + round + 1,
+      });
+    },
+  );
+
+  Deno.bench(
+    `Pattern push vs pull - mapWithPattern object element.value update + pull [${mode}]`,
+    benchOptions("pattern-map-object-pull", !pullMode),
+    async (b) => {
+      await runPullBench(b, {
+        pullMode,
+        prefix: `bench:map:object:pull:${mode}`,
+        setupScenario: setupObjectMapScenario,
+        nextValue: (round) => LIST_SIZE + round + 1,
+      });
+    },
+  );
+
+  Deno.bench(
+    `Pattern push vs pull - filterWithPattern object element.value flip + pull [${mode}]`,
+    benchOptions("pattern-filter-object-pull", !pullMode),
+    async (b) => {
+      await runPullBench(b, {
+        pullMode,
+        prefix: `bench:filter:object:pull:${mode}`,
+        setupScenario: setupObjectFilterScenario,
+        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : -1),
+      });
+    },
+  );
+
+  Deno.bench(
+    `Pattern push vs pull - flatMapWithPattern object element.value flip + pull [${mode}]`,
+    benchOptions("pattern-flatmap-object-pull", !pullMode),
+    async (b) => {
+      await runPullBench(b, {
+        pullMode,
+        prefix: `bench:flatmap:object:pull:${mode}`,
+        setupScenario: setupObjectFlatMapScenario,
+        nextValue: (round) => (round % 2 === 0 ? TARGET_INDEX + 1 : 0),
+      });
+    },
+  );
+
+  Deno.bench(
+    `Pattern push vs pull - mapWithPattern object element.value update + sink [${mode}]`,
+    benchOptions("pattern-map-object-sink", !pullMode),
+    async (b) => {
+      await runSinkBench(b, {
+        pullMode,
+        prefix: `bench:map:object:sink:${mode}`,
+        setupScenario: setupObjectMapScenario,
         nextValue: (round) => LIST_SIZE + round + 1,
       });
     },
