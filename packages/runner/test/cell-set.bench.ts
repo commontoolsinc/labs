@@ -605,31 +605,11 @@ Deno.bench({
   },
 });
 
-Deno.bench({
-  name: "Cell.set() - array: large (500 items)",
-  group: "array",
-  async fn() {
-    const { runtime, storageManager, tx } = setup();
-
-    const cell = runtime.getCell<any>(
-      space,
-      "bench-array-large",
-      undefined,
-      tx,
-    );
-
-    for (let i = 0; i < 100; i++) {
-      cell.set({
-        items: Array.from({ length: 500 }, (_, j) => ({
-          id: j,
-          value: `item-${i}-${j}`,
-        })),
-      });
-    }
-
-    await cleanup(runtime, storageManager, tx);
-  },
-});
+// NOTE: A "large (500 items)" array benchmark was removed because it took ~96s
+// per iteration. Profiling showed 95% of that time was spent in SQLite writes
+// during tx.commit() (~150-200K prepared statement executions for 50K changed
+// facts), not in Cell.set() itself (~3.4s for all 100 iterations). The benchmark
+// was measuring SQLite write throughput rather than Cell.set() performance.
 
 // =============================================================================
 // WRITE COUNT BENCHMARKS
