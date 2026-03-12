@@ -788,11 +788,12 @@ export class PieceManager {
     });
     await piece.sync();
     const start = options?.start ?? true;
-    await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
-    await this.syncPattern(piece);
     if (start) {
-      await this.startPiece(piece);
+      await this.runtime.runSynced(piece, pattern, inputs);
+    } else {
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
+    await this.syncPattern(piece);
 
     return piece;
   }
