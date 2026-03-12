@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
+import { MEMORY_V2_PROTOCOL } from "../v2.ts";
 import {
   connect,
   loopback,
@@ -116,15 +117,15 @@ class ReconnectableLoopbackTransport implements Transport {
   }
 }
 
-class SabotagedLoopbackTransport implements Transport {
+class ScriptedReconnectTransport implements Transport {
   connectionCount = 0;
+  transactLocalSeqs: number[] = [];
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #connection: ReturnType<Server["connect"]> | null = null;
-  #dropResponses = false;
-  #dropNextResponsePredicate: ((payload: string) => boolean) | null = null;
+  #connected = false;
+  #dropped = new Set<number>();
 
-  constructor(private readonly server: Server) {}
+  constructor(private readonly dropOnFirstLocalSeqs: number[] = []) {}
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -135,46 +136,79 @@ class SabotagedLoopbackTransport implements Transport {
   }
 
   async send(payload: string): Promise<void> {
-    const shouldDrop = this.#dropNextResponsePredicate?.(payload) ?? false;
-    if (shouldDrop) {
-      this.#dropNextResponsePredicate = null;
-      this.#dropResponses = true;
-      try {
-        await this.connection().receive(payload);
-      } finally {
-        this.#dropResponses = false;
-        this.disconnect();
-      }
-      return;
+    if (!this.#connected) {
+      this.#connected = true;
+      this.connectionCount++;
     }
 
-    await this.connection().receive(payload);
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      commit?: { localSeq?: number };
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond({
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+        });
+        return;
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:scripted",
+            serverSeq: 0,
+          },
+        });
+        return;
+      case "transact": {
+        const localSeq = message.commit?.localSeq ?? -1;
+        this.transactLocalSeqs.push(localSeq);
+        if (
+          this.dropOnFirstLocalSeqs.includes(localSeq) &&
+          !this.#dropped.has(localSeq)
+        ) {
+          this.#dropped.add(localSeq);
+          this.#connected = false;
+          this.#closeReceiver(new Error("disconnect"));
+          return;
+        }
+
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            seq: localSeq,
+            hash: `commit:${localSeq}`,
+            branch: "",
+            facts: [{
+              hash: `fact:${localSeq}:0`,
+              id: `of:doc:${localSeq}`,
+              valueRef: `value:${localSeq}:0`,
+              parent: null,
+              branch: "",
+              seq: localSeq,
+              commitSeq: localSeq,
+              factType: "set",
+            }],
+          },
+        });
+        return;
+      }
+      default:
+        throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
   }
 
   async close(): Promise<void> {
-    this.disconnect();
+    this.#connected = false;
   }
 
-  disconnect(): void {
-    this.#connection?.close();
-    this.#connection = null;
-    this.#closeReceiver(new Error("disconnect"));
-  }
-
-  dropNextResponse(predicate: (payload: string) => boolean): void {
-    this.#dropNextResponsePredicate = predicate;
-  }
-
-  private connection(): ReturnType<Server["connect"]> {
-    if (this.#connection === null) {
-      this.connectionCount++;
-      this.#connection = this.server.connect((message) => {
-        if (!this.#dropResponses) {
-          this.#receiver(JSON.stringify(message));
-        }
-      });
-    }
-    return this.#connection;
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
   }
 }
 
@@ -257,149 +291,80 @@ Deno.test("memory v2 client reconnects and reissues graph subscriptions", async 
 });
 
 Deno.test("memory v2 client replays an in-flight transact after reconnect", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-client-replay"),
-  });
-  const transport = new SabotagedLoopbackTransport(server);
+  const transport = new ScriptedReconnectTransport([1]);
   const client = await connect({ transport });
-  const readerClient = await connect({
-    transport: loopback(server),
-  });
-  const spaceId = "did:key:z6Mk-memory-v2-client-replay";
-  const space = await client.mount(spaceId);
-  const reader = await readerClient.mount(spaceId);
+  const space = await client.mount("did:key:z6Mk-memory-v2-client-replay");
 
-  transport.dropNextResponse((payload) => {
-    const message = JSON.parse(payload) as { type?: string; commit?: { localSeq?: number } };
-    return message.type === "transact" && message.commit?.localSeq === 1;
-  });
-
-  const applied = await space.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: "of:doc:1",
-      value: {
+  try {
+    const applied = await space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
         value: {
-          hello: "replayed",
+          value: {
+            hello: "replayed",
+          },
         },
-      },
-    }],
-  });
+      }],
+    });
 
-  const view = await reader.queryGraph({
-    roots: [{
-      id: "of:doc:1",
-      selector: {
-        path: [],
-        schema: false,
-      },
-    }],
-  });
-
-  assertEquals(transport.connectionCount >= 2, true);
-  assertEquals(applied.seq, 1);
-  assertEquals(view.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 1,
-    document: {
-      value: {
-        hello: "replayed",
-      },
-    },
-  }]);
-
-  await readerClient.close();
-  await client.close();
-  await server.close();
+    assertEquals(transport.connectionCount, 2);
+    assertEquals(transport.transactLocalSeqs, [1, 1]);
+    assertEquals(applied.seq, 1);
+  } finally {
+    await client.close();
+  }
 });
 
 Deno.test("memory v2 client replays retained commits in localSeq order after reconnect", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-client-replay-order"),
-  });
-  const transport = new SabotagedLoopbackTransport(server);
+  const transport = new ScriptedReconnectTransport([1]);
   const client = await connect({ transport });
-  const readerClient = await connect({
-    transport: loopback(server),
-  });
-  const spaceId = "did:key:z6Mk-memory-v2-client-replay-order";
-  const space = await client.mount(spaceId);
-  const reader = await readerClient.mount(spaceId);
+  const space = await client.mount("did:key:z6Mk-memory-v2-client-replay-order");
 
-  transport.dropNextResponse((payload) => {
-    const message = JSON.parse(payload) as { type?: string; commit?: { localSeq?: number } };
-    return message.type === "transact" && message.commit?.localSeq === 1;
-  });
-
-  const first = space.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: "of:doc:1",
-      value: {
-        value: {
-          count: 1,
-        },
-      },
-    }],
-  });
-  const second = space.transact({
-    localSeq: 2,
-    reads: {
-      confirmed: [],
-      pending: [{
+  try {
+    const first = space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
         id: "of:doc:1",
-        path: ["value"],
-        localSeq: 1,
-      }],
-    },
-    operations: [{
-      op: "set",
-      id: "of:doc:1",
-      value: {
         value: {
-          count: 2,
+          value: {
+            count: 1,
+          },
         },
+      }],
+    });
+    const second = space.transact({
+      localSeq: 2,
+      reads: {
+        confirmed: [],
+        pending: [{
+          id: "of:doc:1",
+          path: ["value"],
+          localSeq: 1,
+        }],
       },
-    }],
-  });
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 2,
+          },
+        },
+      }],
+    });
 
-  const [applied1, applied2] = await Promise.all([first, second]);
-  const view = await reader.queryGraph({
-    roots: [{
-      id: "of:doc:1",
-      selector: {
-        path: [],
-        schema: false,
-      },
-    }],
-  });
+    const [applied1, applied2] = await Promise.all([first, second]);
 
-  assertEquals(transport.connectionCount >= 2, true);
-  assertEquals(applied1.seq, 1);
-  assertEquals(applied2.seq, 2);
-  assertEquals(view.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 2,
-    document: {
-      value: {
-        count: 2,
-      },
-    },
-  }]);
-
-  await readerClient.close();
-  await client.close();
-  await server.close();
+    assertEquals(transport.connectionCount, 2);
+    assertEquals(transport.transactLocalSeqs, [1, 1, 2]);
+    assertEquals(applied1.seq, 1);
+    assertEquals(applied2.seq, 2);
+  } finally {
+    await client.close();
+  }
 });

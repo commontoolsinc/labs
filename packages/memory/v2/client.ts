@@ -55,7 +55,11 @@ export class Client {
     this.#closed = true;
     this.#connected = false;
     this.rejectPending(new Error("memory/v2 client closed"));
+    await Promise.all([...this.#spaces].map((space) => space.close()));
+    this.#spaces.clear();
+    this.#subscriptions.clear();
     await this.transport.close();
+    await this.#reconnecting?.catch(() => undefined);
   }
 
   async mount(space: string, options: MountOptions = {}): Promise<SpaceSession> {
@@ -100,6 +104,14 @@ export class Client {
     if (id) {
       this.#subscriptions.delete(id);
     }
+  }
+
+  isConnected(): boolean {
+    return this.#connected;
+  }
+
+  async restoreConnection(): Promise<void> {
+    await this.ensureConnected();
   }
 
   private async hello(): Promise<void> {
@@ -159,7 +171,7 @@ export class Client {
       return;
     }
     this.#connected = false;
-    this.rejectPending(error ?? new Error("memory/v2 transport closed"));
+    this.rejectPending(toConnectionError(error));
     void this.reconnect();
   }
 
@@ -211,6 +223,11 @@ export class SpaceSession {
     subscriptionId: string | null;
     view: QueryView;
   }>();
+  #outstandingCommits = new Map<number, {
+    commit: ClientCommit;
+    pending: PromiseWithResolvers<AppliedCommit>;
+  }>();
+  #flushing: Promise<void> | null = null;
   #sessionId: string;
   #serverSeq: number;
 
@@ -233,14 +250,26 @@ export class SpaceSession {
   }
 
   async transact(commit: ClientCommit): Promise<AppliedCommit> {
-    const applied = await this.client.request<AppliedCommit>({
-      type: "transact",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
+    const existing = this.#outstandingCommits.get(commit.localSeq);
+    if (existing) {
+      return await existing.pending.promise;
+    }
+
+    const pending = Promise.withResolvers<AppliedCommit>();
+    this.#outstandingCommits.set(commit.localSeq, {
       commit,
+      pending,
     });
-    this.#serverSeq = Math.max(this.#serverSeq, applied.seq);
+
+    if (this.client.isConnected()) {
+      void this.flushOutstandingCommits();
+    } else {
+      void this.client.restoreConnection();
+    }
+
+    const applied = await pending.promise;
+    await this.#flushing;
+    await this.client.restoreConnection();
     return applied;
   }
 
@@ -271,13 +300,21 @@ export class SpaceSession {
   }
 
   async restore(): Promise<void> {
+    await this.reopen();
+    await this.replayOutstandingCommits();
+    await this.restoreSubscriptions();
+  }
+
+  private async reopen(): Promise<void> {
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
     });
     this.#sessionId = restored.sessionId;
     this.#serverSeq = Math.max(this.#serverSeq, restored.serverSeq);
+  }
 
+  private async restoreSubscriptions(): Promise<void> {
     for (const subscription of this.#subscriptions) {
       this.client.unregisterSubscription(subscription.subscriptionId);
       const result = await this.client.request<GraphQueryResult>({
@@ -302,11 +339,86 @@ export class SpaceSession {
       subscription.view.reconnect(result);
     }
   }
+
+  private async replayOutstandingCommits(): Promise<void> {
+    if (this.#outstandingCommits.size === 0) {
+      return;
+    }
+    await this.flushOutstandingCommits();
+  }
+
+  private async flushOutstandingCommits(): Promise<void> {
+    if (this.#flushing) {
+      return await this.#flushing;
+    }
+    if (!this.client.isConnected()) {
+      return;
+    }
+
+    const flush = (async () => {
+      while (this.client.isConnected() && this.#outstandingCommits.size > 0) {
+        const next = [...this.#outstandingCommits.entries()]
+          .sort(([left], [right]) => left - right)[0];
+        if (!next) {
+          return;
+        }
+
+        const [localSeq, pendingCommit] = next;
+        try {
+          const applied = await this.client.request<AppliedCommit>({
+            type: "transact",
+            requestId: crypto.randomUUID(),
+            space: this.space,
+            sessionId: this.#sessionId,
+            commit: pendingCommit.commit,
+          });
+          this.#serverSeq = Math.max(this.#serverSeq, applied.seq);
+          if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
+            this.#outstandingCommits.delete(localSeq);
+          }
+          pendingCommit.pending.resolve(applied);
+        } catch (error) {
+          if (isConnectionError(error)) {
+            return;
+          }
+          if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
+            this.#outstandingCommits.delete(localSeq);
+          }
+          pendingCommit.pending.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    })();
+
+    const flushing = flush.finally(() => {
+      if (this.#flushing === flushing) {
+        this.#flushing = null;
+      }
+    });
+    this.#flushing = flushing;
+
+    return await this.#flushing;
+  }
+
+  async close(): Promise<void> {
+    await this.#flushing;
+    for (const pending of this.#outstandingCommits.values()) {
+      pending.pending.reject(new Error("memory/v2 session closed"));
+    }
+    this.#outstandingCommits.clear();
+    for (const subscription of this.#subscriptions) {
+      this.client.unregisterSubscription(subscription.subscriptionId);
+      subscription.view.close();
+    }
+    this.#subscriptions.clear();
+  }
 }
 
 export class QueryView {
   #queue: GraphQueryResult[] = [];
   #pending = new Set<PromiseWithResolvers<IteratorResult<GraphQueryResult>>>();
+  #closed = false;
   entities: EntitySnapshot[];
   serverSeq: number;
 
@@ -318,6 +430,12 @@ export class QueryView {
   subscribe(): AsyncIterator<GraphQueryResult> {
     return {
       next: async () => {
+        if (this.#closed) {
+          return {
+            done: true,
+            value: undefined as never,
+          };
+        }
         const queued = this.#queue.shift();
         if (queued) {
           return { done: false, value: queued };
@@ -330,6 +448,9 @@ export class QueryView {
   }
 
   push(result: GraphQueryResult): void {
+    if (this.#closed) {
+      return;
+    }
     this.entities = result.entities;
     this.serverSeq = result.serverSeq;
     const pending = this.#pending.values().next().value;
@@ -342,12 +463,30 @@ export class QueryView {
   }
 
   reconnect(result: GraphQueryResult): void {
+    if (this.#closed) {
+      return;
+    }
     if (sameQueryResult(this, result)) {
       this.entities = result.entities;
       this.serverSeq = result.serverSeq;
       return;
     }
     this.push(result);
+  }
+
+  close(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    for (const pending of this.#pending) {
+      pending.resolve({
+        done: true,
+        value: undefined as never,
+      });
+    }
+    this.#pending.clear();
+    this.#queue = [];
   }
 }
 
@@ -362,13 +501,29 @@ export const loopback = (server: Server): Transport => {
     async send(payload: string) {
       await connection.receive(payload);
     },
-    async close() {},
+    async close() {
+      connection.close();
+    },
     setReceiver(next) {
       receiver = next;
     },
     setCloseReceiver() {},
   };
 };
+
+const toConnectionError = (error?: Error): Error => {
+  const connectionError = error instanceof Error ? error : new Error(
+    "memory/v2 transport closed",
+  );
+  connectionError.name = "ConnectionError";
+  return connectionError;
+};
+
+const isConnectionError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.name === "ConnectionError" ||
+    error.message.includes("transport closed") ||
+    error.message.includes("disconnect"));
 
 const isHelloOk = (message: unknown): message is Extract<ServerMessage, { type: "hello.ok" }> => {
   return typeof message === "object" && message !== null &&
