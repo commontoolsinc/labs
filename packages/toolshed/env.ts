@@ -206,9 +206,16 @@ const EnvSchema = z.object({
   COMPILATION_CACHE_SERVER: z.string().default("false").transform((
     v,
   ) => v === "true"),
+  // COMPILATION_CACHE_CLIENT is read by the shell's felt.config.ts via
+  // Deno.env.get() at build time (esbuild define), not by toolshed code.
+  // It's defined here so the start scripts can pass it through consistently.
   COMPILATION_CACHE_CLIENT: z.string().default("false").transform((
     v,
   ) => v === "true"),
+  // Directory for the server-side filesystem compilation cache.
+  // Must be writable. In multi-process environments (e.g. common-cluster),
+  // use distinct directories per process to avoid conflicts.
+  COMPILATION_CACHE_FS_DIR: z.string().default("/tmp/ct-compilation-cache"),
 
   // ===========================================================================
   // Sandbox Service

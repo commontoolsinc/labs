@@ -6,6 +6,10 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  CachedCompiler,
+  MemoryCompilationCache,
+} from "../src/compilation-cache/mod.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -265,5 +269,87 @@ describe("PatternManager.compileOrGetPattern", () => {
     // And the pattern should have its program attached
     expect(pattern.program).toBeDefined();
     expect(pattern.program?.main).toEqual("/main.ts");
+  });
+});
+
+describe("PatternManager compilation cache integration", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let cacheStorage: MemoryCompilationCache;
+  let cachedCompiler: CachedCompiler;
+  let runtime: Runtime;
+
+  const simpleProgram: RuntimeProgram = {
+    main: "/main.ts",
+    files: [
+      {
+        name: "/main.ts",
+        contents: [
+          "import { pattern } from 'commontools';",
+          "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    cacheStorage = new MemoryCompilationCache();
+    cachedCompiler = new CachedCompiler(cacheStorage, "test-fingerprint");
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cachedCompiler,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("writes to cache on first compile, hits cache on second", async () => {
+    expect(await cacheStorage.count()).toBe(0);
+
+    // First compile — cache miss, should write an entry
+    const first = await runtime.patternManager.compilePattern(simpleProgram);
+    expect(first).toBeDefined();
+    expect(first.program?.main).toEqual("/main.ts");
+    expect(await cacheStorage.count()).toBe(1);
+    expect(cachedCompiler.getStats().misses).toBe(1);
+    expect(cachedCompiler.getStats().writes).toBe(1);
+
+    // Second compile — cache hit, no new writes
+    const second = await runtime.patternManager.compilePattern(simpleProgram);
+    expect(second).toBeDefined();
+    expect(second.program?.main).toEqual("/main.ts");
+    expect(await cacheStorage.count()).toBe(1);
+    expect(cachedCompiler.getStats().hits).toBe(1);
+    expect(cachedCompiler.getStats().writes).toBe(1);
+  });
+
+  it("cache miss with wrong fingerprint triggers recompile", async () => {
+    // Seed the cache with a known key and fingerprint, then use a
+    // CachedCompiler with a different fingerprint to observe the mismatch.
+    // We test CachedCompiler directly (not via Runtime) because Runtime's
+    // constructor fires evictStale() which removes old-fingerprint entries
+    // before compilePattern() can observe them.
+    const programHash = "test-program-hash";
+    await cacheStorage.set(programHash, {
+      id: "stale-id",
+      jsScript: { js: "// stale" },
+      fingerprint: "old-fingerprint",
+      cachedAt: Date.now(),
+    });
+    expect(await cacheStorage.count()).toBe(1);
+
+    const compiler2 = new CachedCompiler(
+      cacheStorage,
+      "new-fingerprint",
+    );
+
+    const miss = await compiler2.get(programHash);
+    expect(miss).toBeUndefined();
+    expect(compiler2.getStats().misses).toBe(1);
+    expect(compiler2.getStats().missReasons.fingerprintMismatch).toBe(1);
   });
 });

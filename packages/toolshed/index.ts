@@ -27,7 +27,7 @@ const initializeRuntime = async () => {
       const fingerprint = await computeGitFingerprint();
       if (fingerprint) {
         cachedCompiler = new CachedCompiler(
-          new FileSystemCompilationCache("/tmp/ct-compilation-cache"),
+          new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),
           fingerprint,
         );
         console.log(

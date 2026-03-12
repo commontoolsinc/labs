@@ -491,10 +491,10 @@ async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
 
   // Persist to cache (output is CompileResult { id, jsScript })
   if (this.cachedCompiler) {
-    // Fire-and-forget: don't block on cache write
-    this.cachedCompiler.set(programHash, output).catch((err) =>
-      logger.warn("compilation-cache", "Failed to write cache", err)
-    );
+    // Fire-and-forget: don't block on cache write.
+    // CachedCompiler.set() logs errors internally via logger.warn,
+    // so the caller swallows the rejection silently.
+    this.cachedCompiler.set(programHash, output).catch(() => {});
   }
 
   return pattern;
