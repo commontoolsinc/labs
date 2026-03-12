@@ -512,8 +512,9 @@ export const loopback = (server: Server): Transport => {
 };
 
 const toConnectionError = (error?: Error): Error => {
-  const connectionError = error instanceof Error ? error : new Error(
-    "memory/v2 transport closed",
+  const connectionError = new Error(
+    error?.message ?? "memory/v2 transport closed",
+    error ? { cause: error } : undefined,
   );
   connectionError.name = "ConnectionError";
   return connectionError;
