@@ -787,11 +787,15 @@ export class PieceManager {
     await piece.sync();
     const start = options?.start ?? true;
     if (start) {
-      await this.runtime.runSynced(piece, pattern, inputs);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     } else {
-      this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
     await this.syncPattern(piece);
+    if (start) {
+      await this.getResult(piece).pull();
+      await this.synced();
+    }
 
     return piece;
   }
@@ -833,7 +837,7 @@ export class PieceManager {
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     await this.runtime.start(piece);
-    await this.runtime.idle();
+    await this.getResult(piece).pull();
     await this.synced();
   }
 
@@ -893,6 +897,7 @@ export class PieceManager {
     targetPath: (string | number)[],
     options?: { start?: boolean },
   ): Promise<void> {
+    const start = options?.start ?? true;
     let linkCell = this.runtime.getCellFromEntityId(this.space, {
       "/": linkPieceId,
     });
@@ -929,7 +934,9 @@ export class PieceManager {
       );
     });
 
-    await this.runtime.idle();
+    if (targetIsPiece && start) {
+      await this.getResult(targetCell).pull();
+    }
     await this.synced();
   }
 }

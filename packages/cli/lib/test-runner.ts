@@ -952,7 +952,10 @@ export async function runTestPattern(
               }
             }
             if (deltas.length > actionLimit) {
-              const rest = deltas.slice(actionLimit).reduce((s, d) => s + d.delta, 0);
+              const rest = deltas.slice(actionLimit).reduce(
+                (s, d) => s + d.delta,
+                0,
+              );
               console.log(
                 `      ${String(rest).padStart(4)}× (${
                   deltas.length - actionLimit

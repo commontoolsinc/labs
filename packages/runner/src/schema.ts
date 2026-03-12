@@ -373,7 +373,7 @@ export function validateAndTransform(
 
   // Reconstruct doc, path, schema from link and runtime
   const schema = link.schema;
-  let resolvedSchema = resolveSchema(schema);
+  const resolvedSchema = resolveSchema(schema);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that

@@ -3,6 +3,8 @@ import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
+const schedulerModes = ["default", "push", "pull"] as const;
+
 export const test = new Command()
   .name("test")
   .description("Run pattern tests (.test.tsx files).")
@@ -122,6 +124,15 @@ export const test = new Command()
         .map((part) => part.trim())
         .filter(Boolean)
       : undefined;
+    const schedulerMode = schedulerModes.find((mode) =>
+      mode === options.schedulerMode
+    );
+    if (!schedulerMode) {
+      console.error(
+        "Error: --scheduler-mode must be one of: default, push, pull",
+      );
+      Deno.exit(1);
+    }
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
@@ -131,7 +142,7 @@ export const test = new Command()
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,
-      schedulerMode: options.schedulerMode,
+      schedulerMode,
     });
 
     // Exit with error code if any tests failed

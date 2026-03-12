@@ -47,7 +47,6 @@ export class PiecesController<T = unknown> {
       undefined,
       { start: options.start ?? true },
     );
-    await this.#manager.runtime.idle();
     await this.#manager.synced();
     return new PieceController<U>(this.#manager, piece);
   }
