@@ -241,13 +241,14 @@ export async function linkPieces(
   sourcePath: (string | number)[],
   targetPieceId: string,
   targetPath: (string | number)[],
-  options?: { start?: boolean },
+  options?: { start?: boolean; allowNonExisting?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
 
   // Ensure default pattern exists (best effort)
+  let pieces: PiecesController;
   try {
-    const pieces = new PiecesController(manager);
+    pieces = new PiecesController(manager);
     await pieces.ensureDefaultPattern();
   } catch (error) {
     // Non-fatal, log and continue
@@ -256,6 +257,80 @@ export async function linkPieces(
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    pieces = new PiecesController(manager);
+  }
+
+  // Validate that source and target pieces/paths exist by reading them
+  if (!options?.allowNonExisting) {
+    const errors: string[] = [];
+
+    // Check source piece exists by verifying it has a source/process cell
+    // (i.e., was created via ct piece new, not just written to with ct piece set)
+    const sourcePiece = await pieces.get(sourcePieceId, false);
+    const sourceHasProcess =
+      sourcePiece.getCell().getSourceCell() !== undefined;
+    if (!sourceHasProcess) {
+      errors.push(`Source piece ${sourcePieceId} does not exist`);
+    } else if (sourcePath.length > 0) {
+      const sourceData = await sourcePiece.result.get();
+      // Check source path resolves
+      let current: any = sourceData;
+      for (const segment of sourcePath) {
+        if (current == null || typeof current !== "object") {
+          errors.push(
+            `Source path "${
+              sourcePath.join("/")
+            }" does not exist on piece ${sourcePieceId}`,
+          );
+          break;
+        }
+        current = current[segment];
+      }
+      if (current === undefined) {
+        errors.push(
+          `Source path "${
+            sourcePath.join("/")
+          }" does not exist on piece ${sourcePieceId}`,
+        );
+      }
+    }
+
+    // Check target piece exists by verifying it has a source/process cell
+    const targetPiece = await pieces.get(targetPieceId, false);
+    const targetHasProcess =
+      targetPiece.getCell().getSourceCell() !== undefined;
+    if (!targetHasProcess) {
+      errors.push(`Target piece ${targetPieceId} does not exist`);
+    } else if (targetPath.length > 0) {
+      // Check target path resolves on the input cell
+      const targetData = await targetPiece.input.get();
+      let current: any = targetData;
+      for (const segment of targetPath) {
+        if (current == null || typeof current !== "object") {
+          errors.push(
+            `Target path "${
+              targetPath.join("/")
+            }" does not exist on piece ${targetPieceId}`,
+          );
+          break;
+        }
+        current = current[segment];
+      }
+      if (current === undefined) {
+        errors.push(
+          `Target path "${
+            targetPath.join("/")
+          }" does not exist on piece ${targetPieceId}`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new LinkValidationError(
+        errors.join("\n") +
+          "\n\nUse --allow-non-existing to link anyway.",
+      );
+    }
   }
 
   await manager.link(
@@ -265,6 +340,13 @@ export async function linkPieces(
     targetPath,
     options,
   );
+}
+
+export class LinkValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinkValidationError";
+  }
 }
 
 // Constants for piece mapping

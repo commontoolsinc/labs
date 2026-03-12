@@ -9,6 +9,7 @@ import {
   getPieceView,
   inspectPiece,
   linkPieces,
+  LinkValidationError,
   listPieces,
   loadManager,
   MapFormat,
@@ -464,6 +465,10 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .arguments("<source:string> <target:string>")
   .option("--no-start", "Only link without starting the pieces")
+  .option(
+    "--allow-non-existing",
+    "Allow linking to/from pieces or paths that don't exist yet",
+  )
   .action(async (options, sourceRef, targetRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -484,14 +489,24 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
       );
     }
 
-    await linkPieces(
-      spaceConfig,
-      source.pieceId,
-      source.path || [], // Empty path for well-known IDs
-      target.pieceId,
-      target.path,
-      { start: options.start },
-    );
+    try {
+      await linkPieces(
+        spaceConfig,
+        source.pieceId,
+        source.path || [], // Empty path for well-known IDs
+        target.pieceId,
+        target.path,
+        {
+          start: options.start,
+          allowNonExisting: !!(options as any).allowNonExisting,
+        },
+      );
+    } catch (error) {
+      if (error instanceof LinkValidationError) {
+        throw new ValidationError(error.message, { exitCode: 1 });
+      }
+      throw error;
+    }
 
     render(`Linked ${sourceRef} to ${targetRef}`);
     hint(`NEXT STEPS:
