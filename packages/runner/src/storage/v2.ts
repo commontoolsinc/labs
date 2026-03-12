@@ -903,9 +903,12 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
 };
 
 const toStoredDocument = (value: StorageValue | StorableDatum): StorableDatum => {
-  if (isRecord(value) && "value" in value) {
+  if (
+    isRecord(value) &&
+    ("value" in value || "source" in value)
+  ) {
     return {
-      value: value.value as StorableValue,
+      ...("value" in value ? { value: value.value as StorableValue } : {}),
       ...("source" in value && value.source !== undefined
         ? { source: value.source }
         : {}),
