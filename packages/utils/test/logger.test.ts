@@ -1656,6 +1656,40 @@ describe("logger", () => {
       });
     });
 
+    describe("timing baselines", () => {
+      it("should track exact timing totals since baseline", () => {
+        const logger = getLogger("timing-baseline-total");
+
+        logger.time(0, 10, "op");
+        logger.time(0, 20, "op");
+        logger.resetTimingBaseline();
+        logger.time(0, 30, "op");
+        logger.time(0, 40, "op");
+
+        const stats = logger.getTimeStats("op");
+        expect(stats?.count).toBe(4);
+        expect(stats?.totalTime).toBe(100);
+        expect(stats?.countSinceBaseline).toBe(2);
+        expect(stats?.totalTimeSinceBaseline).toBe(70);
+        expect(stats?.averageSinceBaseline).toBe(35);
+        expect(stats?.cdfSinceBaseline).not.toBeNull();
+      });
+
+      it("should include timing keys first seen after baseline reset", () => {
+        const logger = getLogger("timing-baseline-new-key");
+
+        logger.resetTimingBaseline();
+        logger.time(0, 15, "new-op");
+
+        const stats = logger.getTimeStats("new-op");
+        expect(stats?.count).toBe(1);
+        expect(stats?.countSinceBaseline).toBe(1);
+        expect(stats?.totalTimeSinceBaseline).toBe(15);
+        expect(stats?.averageSinceBaseline).toBe(15);
+        expect(stats?.cdfSinceBaseline).not.toBeNull();
+      });
+    });
+
     describe("reservoir sampling", () => {
       it("should maintain bounded memory with many samples", () => {
         const logger = getLogger("timing-reservoir-test");
