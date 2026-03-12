@@ -670,9 +670,9 @@ export function cloneIfNecessaryRich(
   force: boolean,
 ): StorableValue {
   if (deep) {
-    return deepCloneWithForce(value, frozen, force, null);
+    return deepCloneHelper(value, frozen, force, null);
   }
-  return shallowCloneWithForce(value, frozen, force);
+  return shallowCloneHelper(value, frozen, force);
 }
 
 /**
@@ -682,7 +682,7 @@ export function cloneIfNecessaryRich(
  * matches the requested state. When `force` is true, always copies (unless
  * the value is a primitive or special primitive).
  */
-function shallowCloneWithForce(
+function shallowCloneHelper(
   value: StorableValue,
   frozen: boolean,
   force: boolean,
@@ -737,7 +737,7 @@ function shallowCloneWithForce(
  * When `force` is false and `frozen` is true, uses the deep-frozen identity
  * optimization. When `force` is true, always recurses and copies.
  */
-function deepCloneWithForce(
+function deepCloneHelper(
   value: StorableValue,
   frozen: boolean,
   force: boolean,
@@ -772,7 +772,7 @@ function deepCloneWithForce(
       const copy: StorableValue[] = new Array(arr.length);
       for (let i = 0; i < arr.length; i++) {
         if (i in arr) {
-          copy[i] = deepCloneWithForce(arr[i], frozen, force, seen);
+          copy[i] = deepCloneHelper(arr[i], frozen, force, seen);
         }
       }
       seen.delete(arr);
@@ -793,7 +793,7 @@ function deepCloneWithForce(
       const proto = Object.getPrototypeOf(obj);
       const copy = Object.create(proto) as Record<string, StorableValue>;
       for (const [key, val] of Object.entries(obj)) {
-        copy[key] = deepCloneWithForce(
+        copy[key] = deepCloneHelper(
           val as StorableValue,
           frozen,
           force,
