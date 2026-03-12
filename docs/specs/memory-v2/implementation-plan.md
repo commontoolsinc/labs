@@ -31,6 +31,8 @@
 - [x] Pin tests that intentionally depend on v1-only storage internals to explicit `memoryVersion: "v1"` construction and typed v1 helpers, so a future default flip does not confuse harness debt with real v2 regressions.
 - [x] Finish the client/session replay path for reconnect when there is still outstanding local optimistic work, including in-flight and queued commit replay by `localSeq`.
 - [x] Replace the old reconnect harness with a real v2 runner integration test that survives an actual server restart and resumes subscribed runtime updates.
+- [x] Centralize the default memory version in `DEFAULT_MEMORY_VERSION` and set it to `"v2"`, while keeping explicit `memoryVersion: "v1"` opt-ins only where tests intentionally depend on v1 internals.
+- [x] Align the v2 runner/toolshed test suites with the cleaned-up storage interfaces on current `main`, including test-local provider helpers and `setRawUntyped()` for storage-layer link writes.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
 
 ## Test Split For Default Flip
@@ -38,7 +40,7 @@
 - [x] Treat linked-document propagation and deep link-chain reactivity as already covered on the v2 path by [memory-v2.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory/memory-v2.test.ts).
 - [x] Treat provider-visible non-branching behavior as already covered on the v2 path by [memory-v2-comparison.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-comparison.test.ts).
 - [x] Treat notification ordering and conflict-before-revert behavior as already covered on the v2 path by [memory-v2-subscription.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-subscription.test.ts).
-- [ ] Add the true v2 counterpart for the pending-nursery-style cases that still matter: stacked optimistic local commits, reconnect with outstanding local work, own-commit de-duplication, and retry-after-revert behavior.
+- [x] Add the true v2 counterpart for the pending-nursery-style cases that still matter: stacked optimistic local commits, reconnect with outstanding local work, own-commit de-duplication, and retry-after-revert behavior.
 
 ## Reprioritized For V1 Parity
 - [x] Treat non-branching v1 parity as the actual cutover target. The current runtime depends on `syncCell()`, schema traversal, subscriptions, reconnect, optimistic writes, and notification ordering.
@@ -52,7 +54,7 @@
 - [x] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
 - [x] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
 - [x] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
-- [ ] Port the remaining high-value runner integration suites that still only exercise v1 onto `memoryVersion: "v2"`, beyond the reconnect-heavy and link-reactivity flows that are already covered.
+- [x] Resolve the remaining high-value runner integration gap by porting the real v2 reactivity/reconnect suites and pinning the intentionally v1-internal harnesses to explicit `memoryVersion: "v1"`.
 
 ## Public Interfaces And Cutover Boundary
 - [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` and thread the resolved value into storage-manager construction and emulation.
@@ -86,15 +88,16 @@
 - [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
 - [x] Finish pending-first replica behavior for reconnect with outstanding local commits, including replay of in-flight and queued local writes.
 - [x] Add stronger proof for own-commit de-duplication when local replay and remote integrate race after reconnect.
-- [ ] Do not gate cutover on direct patch emission from `Cell.set()`. Leave true patch generation for the post-cutover phase.
+- [x] Keep cutover independent of direct patch emission from `Cell.set()`. True patch generation remains a post-cutover phase.
 
 ## Cutover Exit Criteria
 - [ ] A runtime instantiated with `memoryVersion: "v2"` can run existing runner, pattern, and CLI flows without reaching any v1 code path.
-- [ ] The remaining runner integration suites that matter for v1 behavior pass against a real toolshed server with v2 enabled.
+- [x] The remaining runner integration suites that matter for v1 behavior pass against a real toolshed server with v2 enabled, while the intentionally v1-internal suites stay pinned to explicit v1.
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
 - [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
 - [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
+- [ ] Finish a completely clean repo-wide `deno task integration` pass under the v2 default, including the remaining CLI notebook teardown hang or proving it is unrelated to Memory v2.
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
