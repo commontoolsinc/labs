@@ -731,6 +731,196 @@ function deepCloneIfNecessaryInternal(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Unified clone: cloneIfNecessary
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for `cloneIfNecessary`.
+ */
+export interface CloneOptions {
+  /** Whether the result should be frozen. Default: `true`. */
+  frozen?: boolean;
+  /** Whether to clone deeply or shallowly. Default: `true`. */
+  deep?: boolean;
+  /**
+   * Force a copy to be made.
+   *
+   * - When `frozen = false`: defaults to `true` (always clone to guarantee
+   *   mutable isolation).
+   * - When `frozen = true`: defaults to `false` (clone only if necessary
+   *   to achieve frozenness).
+   * - `{ frozen: true, force: true }` is an error (pointless to force-copy
+   *   something that will be immutable anyway).
+   * - `{ frozen: false, force: false, deep: false }`: valid -- caller owns
+   *   the reference and wants it mutable; thaws if frozen, returns as-is
+   *   if already mutable.
+   * - `{ frozen: false, force: false, deep: true }`: error -- ambiguous
+   *   semantics for trees with mixed frozenness.
+   */
+  force?: boolean;
+}
+
+/**
+ * Clone an already-valid `StorableValue` to achieve a desired frozenness,
+ * with control over depth and copy semantics.
+ *
+ * Unlike `storableFromNativeValue` (which converts native JS values into
+ * storable wrappers), this function assumes the input is already a valid
+ * `StorableValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Callers must resolve `CloneOptions` defaults and validate before calling;
+ * the dispatcher in `storable-value.ts` handles that.
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param frozen - Whether the result should be frozen.
+ * @param deep - Whether to clone deeply or shallowly.
+ * @param force - Whether to force a copy.
+ */
+export function cloneIfNecessaryRich(
+  value: StorableValue,
+  frozen: boolean,
+  deep: boolean,
+  force: boolean,
+): StorableValue {
+  if (deep) {
+    return deepCloneWithForce(value, frozen, force, null);
+  }
+  return shallowCloneWithForce(value, frozen, force);
+}
+
+/**
+ * Shallow clone respecting the `force` flag.
+ *
+ * When `force` is false, returns the value as-is if its frozenness already
+ * matches the requested state. When `force` is true, always copies (unless
+ * the value is a primitive or special primitive).
+ */
+function shallowCloneWithForce(
+  value: StorableValue,
+  frozen: boolean,
+  force: boolean,
+): StorableValue {
+  const tag = tagFromNativeValue(value);
+
+  switch (tag) {
+    // Primitives are inherently immutable -- no cloning needed regardless
+    // of force.
+    case NATIVE_TAGS.Primitive:
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value;
+
+    case NATIVE_TAGS.Array: {
+      if (!force && Object.isFrozen(value) === frozen) return value;
+      const arr = value as unknown[];
+      const copy = new Array(arr.length);
+      for (let i = 0; i < arr.length; i++) {
+        if (i in arr) copy[i] = arr[i];
+      }
+      return (frozen ? Object.freeze(copy) : copy) as StorableValue;
+    }
+
+    case NATIVE_TAGS.Object: {
+      if (!force && Object.isFrozen(value) === frozen) return value;
+      const copy = { ...(value as Record<string, unknown>) };
+      return (frozen ? Object.freeze(copy) : copy) as StorableValue;
+    }
+
+    case NATIVE_TAGS.StorableInstance:
+      if (!force && Object.isFrozen(value) === frozen) return value;
+      return (value as StorableInstance).shallowClone(frozen) as StorableValue;
+
+    default:
+      throw new Error(
+        `Cannot shallow-clone: ${
+          (value as object).constructor?.name ?? typeof value
+        }`,
+      );
+  }
+}
+
+/**
+ * Deep clone respecting the `force` flag.
+ *
+ * When `force` is false and `frozen` is true, uses the deep-frozen identity
+ * optimization. When `force` is true, always recurses and copies.
+ */
+function deepCloneWithForce(
+  value: StorableValue,
+  frozen: boolean,
+  force: boolean,
+  seen: Set<object> | null,
+): StorableValue {
+  switch (tagFromNativeValue(value)) {
+    case NATIVE_TAGS.Primitive:
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value;
+
+    case NATIVE_TAGS.StorableInstance:
+      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
+      if (!force && !frozen && !Object.isFrozen(value)) return value;
+      return (value as StorableInstance).shallowClone(frozen);
+
+    case NATIVE_TAGS.Array: {
+      // Identity optimizations when force is off:
+      // - frozen+deep-frozen: already correct, return as-is.
+      // - mutable+mutable: caller accepts sharing risk, return as-is.
+      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
+      if (!force && !frozen && !Object.isFrozen(value)) return value;
+      const arr = value as StorableValue[];
+      seen ??= new Set();
+      if (seen.has(arr)) {
+        throw new Error("Cannot deep-clone circular reference");
+      }
+      seen.add(arr);
+      const copy: StorableValue[] = new Array(arr.length);
+      for (let i = 0; i < arr.length; i++) {
+        if (i in arr) {
+          copy[i] = deepCloneWithForce(arr[i], frozen, force, seen);
+        }
+      }
+      seen.delete(arr);
+      if (frozen) Object.freeze(copy);
+      return copy;
+    }
+
+    case NATIVE_TAGS.Object: {
+      if (!force && frozen && isDeepFrozenStorableValue(value)) return value;
+      if (!force && !frozen && !Object.isFrozen(value)) return value;
+      const obj = value as object;
+      seen ??= new Set();
+      if (seen.has(obj)) {
+        throw new Error("Cannot deep-clone circular reference");
+      }
+      seen.add(obj);
+      const proto = Object.getPrototypeOf(obj);
+      const copy = Object.create(proto) as Record<string, StorableValue>;
+      for (const [key, val] of Object.entries(obj)) {
+        copy[key] = deepCloneWithForce(
+          val as StorableValue,
+          frozen,
+          force,
+          seen,
+        );
+      }
+      seen.delete(obj);
+      if (frozen) Object.freeze(copy);
+      return copy;
+    }
+
+    default:
+      throw new Error(
+        `Cannot deep-clone: ${
+          (value as object).constructor?.name ?? typeof value
+        }`,
+      );
+  }
+}
+
 function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
   // Primitives: null, boolean, string, number (finite), bigint, undefined.
   if (value === null || value === undefined) return true;

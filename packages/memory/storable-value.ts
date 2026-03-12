@@ -6,11 +6,14 @@ import type {
 } from "./interface.ts";
 import {
   canBeStoredRich,
+  cloneIfNecessaryRich,
+  type CloneOptions,
   deepCloneIfNecessaryRich,
   isStorableValueRich,
   shallowStorableFromNativeValueRich,
   storableFromNativeValueRich,
 } from "./storable-value-modern.ts";
+export type { CloneOptions } from "./storable-value-modern.ts";
 import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
@@ -138,6 +141,47 @@ export function deepCloneIfNecessary(
   return currentConfig.richStorableValues
     ? deepCloneIfNecessaryRich(value, frozen)
     : value;
+}
+
+/**
+ * Clone an already-valid `StorableValue` to achieve a desired frozenness,
+ * with control over depth and copy semantics.
+ *
+ * Unlike `storableFromNativeValue` (which converts native JS values into
+ * storable wrappers), this function assumes the input is already a valid
+ * `StorableValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
+ * Flag ON (rich): delegates to `cloneIfNecessaryRich`.
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
+ */
+export function cloneIfNecessary(
+  value: StorableValue,
+  options?: CloneOptions,
+): StorableValue {
+  if (!currentConfig.richStorableValues) return value;
+
+  const frozen = options?.frozen ?? true;
+  const deep = options?.deep ?? true;
+  const force = options?.force ?? (frozen ? false : true);
+
+  if (frozen && force) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
+        "(pointless to force-copy an immutable value)",
+    );
+  }
+
+  if (!frozen && !force && deep) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
+        "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
+    );
+  }
+
+  return cloneIfNecessaryRich(value, frozen, deep, force);
 }
 
 // ---------------------------------------------------------------------------
