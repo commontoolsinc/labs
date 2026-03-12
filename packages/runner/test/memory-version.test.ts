@@ -3,7 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { type IStorageNotification } from "../src/storage/interface.ts";
+import {
+  DEFAULT_MEMORY_VERSION,
+  type IStorageNotification,
+} from "../src/storage/interface.ts";
 import {
   createStorageNotificationRelay,
   StorageNotificationRelay,
@@ -17,15 +20,15 @@ describe("memoryVersion cutover seam", () => {
     await new Promise((resolve) => setTimeout(resolve, 1));
   });
 
-  it("defaults runtime and storage manager memoryVersion to v1", async () => {
+  it("defaults runtime and storage manager memoryVersion consistently", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
 
-    expect(runtime.memoryVersion).toBe("v1");
-    expect(storageManager.memoryVersion).toBe("v1");
+    expect(runtime.memoryVersion).toBe(DEFAULT_MEMORY_VERSION);
+    expect(storageManager.memoryVersion).toBe(DEFAULT_MEMORY_VERSION);
 
     await runtime.dispose();
     await storageManager.close();
@@ -50,7 +53,10 @@ describe("memoryVersion cutover seam", () => {
   });
 
   it("rejects a runtime/storage manager memoryVersion mismatch", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
 
     expect(() =>
       new Runtime({

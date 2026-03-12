@@ -1,27 +1,29 @@
 import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
-import type {
-  Assertion,
-  AuthorizationError as IAuthorizationError,
-  ConflictError as IConflictError,
-  ConnectionError as IConnectionError,
-  DID,
-  Fact,
-  Invariant as IClaim,
-  MemorySpace,
-  QueryError as IQueryError,
-  Result,
-  SchemaPathSelector,
-  Signer,
-  State,
-  StorableDatum,
-  StorableValue,
-  The as MediaType,
-  TransactionError,
-  Unit,
-  URI,
-  Variant,
-  MemoryVersion,
+import type { Cancel } from "../cancel.ts";
+import {
+  DEFAULT_MEMORY_VERSION,
+  type Assertion,
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  type DID,
+  type Fact,
+  type Invariant as IClaim,
+  type MemorySpace,
+  type QueryError as IQueryError,
+  type Result,
+  type SchemaPathSelector,
+  type Signer,
+  type State,
+  type StorableDatum,
+  type StorableValue,
+  type The as MediaType,
+  type TransactionError,
+  type Unit,
+  type URI,
+  type Variant,
+  type MemoryVersion,
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
@@ -41,6 +43,7 @@ export type {
   Unit,
   URI,
 };
+export { DEFAULT_MEMORY_VERSION };
 
 export type ChangeGroup = unknown;
 
