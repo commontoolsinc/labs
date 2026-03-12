@@ -122,6 +122,30 @@ interface JUnitTestSuite {
   tests: { name: string; time: number }[];
 }
 
+/** Structured output from `deno bench --json`. */
+interface DenoBenchResult {
+  version: number;
+  runtime: string;
+  cpu: string;
+  benches: {
+    origin: string;
+    group: string | null;
+    name: string;
+    baseline: boolean;
+    results: {
+      ok?: {
+        n: number;
+        min: number;
+        max: number;
+        avg: number;
+        p75: number;
+        p99: number;
+        p995: number;
+      };
+    }[];
+  }[];
+}
+
 // ---------------------------------------------------------------------------
 // GitHub API helpers
 // ---------------------------------------------------------------------------
@@ -483,6 +507,46 @@ const JOB_TO_LABEL: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Step 3c: Benchmark results parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse `deno bench --json` output and return per-benchmark timing samples.
+ * Values are in nanoseconds from the JSON; we convert to microseconds for
+ * readability (benchmarks measure µs-scale operations, not seconds).
+ */
+function extractBenchMetrics(
+  run: WorkflowRun,
+  benchData: DenoBenchResult,
+): Map<string, TimingSample> {
+  const metrics = new Map<string, TimingSample>();
+
+  for (const bench of benchData.benches) {
+    const result = bench.results[0]?.ok;
+    if (!result) continue;
+
+    // Extract file name from origin URL
+    const originFile = bench.origin.replace(
+      /^file:\/\/.*\/packages\//,
+      "packages/",
+    );
+    const group = bench.group ? `${bench.group}/` : "";
+    const key = `bench: ${originFile} > ${group}${bench.name}`;
+
+    // Store avg time in nanoseconds (the raw unit from deno bench)
+    metrics.set(key, {
+      runId: run.id,
+      runUrl: run.html_url,
+      sha: run.head_sha,
+      createdAt: run.created_at,
+      durationSeconds: result.avg, // nanoseconds — we'll format appropriately
+    });
+  }
+
+  return metrics;
+}
+
+// ---------------------------------------------------------------------------
 // Step 4: Extract timing metrics
 // ---------------------------------------------------------------------------
 
@@ -699,6 +763,19 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s.toFixed(0)}s`;
 }
 
+/** Format nanosecond values from deno bench. */
+function formatNanos(ns: number): string {
+  if (ns < 1_000) return `${ns.toFixed(1)}ns`;
+  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(1)}µs`;
+  if (ns < 1_000_000_000) return `${(ns / 1_000_000).toFixed(1)}ms`;
+  return `${(ns / 1_000_000_000).toFixed(2)}s`;
+}
+
+/** Format a metric value, using the right unit based on the metric name. */
+function formatMetricValue(name: string, value: number): string {
+  return name.startsWith("bench:") ? formatNanos(value) : formatDuration(value);
+}
+
 function buildIssueBody(
   regressions: Regression[],
   baselineInfo: string,
@@ -711,20 +788,20 @@ function buildIssueBody(
   ];
 
   for (const r of regressions) {
+    const fmt = (v: number) => formatMetricValue(r.metric, v);
     lines.push(
-      `| ${r.metric} | ${formatDuration(r.avgRecent)} | ${
-        formatDuration(r.baseline.median)
-      } | ${formatDuration(r.baseline.threshold)} | **+${
-        r.pctIncrease.toFixed(0)
-      }%** |`,
+      `| ${r.metric} | ${fmt(r.avgRecent)} | ${fmt(r.baseline.median)} | ${
+        fmt(r.baseline.threshold)
+      } | **+${r.pctIncrease.toFixed(0)}%** |`,
     );
   }
 
   lines.push("");
   lines.push("### Recent values\n");
   for (const r of regressions) {
+    const fmt = (v: number) => formatMetricValue(r.metric, v);
     lines.push(
-      `- **${r.metric}**: ${r.recentValues.map(formatDuration).join(", ")}`,
+      `- **${r.metric}**: ${r.recentValues.map(fmt).join(", ")}`,
     );
   }
 
@@ -958,6 +1035,71 @@ async function main() {
     `Processed ${timelines.size} metrics across ${runs.length} runs (${artifactRunsProcessed} with JUnit artifacts, ${logParseRunsProcessed} via log parsing).`,
   );
 
+  // Fetch benchmark results from the Benchmarks workflow
+  console.log("Fetching benchmark results...");
+  let benchRunsProcessed = 0;
+  try {
+    const benchRuns = (
+      await githubGet<{ workflow_runs: WorkflowRun[] }>(
+        `/repos/${REPO}/actions/workflows/benchmarks.yml/runs?branch=main&status=success&per_page=${MAX_RUNS_TO_FETCH}`,
+      )
+    ).workflow_runs;
+
+    if (benchRuns.length > 0) {
+      await mapConcurrent(benchRuns, API_CONCURRENCY, async (run) => {
+        try {
+          const artifacts = await fetchArtifactsForRun(run.id);
+          const benchArtifact = artifacts.find(
+            (a) => a.name === "bench-results" && !a.expired,
+          );
+          if (!benchArtifact) return;
+
+          const resp = await fetch(
+            `https://api.github.com/repos/${REPO}/actions/artifacts/${benchArtifact.id}/zip`,
+            { headers: apiHeaders() },
+          );
+          if (!resp.ok) return;
+
+          const tmpDir = await Deno.makeTempDir({ prefix: "perf-bench-" });
+          try {
+            const data = new Uint8Array(await resp.arrayBuffer());
+            await Deno.writeFile(`${tmpDir}/artifact.zip`, data);
+            const unzip = new Deno.Command("unzip", {
+              args: ["-o", `${tmpDir}/artifact.zip`, "-d", tmpDir],
+              stdout: "null",
+              stderr: "null",
+            });
+            if (!(await unzip.output()).success) return;
+
+            const jsonPath = `${tmpDir}/results.json`;
+            try {
+              const content = await Deno.readTextFile(jsonPath);
+              const benchData: DenoBenchResult = JSON.parse(content);
+              const benchMetrics = extractBenchMetrics(run, benchData);
+              for (const [name, sample] of benchMetrics) {
+                addSample(name, sample);
+              }
+              benchRunsProcessed++;
+            } catch { /* missing or invalid JSON */ }
+          } finally {
+            try {
+              await Deno.remove(tmpDir, { recursive: true });
+            } catch { /* ignore */ }
+          }
+        } catch {
+          // Benchmark artifacts may not exist yet
+        }
+      });
+      console.log(
+        `  Found ${benchRuns.length} benchmark runs, ${benchRunsProcessed} with results.`,
+      );
+    } else {
+      console.log("  No benchmark runs found (workflow may not have run yet).");
+    }
+  } catch {
+    console.log("  Benchmarks workflow not found or not yet created.");
+  }
+
   // Print a summary of all metrics
   console.log("\nMetric summary:");
   for (
@@ -972,9 +1114,10 @@ async function main() {
       ? (sorted[mid - 1] + sorted[mid]) / 2
       : sorted[mid];
     const latest = durations[durations.length - 1];
+    const fmt = (v: number) => formatMetricValue(name, v);
     console.log(
-      `  ${name}: latest=${formatDuration(latest)}, median=${
-        formatDuration(median)
+      `  ${name}: latest=${fmt(latest)}, median=${
+        fmt(median)
       }, samples=${durations.length}`,
     );
   }
@@ -985,9 +1128,10 @@ async function main() {
   if (regressions.length > 0) {
     console.log(`\n⚠️  ${regressions.length} regression(s) detected:`);
     for (const r of regressions) {
+      const fmt = (v: number) => formatMetricValue(r.metric, v);
       console.log(
-        `  ${r.metric}: ${formatDuration(r.avgRecent)} vs baseline ${
-          formatDuration(r.baseline.median)
+        `  ${r.metric}: ${fmt(r.avgRecent)} vs baseline ${
+          fmt(r.baseline.median)
         } (+${r.pctIncrease.toFixed(0)}%)`,
       );
     }

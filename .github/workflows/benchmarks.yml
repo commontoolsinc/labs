@@ -1,0 +1,41 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {} # Allow manual trigger
+
+jobs:
+  benchmarks:
+    name: "Run Benchmarks"
+    runs-on: ubuntu-24.04-64-core
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🏋️ Run benchmarks
+        run: |
+          mkdir -p bench-results
+          deno bench --json -A packages/runner/test/*.bench.ts \
+            packages/utils/src/cache.bench.ts \
+            packages/utils/test/deep-equal.bench.ts \
+            > bench-results/results.json
+
+      - name: 📤 Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results/
+          retention-days: 90
+          if-no-files-found: ignore
