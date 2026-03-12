@@ -212,6 +212,52 @@ class ScriptedReconnectTransport implements Transport {
   }
 }
 
+class CloseOnSessionOpenTransport implements Transport {
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #connected = false;
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  async send(payload: string): Promise<void> {
+    if (!this.#connected) {
+      this.#connected = true;
+    }
+
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    if (message.type === "hello") {
+      this.#receiver(JSON.stringify({
+        type: "hello.ok",
+        protocol: MEMORY_V2_PROTOCOL,
+      }));
+      return;
+    }
+
+    if (message.type === "session.open") {
+      this.#closeReceiver(
+        new DOMException("memory/v2 transport closed", "NetworkError") as Error,
+      );
+      return;
+    }
+
+    throw new Error(`Unhandled close-on-open message: ${message.type}`);
+  }
+
+  async close(): Promise<void> {
+    this.#connected = false;
+  }
+}
+
 const waitFor = async (
   predicate: () => boolean,
   timeout = 500,
@@ -367,4 +413,23 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
   } finally {
     await client.close();
   }
+});
+
+Deno.test("memory v2 client wraps close errors with read-only names", async () => {
+  const client = await connect({
+    transport: new CloseOnSessionOpenTransport(),
+  });
+
+  try {
+    await client.mount("did:key:z6Mk-memory-v2-close-error");
+  } catch (error) {
+    assertEquals(error instanceof Error, true);
+    assertEquals((error as Error).name, "ConnectionError");
+    assertEquals((error as Error).message, "memory/v2 transport closed");
+    await client.close();
+    return;
+  }
+
+  await client.close();
+  throw new Error("Expected mount() to fail");
 });
