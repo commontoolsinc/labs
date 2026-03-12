@@ -82,7 +82,10 @@ const p = pattern<{ items: string[] }>((state) =>
 
     const output = await transformSource(source);
 
-    assertStringIncludes(output, "=> state.items.map((item) => item.toUpperCase())");
+    assertStringIncludes(
+      output,
+      "=> state.items.map((item) => item.toUpperCase())",
+    );
     assert(!output.includes("state.items.mapWithPattern("));
   },
 );
@@ -99,7 +102,10 @@ const p = pattern<{ items: string[] }>((state) =>
 
     const output = await transformSource(source);
 
-    assertStringIncludes(output, "({ items }) => items.map((item) => item.toUpperCase())");
+    assertStringIncludes(
+      output,
+      "({ items }) => items.map((item) => item.toUpperCase())",
+    );
     assert(!output.includes("items.mapWithPattern("));
   },
 );
@@ -190,7 +196,9 @@ const p = pattern<{ items: string[] }>((state) => {
 
     assertStringIncludes(output, "foo.filterWithPattern(");
     assertStringIncludes(output, "filtered.mapWithPattern(");
-    assert(!output.includes("return filtered.map((item) => item.toUpperCase())"));
+    assert(
+      !output.includes("return filtered.map((item) => item.toUpperCase())"),
+    );
   },
 );
 
