@@ -1,0 +1,27 @@
+name: Performance Regression Check
+
+on:
+  schedule:
+    - cron: "0 */4 * * *" # Every 4 hours
+  workflow_dispatch: {} # Allow manual trigger
+
+jobs:
+  check-performance:
+    name: "Check for Performance Regressions"
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 📊 Run performance regression analysis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-regression.ts

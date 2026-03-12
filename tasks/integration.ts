@@ -273,6 +273,7 @@ async function runPackageIntegration(
   apiUrl: string,
   rootDir: string,
   filter?: string,
+  junitDir?: string,
 ): Promise<boolean> {
   const packageDir = path.join(rootDir, "packages", pkg);
   console.log(`\n${"=".repeat(60)}`);
@@ -282,6 +283,18 @@ async function runPackageIntegration(
   const env: Record<string, string> = {
     LOG_LEVEL: "warn",
   };
+
+  // Set INTEGRATION_TEST_FLAGS for JUnit output if --junit-dir was specified
+  if (junitDir) {
+    const junitPath = path.join(junitDir, `${pkg}.xml`);
+    env.INTEGRATION_TEST_FLAGS = `--junit-path=${junitPath}`;
+  } else {
+    // Pass through INTEGRATION_TEST_FLAGS if set in environment
+    const testFlags = Deno.env.get("INTEGRATION_TEST_FLAGS");
+    if (testFlags) {
+      env.INTEGRATION_TEST_FLAGS = testFlags;
+    }
+  }
 
   // Add API_URL for packages that need it
   if (PACKAGES_WITH_SERVER.includes(pkg)) {
@@ -362,6 +375,8 @@ Options:
   --port-offset=N   Use port offset N (100-1000). Servers are left running
                     after tests complete. If not set, picks a random offset
                     and cleans up servers after tests.
+  --junit-dir=DIR   Write JUnit XML results per package to DIR (e.g.,
+                    --junit-dir=test-results creates test-results/runner.xml).
   --help, -h        Show this help message.
 
 Arguments:
@@ -401,8 +416,9 @@ async function main(): Promise<void> {
     Deno.exit(0);
   }
 
-  // Parse --port-offset argument
+  // Parse flags
   let cliPortOffset: number | undefined;
+  let junitDir: string | undefined;
   const positionalArgs: string[] = [];
 
   for (const arg of args) {
@@ -412,9 +428,16 @@ async function main(): Promise<void> {
         console.error(`Invalid port offset: ${arg}`);
         Deno.exit(1);
       }
+    } else if (arg.startsWith("--junit-dir=")) {
+      junitDir = arg.split("=")[1];
     } else if (!arg.startsWith("-")) {
       positionalArgs.push(arg);
     }
+  }
+
+  // If --junit-dir is set, pass per-package INTEGRATION_TEST_FLAGS
+  if (junitDir) {
+    await Deno.mkdir(junitDir, { recursive: true });
   }
 
   const packageFilter = positionalArgs[0];
@@ -494,6 +517,7 @@ async function main(): Promise<void> {
         apiUrl,
         rootDir,
         nameFilter,
+        junitDir,
       );
       results.push({ pkg, success });
     }
@@ -509,6 +533,7 @@ async function main(): Promise<void> {
         apiUrl,
         rootDir,
         nameFilter,
+        junitDir,
       );
       results.push({ pkg, success });
     }
