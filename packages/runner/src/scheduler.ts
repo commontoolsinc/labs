@@ -192,6 +192,7 @@ export class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
+  private ignorePendingDependencyWakeup = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
   private pullMode = false;
 
@@ -609,6 +610,7 @@ export class Scheduler {
       noDebounce?: boolean;
       throttle?: number;
       changeGroup?: ChangeGroup;
+      ignorePendingDependencyWakeup?: boolean;
     } = {},
   ): Cancel {
     // Handle backwards-compatible ReactivityLog argument
@@ -627,6 +629,7 @@ export class Scheduler {
       debounce,
       noDebounce,
       throttle,
+      ignorePendingDependencyWakeup,
     } = options;
 
     this.updateChangeGroup(action, options);
@@ -646,6 +649,12 @@ export class Scheduler {
     const actionIsEffect = this.updateActionType(action, isEffect, {
       queueExecution: true,
     });
+    if (ignorePendingDependencyWakeup !== undefined) {
+      this.ignorePendingDependencyWakeup.set(
+        action,
+        ignorePendingDependencyWakeup,
+      );
+    }
 
     // Track parent-child relationship if action is created during another action's execution
     this.registerParentChild(action);
@@ -743,9 +752,17 @@ export class Scheduler {
   resubscribe(
     action: Action,
     log: ReactivityLog,
-    options: { isEffect?: boolean; changeGroup?: ChangeGroup } = {},
+    options: {
+      isEffect?: boolean;
+      changeGroup?: ChangeGroup;
+      ignorePendingDependencyWakeup?: boolean;
+    } = {},
   ): void {
     const { isEffect } = options;
+    const ignorePendingDependencyWakeup = options
+      .ignorePendingDependencyWakeup ??
+      this.ignorePendingDependencyWakeup.get(action) ??
+      false;
 
     this.updateChangeGroup(action, options);
 
@@ -792,11 +809,16 @@ export class Scheduler {
     if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
       const effectReads = log.reads ?? [];
       let shouldMarkDirty = false;
+      let dirtyReason: string | undefined;
 
       // If there are pending computations whose dependencies haven't been collected yet,
       // we can't know what they write. Be conservative and assume they might affect this effect.
-      if (this.pendingDependencyCollection.size > 0) {
+      if (
+        !ignorePendingDependencyWakeup &&
+        this.pendingDependencyCollection.size > 0
+      ) {
         shouldMarkDirty = true;
+        dirtyReason = "pendingDependencyCollection";
       }
 
       // Use writersByEntity index for efficient lookup
@@ -821,6 +843,7 @@ export class Scheduler {
                 arraysOverlap(write.path, read.path)
               ) {
                 shouldMarkDirty = true;
+                dirtyReason = `writerOverlap:${this.getActionId(writer)}`;
                 break;
               }
             }
@@ -831,6 +854,12 @@ export class Scheduler {
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
+        if (actionId.includes("/$TYPE")) {
+          logger.warn(
+            "type-watcher-resubscribe-dirty",
+            `${actionId} reason=${dirtyReason ?? "unknown"}`,
+          );
+        }
         this.dirty.add(action);
         this.pending.add(action);
         this.queueExecution();
@@ -1259,6 +1288,12 @@ export class Scheduler {
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
+                    if (this.getActionId(action).includes("/$TYPE")) {
+                      logger.warn(
+                        "type-watcher-storage-trigger",
+                        `${this.getActionId(action)} change=${spaceAndURI}/${change.address.path.join("/")}`,
+                      );
+                    }
                     this.scheduleWithDebounce(action);
                   } else {
                     // Mark computation as dirty and schedule affected effects
@@ -2116,6 +2151,12 @@ export class Scheduler {
       findEffects(computation);
 
       for (const effect of toSchedule) {
+        if (this.getActionId(effect).includes("/$TYPE")) {
+          logger.warn(
+            "type-watcher-scheduleAffectedEffects",
+            `${this.getActionId(effect)} from=${this.getActionId(computation)}`,
+          );
+        }
         this.scheduleWithDebounce(effect);
       }
     } finally {

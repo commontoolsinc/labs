@@ -99,6 +99,7 @@ const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+  ignorePendingDependencyWakeup?: boolean;
 };
 
 // Shared factory instances for all cells
@@ -1763,10 +1764,16 @@ function subscribeToReferencedDocs<T>(
     ...(options.changeGroup !== undefined && {
       changeGroup: options.changeGroup,
     }),
+    ...(options.ignorePendingDependencyWakeup !== undefined && {
+      ignorePendingDependencyWakeup: options.ignorePendingDependencyWakeup,
+    }),
   };
   runtime.scheduler.resubscribe(action, log, resubscribeOptions);
 
   return () => {
+    if (sinkName.includes("/$TYPE")) {
+      logger.warn("type-watcher-dispose", sinkName);
+    }
     runtime.scheduler.unsubscribe(action);
     if (isCancel(cleanup)) cleanup();
   };

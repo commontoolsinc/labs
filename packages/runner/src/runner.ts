@@ -466,6 +466,16 @@ export class Runner {
     // Helper to set up the $TYPE watcher
     const setupTypeWatcher = () => {
       const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
+      const executingAction = (this.runtime.scheduler as unknown as {
+        executingAction?: Action | null;
+      }).executingAction;
+      const parentSrc = (
+        executingAction as Action & { src?: string } | null | undefined
+      )?.src;
+      logger.warn(
+        "type-watcher-create",
+        `process=${processCell.getAsNormalizedFullLink().id} pattern=${currentPatternId ?? "unknown"} parent=${parentSrc ?? "none"} given=${givenPattern ? "yes" : "no"}`,
+      );
       addCancel(
         typeCell.sink((newPatternId) => {
           if (!newPatternId) return;
@@ -512,7 +522,7 @@ export class Runner {
             cancelNodes?.();
             instantiatePattern(resolved);
           }
-        }),
+        }, { ignorePendingDependencyWakeup: true }),
       );
     };
 
