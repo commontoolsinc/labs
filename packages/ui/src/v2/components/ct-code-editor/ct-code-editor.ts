@@ -141,6 +141,8 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
+ * @attr {"code"|"prose"} mode - Editor mode; "prose" enables markdown prose editing.
+ * @attr {CellHandle<string>} pattern - Optional pattern piece used for backlink context.
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus

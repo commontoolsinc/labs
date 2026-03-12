@@ -54,8 +54,8 @@ interface SelectControlInput {
   label: string;
   description?: string;
   defaultValue?: string;
-  value: Writable<string>;
-  items: { label: string; value: string }[];
+  value: Writable<unknown>;
+  items: { label: string; value: unknown }[];
 }
 
 interface SelectControlOutput {
