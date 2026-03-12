@@ -24,6 +24,8 @@ jobs:
         run: deno task initialize-db
 
       - name: 🏋️ Run benchmarks
+        env:
+          CT_LOG_LEVEL: silent
         run: |
           mkdir -p bench-results
           deno bench --json -A packages/runner/test/*.bench.ts \
