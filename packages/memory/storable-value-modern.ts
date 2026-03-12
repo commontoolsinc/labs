@@ -673,6 +673,24 @@ export function cloneIfNecessaryRich(
 }
 
 /**
+ * Track an object for circular reference detection during deep cloning.
+ * Lazily allocates the `seen` set on first use, throws if a cycle is
+ * detected, and adds the object to the set. Returns the (possibly
+ * newly-allocated) set.
+ */
+function trackForCircularity(
+  obj: object,
+  seen: Set<object> | null,
+): Set<object> {
+  seen ??= new Set();
+  if (seen.has(obj)) {
+    throw new Error("Cannot deep-clone circular reference");
+  }
+  seen.add(obj);
+  return seen;
+}
+
+/**
  * Unified clone helper for both shallow and deep modes.
  *
  * When `deep` is true, recursively clones containers and detects circular
@@ -728,13 +746,7 @@ function cloneHelper(
         }
       }
       const arr = value as StorableValue[];
-      if (deep) {
-        seen ??= new Set();
-        if (seen.has(arr)) {
-          throw new Error("Cannot deep-clone circular reference");
-        }
-        seen.add(arr);
-      }
+      if (deep) seen = trackForCircularity(arr, seen);
       const copy: StorableValue[] = new Array(arr.length);
       for (let i = 0; i < arr.length; i++) {
         if (i in arr) {
@@ -758,13 +770,7 @@ function cloneHelper(
         }
       }
       const obj = value as object;
-      if (deep) {
-        seen ??= new Set();
-        if (seen.has(obj)) {
-          throw new Error("Cannot deep-clone circular reference");
-        }
-        seen.add(obj);
-      }
+      if (deep) seen = trackForCircularity(obj, seen);
       // Preserve null prototypes (e.g. Object.create(null)).
       const proto = Object.getPrototypeOf(obj);
       const copy = Object.create(proto) as Record<string, StorableValue>;
