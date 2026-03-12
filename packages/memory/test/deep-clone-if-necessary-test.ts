@@ -2,7 +2,6 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   cloneIfNecessary,
-  deepCloneIfNecessary,
   resetStorableValueConfig,
   setStorableValueConfig,
 } from "../storable-value.ts";
@@ -16,7 +15,7 @@ import {
 // Tests
 // ============================================================================
 
-describe("deepCloneIfNecessary", () => {
+describe("cloneIfNecessary (migrated from deepCloneIfNecessary)", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
     resetStorableValueConfig();
@@ -29,26 +28,26 @@ describe("deepCloneIfNecessary", () => {
   describe("legacy path (flag OFF)", () => {
     it("returns the same object (identity passthrough)", () => {
       const value = { a: 1, b: [2, 3] } as StorableValue;
-      expect(deepCloneIfNecessary(value)).toBe(value);
+      expect(cloneIfNecessary(value)).toBe(value);
     });
 
     it("returns the same array (identity passthrough)", () => {
       const value = [1, 2, 3] as StorableValue;
-      expect(deepCloneIfNecessary(value)).toBe(value);
+      expect(cloneIfNecessary(value)).toBe(value);
     });
 
     it("passes through primitives", () => {
-      expect(deepCloneIfNecessary(42 as StorableValue)).toBe(42);
-      expect(deepCloneIfNecessary("hello" as StorableValue)).toBe("hello");
-      expect(deepCloneIfNecessary(null)).toBe(null);
-      expect(deepCloneIfNecessary(true as StorableValue)).toBe(true);
-      expect(deepCloneIfNecessary(undefined)).toBe(undefined);
+      expect(cloneIfNecessary(42 as StorableValue)).toBe(42);
+      expect(cloneIfNecessary("hello" as StorableValue)).toBe("hello");
+      expect(cloneIfNecessary(null)).toBe(null);
+      expect(cloneIfNecessary(true as StorableValue)).toBe(true);
+      expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
     it("ignores frozen parameter (identity passthrough regardless)", () => {
       const value = { a: 1 } as StorableValue;
-      expect(deepCloneIfNecessary(value, true)).toBe(value);
-      expect(deepCloneIfNecessary(value, false)).toBe(value);
+      expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
+      expect(cloneIfNecessary(value, { frozen: false })).toBe(value);
     });
   });
 
@@ -61,16 +60,16 @@ describe("deepCloneIfNecessary", () => {
 
     it("passes through primitives unchanged", () => {
       setStorableValueConfig({ richStorableValues: true });
-      expect(deepCloneIfNecessary(42 as StorableValue)).toBe(42);
-      expect(deepCloneIfNecessary("hello" as StorableValue)).toBe("hello");
-      expect(deepCloneIfNecessary(null)).toBe(null);
-      expect(deepCloneIfNecessary(true as StorableValue)).toBe(true);
-      expect(deepCloneIfNecessary(undefined)).toBe(undefined);
+      expect(cloneIfNecessary(42 as StorableValue)).toBe(42);
+      expect(cloneIfNecessary("hello" as StorableValue)).toBe("hello");
+      expect(cloneIfNecessary(null)).toBe(null);
+      expect(cloneIfNecessary(true as StorableValue)).toBe(true);
+      expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
     it("passes through bigint unchanged", () => {
       setStorableValueConfig({ richStorableValues: true });
-      expect(deepCloneIfNecessary(42n as StorableValue)).toBe(42n);
+      expect(cloneIfNecessary(42n as StorableValue)).toBe(42n);
     });
 
     // -- Frozen=true (default) --
@@ -78,7 +77,7 @@ describe("deepCloneIfNecessary", () => {
     it("returns a frozen copy of an unfrozen object", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1, b: "two" } as StorableValue;
-      const result = deepCloneIfNecessary(value);
+      const result = cloneIfNecessary(value);
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(true);
@@ -87,7 +86,7 @@ describe("deepCloneIfNecessary", () => {
     it("returns a frozen copy of an unfrozen array", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = [1, 2, 3] as StorableValue;
-      const result = deepCloneIfNecessary(value);
+      const result = cloneIfNecessary(value);
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(true);
@@ -96,7 +95,7 @@ describe("deepCloneIfNecessary", () => {
     it("deep-freezes nested structures", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = { a: { b: [1, 2] } } as StorableValue;
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.a)).toBe(true);
       const inner = (result.a as Record<string, unknown>).b;
@@ -107,7 +106,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = Object.freeze([1, 2]);
       const value = Object.freeze({ a: inner }) as StorableValue;
-      const result = deepCloneIfNecessary(value);
+      const result = cloneIfNecessary(value);
       expect(result).toBe(value); // identity -- no clone needed
     });
 
@@ -117,7 +116,7 @@ describe("deepCloneIfNecessary", () => {
       const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
       // `value` is NOT frozen (unfrozen parent), so it must be cloned.
       const value = { a: frozenChild, b: "mutable" } as StorableValue;
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       // The outer object is a new frozen clone.
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(true);
@@ -131,7 +130,7 @@ describe("deepCloneIfNecessary", () => {
     it("returns a mutable copy when frozen=false", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = Object.freeze({ a: 1, b: "two" }) as StorableValue;
-      const result = deepCloneIfNecessary(value, false);
+      const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(false);
@@ -140,7 +139,7 @@ describe("deepCloneIfNecessary", () => {
     it("returns a mutable array copy when frozen=false", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = Object.freeze([1, 2, 3]) as StorableValue;
-      const result = deepCloneIfNecessary(value, false);
+      const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
       expect(Object.isFrozen(result)).toBe(false);
@@ -150,7 +149,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = { x: 1 };
       const value = { a: inner, b: [2, 3] } as StorableValue;
-      const result = deepCloneIfNecessary(value, false) as Record<
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
       >;
@@ -169,7 +168,7 @@ describe("deepCloneIfNecessary", () => {
       const value = Object.freeze({
         a: Object.freeze({ b: inner }),
       }) as StorableValue;
-      const result = deepCloneIfNecessary(value, false) as Record<
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
       >;
@@ -185,7 +184,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const error = new StorableError(new Error("test"));
       Object.freeze(error);
-      const result = deepCloneIfNecessary(error as unknown as StorableValue);
+      const result = cloneIfNecessary(error as unknown as StorableValue);
       expect(result).toBeInstanceOf(StorableError);
       expect(Object.isFrozen(result)).toBe(true);
     });
@@ -194,9 +193,9 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const error = new StorableError(new Error("test"));
       Object.freeze(error);
-      const result = deepCloneIfNecessary(
+      const result = cloneIfNecessary(
         error as unknown as StorableValue,
-        false,
+        { frozen: false },
       );
       expect(result).toBeInstanceOf(StorableError);
       expect(result).not.toBe(error);
@@ -209,7 +208,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const error = new StorableError(new Error("nested"));
       const value = { err: error, x: 42 } as StorableValue;
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(result.err).toBeInstanceOf(StorableError);
       expect(result.x).toBe(42);
@@ -220,7 +219,7 @@ describe("deepCloneIfNecessary", () => {
     it("preserves undefined in objects", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1, b: undefined } as StorableValue;
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result.b).toBe(undefined);
       expect("b" in result).toBe(true);
       expect(Object.isFrozen(result)).toBe(true);
@@ -229,7 +228,7 @@ describe("deepCloneIfNecessary", () => {
     it("preserves undefined in arrays", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = [1, undefined, 3] as StorableValue;
-      const result = deepCloneIfNecessary(value) as unknown[];
+      const result = cloneIfNecessary(value) as unknown[];
       expect(result[1]).toBe(undefined);
       expect(1 in result).toBe(true);
       expect(Object.isFrozen(result)).toBe(true);
@@ -242,7 +241,7 @@ describe("deepCloneIfNecessary", () => {
       const value = Object.create(null) as Record<string, unknown>;
       value.a = 1;
       value.b = "two";
-      const result = deepCloneIfNecessary(
+      const result = cloneIfNecessary(
         value as StorableValue,
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
@@ -255,9 +254,9 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = Object.create(null) as Record<string, unknown>;
       value.x = 42;
-      const result = deepCloneIfNecessary(
+      const result = cloneIfNecessary(
         value as StorableValue,
-        false,
+        { frozen: false },
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
       expect(result.x).toBe(42);
@@ -274,7 +273,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const epoch = new StorableEpochNsec(1234567890n);
       Object.freeze(epoch);
-      const result = deepCloneIfNecessary(epoch as unknown as StorableValue);
+      const result = cloneIfNecessary(epoch as unknown as StorableValue);
       expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
@@ -283,9 +282,9 @@ describe("deepCloneIfNecessary", () => {
       const epoch = new StorableEpochNsec(42n);
       Object.freeze(epoch);
       // frozen parameter is irrelevant for special primitives
-      const result = deepCloneIfNecessary(
+      const result = cloneIfNecessary(
         epoch as unknown as StorableValue,
-        false,
+        { frozen: false },
       );
       expect(result).toBe(epoch);
     });
@@ -295,7 +294,7 @@ describe("deepCloneIfNecessary", () => {
       const epoch = new StorableEpochNsec(999n);
       Object.freeze(epoch);
       const value = { time: epoch, label: "test" } as StorableValue;
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(result.time).toBe(epoch); // same instance -- not cloned
       expect(result.label).toBe("test");
@@ -311,7 +310,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const obj = {} as Record<string, unknown>;
       obj.self = obj;
-      expect(() => deepCloneIfNecessary(obj as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(obj as StorableValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -320,7 +319,7 @@ describe("deepCloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const arr: unknown[] = [1, 2];
       arr.push(arr);
-      expect(() => deepCloneIfNecessary(arr as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(arr as StorableValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -330,7 +329,7 @@ describe("deepCloneIfNecessary", () => {
       const a = {} as Record<string, unknown>;
       const b = { parent: a } as Record<string, unknown>;
       a.child = b;
-      expect(() => deepCloneIfNecessary(a as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(a as StorableValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -340,7 +339,7 @@ describe("deepCloneIfNecessary", () => {
       const shared = { x: 1 };
       const value = { a: shared, b: shared } as StorableValue;
       // Shared (non-circular) references should not throw.
-      const result = deepCloneIfNecessary(value) as Record<string, unknown>;
+      const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result).toEqual({ a: { x: 1 }, b: { x: 1 } });
       expect(Object.isFrozen(result)).toBe(true);
     });
@@ -354,11 +353,11 @@ describe("deepCloneIfNecessary", () => {
     it("switching from rich to legacy restores identity passthrough", () => {
       setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1 } as StorableValue;
-      const richResult = deepCloneIfNecessary(value);
+      const richResult = cloneIfNecessary(value);
       expect(richResult).not.toBe(value); // rich path clones
 
       resetStorableValueConfig();
-      const legacyResult = deepCloneIfNecessary(value);
+      const legacyResult = cloneIfNecessary(value);
       expect(legacyResult).toBe(value); // legacy path is identity
     });
   });

@@ -5,7 +5,7 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
-  deepCloneIfNecessary,
+  cloneIfNecessary,
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
 } from "@commontools/memory/storable-value";
@@ -1224,7 +1224,7 @@ export class CellImpl<T extends StorableValue>
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return storable-layer values, not native ("wild
     // west") values.
-    return deepCloneIfNecessary(value, frozen);
+    return cloneIfNecessary(value, { frozen });
   }
 
   setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
