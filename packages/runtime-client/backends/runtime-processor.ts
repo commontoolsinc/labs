@@ -317,7 +317,7 @@ export class RuntimeProcessor {
         return args;
       },
 
-      navigateCallback: (target) => {
+      navigateCallback: async (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
         const writeContext = runtime.getWriteDebugContext();
         // Add to the space's piece list here if it's from the
@@ -325,30 +325,33 @@ export class RuntimeProcessor {
         if (link.space !== space) {
           console.warn("Navigating cross-space, not adding to pieces list.");
         } else {
-          void runtime.withWriteDebugContext(
-            writeContext,
-            () => pieceManager!.add([target]),
-          ).catch((e: unknown) => {
+          try {
+            await runtime.withWriteDebugContext(
+              writeContext,
+              () => pieceManager!.add([target]),
+            );
+          } catch (e: unknown) {
             console.error(
-              "[RuntimeProcessor] Failed to add navigated piece:",
+              "[RuntimeProcessor] Failed to register navigated piece:",
               {
                 error: e instanceof Error ? e.message : e,
               },
             );
-          });
+          }
 
-          // Track as recently used (async, fire-and-forget)
-          void runtime.withWriteDebugContext(
-            writeContext,
-            () => RuntimeProcessor.trackRecentPiece(pieceManager!, target),
-          ).catch((e: unknown) => {
+          try {
+            await runtime.withWriteDebugContext(
+              writeContext,
+              () => RuntimeProcessor.trackRecentPiece(pieceManager!, target),
+            );
+          } catch (e: unknown) {
             console.error(
               "[RuntimeProcessor] Failed to track recent piece:",
               {
                 error: e instanceof Error ? e.message : e,
               },
             );
-          });
+          }
         }
 
         self.postMessage({

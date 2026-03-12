@@ -1,8 +1,11 @@
 import {
   hashObjectFromString,
-  hashOf,
 } from "@commonfabric/data-model/value-hash";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { refer } from "@commonfabric/memory/reference";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commonfabric/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -27,13 +30,13 @@ import type {
 } from "@commonfabric/memory/interface";
 import { set, setSelector } from "@commonfabric/memory/selection";
 import type { MemorySpaceSession } from "@commonfabric/memory/consumer";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
+import { assert, retract, unclaimed } from "@commonfabric/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commonfabric/memory/commit";
 import * as Consumer from "@commonfabric/memory/consumer";
 import * as Codec from "@commonfabric/memory/codec";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBrowser } from "@commonfabric/utils/env";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -61,6 +64,7 @@ import {
   MemoryVersion,
   OptStorageValue,
   PullError,
+  PushError,
   Retract,
   StorageValue,
   URI,
@@ -303,7 +307,7 @@ class Heap implements SyncPush<Revision<State>> {
 type RevisionArchive = {
   the: The;
   of: Entity;
-  is?: FabricValue;
+  is?: StorableDatum;
   cause?: string;
   since: number;
 };
@@ -377,7 +381,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selector === undefined || selector.schema === undefined) {
       return;
     }
-    const selectorRef = hashOf(JSON.stringify(selector)).toString();
+    const selectorRef = refer(JSON.stringify(selector)).toString();
     this.refTracker.add(toKey(address), selectorRef);
     this.selectors.set(selectorRef, selector);
     this.standardizedSelector.set(selectorRef, {
@@ -398,7 +402,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   ): boolean {
     const selectorRefs = this.refTracker.get(toKey(address));
     if (selectorRefs !== undefined) {
-      const selectorRef = hashOf(JSON.stringify(selector)).toString();
+      const selectorRef = refer(JSON.stringify(selector)).toString();
       return selectorRefs.has(selectorRef);
     }
     return false;
@@ -414,7 +418,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selectorRefs === undefined) {
       return noMatch;
     }
-    const newSelectorRef = hashOf(JSON.stringify(selector)).toString();
+    const newSelectorRef = refer(JSON.stringify(selector)).toString();
     // A selector is its own superset
     if (selectorRefs.has(newSelectorRef)) {
       const promiseKey = `${toKey(address)}?${newSelectorRef}`;
@@ -467,7 +471,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
           // If we don't use any $refs, we can compare these without $defs
           if (
-            isRecord(newSchema) && isRecord(sortedSubSchema) &&
+            isObject(newSchema) && isObject(sortedSubSchema) &&
             newSchemaRefs.size == 0
           ) {
             const { $defs: _defs1, ...newSchemaNoDefs } = newSchema;
@@ -497,7 +501,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
-    const selectorRef = hashOf(JSON.stringify(selector)).toString();
+    const selectorRef = refer(JSON.stringify(selector)).toString();
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
   }
@@ -580,7 +584,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     }
     const traverse = (
       value: Readonly<any>,
-    ): FabricValue => {
+    ): StorableDatum => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
@@ -1399,7 +1403,7 @@ export class Replica {
       return;
     }
 
-    const initialACL: FabricValue = {
+    const initialACL: StorableDatum = {
       value: {
         [userIdentity.did()]: "OWNER",
         [ANYONE_USER]: "WRITE",
@@ -1888,7 +1892,7 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<
     string,
-    Set<(value: StorageValue<FabricValue>) => void>
+    Set<(value: StorageValue<StorableDatum>) => void>
   > = new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid
@@ -2483,7 +2487,7 @@ export const getChanges = (
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
-  if (isRecord(change.is) && "labels" in change.is) {
+  if (isObject(change?.is) && "labels" in change.is) {
     return { ifc: change.is.labels } as JSONSchema;
   }
   return undefined;
