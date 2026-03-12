@@ -24,6 +24,12 @@ function processBranch(
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
 ): ts.Expression {
+  // Branch wrapping needs a branch-local view of data flow, so we intentionally
+  // re-analyze the authored branch here instead of reusing the outer
+  // conditional's aggregate analysis. The important invariant is that the wrap
+  // decision still runs on the authored subtree before recursive rewriting;
+  // otherwise we start reasoning about a partially lowered branch and can
+  // introduce nested derives or mixed pattern/compute lowering.
   const branchAnalysis = analyze(expr);
   const branchDataFlows = filterRelevantDataFlows(
     normalizeDataFlows(
