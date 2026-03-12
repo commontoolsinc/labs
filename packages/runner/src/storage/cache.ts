@@ -34,7 +34,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { BaseMemoryAddress, MapSet, stableHash } from "../traverse.ts";
+import { BaseMemoryAddress, MapSet, stableStringify } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
   isPrimitiveCellLink,
@@ -2118,7 +2118,7 @@ export class StorageManager implements IStorageManager {
   ): Promise<Cell<T>> {
     // Build cache key: data URI + schema hash + path + space
     const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? stableHash(schema) : "";
+    const schemaStr = schema ? stableStringify(schema) : "";
     const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
 
     const existing = _dataURISyncCache.get(cacheKey);
