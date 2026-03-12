@@ -5,18 +5,18 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import {
-  canBeStored as canBeStoredRich,
+  canBeStoredRich,
   deepCloneIfNecessaryRich,
-  isRichStorableValue,
-  toDeepRichStorableValue,
-  toRichStorableValue,
+  isStorableValueRich,
+  shallowStorableFromNativeValueRich,
+  storableFromNativeValueRich,
 } from "./storable-value-modern.ts";
-import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
+import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
   isStorableValueLegacy,
   shallowStorableFromNativeValueLegacy,
-  toDeepStorableValueLegacy,
+  storableFromNativeValueLegacy,
 } from "./storable-value-legacy.ts";
 export {
   isArrayIndexPropertyName,
@@ -78,9 +78,9 @@ export function resetStorableValueConfig(): void {
 /**
  * Convert a native JS value to storable form (deep, recursive).
  *
- * Flag OFF (legacy): performs deep conversion via `toDeepStorableValueLegacy`.
+ * Flag OFF (legacy): performs deep conversion via `storableFromNativeValueLegacy`.
  * Flag ON (rich): wraps native types (Error, Date, RegExp, etc.) into
- * storable wrappers and deep-freezes via `toDeepRichStorableValue`.
+ * storable wrappers and deep-freezes via `storableFromNativeValueRich`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
  *   applies when `richStorableValues` is ON; the legacy path does not
@@ -91,8 +91,8 @@ export function storableFromNativeValue(
   freeze = true,
 ): StorableValue {
   return currentConfig.richStorableValues
-    ? toDeepRichStorableValue(value, freeze)
-    : toDeepStorableValueLegacy(value);
+    ? storableFromNativeValueRich(value, freeze)
+    : storableFromNativeValueLegacy(value);
 }
 
 /**
@@ -100,7 +100,7 @@ export function storableFromNativeValue(
  *
  * Flag OFF (legacy): identity passthrough. Flag ON (rich): unwraps storable
  * wrappers (StorableError, StorableMap, etc.) back to native JS types via
- * `deepNativeValueFromStorableValue`.
+ * `nativeFromStorableValueRich`.
  *
  * @param frozen - When `true` (default), deep-freezes the result. Only
  *   applies when `richStorableValues` is ON; the legacy path is a
@@ -111,7 +111,7 @@ export function nativeFromStorableValue(
   frozen = true,
 ): StorableValue {
   return currentConfig.richStorableValues
-    ? deepNativeValueFromStorableValue(value, frozen) as StorableValue
+    ? nativeFromStorableValueRich(value, frozen) as StorableValue
     : value;
 }
 
@@ -150,7 +150,7 @@ export function deepCloneIfNecessary(
  * not recursively validate nested values in arrays or objects.
  *
  * Flag OFF (legacy): storable values are JSON-encodable values plus
- * `undefined`. Flag ON (rich): delegates to `isRichStorableValue` which
+ * `undefined`. Flag ON (rich): delegates to `isStorableValueRich` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
@@ -160,7 +160,7 @@ export function isStorableValue(
   value: unknown,
 ): value is StorableValueLayer {
   return currentConfig.richStorableValues
-    ? isRichStorableValue(value)
+    ? isStorableValueRich(value)
     : isStorableValueLegacy(value);
 }
 
@@ -194,7 +194,7 @@ export function canBeStored(
  * converted via `toJSON()` if available.
  *
  * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
- * `toRichStorableValue` which handles the extended type system.
+ * `shallowStorableFromNativeValueRich` which handles the extended type system.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
@@ -207,7 +207,7 @@ export function shallowStorableFromNativeValue(
   freeze = true,
 ): StorableValueLayer {
   return currentConfig.richStorableValues
-    ? toRichStorableValue(value, freeze)
+    ? shallowStorableFromNativeValueRich(value, freeze)
     : shallowStorableFromNativeValueLegacy(value);
 }
 

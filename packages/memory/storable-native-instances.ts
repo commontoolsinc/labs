@@ -589,7 +589,7 @@ export function nativeValueFromStorableValue(
  * FrozenSet and plain objects/arrays are frozen. When false, mutable copies are
  * returned.
  */
-export function deepNativeValueFromStorableValue(
+export function nativeFromStorableValueRich(
   value: StorableValue,
   frozen = true,
 ): unknown {
@@ -628,7 +628,7 @@ export function deepNativeValueFromStorableValue(
         // Preserve sparse holes.
         result.length = i + 1;
       } else {
-        result[i] = deepNativeValueFromStorableValue(
+        result[i] = nativeFromStorableValueRich(
           value[i] as StorableValue,
           frozen,
         );
@@ -643,7 +643,7 @@ export function deepNativeValueFromStorableValue(
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!UNSAFE_KEYS.has(key)) {
-      result[key] = deepNativeValueFromStorableValue(
+      result[key] = nativeFromStorableValueRich(
         val as StorableValue,
         frozen,
       );
@@ -666,7 +666,7 @@ function deepUnwrapError(error: Error, frozen: boolean): Error {
 
   // Recursively unwrap cause.
   if (error.cause !== undefined) {
-    copy.cause = deepNativeValueFromStorableValue(
+    copy.cause = nativeFromStorableValueRich(
       error.cause as StorableValue,
       frozen,
     );
@@ -677,7 +677,7 @@ function deepUnwrapError(error: Error, frozen: boolean): Error {
   for (const key of Object.keys(error)) {
     if (SKIP.has(key) || UNSAFE_KEYS.has(key)) continue;
     (copy as unknown as Record<string, unknown>)[key] =
-      deepNativeValueFromStorableValue(
+      nativeFromStorableValueRich(
         (error as unknown as Record<string, unknown>)[key] as StorableValue,
         frozen,
       );

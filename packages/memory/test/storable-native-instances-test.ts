@@ -9,8 +9,8 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
 import {
-  deepNativeValueFromStorableValue,
   isConvertibleNativeInstance,
+  nativeFromStorableValueRich,
   nativeValueFromStorableValue,
   StorableEpochDays,
   StorableEpochNsec,
@@ -647,14 +647,14 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // deepNativeValueFromStorableValue (deep unwrap)
+  // nativeFromStorableValueRich (deep unwrap)
   // --------------------------------------------------------------------------
 
-  describe("deepNativeValueFromStorableValue", () => {
+  describe("nativeFromStorableValueRich", () => {
     it("unwraps StorableError in nested object", () => {
       const se = new StorableError(new Error("deep"));
       const obj = { error: se } as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -667,7 +667,7 @@ describe("storable-native-instances", () => {
         new Map<StorableValue, StorableValue>([["k", "v"]]),
       );
       const arr = [sm] as StorableValue;
-      const result = deepNativeValueFromStorableValue(arr) as unknown[];
+      const result = nativeFromStorableValueRich(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenMap);
     });
 
@@ -676,14 +676,14 @@ describe("storable-native-instances", () => {
         new Map<StorableValue, StorableValue>([["k", "v"]]),
       );
       const arr = [sm] as StorableValue;
-      const result = deepNativeValueFromStorableValue(arr, false) as unknown[];
+      const result = nativeFromStorableValueRich(arr, false) as unknown[];
       expect(result[0]).toBeInstanceOf(Map);
       expect(result[0]).not.toBeInstanceOf(FrozenMap);
     });
 
     it("passes through primitives at all levels", () => {
       const obj = { a: 1, b: "two", c: null, d: true } as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as Record<
+      const result = nativeFromStorableValueRich(obj) as Record<
         string,
         unknown
       >;
@@ -697,7 +697,7 @@ describe("storable-native-instances", () => {
           inner: se,
         },
       } as StorableValue;
-      const result = deepNativeValueFromStorableValue(obj) as {
+      const result = nativeFromStorableValueRich(obj) as {
         outer: { inner: Error };
       };
       expect(result.outer.inner).toBeInstanceOf(Error);
