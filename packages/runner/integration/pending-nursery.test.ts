@@ -3,11 +3,9 @@
 import { assert, assertEquals } from "@std/assert";
 import { Runtime } from "@commontools/runner";
 import { Identity, IdentityCreateConfig } from "@commontools/identity";
-import { Provider, StorageManager } from "@commontools/runner/storage/cache";
+import { Provider, StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type JSONSchema } from "@commontools/runner";
 import { toURI } from "../src/uri-utils.ts";
-import { env } from "@commontools/integration";
-const { API_URL } = env;
 
 // Create test identity
 const keyConfig: IdentityCreateConfig = {
@@ -19,14 +17,17 @@ console.log("\n=== TEST: Simple object persistence ===");
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
 
+// Archived v1 integration coverage. The live toolshed path is intentionally
+// hard-cut to v2, and the corresponding cutover behavior is covered in the
+// memory-v2 subscription/reconnect race tests.
+
 const createV1Runtime = (identity: Identity) => {
-  const storageManager = StorageManager.open({
+  const storageManager = StorageManager.emulate({
     as: identity,
-    address: new URL("/api/storage/memory", API_URL),
     memoryVersion: "v1",
   });
   const runtime = new Runtime({
-    apiUrl: new URL(API_URL),
+    apiUrl: new URL("memory://"),
     storageManager,
     memoryVersion: "v1",
   });
@@ -159,6 +160,7 @@ async function runTest() {
 
 Deno.test({
   name: "pending nursery test",
+  ignore: true,
   fn: async () => {
     let timeoutHandle: number;
     const timeoutPromise = new Promise((_, reject) => {
