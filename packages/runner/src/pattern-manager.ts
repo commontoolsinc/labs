@@ -9,6 +9,7 @@ import {
 import { Cell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
+import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
@@ -308,7 +309,7 @@ export class PatternManager {
   }
 
   async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
-    let program: RuntimeProgram | undefined;
+    let program: RuntimeProgram;
     if (typeof input === "string") {
       program = {
         main: "/main.tsx",
@@ -317,7 +318,46 @@ export class PatternManager {
     } else {
       program = input;
     }
-    const pattern = await this.runtime.harness.run(program);
+
+    const { cachedCompiler } = this.runtime;
+    if (cachedCompiler) {
+      const programHash = createRef(
+        { src: program },
+        "pattern source",
+      ).toString();
+      let compileResult = await cachedCompiler.get(programHash);
+      if (!compileResult) {
+        compileResult = await this.runtime.harness.compile(program);
+        // Fire-and-forget cache write
+        cachedCompiler.set(programHash, compileResult).catch(() => {});
+      }
+      return this.evaluateToPattern(compileResult, program);
+    }
+
+    // No persistent cache — compile and evaluate directly
+    const compileResult = await this.runtime.harness.compile(program);
+    return this.evaluateToPattern(compileResult, program);
+  }
+
+  private async evaluateToPattern(
+    { id, jsScript }: CompileResult,
+    program: RuntimeProgram,
+  ): Promise<Pattern> {
+    const { main } = await this.runtime.harness.evaluate(
+      id,
+      jsScript,
+      program.files,
+    );
+    if (!main) {
+      throw new Error("Pattern compilation produced no exports.");
+    }
+    const exportName = program.mainExport ?? "default";
+    if (!(exportName in main)) {
+      throw new Error(
+        `No "${exportName}" export found in compiled pattern.`,
+      );
+    }
+    const pattern = main[exportName] as Pattern;
     pattern.program = program;
     return pattern;
   }

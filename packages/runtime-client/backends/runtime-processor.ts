@@ -23,6 +23,10 @@ import {
   type SigilLink,
 } from "@commontools/runner";
 import {
+  CachedCompiler,
+  IDBCompilationCache,
+} from "@commontools/runner/compilation-cache";
+import {
   NameSchema,
   nameSchema,
   rendererVDOMSchema,
@@ -268,6 +272,11 @@ export class RuntimeProcessor {
       address: new URL("/api/storage/memory", data.apiUrl),
     });
 
+    // Construct compilation cache if a build hash was provided (browser path).
+    const cachedCompiler = data.buildHash
+      ? new CachedCompiler(new IDBCompilationCache(), data.buildHash)
+      : undefined;
+
     let pieceManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
       apiUrl: apiUrlObj,
@@ -275,6 +284,7 @@ export class RuntimeProcessor {
       patternEnvironment: { apiUrl: apiUrlObj },
       telemetry,
       experimental: data.experimental,
+      cachedCompiler,
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,
         // functions) into cloneable representations for postMessage.

@@ -13,7 +13,7 @@ import {
 import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
 import { getLogger } from "@commontools/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
-import { EXPERIMENTAL } from "./env.ts";
+import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
@@ -290,7 +290,7 @@ export class RuntimeInternals extends EventTarget {
     // connect worker transport in parallel — they're independent I/O.
     // See docs/specs/compilation-cache.md Phase 3.
     const [buildHash, transport] = await Promise.all([
-      fetchBuildHash(),
+      COMPILATION_CACHE_CLIENT ? fetchBuildHash() : Promise.resolve(undefined),
       WebWorkerRuntimeTransport.connect({
         workerUrl: new URL(
           "/scripts/worker-runtime.js",
@@ -298,6 +298,19 @@ export class RuntimeInternals extends EventTarget {
         ),
       }),
     ]);
+    if (COMPILATION_CACHE_CLIENT) {
+      console.log(
+        buildHash
+          ? `Compilation cache enabled (client), buildHash=${
+            buildHash.substring(0, 8)
+          }`
+          : "Compilation cache disabled (client): no build manifest",
+      );
+    } else {
+      console.log(
+        "Compilation cache disabled (client): COMPILATION_CACHE_CLIENT not set",
+      );
+    }
     const client = await RuntimeClient.initialize(transport, {
       apiUrl,
       identity: session.as,

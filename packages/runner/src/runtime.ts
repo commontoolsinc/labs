@@ -58,6 +58,7 @@ import { isDeno } from "@commontools/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
+import type { CachedCompiler } from "./compilation-cache/mod.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -113,6 +114,9 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+  /** Optional compilation cache for persistent caching of compiled JS.
+   *  If absent, no persistent caching is performed (same as before). */
+  cachedCompiler?: CachedCompiler;
 }
 
 /**
@@ -179,6 +183,7 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: Required<ExperimentalOptions>;
   readonly apiUrl: URL;
@@ -225,6 +230,7 @@ export class Runtime {
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
 
     this.telemetry = options.telemetry ?? new RuntimeTelemetry();
+    this.cachedCompiler = options.cachedCompiler;
 
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
@@ -257,6 +263,13 @@ export class Runtime {
     if (options.patternEnvironment) {
       // This is still a singleton. TODO(seefeld): Fix this.
       setPatternEnvironment(options.patternEnvironment);
+    }
+
+    // Fire-and-forget startup eviction for compilation cache
+    if (this.cachedCompiler) {
+      this.cachedCompiler.evictStale().catch((err) => {
+        console.warn("Compilation cache eviction failed:", err);
+      });
     }
 
     if (options.debug) {

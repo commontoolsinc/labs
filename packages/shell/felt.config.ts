@@ -49,6 +49,9 @@ const config: Config = {
       "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
         "EXPERIMENTAL_CANONICAL_HASHING",
       ),
+      "$COMPILATION_CACHE_CLIENT": Deno.env.get(
+        "COMPILATION_CACHE_CLIENT",
+      ),
     },
     supported: {
       // Provide polyfills for `using` resource management

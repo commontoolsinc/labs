@@ -1,6 +1,6 @@
-import type { JsScript } from "@commontools/js-compiler";
 import { getLogger } from "@commontools/utils/logger";
 import type { CompilationCacheStorage } from "./storage.ts";
+import type { CompileResult } from "../harness/types.ts";
 
 export type {
   CompilationCacheEntry,
@@ -55,10 +55,10 @@ export class CachedCompiler {
   }
 
   /**
-   * Returns cached JsScript for the given program, or undefined on miss.
+   * Returns cached CompileResult for the given program, or undefined on miss.
    * Caller is responsible for compilation on miss and calling set().
    */
-  async get(programHash: string): Promise<JsScript | undefined> {
+  async get(programHash: string): Promise<CompileResult | undefined> {
     const entry = await this.cache.get(programHash);
     if (!entry) {
       this.stats.misses++;
@@ -71,13 +71,14 @@ export class CachedCompiler {
       return undefined;
     }
     this.stats.hits++;
-    return entry.jsScript;
+    return { id: entry.id, jsScript: entry.jsScript };
   }
 
-  async set(programHash: string, jsScript: JsScript): Promise<void> {
+  async set(programHash: string, result: CompileResult): Promise<void> {
     try {
       await this.cache.set(programHash, {
-        jsScript,
+        id: result.id,
+        jsScript: result.jsScript,
         fingerprint: this.fingerprint,
         cachedAt: Date.now(),
       });
