@@ -711,6 +711,19 @@ function cloneHelper(
   force: boolean,
   seen: Set<object> | null,
 ): StorableValue {
+  // Identity optimization: when force is off, check if the value's frozenness
+  // already matches the requested state. Deep mode uses isDeepFrozenStorableValue;
+  // shallow mode uses Object.isFrozen(v) === frozen.
+  function canReturnAsIs(v: StorableValue): boolean {
+    if (force) return false;
+    if (deep) {
+      if (frozen && isDeepFrozenStorableValue(v)) return true;
+      if (!frozen && !Object.isFrozen(v)) return true;
+      return false;
+    }
+    return Object.isFrozen(v) === frozen;
+  }
+
   switch (tagFromNativeValue(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
@@ -722,29 +735,11 @@ function cloneHelper(
 
     case NATIVE_TAGS.StorableInstance:
       // Identity optimization: already-correct frozenness needs no clone.
-      if (!force) {
-        if (deep) {
-          if (frozen && isDeepFrozenStorableValue(value)) return value;
-          if (!frozen && !Object.isFrozen(value)) return value;
-        } else {
-          if (Object.isFrozen(value) === frozen) return value;
-        }
-      }
+      if (canReturnAsIs(value)) return value;
       return (value as StorableInstance).shallowClone(frozen) as StorableValue;
 
     case NATIVE_TAGS.Array: {
-      // Identity optimizations when force is off:
-      // - deep+frozen+deep-frozen: already correct, return as-is.
-      // - deep+mutable+mutable: caller accepts sharing risk, return as-is.
-      // - shallow: frozenness matches requested state, return as-is.
-      if (!force) {
-        if (deep) {
-          if (frozen && isDeepFrozenStorableValue(value)) return value;
-          if (!frozen && !Object.isFrozen(value)) return value;
-        } else {
-          if (Object.isFrozen(value) === frozen) return value;
-        }
-      }
+      if (canReturnAsIs(value)) return value;
       const arr = value as StorableValue[];
       if (deep) seen = trackForCircularity(arr, seen);
       const copy: StorableValue[] = new Array(arr.length);
@@ -761,14 +756,7 @@ function cloneHelper(
     }
 
     case NATIVE_TAGS.Object: {
-      if (!force) {
-        if (deep) {
-          if (frozen && isDeepFrozenStorableValue(value)) return value;
-          if (!frozen && !Object.isFrozen(value)) return value;
-        } else {
-          if (Object.isFrozen(value) === frozen) return value;
-        }
-      }
+      if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);
       // Preserve null prototypes (e.g. Object.create(null)).
