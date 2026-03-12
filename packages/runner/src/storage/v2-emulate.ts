@@ -25,10 +25,10 @@ class EmulatedSessionFactory implements SessionFactory {
 const toStoredDocument = (value: StorableDatum) => {
   if (
     value !== null && typeof value === "object" && !Array.isArray(value) &&
-    "value" in value
+    ("value" in value || "source" in value)
   ) {
     return {
-      value: (value as { value: unknown }).value,
+      ...("value" in value ? { value: (value as { value: unknown }).value } : {}),
       ...("source" in value &&
           (value as { source?: unknown }).source !== undefined
         ? { source: (value as { source?: unknown }).source }

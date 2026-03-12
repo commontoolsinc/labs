@@ -54,3 +54,43 @@ Deno.test("memory v2 root deletes stay undefined through sink and get", async ()
     await storageManager.close();
   }
 });
+
+Deno.test("memory v2 source-backed cells clear to undefined", async () => {
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    memoryVersion: "v2",
+  });
+
+  let tx: IExtendedStorageTransaction = runtime.edit();
+
+  try {
+    const parent = runtime.getCell(space, "memory-v2-root-delete-parent", undefined, tx);
+    const child = runtime.getCell<{ name: string }>(
+      space,
+      "memory-v2-root-delete-child",
+      undefined,
+      tx,
+    );
+
+    child.setSourceCell(parent);
+    child.set({ name: "Alice" });
+    await tx.commit();
+
+    tx = runtime.edit();
+    child.withTx(tx).set(undefined as unknown as { name: string });
+    await tx.commit();
+    tx = runtime.edit();
+
+    assertEquals(child.get(), undefined);
+    assertEquals(await child.pull(), undefined);
+  } finally {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
