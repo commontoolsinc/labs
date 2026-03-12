@@ -466,16 +466,6 @@ export class Runner {
     // Helper to set up the $TYPE watcher
     const setupTypeWatcher = () => {
       const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
-      const executingAction = (this.runtime.scheduler as unknown as {
-        executingAction?: Action | null;
-      }).executingAction;
-      const parentSrc = (
-        executingAction as Action & { src?: string } | null | undefined
-      )?.src;
-      logger.warn(
-        "type-watcher-create",
-        `process=${processCell.getAsNormalizedFullLink().id} pattern=${currentPatternId ?? "unknown"} parent=${parentSrc ?? "none"} given=${givenPattern ? "yes" : "no"}`,
-      );
       addCancel(
         typeCell.sink((newPatternId) => {
           if (!newPatternId) return;
@@ -522,7 +512,7 @@ export class Runner {
             cancelNodes?.();
             instantiatePattern(resolved);
           }
-        }, { ignorePendingDependencyWakeup: true }),
+        }),
       );
     };
 
@@ -1467,7 +1457,10 @@ export class Runner {
 
       let previouslyInvalidArgument = false;
 
-      const action: Action = (tx: IExtendedStorageTransaction) => {
+      const action: Action & {
+        ignoredSchedulingWrites?: NormalizedFullLink[];
+      } = (tx: IExtendedStorageTransaction) => {
+        action.ignoredSchedulingWrites = [];
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
           {
@@ -1629,6 +1622,12 @@ export class Runner {
                   undefined,
                   resultCell,
                 );
+                const childProcessCell = resultCell.withTx(tx).getSourceCell();
+                if (childProcessCell) {
+                  action.ignoredSchedulingWrites?.push(
+                    childProcessCell.getAsNormalizedFullLink(),
+                  );
+                }
                 addCancel(() => this.stop(resultCell));
 
                 // CT-1316: If the TX commit fails (e.g. session cancel,
