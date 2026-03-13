@@ -279,7 +279,7 @@ export class Runner {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.key("internal").getRaw({
+    const previousInternal = processCell.key("internal").getRawUntypedMutable({
       meta: ignoreReadForScheduling,
     });
     const internal = Object.assign(

@@ -29,7 +29,10 @@ import type {
 import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import {
+  cloneIfNecessary,
+  isArrayIndexPropertyName,
+} from "@commontools/memory/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -137,7 +140,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        valueObj = currentValue as StorableObject;
+        // When richStorableValues is ON, stored objects are deep-frozen by
+        // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
+        // TypeError on frozen objects. force defaults to true (always clone)
+        // because the value may be the transaction's working copy, which
+        // must not be mutated in place.
+        valueObj = cloneIfNecessary(currentValue as StorableValue, {
+          deep: false,
+          frozen: false,
+        }) as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
