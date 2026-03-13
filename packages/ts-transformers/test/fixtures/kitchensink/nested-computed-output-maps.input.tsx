@@ -39,6 +39,7 @@ interface Thread {
   comments: Comment[];
 }
 
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const jumpToComment = handler<unknown, {
   selectedCommentId: string | undefined;
   threadId: string;
@@ -48,17 +49,22 @@ const jumpToComment = handler<unknown, {
   innerIndex: number;
 }>((_event, state) => state);
 
+// [TRANSFORM] lift: input and output schemas injected
 const passthroughLabels = lift((labels: string[]) => labels);
 
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern<{
   threads: Thread[];
   lane: string;
   showFlagged: boolean;
 }>((state) => {
+  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
   const selectedCommentId = Writable.of<string | undefined>();
   const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
 
+  // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
   const visibleThreads = computed(() =>
+    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
     state.threads.map((thread, outerIndex) => ({
       thread,
       outerIndex,
@@ -68,17 +74,22 @@ export default pattern<{
     }))
   );
 
+  // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
   const threadRows = computed(() =>
+    // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
+      // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
       const plainSeparators = ["top", "bottom"].map((edge) =>
         `${thread.title}-${edge}`
       );
       const liftedSeparators = passthroughLabels(plainSeparators);
+      // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
       const reboundComments = computed(() => visibleComments);
 
       return (
         <article>
           <h2>{thread.title}</h2>
+          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
           {visibleComments.map((comment, innerIndex) => (
             <div>
               <button
@@ -94,12 +105,14 @@ export default pattern<{
               >
                 {comment.flagged
                   ? <strong>{comment.text}</strong>
-                  : ifElse(
+                  : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */
+                  ifElse(
                     thread.muted,
                     <em>{comment.text}</em>,
                     <span>{comment.text}</span>,
                   )}
               </button>
+              {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
               {comment.reactions.map((reaction, reactionIndex) => (
                 <span>
                   {reactionIndex === innerIndex
@@ -109,6 +122,8 @@ export default pattern<{
               ))}
             </div>
           ))}
+          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {reboundComments.map((comment, reboundIndex) => (
             <aside>
               {reboundIndex === outerIndex
@@ -116,11 +131,14 @@ export default pattern<{
                 : comment.text}
             </aside>
           ))}
+          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {liftedSeparators.map((edge, edgeIndex) => (
             <small>
               {edgeIndex === outerIndex ? `${state.lane}:${edge}` : edge}
             </small>
           ))}
+          {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
           {plainSeparators.map((edge) => <small>{edge}</small>)}
         </article>
       );
@@ -130,11 +148,14 @@ export default pattern<{
   return {
     [UI]: (
       <div>
+        {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
+        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
         {laneLabels.map((label, labelIndex) => (
           <header data-lane-label={labelIndex}>
             {labelIndex === 0 ? `${state.lane}:${label}` : label}
           </header>
         ))}
+        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
         {threadRows.map((row, rowIndex) => (
           <section data-row={rowIndex}>{row}</section>
         ))}

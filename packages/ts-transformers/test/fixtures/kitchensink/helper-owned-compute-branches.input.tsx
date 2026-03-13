@@ -25,28 +25,36 @@ interface Project {
   badges: Badge[];
 }
 
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern<{
   projects: Project[];
   prefix: string;
   showArchived: boolean;
 }>((state) => {
+  // [TRANSFORM] Writable.of: schema arg injected
   const fallbackMembers = Writable.of(["ops", "sales"]);
+  // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
   const visibleProjects = computed(() =>
     state.showArchived
       ? state.projects
       : state.projects.filter((project) => !project.archived)
   );
 
+  // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
   const rows = computed(() =>
+    // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
     visibleProjects.map((project, projectIndex) => {
+      // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
       const plainPreview = ["alpha", "beta"].map((label, labelIndex) =>
         `${project.name}-${labelIndex}-${label}`
       );
 
+      // [TRANSFORM] ifElse: schema args injected on authored ifElse
       return ifElse(
         project.badges.length > 0,
         <div>
           <h3>{project.name}</h3>
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
           {project.badges.map((badge, badgeIndex) => (
             <span>
               {badge.active
@@ -56,14 +64,17 @@ export default pattern<{
                 : ""}
             </span>
           ))}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
           {fallbackMembers.map((member, memberIndex) => (
             <small>
               {memberIndex === 0 ? `${project.name}-${member}` : member}
             </small>
           ))}
+          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
           {plainPreview.map((label) => <i>{label}</i>)}
         </div>,
         <div>
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside derive */}
           {project.members.map((member, memberIndex) => (
             <span>
               {memberIndex === projectIndex

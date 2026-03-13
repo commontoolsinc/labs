@@ -28,6 +28,7 @@ interface Section {
   tasks: Task[];
 }
 
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const selectTask = handler<unknown, {
   selectedTaskId: string | undefined;
   hoveredSectionId: string | undefined;
@@ -37,33 +38,44 @@ const selectTask = handler<unknown, {
   taskIndex: number;
 }>((_event, state) => state);
 
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern<{
   sections: Writable<Section[]>;
   showCompleted: boolean;
   globalAccent: string;
 }>((state) => {
+  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
   const selectedTaskId = Writable.of<string | undefined>();
+  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
   const hoveredSectionId = Writable.of<string | undefined>();
+  // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
   const hasSections = computed(() => state.sections.get().length > 0);
 
   return {
     [UI]: (
       <div>
+        {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}
         {ifElse(
           hasSections,
           <div>
+            {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
+            {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
             {state.sections.map((section, sectionIndex) => (
               <section>
                 <h2
                   style={{
+                    // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
                     color: section.accent ? section.accent : state.globalAccent,
                   }}
                 >
                   {section.title}
                 </h2>
+                {/* [TRANSFORM] ifElse: schema-injected authored ifElse(section.expanded, ..., ...) */}
                 {ifElse(
                   section.expanded,
                   <div>
+                    {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
+                    {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
                     {section.tasks.map((task, taskIndex) => (
                       <div>
                         <button
@@ -77,6 +89,7 @@ export default pattern<{
                             taskIndex,
                           })}
                         >
+                          {/* [TRANSFORM] ternary lowered: task.done ? <span>...</span> : ifElse(...) → ifElse(task.done, ..., ...) */}
                           {task.done
                             ? <span>{task.label}</span>
                             : ifElse(
@@ -85,6 +98,9 @@ export default pattern<{
                               <em>{task.label}</em>,
                             )}
                         </button>
+                        {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
+                        {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
+                        {/* [TRANSFORM] ternary lowered: tagIndex===taskIndex ? `${section.title}:${tag}` : (showCompleted||!task.done ? tag : "") */}
                         {task.tags.map((tag, tagIndex) => (
                           <span>
                             {tagIndex === taskIndex
@@ -97,6 +113,9 @@ export default pattern<{
                       </div>
                     ))}
                   </div>,
+                  // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
+                  //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
+                  //   → derive() wrapping the ternary condition + inner ifElse for branches
                   section.tasks.length > 0
                     ? <small>{section.title} collapsed</small>
                     : <small>empty</small>,
@@ -104,6 +123,8 @@ export default pattern<{
               </section>
             ))}
           </div>,
+          // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
+          //   → derive() wrapping the <p> + inner ifElse for the ternary
           <p>{state.showCompleted ? "No completed sections" : "No sections"}</p>,
         )}
       </div>

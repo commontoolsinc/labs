@@ -22,13 +22,16 @@ interface Project {
     members: string[];
     badges: Badge[];
 }
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
+    // [TRANSFORM] Writable.of: schema arg injected
     const fallbackMembers = Writable.of(["ops", "sales"], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
+    // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
     const visibleProjects = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -145,6 +148,7 @@ export default pattern((state) => {
         } }, ({ state }) => state.showArchived
         ? state.projects
         : state.projects.filter((project) => !project.archived));
+    // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
     const rows = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -239,8 +243,12 @@ export default pattern((state) => {
             prefix: state.key("prefix")
         },
         fallbackMembers: fallbackMembers
-    }, ({ visibleProjects, state, fallbackMembers }) => visibleProjects.map((project, projectIndex) => {
+    }, ({ visibleProjects, state, fallbackMembers }) => 
+    // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
+    visibleProjects.map((project, projectIndex) => {
+        // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
         const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
+        // [TRANSFORM] ifElse: schema args injected on authored ifElse
         return ifElse({
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -269,6 +277,7 @@ export default pattern((state) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, project.badges.length > 0, <div>
           <h3>{project.name}</h3>
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
           {project.badges.map((badge, badgeIndex) => (<span>
               {badge.active
                     ? `${state.prefix}${badge.text}-${projectIndex}`
@@ -276,6 +285,7 @@ export default pattern((state) => {
                         ? `${project.name}:${badge.text}`
                         : ""}
             </span>))}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
           {fallbackMembers.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const member = __ct_pattern_input.key("element");
                 const memberIndex = __ct_pattern_input.key("index");
@@ -336,8 +346,10 @@ export default pattern((state) => {
                     name: project.name
                 }
             })}
+          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
           {plainPreview.map((label) => <i>{label}</i>)}
         </div>, <div>
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside derive */}
           {project.members.map((member, memberIndex) => (<span>
               {memberIndex === projectIndex
                     ? `${state.prefix}${member}`
