@@ -299,16 +299,8 @@ for (const config of configs) {
       relativeInputPath: string;
       relativeExpectedPath: string;
     }) {
-      // Strip // [TRANSFORM] annotation comments from expected output.
-      // These are reviewer-facing documentation that the transformer doesn't
-      // emit; they explain *why* each rewrite was applied so golden updates
-      // can be verified at a glance.
-      const stripped = expected.replace(
-        /^[ \t]*\/\/ \[TRANSFORM\][^\n]*\n/gm,
-        "",
-      );
-      if (actual === stripped) return;
-      const diff = createUnifiedDiff(stripped, actual);
+      if (actual === expected) return;
+      const diff = createUnifiedDiff(expected, actual);
       let message =
         `\n\nTransformation output does not match expected for: ${fixture.baseName}\n`;
       message += `\nFiles:\n`;
