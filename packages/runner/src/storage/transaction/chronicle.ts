@@ -52,11 +52,15 @@ const alignRootWriteWithLoadedShape = (
     return merged;
   }
 
+  if (merged === undefined) {
+    return loaded.source === undefined ? undefined : { source: loaded.source };
+  }
+
   return {
     ...("source" in loaded && loaded.source !== undefined
       ? { source: loaded.source }
       : {}),
-    ...(merged !== undefined ? { value: merged } : {}),
+    value: merged,
   };
 };
 
