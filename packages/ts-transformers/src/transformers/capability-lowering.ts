@@ -792,6 +792,126 @@ function rewritePatternBody(
   return rewrittenExpr;
 }
 
+/**
+ * Recursively process derive() callback bodies to rewrite property accesses
+ * on locally-declared OpaqueRef variables (e.g., const foo = computed(...); foo.bar → foo.key("bar")).
+ *
+ * rewritePatternBody stops at function boundaries, so derive callback bodies
+ * are not processed by it. This function finds derive() calls in the given body,
+ * extracts their callbacks, and applies rewritePatternBody to each callback body
+ * with empty opaque roots (since derive callbacks receive unwrapped captures).
+ * Local variables initialized from derive/computed/lift calls within the callback
+ * will be detected as opaque roots by rewritePatternBody's variable tracking.
+ */
+function rewriteDeriveCallbackBodies(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const visit = (node: ts.Node): ts.Node => {
+    // First recurse into children
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+
+    if (!ts.isCallExpression(visited)) return visited;
+
+    const callKind = detectCallKind(visited, context.checker);
+    if (callKind?.kind !== "derive") return visited;
+
+    const callbackArg = visited.arguments.length === 2
+      ? visited.arguments[1]
+      : visited.arguments.length === 4
+      ? visited.arguments[3]
+      : undefined;
+
+    if (!callbackArg || !isFunctionLikeExpression(callbackArg)) return visited;
+
+    // Recursively process nested derive callbacks first
+    let processedBody = rewriteDeriveCallbackBodies(
+      callbackArg.body,
+      context,
+    );
+
+    // Pre-scan the callback body for local variable declarations that produce
+    // OpaqueRef values (e.g., const foo = derive(...)). We collect only SYMBOLS
+    // (not names) to avoid false rewrites when a block-scoped opaque variable
+    // shares a name with an unrelated outer-scope variable. Names are discovered
+    // by rewritePatternBody's own setBindingOpaqueState as it walks declarations.
+    // We walk the full AST (stopping at nested function boundaries) so
+    // declarations inside if/else/loops are also discovered.
+    const localOpaqueRootSymbols = new Set<ts.Symbol>();
+    const scanForOpaqueDecls = (node: ts.Node): void => {
+      if (ts.isFunctionLike(node)) return; // don't cross function boundaries
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        ts.isIdentifier(node.name) &&
+        isOpaqueSourceExpression(
+          node.initializer,
+          new Set(),
+          localOpaqueRootSymbols,
+          context,
+        )
+      ) {
+        const sym = context.checker.getSymbolAtLocation(node.name);
+        if (sym) localOpaqueRootSymbols.add(sym);
+      }
+      ts.forEachChild(node, scanForOpaqueDecls);
+    };
+    scanForOpaqueDecls(processedBody);
+
+    // Rewrite property accesses on local OpaqueRef variables.
+    // Pass empty name set — rewritePatternBody will populate activeOpaqueRoots
+    // via setBindingOpaqueState as it encounters declarations, respecting
+    // block scoping. The symbol set bypasses the early return guard.
+    processedBody = rewritePatternBody(
+      processedBody,
+      new Set(),
+      localOpaqueRootSymbols,
+      context,
+    );
+
+    if (processedBody === callbackArg.body) return visited;
+
+    const newCallback = ts.isArrowFunction(callbackArg)
+      ? context.factory.updateArrowFunction(
+        callbackArg,
+        callbackArg.modifiers,
+        callbackArg.typeParameters,
+        callbackArg.parameters,
+        callbackArg.type,
+        callbackArg.equalsGreaterThanToken,
+        processedBody,
+      )
+      : context.factory.updateFunctionExpression(
+        callbackArg as ts.FunctionExpression,
+        callbackArg.modifiers,
+        (callbackArg as ts.FunctionExpression).asteriskToken,
+        (callbackArg as ts.FunctionExpression).name,
+        callbackArg.typeParameters,
+        callbackArg.parameters,
+        callbackArg.type,
+        processedBody as ts.Block,
+      );
+
+    const args = [...visited.arguments];
+    args[args.length === 2 ? 1 : 3] = newCallback;
+    return context.factory.updateCallExpression(
+      visited,
+      visited.expression,
+      visited.typeArguments,
+      args,
+    );
+  };
+
+  if (ts.isBlock(body)) {
+    return visitEachChildWithJsx(
+      body,
+      visit,
+      context.tsContext,
+    ) as ts.Block;
+  }
+  return visit(body) as ts.Expression;
+}
+
 /** Property names that correspond to reactive data in map callback params. */
 const MAP_REACTIVE_PROPERTIES = new Set(["element", "index", "array"]);
 
@@ -1006,6 +1126,7 @@ function transformPatternCallback(
 
   let body: ts.ConciseBody = callback.body;
   body = rewritePatternBody(body, opaqueRoots, opaqueRootSymbols, context);
+  body = rewriteDeriveCallbackBodies(body, context);
 
   if (prologue.length > 0) {
     if (ts.isBlock(body)) {
