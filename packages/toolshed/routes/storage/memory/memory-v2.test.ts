@@ -4,6 +4,7 @@ import { MEMORY_V2_PROTOCOL } from "@commontools/memory/v2";
 import { Identity } from "@commontools/identity";
 import { Runtime, type JSONSchema } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { fromDigest } from "merkle-reference";
 
 const openSocket = async (url: URL): Promise<WebSocket> => {
   const socket = new WebSocket(url);
@@ -44,6 +45,13 @@ const waitFor = async (
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+};
+
+const toBlobHash = async (value: Uint8Array): Promise<string> => {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", Uint8Array.from(value)),
+  );
+  return fromDigest(digest).toString();
 };
 
 const createRuntime = (identity: Identity, base: URL) =>
@@ -227,6 +235,49 @@ Deno.test("memory websocket resumes a requested v2 session id", async () => {
     assertEquals(message.ok.serverSeq, 0);
 
     socket.close();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+Deno.test("memory blob endpoints upload and download v2 payloads by hash", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-blobs");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+  const bytes = new TextEncoder().encode("hello from memory v2 blobs");
+  const hash = await toBlobHash(bytes);
+  const blobUrl = new URL(
+    `/api/storage/memory/blob/${encodeURIComponent(hash)}?space=${
+      encodeURIComponent(identity.did())
+    }`,
+    base,
+  );
+
+  try {
+    const created = await fetch(blobUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/plain",
+      },
+      body: bytes,
+    });
+    await created.text();
+    assertEquals(created.status, 201);
+
+    const existing = await fetch(blobUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/plain",
+      },
+      body: bytes,
+    });
+    await existing.text();
+    assertEquals(existing.status, 200);
+
+    const downloaded = await fetch(blobUrl);
+    assertEquals(downloaded.status, 200);
+    assertEquals(downloaded.headers.get("content-type"), "text/plain");
+    assertEquals(await downloaded.text(), "hello from memory v2 blobs");
   } finally {
     await server.shutdown();
   }
