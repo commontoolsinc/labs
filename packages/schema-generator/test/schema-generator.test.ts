@@ -123,13 +123,15 @@ type CalculatorRequest = {
       expect(schema.required).toEqual(["0"]);
     });
 
-    it("collapses synthetic union containing unknown to { type: 'unknown' }", async () => {
+    it("preserves anyOf for synthetic union containing unknown", async () => {
       const generator = new SchemaGenerator();
       const { checker } = await getTypeFromCode(
         "type Dummy = unknown;",
         "Dummy",
       );
       // Synthetic union: unknown | { foo: string }
+      // unknown should NOT absorb the object branch — the runtime can
+      // try the object branch when the value matches.
       const unionNode = ts.factory.createUnionTypeNode([
         ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
         ts.factory.createTypeLiteralNode([
@@ -145,8 +147,15 @@ type CalculatorRequest = {
       const schema = generator.generateSchemaFromSyntheticTypeNode(
         unionNode,
         checker,
-      );
-      expect(schema).toEqual({ type: "unknown" });
+      ) as Record<string, unknown>;
+      expect(schema.anyOf).toEqual([
+        { type: "unknown" },
+        {
+          type: "object",
+          properties: { foo: { type: "string" } },
+          required: ["foo"],
+        },
+      ]);
     });
   });
 
