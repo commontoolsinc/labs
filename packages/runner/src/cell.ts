@@ -202,8 +202,6 @@ declare module "@commontools/api" {
       options: IReadOptions & { frozen: false },
     ): StorableValue;
     getRawUntyped(options?: IReadOptions): StorableValue;
-    /** @deprecated Use `getRawUntyped({ frozen: false })` instead. */
-    getRawUntypedMutable(options?: IReadOptions): StorableValue;
     setRaw(value: (NoInfer<T> & StorableValue) | undefined): void;
     /**
      * Sets the raw cell value to any `StorableValue`, bypassing the cell's
@@ -318,7 +316,6 @@ const cellMethods = new Set<
   "getAsWriteRedirectLink",
   "getRaw",
   "getRawUntyped",
-  "getRawUntypedMutable",
   "setRaw",
   "setRawUntyped",
   "getSourceCell",
@@ -1233,11 +1230,6 @@ export class CellImpl<T extends StorableValue>
     // and getRawUntyped() return storable-layer values, not native ("wild
     // west") values.
     return cloneIfNecessary(value, { frozen });
-  }
-
-  /** @deprecated Use `getRawUntyped({ frozen: false })` instead. */
-  getRawUntypedMutable(options?: IReadOptions): StorableValue {
-    return this.getRawUntyped({ ...options, frozen: false });
   }
 
   setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {

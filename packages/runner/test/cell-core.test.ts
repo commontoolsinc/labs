@@ -606,7 +606,7 @@ describe("Cell utility functions", () => {
     expect(isCellResult({})).toBe(false);
   });
 
-  describe("getRawUntyped / setRawUntyped / getRawUntypedMutable", () => {
+  describe("getRawUntyped / setRawUntyped", () => {
     it("getRawUntyped returns the same value as getRaw for typed data", () => {
       const cell = runtime.getCell<{ a: number }>(
         space,
@@ -658,25 +658,25 @@ describe("Cell utility functions", () => {
       expect(cell.getRawUntyped()).toBeUndefined();
     });
 
-    it("getRawUntypedMutable returns undefined for an empty cell", () => {
+    it("getRawUntyped({ frozen: false }) returns undefined for an empty cell", () => {
       const cell = runtime.getCell<{ x: number }>(
         space,
-        "getRawUntypedMutable empty",
+        "getRawUntyped frozen false empty",
         undefined,
         tx,
       );
-      expect(cell.getRawUntypedMutable()).toBeUndefined();
+      expect(cell.getRawUntyped({ frozen: false })).toBeUndefined();
     });
 
-    it("getRawUntypedMutable returns a value equal to getRaw", () => {
+    it("getRawUntyped({ frozen: false }) returns a value equal to getRaw", () => {
       const cell = runtime.getCell<{ x: number; y: number }>(
         space,
-        "getRawUntypedMutable basic",
+        "getRawUntyped frozen false basic",
         undefined,
         tx,
       );
       cell.set({ x: 10, y: 20 });
-      expect(cell.getRawUntypedMutable()).toEqual(cell.getRaw());
+      expect(cell.getRawUntyped({ frozen: false })).toEqual(cell.getRaw());
     });
 
     it("setRawUntyped accepts an array", () => {
@@ -735,17 +735,17 @@ describe("Cell utility functions", () => {
       );
     });
 
-    it("getRawUntypedMutable is identity passthrough (flag OFF)", () => {
+    it("getRawUntyped({ frozen: false }) is identity passthrough (flag OFF)", () => {
       // With richStorableValues OFF, cloneIfNecessary is a no-op, so
-      // getRawUntypedMutable returns the same reference as the stored value.
+      // getRawUntyped({ frozen: false }) returns the same reference.
       const cell = runtime.getCell<{ items: number[] }>(
         space,
-        "getRawUntypedMutable passthrough off",
+        "getRawUntyped frozen false passthrough off",
         undefined,
         tx,
       );
       cell.set({ items: [1, 2] });
-      const result = cell.getRawUntypedMutable();
+      const result = cell.getRawUntyped({ frozen: false });
       expect(result).toEqual({ items: [1, 2] });
       expect(result).toBe(cell.getRawUntyped());
     });
@@ -805,16 +805,18 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(Object.isFrozen((raw as { x: readonly number[] }).x)).toBe(true);
   });
 
-  it("getRawUntypedMutable returns a mutable deep copy", () => {
+  it("getRawUntyped({ frozen: false }) returns a mutable deep copy", () => {
     const cell = runtime.getCell<{ items: number[] }>(
       richSpace,
-      "getRawUntypedMutable mutable",
+      "getRawUntyped frozen false mutable",
       undefined,
       tx,
     );
     cell.set({ items: [10, 20] });
 
-    const mutable = cell.getRawUntypedMutable() as { items: number[] };
+    const mutable = cell.getRawUntyped({ frozen: false }) as {
+      items: number[];
+    };
     expect(mutable).toBeDefined();
     expect(Object.isFrozen(mutable)).toBe(false);
     expect(Object.isFrozen(mutable.items)).toBe(false);
@@ -882,29 +884,29 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(cell.getRawUntyped()).toBe(null);
   });
 
-  it("getRawUntypedMutable returns mutable array copy", () => {
+  it("getRawUntyped({ frozen: false }) returns mutable array copy", () => {
     const cell = runtime.getCell<number[]>(
       richSpace,
-      "getRawUntypedMutable array",
+      "getRawUntyped frozen false array",
       undefined,
       tx,
     );
     cell.set([10, 20, 30]);
-    const mutable = cell.getRawUntypedMutable() as number[];
+    const mutable = cell.getRawUntyped({ frozen: false }) as number[];
     expect(Object.isFrozen(mutable)).toBe(false);
     mutable.push(40);
     expect(cell.getRaw() as readonly number[]).toEqual([10, 20, 30]);
   });
 
-  it("getRawUntypedMutable returns mutable deeply nested copy", () => {
+  it("getRawUntyped({ frozen: false }) returns mutable deeply nested copy", () => {
     const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
       richSpace,
-      "getRawUntypedMutable deep nested",
+      "getRawUntyped frozen false deep nested",
       undefined,
       tx,
     );
     cell.set({ a: { b: { c: [1, 2] } } });
-    const mutable = cell.getRawUntypedMutable() as {
+    const mutable = cell.getRawUntyped({ frozen: false }) as {
       a: { b: { c: number[] } };
     };
     expect(Object.isFrozen(mutable)).toBe(false);
@@ -916,53 +918,31 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(raw.a.b.c).toEqual([1, 2]);
   });
 
-  it("getRawUntypedMutable with empty array", () => {
+  it("getRawUntyped({ frozen: false }) with empty array", () => {
     const cell = runtime.getCell<unknown[]>(
       richSpace,
-      "getRawUntypedMutable empty array",
+      "getRawUntyped frozen false empty array",
       undefined,
       tx,
     );
     cell.set([]);
-    const mutable = cell.getRawUntypedMutable() as unknown[];
+    const mutable = cell.getRawUntyped({ frozen: false }) as unknown[];
     expect(mutable).toEqual([]);
     expect(Object.isFrozen(mutable)).toBe(false);
   });
 
-  it("getRawUntypedMutable successive calls return independent copies", () => {
+  it("getRawUntyped({ frozen: false }) successive calls return independent copies", () => {
     const cell = runtime.getCell<{ val: number }>(
       richSpace,
-      "getRawUntypedMutable independence",
+      "getRawUntyped frozen false independence",
       undefined,
       tx,
     );
     cell.set({ val: 1 });
-    const copy1 = cell.getRawUntypedMutable() as { val: number };
-    const copy2 = cell.getRawUntypedMutable() as { val: number };
+    const copy1 = cell.getRawUntyped({ frozen: false }) as { val: number };
+    const copy2 = cell.getRawUntyped({ frozen: false }) as { val: number };
     copy1.val = 99;
     expect(copy2.val).toBe(1);
-  });
-
-  // --- getRawUntyped({ frozen: false }) unified API tests ---
-
-  it("getRawUntyped({ frozen: false }) returns a mutable deep copy", () => {
-    const cell = runtime.getCell<{ items: number[] }>(
-      richSpace,
-      "getRawUntyped frozen false",
-      undefined,
-      tx,
-    );
-    cell.set({ items: [10, 20] });
-    const mutable = cell.getRawUntyped({ frozen: false }) as {
-      items: number[];
-    };
-    expect(Object.isFrozen(mutable)).toBe(false);
-    expect(Object.isFrozen(mutable.items)).toBe(false);
-    mutable.items.push(30);
-    expect((cell.getRaw() as { items: readonly number[] }).items).toEqual([
-      10,
-      20,
-    ]);
   });
 
   it("getRawUntyped({ frozen: true }) returns frozen (same as default)", () => {
@@ -976,21 +956,6 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     const frozen = cell.getRawUntyped({ frozen: true });
     expect(Object.isFrozen(frozen)).toBe(true);
     expect(frozen).toEqual(cell.getRawUntyped());
-  });
-
-  it("getRawUntyped({ frozen: false }) matches getRawUntypedMutable", () => {
-    const cell = runtime.getCell<{ a: number[] }>(
-      richSpace,
-      "getRawUntyped frozen false matches mutable",
-      undefined,
-      tx,
-    );
-    cell.set({ a: [1, 2, 3] });
-    const viaMutable = cell.getRawUntypedMutable();
-    const viaFrozenFalse = cell.getRawUntyped({ frozen: false });
-    expect(viaMutable).toEqual(viaFrozenFalse);
-    expect(Object.isFrozen(viaMutable)).toBe(false);
-    expect(Object.isFrozen(viaFrozenFalse)).toBe(false);
   });
 
   it("getRawUntyped({ frozen: false }) with deeply nested structure", () => {
