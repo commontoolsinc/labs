@@ -6,6 +6,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   largeStringA,
   largeStringB,
@@ -25,10 +26,14 @@ const space = signer.did();
 
 // Setup helper
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.disablePullMode();
   const tx = runtime.edit();

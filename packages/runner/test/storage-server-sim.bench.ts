@@ -14,6 +14,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { Nursery, Replica } from "../src/storage/cache.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   largeStringA,
   manySmallObjectsA,
@@ -28,10 +29,14 @@ const space = signer.did();
 // ============================================================================
 
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
