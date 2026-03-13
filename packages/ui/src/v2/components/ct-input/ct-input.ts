@@ -125,6 +125,24 @@ export const INPUT_PATTERNS = {
 export class CTInput extends BaseElement {
   static override styles = css`
     :host {
+      --ct-input-color-text: var(--ct-theme-color-text, #111827);
+      --ct-input-color-background: var(--ct-theme-color-background, #ffffff);
+      --ct-input-color-border: var(--ct-theme-color-border, #e5e7eb);
+      --ct-input-color-border-hover: var(--ct-theme-color-border-muted, #d1d5db);
+      --ct-input-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --ct-input-color-ring: rgba(59, 130, 246, 0.15);
+      --ct-input-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --ct-input-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
+      --ct-input-color-error: var(--ct-theme-color-error, #dc2626);
+      --ct-input-color-error-ring: rgba(220, 38, 38, 0.15);
+      --ct-input-color-success: var(--ct-theme-color-success, #16a34a);
+      --ct-input-border-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
+      --ct-input-animation-duration: var(--ct-theme-animation-duration, 150ms);
+      --ct-input-font-family: var(--ct-theme-font-family, inherit);
+
       display: block;
       box-sizing: border-box;
     }
@@ -141,50 +159,50 @@ export class CTInput extends BaseElement {
       padding: 0.5rem 0.75rem;
       font-size: 0.875rem;
       line-height: 1.25rem;
-      color: var(--ct-theme-color-text, #111827);
-      background-color: var(--ct-theme-color-background, #ffffff);
-      border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+      color: var(--ct-input-color-text, #111827);
+      background-color: var(--ct-input-color-background, #ffffff);
+      border: 1px solid var(--ct-input-color-border, #e5e7eb);
       border-radius: var(
-        --ct-theme-border-radius,
+        --ct-input-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
-      transition: all var(--ct-theme-animation-duration, 150ms)
+      transition: all var(--ct-input-animation-duration, 150ms)
         var(--ct-transition-timing-ease);
-      font-family: var(--ct-theme-font-family, inherit);
+      font-family: var(--ct-input-font-family, inherit);
     }
 
     input::placeholder {
-      color: var(--ct-theme-color-text-muted, #6b7280);
+      color: var(--ct-input-color-text-muted, #6b7280);
     }
 
     input:hover:not(:disabled):not(:focus) {
-      border-color: var(--ct-theme-color-border, #d1d5db);
+      border-color: var(--ct-input-color-border-hover, #d1d5db);
     }
 
     input:focus {
       outline: none;
-      border-color: var(--ct-theme-color-primary, #3b82f6);
+      border-color: var(--ct-input-color-primary, #3b82f6);
+      box-shadow: 0 0 0 3px var(--ct-input-color-ring, rgba(59, 130, 246, 0.15));
+    }
+
+    input:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      background-color: var(--ct-input-color-surface, #f1f5f9);
+    }
+
+    input[readonly] {
+      background-color: var(--ct-input-color-surface, #f1f5f9);
+    }
+
+    input.error {
+      border-color: var(--ct-input-color-error, #dc2626);
+    }
+
+    input.error:focus {
+      border-color: var(--ct-input-color-error, #dc2626);
       box-shadow: 0 0 0 3px
-        var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
-      }
-
-      input:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-        background-color: var(--ct-theme-color-surface, #f1f5f9);
-      }
-
-      input[readonly] {
-        background-color: var(--ct-theme-color-surface, #f1f5f9);
-      }
-
-      input.error {
-        border-color: var(--ct-theme-color-error, #dc2626);
-      }
-
-      input.error:focus {
-        border-color: var(--ct-theme-color-error, #dc2626);
-        box-shadow: 0 0 0 3px var(--ct-theme-color-error, rgba(220, 38, 38, 0.15));
+        var(--ct-input-color-error-ring, rgba(220, 38, 38, 0.15));
       }
 
       /* Remove spinner buttons from number inputs in Chrome/Safari/Edge */
@@ -210,15 +228,18 @@ export class CTInput extends BaseElement {
         padding: 0.125rem 0.5rem;
         font-size: 0.75rem;
         font-weight: 500;
-        color: var(--primary-foreground, hsl(0, 0%, 100%));
-        background-color: var(--primary, hsl(212, 100%, 47%));
+        color: var(--ct-input-color-background, hsl(0, 0%, 100%));
+        background-color: var(--ct-input-color-primary, hsl(212, 100%, 47%));
         border: none;
-        border-radius: var(--radius-sm, 0.25rem);
+        border-radius: var(
+          --ct-input-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
         cursor: pointer;
       }
 
       input[type="file"]::file-selector-button:hover {
-        background-color: var(--primary-hover, hsl(212, 100%, 42%));
+        opacity: 0.9;
       }
 
       /* Date/time inputs */
@@ -251,7 +272,7 @@ export class CTInput extends BaseElement {
       input[type="range"]::-webkit-slider-track {
         width: 100%;
         height: 4px;
-        background: var(--ct-theme-color-surface, #f1f5f9);
+        background: var(--ct-input-color-surface, #f1f5f9);
         border-radius: 2px;
       }
 
@@ -260,7 +281,7 @@ export class CTInput extends BaseElement {
         appearance: none;
         width: 16px;
         height: 16px;
-        background: var(--ct-theme-color-primary, #3b82f6);
+        background: var(--ct-input-color-primary, #3b82f6);
         border-radius: 50%;
         cursor: pointer;
       }
@@ -268,14 +289,14 @@ export class CTInput extends BaseElement {
       input[type="range"]::-moz-range-track {
         width: 100%;
         height: 4px;
-        background: var(--ct-theme-color-surface, #f1f5f9);
+        background: var(--ct-input-color-surface, #f1f5f9);
         border-radius: 2px;
       }
 
       input[type="range"]::-moz-range-thumb {
         width: 16px;
         height: 16px;
-        background: var(--ct-theme-color-primary, #3b82f6);
+        background: var(--ct-input-color-primary, #3b82f6);
         border-radius: 50%;
         border: none;
         cursor: pointer;
@@ -288,13 +309,13 @@ export class CTInput extends BaseElement {
 
       /* Valid state (when showValidation is true) */
       input:valid:not(:placeholder-shown) {
-        border-color: var(--ct-theme-color-success, #16a34a);
+        border-color: var(--ct-input-color-success, #16a34a);
       }
 
       input:valid:not(:placeholder-shown):focus {
-        border-color: var(--ct-theme-color-success, #16a34a);
+        border-color: var(--ct-input-color-success, #16a34a);
         box-shadow: 0 0 0 3px
-          var(--ct-theme-color-success, rgba(22, 163, 74, 0.15));
+          var(--ct-input-color-success, rgba(22, 163, 74, 0.15));
         }
       `;
 

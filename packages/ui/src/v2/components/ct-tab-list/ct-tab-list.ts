@@ -21,6 +21,12 @@ export class CTTabList extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        --ct-tab-list-border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md)
+        );
+        --ct-tab-list-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+
         display: flex;
         flex-shrink: 0;
       }
@@ -29,8 +35,8 @@ export class CTTabList extends BaseElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-md));
-        background-color: var(--ct-theme-color-surface, #f1f5f9);
+        border-radius: var(--ct-tab-list-border-radius, var(--ct-border-radius-md));
+        background-color: var(--ct-tab-list-color-surface, #f1f5f9);
         padding: var(--ct-spacing-1);
         height: 2.5rem;
         gap: 0.125rem;

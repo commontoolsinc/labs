@@ -1138,7 +1138,8 @@ export class CTCodeEditor extends BaseElement {
     return [
       EditorView.theme({
         ".cm-content": {
-          fontFamily: "var(--ct-theme-font-family, var(--ct-font-family-sans))",
+          fontFamily:
+            "var(--ct-code-editor-font-family-prose, var(--ct-theme-font-family, var(--ct-font-family-sans)))",
           lineHeight: "1.6",
           padding: "8px 0",
           ...(!hasCustomWidth && { maxWidth: "700px" }),

@@ -36,6 +36,18 @@ export class CTToolbar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        --ct-toolbar-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
+        --ct-toolbar-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+        --ct-toolbar-color-surface: var(
+          --ct-theme-color-surface,
+          #ffffff
+        );
+        --ct-toolbar-color-text: var(--ct-theme-color-text, #0f172a);
+        --ct-toolbar-color-border: var(
+          --ct-theme-color-border,
+          var(--ct-colors-gray-200, #e5e7eb)
+        );
+
         display: block;
         box-sizing: border-box;
       }
@@ -44,26 +56,26 @@ export class CTToolbar extends BaseElement {
         display: grid;
         grid-template-columns: 1fr auto 1fr;
         align-items: center;
-        gap: var(--ct-theme-spacing-normal, 0.5rem);
-        padding: var(--ct-theme-spacing-normal, 0.5rem)
-          var(--ct-theme-spacing-loose, 1rem);
+        gap: var(--ct-toolbar-spacing-normal, 0.5rem);
+        padding: var(--ct-toolbar-spacing-normal, 0.5rem)
+          var(--ct-toolbar-spacing-loose, 1rem);
         background: var(
-          --ct-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          --ct-toolbar-color-surface,
+          #ffffff
         );
-        color: var(--ct-theme-color-text, #0f172a);
+        color: var(--ct-toolbar-color-text, #0f172a);
         border-bottom: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--ct-toolbar-color-border, var(--ct-colors-gray-200, #e5e7eb));
         }
 
         :host([dense]) .toolbar {
-          padding: calc(var(--ct-theme-spacing-normal, 0.5rem) * 0.5)
-            var(--ct-theme-spacing-loose, 1rem);
+          padding: calc(var(--ct-toolbar-spacing-normal, 0.5rem) * 0.5)
+            var(--ct-toolbar-spacing-loose, 1rem);
           }
 
           :host([elevated]) .toolbar {
             box-shadow: 0 1px 0 0
-              var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+              var(--ct-toolbar-color-border, var(--ct-colors-gray-200, #e5e7eb));
             }
 
             :host([sticky]) {
@@ -78,7 +90,7 @@ export class CTToolbar extends BaseElement {
             .end {
               display: flex;
               align-items: center;
-              gap: var(--ct-theme-spacing-normal, 0.5rem);
+              gap: var(--ct-toolbar-spacing-normal, 0.5rem);
               min-width: 0;
             }
 

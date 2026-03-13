@@ -1,162 +1,299 @@
-/**
- * Styles for ct-button component
- */
+import { css } from "lit";
 
-export const buttonStyles = `
+export const styles = css`
   :host {
+    --ct-button-border-radius: var(
+      --ct-theme-border-radius,
+      var(--ct-border-radius-md, 0.375rem)
+    );
+    --ct-button-border-radius-full: var(
+      --ct-theme-border-radius-full,
+      var(--ct-border-radius-full, 9999px)
+    );
+    --ct-button-font-family: var(--ct-theme-font-family, inherit);
+    --ct-button-animation-duration: var(--ct-theme-animation-duration, 0.2s);
+    --ct-button-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
+    --ct-button-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
+    --ct-button-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+    --ct-button-spacing-x-lg: 2rem;
+    --ct-button-icon-size: 2.5rem;
+    --ct-button-icon-padding: 0;
+    --ct-button-color-primary: var(
+      --ct-theme-color-primary,
+      var(--ct-colors-primary-500, #3b82f6)
+    );
+    --ct-button-color-primary-foreground: var(
+      --ct-theme-color-primary-foreground,
+      #ffffff
+    );
+    --ct-button-color-secondary: var(
+      --ct-theme-color-secondary,
+      var(--ct-colors-gray-100, #f3f4f6)
+    );
+    --ct-button-color-secondary-foreground: var(
+      --ct-theme-color-secondary-foreground,
+      var(--ct-colors-gray-900, #111827)
+    );
+    --ct-button-color-error: var(
+      --ct-theme-color-error,
+      var(--ct-colors-error, #dc2626)
+    );
+    --ct-button-color-error-foreground: var(
+      --ct-theme-color-error-foreground,
+      #ffffff
+    );
+    --ct-button-color-border: var(
+      --ct-theme-color-border,
+      var(--ct-colors-gray-300, #d1d5db)
+    );
+    --ct-button-color-surface: var(
+      --ct-theme-color-surface,
+      var(--ct-colors-gray-50, #f9fafb)
+    );
+    --ct-button-color-surface-hover: var(
+      --ct-theme-color-surface-hover,
+      var(--ct-colors-gray-200, #e5e7eb)
+    );
+    --ct-button-color-text: var(
+      --ct-theme-color-text,
+      var(--ct-colors-gray-900, #111827)
+    );
+    --ct-button-color-text-muted: var(
+      --ct-theme-color-text-muted,
+      var(--ct-colors-gray-500, #6b7280)
+    );
+
     display: inline-block;
-    --button-height: 2.5rem;
-    --button-height-sm: 2.25rem;
-    --button-height-lg: 2.75rem;
-    --button-padding-x: var(--ct-spacing-4);
-    --button-padding-x-sm: var(--ct-spacing-3);
-    --button-padding-x-lg: var(--ct-spacing-5);
-    --button-font-size: var(--ct-font-size-sm);
-    --button-font-size-sm: var(--ct-font-size-sm);
-    --button-font-size-lg: var(--ct-font-size-base);
-    --button-icon-size: 2.5rem;
-    
-    /* Default color values if not provided */
-    --background: #ffffff;
-    --foreground: var(--ct-colors-gray-900);
-    --primary: var(--ct-colors-primary-500);
-    --primary-foreground: #ffffff;
-    --secondary: var(--ct-colors-gray-100);
-    --secondary-foreground: var(--ct-colors-gray-900);
-    --destructive: var(--ct-colors-error);
-    --destructive-foreground: #ffffff;
-    --accent: var(--ct-colors-gray-100);
-    --accent-foreground: var(--ct-colors-gray-900);
-    --border: var(--ct-colors-gray-300);
-    --ring: var(--ct-colors-primary-500);
+    outline: none;
+    box-sizing: border-box;
   }
 
-  button {
-    all: unset;
-    box-sizing: border-box;
+  *,
+  *::before,
+  *::after {
+    box-sizing: inherit;
+  }
+
+  .button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-    border-radius: var(--ct-border-radius-md);
-    font-weight: var(--ct-font-weight-medium);
-    transition: all var(--ct-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+    border-radius: var(
+      --ct-button-border-radius,
+      var(--ct-border-radius-md, 0.375rem)
+    );
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: var(--ct-button-font-family, inherit);
+    line-height: 1.25rem;
+    transition: all var(--ct-button-animation-duration, 0.2s) ease;
     cursor: pointer;
     user-select: none;
-    -webkit-user-select: none;
-    position: relative;
-    font-family: inherit;
-    line-height: 1;
-    height: var(--button-height);
-    padding: 0 var(--button-padding-x);
-    font-size: var(--button-font-size);
-  }
-
-  button:focus-visible {
+    border: 1px solid transparent;
     outline: 2px solid transparent;
     outline-offset: 2px;
-    box-shadow: 0 0 0 2px var(--background, #fff), 0 0 0 4px var(--ring, #94a3b8);
+    background-color: transparent;
+    background-image: none;
+    text-transform: none;
+    -webkit-appearance: button;
+    text-decoration: none;
   }
 
-  button:disabled {
+  .button:focus-visible {
+    outline: 2px solid
+      var(--ct-button-color-primary, var(--ct-colors-primary-500, #3b82f6));
+    outline-offset: 2px;
+  }
+
+  .button:disabled {
     pointer-events: none;
     opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Size variants */
-  :host([size="sm"]) button {
-    height: var(--button-height-sm);
-    padding: 0 var(--button-padding-x-sm);
-    font-size: var(--button-font-size-sm);
-  }
+  .button.default {
+    height: 2.5rem;
+    padding: var(--ct-button-spacing-normal, 0.5rem)
+      var(--ct-button-spacing-loose, 1rem);
+    }
 
-  :host([size="lg"]) button {
-    height: var(--button-height-lg);
-    padding: 0 var(--button-padding-x-lg);
-    font-size: var(--button-font-size-lg);
-  }
+    .button.sm {
+      height: 2.25rem;
+      padding: var(--ct-button-spacing-tight, 0.25rem)
+        var(--ct-button-spacing-normal, 0.75rem);
+      font-size: 0.75rem;
+    }
 
-  :host([size="icon"]) button {
-    height: var(--button-icon-size);
-    width: var(--button-icon-size);
-    padding: 0;
-  }
+    .button.lg {
+      height: 2.75rem;
+      padding: var(--ct-button-spacing-normal, 0.5rem)
+        var(--ct-button-spacing-x-lg, 2rem);
+      font-size: 1rem;
+      line-height: 1.5rem;
+    }
 
-  /* Default variant */
-  :host(:not([variant])) button,
-  :host([variant="default"]) button {
-    background-color: var(--primary, #0f172a);
-    color: var(--primary-foreground, #f8fafc);
-  }
+    .button.icon {
+      height: var(--ct-button-icon-size, 2.5rem);
+      width: var(--ct-button-icon-size, 2.5rem);
+      padding: var(--ct-button-icon-padding, 0);
+    }
 
-  :host(:not([variant])) button:hover:not(:disabled),
-  :host([variant="default"]) button:hover:not(:disabled) {
-    background-color: var(--primary, #0f172a);
-    opacity: 0.9;
-  }
+    .button.md {
+      height: 2rem;
+      padding: var(--ct-button-spacing-tight, 0.25rem)
+        var(--ct-button-spacing-normal, 0.75rem);
+      font-size: 0.75rem;
+    }
 
-  /* Destructive variant */
-  :host([variant="destructive"]) button {
-    background-color: var(--destructive, #dc2626);
-    color: var(--destructive-foreground, #fef2f2);
-  }
+    /* Variant styles */
+    .button.primary {
+      background-color: var(
+        --ct-button-color-primary,
+        var(--ct-colors-primary-500, #3b82f6)
+      );
+      color: var(
+        --ct-button-color-primary-foreground,
+        #ffffff
+      );
+      border-color: var(
+        --ct-button-color-primary,
+        var(--ct-colors-primary-500, #3b82f6)
+      );
+    }
 
-  :host([variant="destructive"]) button:hover:not(:disabled) {
-    background-color: var(--destructive, #dc2626);
-    opacity: 0.9;
-  }
+    .button.primary:hover:not(:disabled) {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
 
-  /* Outline variant */
-  :host([variant="outline"]) button {
-    border: 1px solid var(--border, #e2e8f0);
-    background-color: var(--background, #fff);
-    color: var(--foreground, #0f172a);
-  }
+    .button.primary:active:not(:disabled) {
+      transform: translateY(0);
+    }
 
-  :host([variant="outline"]) button:hover:not(:disabled) {
-    background-color: var(--accent, #f8fafc);
-    color: var(--accent-foreground, #0f172a);
-  }
+    .button.destructive {
+      background-color: var(
+        --ct-button-color-error,
+        var(--ct-colors-error, #dc2626)
+      );
+      color: var(
+        --ct-button-color-error-foreground,
+        #ffffff
+      );
+      border-color: var(
+        --ct-button-color-error,
+        var(--ct-colors-error, #dc2626)
+      );
+    }
 
-  /* Secondary variant */
-  :host([variant="secondary"]) button {
-    background-color: var(--secondary, #f1f5f9);
-    color: var(--secondary-foreground, #0f172a);
-  }
+    .button.destructive:hover:not(:disabled) {
+      opacity: 0.9;
+    }
 
-  :host([variant="secondary"]) button:hover:not(:disabled) {
-    background-color: var(--secondary, #f1f5f9);
-    opacity: 0.8;
-  }
+    .button.outline {
+      border-color: var(
+        --ct-button-color-border,
+        var(--ct-colors-gray-300, #d1d5db)
+      );
+      background-color: transparent;
+      color: var(--ct-button-color-text, var(--ct-colors-gray-900, #111827));
+    }
 
-  /* Ghost variant */
-  :host([variant="ghost"]) button {
-    background-color: transparent;
-    color: var(--foreground, #0f172a);
-  }
+    .button.outline:hover:not(:disabled) {
+      background-color: var(
+        --ct-button-color-surface,
+        var(--ct-colors-gray-50, #f9fafb)
+      );
+    }
 
-  :host([variant="ghost"]) button:hover:not(:disabled) {
-    background-color: var(--accent, #f8fafc);
-    color: var(--accent-foreground, #0f172a);
-  }
+    .button.secondary {
+      background-color: var(
+        --ct-button-color-secondary,
+        var(--ct-colors-gray-100, #f3f4f6)
+      );
+      color: var(
+        --ct-button-color-secondary-foreground,
+        var(--ct-colors-gray-900, #111827)
+      );
+      border-color: var(
+        --ct-button-color-secondary,
+        var(--ct-colors-gray-100, #f3f4f6)
+      );
+    }
 
-  /* Link variant */
-  :host([variant="link"]) button {
-    background-color: transparent;
-    color: var(--primary, #0f172a);
-    text-decoration: underline;
-    text-underline-offset: 4px;
-    height: auto;
-    padding: 0;
-  }
+    .button.secondary:hover:not(:disabled) {
+      background-color: var(
+        --ct-button-color-surface-hover,
+        var(--ct-colors-gray-200, #e5e7eb)
+      );
+      border-color: var(
+        --ct-button-color-surface-hover,
+        var(--ct-colors-gray-200, #e5e7eb)
+      );
+    }
 
-  :host([variant="link"]) button:hover:not(:disabled) {
-    text-decoration: underline;
-  }
+    .button.ghost {
+      color: var(
+        --ct-button-color-text-muted,
+        var(--ct-colors-gray-500, #6b7280)
+      );
+      background-color: transparent;
+      border: none;
+      padding: 0;
+    }
 
-  /* Slot styles */
-  ::slotted(*) {
-    pointer-events: none;
-  }
-`;
+    .button.ghost:hover:not(:disabled) {
+      color: var(--ct-button-color-text, var(--ct-colors-gray-700, #374151));
+      background-color: var(
+        --ct-button-color-surface-hover,
+        var(--ct-colors-gray-100, #f3f4f6)
+      );
+    }
+
+    .button.ghost.icon {
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: var(
+        --ct-button-border-radius,
+        var(--ct-border-radius-sm, 0.25rem)
+      );
+    }
+
+    .button.link {
+      color: var(
+        --ct-button-color-primary,
+        var(--ct-colors-primary-500, #3b82f6)
+      );
+      text-underline-offset: 4px;
+    }
+
+    .button.link:hover:not(:disabled) {
+      text-decoration: underline;
+    }
+
+    .button.pill {
+      background: var(
+        --ct-button-color-surface,
+        var(--ct-colors-gray-100, #f3f4f6)
+      );
+      color: var(--ct-button-color-text, var(--ct-colors-gray-900, #111827));
+      border: 1px solid
+        var(--ct-button-color-border, var(--ct-colors-gray-300, #d1d5db));
+      border-radius: var(
+        --ct-button-border-radius-full,
+        var(--ct-radius-full, 9999px)
+      );
+      height: auto;
+      padding: 0.25rem 0.625rem;
+      font-size: 0.8125rem;
+      line-height: 1;
+    }
+
+    .button.pill:hover:not(:disabled) {
+      background: var(
+        --ct-button-color-surface-hover,
+        var(--ct-colors-gray-200, #e5e7eb)
+      );
+    }
+  `;

@@ -25,6 +25,9 @@ export class CTSvg extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        --ct-svg-width: 100%;
+        --ct-svg-height: auto;
+
         display: block;
         box-sizing: border-box;
       }
@@ -36,13 +39,13 @@ export class CTSvg extends BaseElement {
       }
 
       .svg-content {
-        width: 100%;
-        height: auto;
+        width: var(--ct-svg-width, 100%);
+        height: var(--ct-svg-height, auto);
       }
 
       .svg-content svg {
-        width: 100%;
-        height: auto;
+        width: var(--ct-svg-width, 100%);
+        height: var(--ct-svg-height, auto);
         display: block;
       }
     `,

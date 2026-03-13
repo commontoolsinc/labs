@@ -24,6 +24,33 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CTVStack extends BaseElement {
   static override styles = css`
     :host {
+      --ct-vstack-gap-0: 0;
+      --ct-vstack-gap-1: 0.25rem;
+      --ct-vstack-gap-2: 0.5rem;
+      --ct-vstack-gap-3: 0.75rem;
+      --ct-vstack-gap-4: 1rem;
+      --ct-vstack-gap-5: 1.25rem;
+      --ct-vstack-gap-6: 1.5rem;
+      --ct-vstack-gap-8: 2rem;
+      --ct-vstack-gap-10: 2.5rem;
+      --ct-vstack-gap-12: 3rem;
+      --ct-vstack-gap-16: 4rem;
+      --ct-vstack-gap-20: 5rem;
+      --ct-vstack-gap-24: 6rem;
+      --ct-vstack-padding-0: 0;
+      --ct-vstack-padding-1: 0.25rem;
+      --ct-vstack-padding-2: 0.5rem;
+      --ct-vstack-padding-3: 0.75rem;
+      --ct-vstack-padding-4: 1rem;
+      --ct-vstack-padding-5: 1.25rem;
+      --ct-vstack-padding-6: 1.5rem;
+      --ct-vstack-padding-8: 2rem;
+      --ct-vstack-padding-10: 2.5rem;
+      --ct-vstack-padding-12: 3rem;
+      --ct-vstack-padding-16: 4rem;
+      --ct-vstack-padding-20: 5rem;
+      --ct-vstack-padding-24: 6rem;
+
       display: block;
     }
 
@@ -35,43 +62,43 @@ export class CTVStack extends BaseElement {
 
     /* Gap utilities */
     .gap-0 {
-      gap: 0;
+      gap: var(--ct-vstack-gap-0);
     }
     .gap-1 {
-      gap: 0.25rem;
+      gap: var(--ct-vstack-gap-1);
     }
     .gap-2 {
-      gap: 0.5rem;
+      gap: var(--ct-vstack-gap-2);
     }
     .gap-3 {
-      gap: 0.75rem;
+      gap: var(--ct-vstack-gap-3);
     }
     .gap-4 {
-      gap: 1rem;
+      gap: var(--ct-vstack-gap-4);
     }
     .gap-5 {
-      gap: 1.25rem;
+      gap: var(--ct-vstack-gap-5);
     }
     .gap-6 {
-      gap: 1.5rem;
+      gap: var(--ct-vstack-gap-6);
     }
     .gap-8 {
-      gap: 2rem;
+      gap: var(--ct-vstack-gap-8);
     }
     .gap-10 {
-      gap: 2.5rem;
+      gap: var(--ct-vstack-gap-10);
     }
     .gap-12 {
-      gap: 3rem;
+      gap: var(--ct-vstack-gap-12);
     }
     .gap-16 {
-      gap: 4rem;
+      gap: var(--ct-vstack-gap-16);
     }
     .gap-20 {
-      gap: 5rem;
+      gap: var(--ct-vstack-gap-20);
     }
     .gap-24 {
-      gap: 6rem;
+      gap: var(--ct-vstack-gap-24);
     }
 
     /* Alignment */
@@ -115,43 +142,43 @@ export class CTVStack extends BaseElement {
 
     /* Padding utilities */
     .p-0 {
-      padding: 0;
+      padding: var(--ct-vstack-padding-0);
     }
     .p-1 {
-      padding: 0.25rem;
+      padding: var(--ct-vstack-padding-1);
     }
     .p-2 {
-      padding: 0.5rem;
+      padding: var(--ct-vstack-padding-2);
     }
     .p-3 {
-      padding: 0.75rem;
+      padding: var(--ct-vstack-padding-3);
     }
     .p-4 {
-      padding: 1rem;
+      padding: var(--ct-vstack-padding-4);
     }
     .p-5 {
-      padding: 1.25rem;
+      padding: var(--ct-vstack-padding-5);
     }
     .p-6 {
-      padding: 1.5rem;
+      padding: var(--ct-vstack-padding-6);
     }
     .p-8 {
-      padding: 2rem;
+      padding: var(--ct-vstack-padding-8);
     }
     .p-10 {
-      padding: 2.5rem;
+      padding: var(--ct-vstack-padding-10);
     }
     .p-12 {
-      padding: 3rem;
+      padding: var(--ct-vstack-padding-12);
     }
     .p-16 {
-      padding: 4rem;
+      padding: var(--ct-vstack-padding-16);
     }
     .p-20 {
-      padding: 5rem;
+      padding: var(--ct-vstack-padding-20);
     }
     .p-24 {
-      padding: 6rem;
+      padding: var(--ct-vstack-padding-24);
     }
 
     /* Direct children styling */

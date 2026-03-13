@@ -4,22 +4,28 @@
 
 export const progressStyles = `
   :host {
-    display: block;
-    width: 100%;
-    
     /* Default color values if not provided */
-    --background: #ffffff;
-    --foreground: #0f172a;
-    --border: #e2e8f0;
-    --ring: #94a3b8;
-    --primary: #3b82f6;
-    --primary-foreground: #ffffff;
-    --muted: #f8fafc;
-    --muted-foreground: #64748b;
+    --ct-progress-color-background: var(--ct-theme-color-background, #ffffff);
+    --ct-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
+    --ct-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
+    --ct-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
+    --ct-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
+    --ct-progress-color-indicator-foreground: var(
+      --ct-theme-color-primary-foreground,
+      #ffffff
+    );
+    --ct-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
+    --ct-progress-color-muted-foreground: var(
+      --ct-theme-color-text-muted,
+      #64748b
+    );
     
     /* Progress dimensions */
     --progress-height: 0.5rem; /* h-2 equivalent */
     --progress-border-radius: 9999px; /* rounded-full */
+
+    display: block;
+    width: 100%;
   }
 
   * {
@@ -30,7 +36,7 @@ export const progressStyles = `
     position: relative;
     width: 100%;
     height: var(--progress-height);
-    background-color: var(--border);
+    background-color: var(--ct-progress-color-track);
     border-radius: var(--progress-border-radius);
     overflow: hidden;
   }
@@ -38,7 +44,7 @@ export const progressStyles = `
   /* Indicator (filled portion) */
   .indicator {
     height: 100%;
-    background-color: var(--primary);
+    background-color: var(--ct-progress-color-indicator);
     border-radius: var(--progress-border-radius);
     transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
     will-change: width;
@@ -96,20 +102,6 @@ export const progressStyles = `
     }
   }
 
-  /* Dark mode support (when CSS variables are updated) */
-  @media (prefers-color-scheme: dark) {
-    :host {
-      --background: #0f172a;
-      --foreground: #f8fafc;
-      --border: #334155;
-      --ring: #64748b;
-      --primary: #60a5fa;
-      --primary-foreground: #0f172a;
-      --muted: #1e293b;
-      --muted-foreground: #94a3b8;
-    }
-  }
-
   /* Size variants via CSS custom properties */
   :host([size="sm"]) {
     --progress-height: 0.25rem;
@@ -125,19 +117,19 @@ export const progressStyles = `
 
   /* Custom styling support */
   :host([variant="success"]) {
-    --primary: #22c55e;
+    --ct-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
   }
 
   :host([variant="warning"]) {
-    --primary: #f59e0b;
+    --ct-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
   }
 
   :host([variant="error"]) {
-    --primary: #ef4444;
+    --ct-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
   }
 
   :host([variant="info"]) {
-    --primary: #3b82f6;
+    --ct-progress-color-indicator: #3b82f6;
   }
 
   /* Striped variant */

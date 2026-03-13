@@ -5,8 +5,12 @@ import ButtonStory from "../stories/ct-button-story.tsx";
 import CheckboxStory from "../stories/ct-checkbox-story.tsx";
 import CodeEditorStory from "../stories/ct-code-editor-story.tsx";
 import InputStory from "../stories/ct-input-story.tsx";
+import PickerStory from "../stories/ct-picker-story.tsx";
 import SelectStory from "../stories/ct-select-story.tsx";
+import SliderStory from "../stories/ct-slider-story.tsx";
 import SwitchStory from "../stories/ct-switch-story.tsx";
+import ToggleStory from "../stories/ct-toggle-story.tsx";
+import ToggleGroupStory from "../stories/ct-toggle-group-story.tsx";
 import CardStory from "../stories/ct-card-story.tsx";
 import ModalStory from "../stories/ct-modal-story.tsx";
 import ProgressStory from "../stories/ct-progress-story.tsx";
@@ -23,11 +27,14 @@ import HeadingStory from "../stories/ct-heading-story.tsx";
 import LabelStory from "../stories/ct-label-story.tsx";
 import ChipStory from "../stories/ct-chip-story.tsx";
 import BadgeStory from "../stories/ct-badge-story.tsx";
+import AlertStory from "../stories/ct-alert-story.tsx";
 import SeparatorStory from "../stories/ct-separator-story.tsx";
 import MarkdownStory from "../stories/ct-markdown-story.tsx";
+import SvgStory from "../stories/ct-svg-story.tsx";
 import LoaderStory from "../stories/ct-loader-story.tsx";
 import SkeletonStory from "../stories/ct-skeleton-story.tsx";
 import CollapsibleStory from "../stories/ct-collapsible-story.tsx";
+import TabListStory from "../stories/ct-tab-list-story.tsx";
 import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
@@ -61,10 +68,18 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return CodeEditorStory({});
         case "input":
           return InputStory({});
+        case "picker":
+          return PickerStory({});
         case "select":
           return SelectStory({});
+        case "slider":
+          return SliderStory({});
         case "switch":
           return SwitchStory({});
+        case "toggle":
+          return ToggleStory({});
+        case "toggle-group":
+          return ToggleGroupStory({});
         case "card":
           return CardStory({});
         case "modal":
@@ -97,16 +112,22 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChipStory({});
         case "badge":
           return BadgeStory({});
+        case "alert":
+          return AlertStory({});
         case "separator":
           return SeparatorStory({});
         case "markdown":
           return MarkdownStory({});
+        case "svg":
+          return SvgStory({});
         case "loader":
           return LoaderStory({});
         case "skeleton":
           return SkeletonStory({});
         case "collapsible":
           return CollapsibleStory({});
+        case "tab-list":
+          return TabListStory({});
         case "tabs":
           return TabsStory({});
         case "chart":

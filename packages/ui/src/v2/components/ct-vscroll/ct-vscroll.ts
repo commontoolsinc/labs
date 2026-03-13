@@ -43,6 +43,11 @@ export class CTVScroll extends BaseElement {
 
   static override styles = css`
     :host {
+      --ct-vscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --ct-vscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
+      --ct-vscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
+      --ct-vscroll-color-background: var(--ct-theme-color-background, #ffffff);
+
       display: block;
       position: relative;
       overflow: hidden;
@@ -83,17 +88,17 @@ export class CTVScroll extends BaseElement {
     }
 
     .scroll-container::-webkit-scrollbar-track {
-      background: var(--muted, #f1f5f9);
+      background: var(--ct-vscroll-color-surface, #f1f5f9);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--muted-foreground, #64748b);
+      background: var(--ct-vscroll-color-thumb, #64748b);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--foreground, #475569);
+      background: var(--ct-vscroll-color-thumb-hover, #475569);
     }
 
     /* Padding utilities */
@@ -139,7 +144,7 @@ export class CTVScroll extends BaseElement {
       top: 0;
       background: linear-gradient(
         to bottom,
-        var(--background, white),
+        var(--ct-vscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -147,7 +152,11 @@ export class CTVScroll extends BaseElement {
 
     :host([fade-edges]) .scroll-wrapper::after {
       bottom: 0;
-      background: linear-gradient(to top, var(--background, white), transparent);
+      background: linear-gradient(
+        to top,
+        var(--ct-vscroll-color-background, white),
+        transparent
+      );
       opacity: 0;
     }
 

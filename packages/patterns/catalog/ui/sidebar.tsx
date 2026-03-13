@@ -200,6 +200,23 @@ export default pattern<SidebarInput, SidebarOutput>(
                 margin: "1px 8px",
                 borderRadius: "4px",
                 fontSize: "13px",
+                color: current === "picker" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "picker"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "picker" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "picker", selected })}
+            >
+              Picker
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
                 color: current === "textarea" ? "#1ea7fd" : "#2e3438",
                 backgroundColor: current === "textarea"
                   ? "#e8f4fd"
@@ -234,6 +251,23 @@ export default pattern<SidebarInput, SidebarOutput>(
                 margin: "1px 8px",
                 borderRadius: "4px",
                 fontSize: "13px",
+                color: current === "slider" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "slider"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "slider" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "slider", selected })}
+            >
+              Slider
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
                 color: current === "switch" ? "#1ea7fd" : "#2e3438",
                 backgroundColor: current === "switch"
                   ? "#e8f4fd"
@@ -244,6 +278,40 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "switch", selected })}
             >
               Switch
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "toggle" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "toggle"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "toggle" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "toggle", selected })}
+            >
+              Toggle
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "toggle-group" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "toggle-group"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "toggle-group" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "toggle-group", selected })}
+            >
+              Toggle Group
             </div>
             <div
               style={{
@@ -545,6 +613,21 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               Markdown
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "svg" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "svg" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "svg" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "svg", selected })}
+            >
+              SVG
+            </div>
           </div>
 
           {/* Feedback */}
@@ -560,6 +643,23 @@ export default pattern<SidebarInput, SidebarOutput>(
               }}
             >
               Feedback
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "alert" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "alert"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "alert" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "alert", selected })}
+            >
+              Alert
             </div>
             <div
               style={{
@@ -644,6 +744,23 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "collapsible", selected })}
             >
               Collapsible
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "tab-list" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "tab-list"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "tab-list" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "tab-list", selected })}
+            >
+              Tab List
             </div>
             <div
               style={{

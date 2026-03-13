@@ -46,6 +46,27 @@ export type LoaderSize = "sm" | "md" | "lg";
 export class CTLoader extends BaseElement {
   static override styles = css`
     :host {
+      --ct-loader-color-track: var(
+        --ct-theme-color-border,
+        var(--ct-colors-gray-300, #e0e0e0)
+      );
+      --ct-loader-color-arc: var(
+        --ct-theme-color-primary,
+        var(--ct-colors-primary-500, #000)
+      );
+      --ct-loader-color-text: var(
+        --ct-theme-color-text-muted,
+        var(--ct-colors-gray-600, #666)
+      );
+      --ct-loader-color-surface: var(
+        --ct-theme-color-surface,
+        var(--ct-colors-gray-100, #f0f0f0)
+      );
+      --ct-loader-color-error: var(
+        --ct-theme-color-error,
+        var(--ct-colors-error, #dc2626)
+      );
+
       display: inline-flex;
       align-items: center;
       vertical-align: middle;
@@ -80,11 +101,11 @@ export class CTLoader extends BaseElement {
     }
 
     .track {
-      stroke: var(--ct-color-border, #e0e0e0);
+      stroke: var(--ct-loader-color-track, #e0e0e0);
     }
 
     .arc {
-      stroke: var(--ct-color-primary, #000);
+      stroke: var(--ct-loader-color-arc, #000);
       stroke-linecap: round;
     }
 
@@ -96,7 +117,7 @@ export class CTLoader extends BaseElement {
 
     .elapsed {
       font-size: 0.75rem;
-      color: var(--ct-color-text-muted, #666);
+      color: var(--ct-loader-color-text, #666);
       font-variant-numeric: tabular-nums;
     }
 
@@ -110,13 +131,13 @@ export class CTLoader extends BaseElement {
       border: none;
       border-radius: 2px;
       background: transparent;
-      color: var(--ct-color-text-muted, #666);
+      color: var(--ct-loader-color-text, #666);
       cursor: pointer;
     }
 
     .stop-button:hover {
-      background: var(--ct-color-surface, #f0f0f0);
-      color: var(--ct-color-error, #dc2626);
+      background: var(--ct-loader-color-surface, #f0f0f0);
+      color: var(--ct-loader-color-error, #dc2626);
     }
 
     .stop-button svg {

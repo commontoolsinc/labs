@@ -37,6 +37,17 @@ export class CTPicker extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        --ct-picker-border-radius: var(--ct-theme-border-radius, 0.5rem);
+        --ct-picker-color-surface: var(--ct-theme-color-surface, #ffffff);
+        --ct-picker-color-text: var(--ct-theme-color-text, #111827);
+        --ct-picker-color-background: var(--ct-theme-color-background, #ffffff);
+        --ct-picker-color-primary: var(--ct-theme-color-primary, #3b82f6);
+        --ct-picker-color-border: var(--ct-theme-color-border, #e5e7eb);
+        --ct-picker-color-text-secondary: var(
+          --ct-theme-color-text-secondary,
+          #6b7280
+        );
+
         display: block;
         width: 100%;
         position: relative;
@@ -60,8 +71,8 @@ export class CTPicker extends BaseElement {
         display: flex;
         align-items: stretch;
         justify-content: center;
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        background: var(--ct-theme-color-surface, #ffffff);
+        border-radius: var(--ct-picker-border-radius, 0.5rem);
+        background: var(--ct-picker-color-surface, #ffffff);
         overflow: hidden;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         min-height: var(--ct-picker-min-height, auto);
@@ -84,8 +95,8 @@ export class CTPicker extends BaseElement {
         height: 2.5rem;
         border: none;
         border-radius: 50%;
-        background: var(--ct-theme-color-surface, rgba(255, 255, 255, 0.95));
-        color: var(--ct-theme-color-text, #111827);
+        background: var(--ct-picker-color-surface, rgba(255, 255, 255, 0.95));
+        color: var(--ct-picker-color-text, #111827);
         cursor: pointer;
         opacity: 0;
         transition:
@@ -96,7 +107,7 @@ export class CTPicker extends BaseElement {
       }
 
       .nav-arrow:hover {
-        background: var(--ct-theme-color-background, #ffffff);
+        background: var(--ct-picker-color-background, #ffffff);
         transform: translateY(-50%) scale(1.05);
       }
 
@@ -105,7 +116,7 @@ export class CTPicker extends BaseElement {
       }
 
       .nav-arrow:focus {
-        outline: 2px solid var(--ct-theme-color-primary, #3b82f6);
+        outline: 2px solid var(--ct-picker-color-primary, #3b82f6);
         outline-offset: 2px;
       }
 
@@ -145,7 +156,7 @@ export class CTPicker extends BaseElement {
       }
 
       .empty-state {
-        color: var(--ct-theme-color-text-secondary, #6b7280);
+        color: var(--ct-picker-color-text-secondary, #6b7280);
         font-size: 0.875rem;
       }
 
@@ -160,11 +171,11 @@ export class CTPicker extends BaseElement {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--ct-theme-color-border, #e5e7eb);
+        background: var(--ct-picker-color-border, #e5e7eb);
       }
 
       .dot.active {
-        background: var(--ct-theme-color-primary, #3b82f6);
+        background: var(--ct-picker-color-primary, #3b82f6);
       }
     `,
   ];

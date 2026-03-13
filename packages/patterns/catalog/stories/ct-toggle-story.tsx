@@ -1,0 +1,72 @@
+/// <cts-enable />
+import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
+
+import { Controls, SelectControl, SwitchControl } from "../ui/controls.tsx";
+
+// deno-lint-ignore no-empty-interface
+interface ToggleStoryInput {}
+interface ToggleStoryOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  controls: VNode;
+}
+
+export default pattern<ToggleStoryInput, ToggleStoryOutput>(() => {
+  const pressed = Writable.of(false);
+  const disabled = Writable.of(false);
+  const variant = Writable.of<"default" | "outline">("default");
+  const size = Writable.of<"default" | "sm" | "lg">("default");
+  const status = computed(() => (pressed.get() ? "Pressed" : "Not pressed"));
+
+  return {
+    [NAME]: "ct-toggle Story",
+    [UI]: (
+      <div style={{ padding: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <ct-toggle
+            $pressed={pressed}
+            disabled={disabled}
+            variant={variant}
+            size={size}
+          >
+            Bold
+          </ct-toggle>
+          <span style={{ fontSize: "13px", color: "#64748b" }}>{status}</span>
+        </div>
+      </div>
+    ),
+    controls: (
+      <Controls>
+        <>
+          <SelectControl
+            label="variant"
+            description="Visual style"
+            defaultValue="default"
+            value={variant as any}
+            items={[
+              { label: "default", value: "default" },
+              { label: "outline", value: "outline" },
+            ]}
+          />
+          <SelectControl
+            label="size"
+            description="Toggle size"
+            defaultValue="default"
+            value={size as any}
+            items={[
+              { label: "default", value: "default" },
+              { label: "sm", value: "sm" },
+              { label: "lg", value: "lg" },
+            ]}
+          />
+          <SwitchControl
+            label="disabled"
+            description="Disables interaction"
+            defaultValue="false"
+            checked={disabled}
+          />
+        </>
+      </Controls>
+    ),
+  };
+});
