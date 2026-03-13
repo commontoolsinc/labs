@@ -56,8 +56,9 @@ export class CTAlert extends BaseElement {
       --ct-alert-color-warning: var(--ct-theme-color-warning, #f59e0b);
       --ct-alert-color-warning-foreground: var(
         --ct-theme-color-warning-foreground,
-        #451a03
+        #fffbeb
       );
+      --ct-alert-color-warning-text: var(--ct-theme-color-text, #92400e);
       --ct-alert-color-success: var(--ct-theme-color-success, #10b981);
       --ct-alert-color-success-foreground: var(
         --ct-theme-color-success-foreground,
@@ -194,8 +195,8 @@ export class CTAlert extends BaseElement {
 
     /* Warning variant */
     .alert.variant-warning {
-      background-color: var(--ct-alert-color-warning-foreground, #fef3c7);
-      color: var(--ct-alert-color-warning-foreground, #451a03);
+      background-color: var(--ct-alert-color-warning-foreground, #fffbeb);
+      color: var(--ct-alert-color-warning-text, #92400e);
       border-color: var(--ct-alert-color-warning, #f59e0b);
     }
 
@@ -204,11 +205,11 @@ export class CTAlert extends BaseElement {
     }
 
     .alert.variant-warning .alert-title {
-      color: var(--ct-alert-color-warning-foreground, #451a03);
+      color: var(--ct-alert-color-warning-text, #92400e);
     }
 
     .alert.variant-warning .alert-description {
-      color: var(--ct-alert-color-warning-foreground, #451a03);
+      color: var(--ct-alert-color-warning-text, #92400e);
       opacity: 0.8;
     }
 
