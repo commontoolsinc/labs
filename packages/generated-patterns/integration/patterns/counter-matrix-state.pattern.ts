@@ -28,12 +28,12 @@ interface SetCellEvent {
 
 interface SetRowEvent {
   row?: number;
-  values?: unknown;
+  values?: number[];
 }
 
 interface SetColumnEvent {
   column?: number;
-  values?: unknown;
+  values?: number[];
   value?: number;
 }
 

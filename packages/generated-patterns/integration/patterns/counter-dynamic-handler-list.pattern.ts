@@ -117,7 +117,14 @@ const liftSlots = lift(
       sequence: Cell<number>;
     }
   >(),
-  toSchema<unknown>(),
+  toSchema<
+    {
+      index: number;
+      value: number;
+      label: string;
+      adjust: any;
+    }[]
+  >(),
   ({ values, view, lastAdjustment, history, sequence }) => {
     const snapshot = view.get();
     const list = Array.isArray(snapshot) ? snapshot : [];
@@ -139,8 +146,8 @@ const liftSlots = lift(
     });
   },
 );
-const liftHandlers = lift((entries: { adjust: unknown }[] | undefined) => {
-  if (!Array.isArray(entries)) return [] as unknown[];
+const liftHandlers = lift((entries: { adjust: any }[] | undefined) => {
+  if (!Array.isArray(entries)) return [] as any[];
   return entries.map((item: any) => item?.adjust);
 });
 const liftHistoryView = lift((entries: AdjustmentRecord[] | undefined) => {

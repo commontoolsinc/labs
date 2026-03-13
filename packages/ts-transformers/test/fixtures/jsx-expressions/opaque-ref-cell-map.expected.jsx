@@ -93,7 +93,9 @@ const addCharmAndNavigate = lift({
     return undefined;
 });
 // Create a new SimplePattern and add it to the array
-const createSimplePattern = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const createSimplePattern = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -114,7 +116,9 @@ const createSimplePattern = handler(true as const satisfies __ctHelpers.JSONSche
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const goToCharm = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         charm: true
