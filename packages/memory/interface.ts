@@ -63,7 +63,14 @@ export type StorableDatum =
 /** An array of storable data. */
 export interface StorableArray extends ArrayLike<StorableDatum> {}
 
-/** An object/record of storable data. */
+/**
+ * An object/record of storable data.
+ *
+ * Note: `__proto__` and `constructor` properties are not currently guarded
+ * against at the type level or at runtime in clone/conversion internals.
+ * If prototype pollution becomes a concern, add boundary validation where
+ * values enter the storable system (e.g., `storableFromNativeValue`).
+ */
 export interface StorableObject extends Record<string, StorableDatum> {}
 
 /**

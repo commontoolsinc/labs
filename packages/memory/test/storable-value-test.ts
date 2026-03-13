@@ -1098,6 +1098,31 @@ describe("storable-value", () => {
         const result = shallowStorableFromNativeValue(mutable, false);
         expect(result).toBe(mutable); // identity -- no copy needed
       });
+
+      it("preserves null prototype on objects when freeze=true", () => {
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.a = 1;
+        const result = shallowStorableFromNativeValue(obj, true) as Record<
+          string,
+          unknown
+        >;
+        expect(Object.getPrototypeOf(result)).toBe(null);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result.a).toBe(1);
+      });
+
+      it("preserves null prototype on objects when freeze=false", () => {
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.b = 2;
+        Object.freeze(obj);
+        const result = shallowStorableFromNativeValue(obj, false) as Record<
+          string,
+          unknown
+        >;
+        expect(Object.getPrototypeOf(result)).toBe(null);
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(result.b).toBe(2);
+      });
     });
 
     describe("storableFromNativeValue", () => {
@@ -1179,6 +1204,27 @@ describe("storable-value", () => {
         const obj = { a: 1, b: 2 };
         storableFromNativeValue(obj, true);
         expect(Object.isFrozen(obj)).toBe(false);
+      });
+
+      it("preserves null prototype on top-level object", () => {
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.x = 1;
+        const result = storableFromNativeValue(obj) as Record<string, unknown>;
+        expect(Object.getPrototypeOf(result)).toBe(null);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result.x).toBe(1);
+      });
+
+      it("preserves null prototype on nested object", () => {
+        const inner = Object.create(null) as Record<string, unknown>;
+        inner.val = 42;
+        const outer = { nested: inner };
+        const result = storableFromNativeValue(outer) as Record<
+          string,
+          Record<string, unknown>
+        >;
+        expect(Object.getPrototypeOf(result.nested)).toBe(null);
+        expect(result.nested.val).toBe(42);
       });
     });
   });

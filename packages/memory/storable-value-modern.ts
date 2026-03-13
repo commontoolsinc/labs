@@ -16,89 +16,8 @@ import {
   StorableRegExp,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
-import {
-  NATIVE_TAGS,
-  type NativeTag,
-  tagFromNativeValue,
-} from "./type-tags.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
-
-/**
- * Shallow-clone a `StorableValueLayer` to achieve a desired frozenness.
- *
- * Given a value that is already a valid storable value (or layer), returns it
- * with the requested frozenness, shallow-cloning only when the current
- * frozenness mismatches the requested `frozen` flag.
- *
- * - Primitives (including `SpecialPrimitiveValue`) are returned as-is --
- *   frozenness does not apply.
- * - `StorableInstance` values: delegated to the protocol's `shallowClone`
- *   method, which handles frozenness per each concrete class.
- * - Arrays: shallow-copied (preserving sparse holes) when frozenness differs.
- * - Plain objects: shallow-copied via spread when frozenness differs.
- * - `HasToJSON` and raw native instances: throw. These should not reach here;
- *   callers must resolve them before calling this function.
- *
- * This centralizes the clone-for-frozenness logic that was previously
- * sprinkled across `shallowStorableFromNativeValueRich`.
- */
-function shallowCloneIfNecessary(
-  value: StorableValueLayer,
-  frozen: boolean,
-  tag?: NativeTag | null,
-): StorableValueLayer {
-  switch (tag ?? tagFromNativeValue(value)) {
-    // Primitives (null, undefined, boolean, number, string, bigint) are
-    // unaffected by frozenness.
-    case NATIVE_TAGS.Primitive:
-    // Special primitives behave like true primitives -- always frozen,
-    // returned as-is regardless of the `frozen` argument.
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentId:
-      return value;
-
-    case NATIVE_TAGS.Array: {
-      if (Object.isFrozen(value) === frozen) return value;
-      // Shallow-copy preserving sparse holes.
-      const arr = value as unknown[];
-      const copy = new Array(arr.length);
-      for (let i = 0; i < arr.length; i++) {
-        if (i in arr) copy[i] = arr[i];
-      }
-      return frozen ? Object.freeze(copy) : copy;
-    }
-
-    case NATIVE_TAGS.Object: {
-      if (Object.isFrozen(value) === frozen) return value;
-      // Plain object -- shallow-copy via spread.
-      const copy = { ...(value as Record<string, unknown>) };
-      return frozen ? Object.freeze(copy) : copy;
-    }
-
-    case NATIVE_TAGS.StorableInstance:
-      // StorableInstance values delegate to the protocol's shallowClone
-      // method, which handles frozenness per each concrete class.
-      return (value as StorableInstance).shallowClone(
-        frozen,
-      ) as StorableValueLayer;
-
-    case NATIVE_TAGS.HasToJSON:
-      // HasToJSON is nascently deprecated; callers should resolve toJSON()
-      // before reaching shallowCloneIfNecessary. Death before confusion!
-      throw new Error("Cannot shallow-clone HasToJSON values");
-
-    default:
-      // Convertible native instances (Error, Map, Set, etc.) should never
-      // reach here -- they are wrapped before being stored as
-      // StorableValueLayer. If they do, something is wrong.
-      throw new Error(
-        `Cannot shallow-clone: ${
-          (value as object).constructor?.name ?? "unknown"
-        }`,
-      );
-  }
-}
 
 /** Reject native objects with extra enumerable properties. */
 function rejectExtraProperties(value: object, typeName: string): void {
@@ -172,13 +91,14 @@ export function shallowStorableFromNativeValueRich(
 
     case NATIVE_TAGS.Array:
     case NATIVE_TAGS.Object:
-      // Arrays and plain objects: delegate frozenness handling to
-      // shallowCloneIfNecessary, passing the already-computed tag.
-      return shallowCloneIfNecessary(
-        value as StorableValueLayer,
+      // Arrays and plain objects: delegate frozenness handling to cloneHelper.
+      return cloneHelper(
+        value as StorableValue,
         freeze,
-        tag,
-      );
+        false,
+        false,
+        null,
+      ) as StorableValueLayer;
 
     case NATIVE_TAGS.HasToJSON: {
       // Objects (or arrays/class instances) with a toJSON() method.
@@ -189,21 +109,26 @@ export function shallowStorableFromNativeValueRich(
           `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
         );
       }
-      return shallowCloneIfNecessary(
-        converted as StorableValueLayer,
+      return cloneHelper(
+        converted as StorableValue,
         freeze,
-      );
+        false,
+        false,
+        null,
+      ) as StorableValueLayer;
     }
 
     case NATIVE_TAGS.StorableInstance: {
       // StorableInstance values (StorableError, UnknownStorable, etc.)
-      // are already valid StorableValue members. Delegate frozenness to
-      // the protocol's shallowClone method.
-      return shallowCloneIfNecessary(
-        value as StorableValueLayer,
+      // are already valid StorableValue members. Delegate frozenness
+      // handling to cloneHelper.
+      return cloneHelper(
+        value as StorableValue,
         freeze,
-        tag,
-      );
+        false,
+        false,
+        null,
+      ) as StorableValueLayer;
     }
 
     // deno-lint-ignore no-fallthrough
@@ -457,16 +382,17 @@ function toDeepRichStorableValueInternal(
     result = resultArray as StorableValue;
   } else {
     // Recurse into object properties. Preserve `undefined`-valued properties.
-    const entries: [string, StorableValue][] = [];
+    // Use Object.create to preserve null prototypes (Object.fromEntries
+    // always produces Object.prototype-backed results).
+    const proto = Object.getPrototypeOf(value);
+    const obj = Object.create(proto) as Record<string, StorableValue>;
     for (const [key, val] of Object.entries(value)) {
-      const convertedVal = toDeepRichStorableValueInternal(
+      obj[key] = toDeepRichStorableValueInternal(
         val,
         converted,
         freeze,
       );
-      entries.push([key, convertedVal]);
     }
-    const obj = Object.fromEntries(entries);
     if (freeze) Object.freeze(obj);
     result = obj;
   }
