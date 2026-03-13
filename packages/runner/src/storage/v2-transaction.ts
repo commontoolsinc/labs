@@ -344,16 +344,25 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.branch(space);
     const { doc } = this.document(branch, address);
+    const current = doc.current;
     const previous = readAttestation(doc.current, address);
+    if (previous.ok && deepEqual(previous.ok.value, value)) {
+      return { ok: current };
+    }
     const isolatedValue = value === undefined
       ? undefined
       : isolateTransactionValue(value) as StorableDatum;
-    const result = writeAttestation(doc.current, address, isolatedValue);
+    const result = writeAttestation(current, address, isolatedValue);
     if (result.error) {
       return { error: result.error.from(space) };
     }
 
-    doc.current = result.ok as RootAttestation;
+    const next = result.ok as RootAttestation;
+    if (next === current) {
+      return { ok: next };
+    }
+
+    doc.current = next;
     doc.readonlyCurrent = undefined;
     this.#activity.push({
       write: {
@@ -372,7 +381,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousValue: existing?.previousValue ?? previous.ok?.value,
     });
 
-    return result;
+    return { ok: next };
   }
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
     const ready = this.editable();

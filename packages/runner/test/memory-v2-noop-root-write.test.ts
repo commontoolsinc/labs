@@ -2,6 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { txToReactivityLog } from "../src/scheduler.ts";
 
 Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   const signer = await Identity.fromPassphrase("memory-v2-noop-root-write");
@@ -41,6 +42,8 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
 
   const tx2 = runtime.edit();
   tx2.writeValueOrThrow({ ...address, space }, { foo: "bar" });
+  assertEquals(Array.from(tx2.getWriteDetails?.(space) ?? []), []);
+  assertEquals(txToReactivityLog(tx2).writes, []);
   assert((await tx2.commit()).ok);
 
   const finalState = provider.replica.get(address) as

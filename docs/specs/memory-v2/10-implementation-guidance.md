@@ -1197,6 +1197,9 @@ Implementation guidance:
 - Compatibility wrappers such as `ExtendedStorageTransaction` and
   `TransactionWrapper` should forward these narrow hooks instead of forcing
   callers to unwrap `.tx` just to reach the native v2 data.
+- Equal-value writes should be dropped at write time, not only filtered later
+  during commit building. Otherwise the v2 transaction accumulates dead
+  `writeDetails`, dead reactivity-log entries, and avoidable no-op commit work.
 - If a future caller needs more detail, add another **narrow** native hook
   instead of recreating broad v1 journal machinery inside v2.
 
