@@ -19,7 +19,7 @@ interface ComponentSeed {
   name?: string;
   category?: string;
   description?: string;
-  props?: unknown;
+  props?: string[];
 }
 
 interface ComponentDefinition {
@@ -40,7 +40,7 @@ interface RecipeRegistrationEntry {
 interface RecipeRegistrationEvent {
   component?: string;
   pattern?: string;
-  props?: unknown;
+  props?: string[];
 }
 
 interface ComponentCoverageView {

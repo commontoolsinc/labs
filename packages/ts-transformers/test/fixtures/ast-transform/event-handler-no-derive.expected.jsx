@@ -7,7 +7,9 @@ declare global {
         }
     }
 }
-const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const handleClick = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {

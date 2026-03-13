@@ -151,7 +151,7 @@ const toRecord = (config: ChildConfig): ChildSpecializationRecord => ({
 
 const configureChildren = handler(
   (
-    event: { configs?: unknown } | undefined,
+    event: { configs?: ChildConfigInput[] } | undefined,
     context: {
       configs: Cell<ChildConfigInput[]>;
       version: Cell<number>;

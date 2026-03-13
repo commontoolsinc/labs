@@ -33,7 +33,7 @@ interface MoodEntrySeed {
   timestamp?: string;
   mood?: string;
   note?: string;
-  tags?: unknown;
+  tags?: string[];
 }
 
 interface MoodEntry {

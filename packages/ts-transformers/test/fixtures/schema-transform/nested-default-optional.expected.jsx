@@ -119,6 +119,7 @@ export default pattern((__ct_pattern_input) => {
             asOpaque: true
         },
         increment: {
+            type: "unknown",
             asStream: true
         }
     },

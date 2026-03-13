@@ -16,7 +16,7 @@ interface SavedSearchInput {
   name?: string;
   query?: string;
   frequency?: string;
-  channels?: unknown;
+  channels?: string[];
 }
 
 interface SavedSearchSubscription {
@@ -39,7 +39,7 @@ interface SavedSubscriptionEvent {
   name?: string;
   query?: string;
   frequency?: string;
-  channels?: unknown;
+  channels?: string[];
 }
 
 interface TriggerSubscriptionEvent {

@@ -18,7 +18,7 @@ interface CitationInput {
   authors?: string[];
   topic?: string;
   year?: number;
-  style?: string;
+  style?: CitationStyle | string;
   summary?: string;
 }
 
@@ -57,14 +57,14 @@ interface AddCitationEvent {
   authors?: string[];
   topic?: string;
   year?: number;
-  style?: string;
+  style?: CitationStyle | string;
   summary?: string;
 }
 
 interface RetagCitationEvent {
   id?: string;
   topic?: string;
-  style?: string;
+  style?: CitationStyle | string;
 }
 
 const allowedStyles: readonly CitationStyle[] = [
@@ -316,7 +316,7 @@ const retagCitation = handler(
 
 const updateActiveStyle = handler(
   (
-    event: { style?: string } | string | undefined,
+    event: { style?: unknown } | string | undefined,
     context: { style: Cell<CitationStyle | string> },
   ) => {
     const requested = typeof event === "string"

@@ -5,7 +5,9 @@ interface Item {
     name: string;
 }
 // Handler that closes over both items array and individual item
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const removeItem = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {

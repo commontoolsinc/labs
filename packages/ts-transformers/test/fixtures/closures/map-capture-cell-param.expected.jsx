@@ -7,7 +7,9 @@ interface InputSchema {
     items: Default<Item[], [
     ]>;
 }
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const removeItem = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {

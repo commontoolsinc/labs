@@ -62,4 +62,31 @@ describe("Schema: Capability wrapper types", () => {
     expect(op.properties?.enabled?.type).toBe("boolean");
     expect(op.asOpaque).toBe(true);
   });
+
+  it("Writable<unknown> produces { type: 'unknown', asCell: true }", async () => {
+    const code = `
+      interface X {
+        value: Writable<unknown>;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const value = result.properties?.value as Record<string, any>;
+    expect(value).toEqual({ type: "unknown", asCell: true });
+  });
+
+  it("Array<Writable<unknown>> produces { type: 'array', items: { type: 'unknown', asCell: true } }", async () => {
+    const code = `
+      interface X {
+        items: Array<Writable<unknown>>;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const items = result.properties?.items as Record<string, any>;
+    expect(items.type).toBe("array");
+    expect(items.items).toEqual({ type: "unknown", asCell: true });
+  });
 });

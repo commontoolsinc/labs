@@ -15,8 +15,8 @@ interface BatchedCounterArgs {
 }
 
 interface BatchEvent {
-  amounts?: unknown;
-  note?: unknown;
+  amounts?: number[];
+  note?: string;
 }
 
 const toNumber = (input: unknown, fallback = 0): number => {

@@ -6,7 +6,9 @@ interface CounterState {
 interface PatternState {
     value: Default<number, 0>;
 }
-const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {

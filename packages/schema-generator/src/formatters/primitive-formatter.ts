@@ -118,9 +118,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       return true;
     }
     if (flags & ts.TypeFlags.Unknown) {
-      // unknown: return true to indicate "accept any value"
-      // Type safety is enforced at compile time via TypeScript narrowing
-      return true;
+      // unknown: return { type: "unknown" } to distinguish from any (true)
+      return { type: "unknown" };
     }
 
     // Fallback

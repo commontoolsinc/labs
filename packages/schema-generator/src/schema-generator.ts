@@ -749,9 +749,10 @@ export class SchemaGenerator implements ISchemaGenerator {
       case ts.SyntaxKind.NeverKeyword:
         // Reject all values (never type can never occur)
         return false as SchemaDefinition;
+      case ts.SyntaxKind.UnknownKeyword:
+        return { type: "unknown" };
       case ts.SyntaxKind.VoidKeyword:
       case ts.SyntaxKind.AnyKeyword:
-      case ts.SyntaxKind.UnknownKeyword:
         // Accept any value
         return true as SchemaDefinition;
     }

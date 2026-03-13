@@ -28,8 +28,9 @@ interface Thread {
     muted: boolean;
     comments: Comment[];
 }
-// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
-const jumpToComment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const jumpToComment = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedCommentId: {

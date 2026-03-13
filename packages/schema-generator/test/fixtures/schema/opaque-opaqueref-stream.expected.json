@@ -5,7 +5,9 @@
         "cancelGeneration": {
           "asStream": true
         },
-        "error": true,
+        "error": {
+          "type": "unknown"
+        },
         "pending": {
           "type": "boolean"
         },

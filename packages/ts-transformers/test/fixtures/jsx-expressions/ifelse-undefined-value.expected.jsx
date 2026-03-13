@@ -22,6 +22,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             result: {
+                type: "unknown",
                 asOpaque: true
             }
         },
@@ -33,6 +34,7 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     result: {
+                        type: "unknown",
                         asOpaque: true
                     }
                 },
@@ -47,6 +49,7 @@ export default pattern(() => {
                 asOpaque: true
             },
             result: {
+                type: "unknown",
                 asOpaque: true
             }
         },
@@ -64,6 +67,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             data: {
+                type: "unknown",
                 asOpaque: true
             }
         },
@@ -77,6 +81,7 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     data: {
+                        type: "unknown",
                         asOpaque: true
                     }
                 },
@@ -87,6 +92,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             result: {
+                type: "unknown",
                 asOpaque: true
             }
         },

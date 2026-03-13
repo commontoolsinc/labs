@@ -10,7 +10,9 @@ interface ListState {
 type Indexed = {
     [k: string]: unknown;
 };
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const removeItem = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     additionalProperties: true,
     $comment: "Unsupported intersection pattern: index signature on constituent"
