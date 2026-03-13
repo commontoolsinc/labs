@@ -12,6 +12,7 @@ import type {
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadActivity,
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
@@ -22,11 +23,19 @@ import type {
   ReadError,
   Result,
   StorageTransactionStatus,
+  TransactionReactivityLog,
+  TransactionWriteDetail,
   Unit,
   WriteError,
   WriterError,
 } from "./interface.ts";
 import { toThrowable } from "./interface.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionReadActivities,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
+import { reactivityLogFromActivities } from "./reactivity-log.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
@@ -51,6 +60,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   get journal(): ITransactionJournal {
     return this.tx.journal;
+  }
+
+  getReactivityLog(): TransactionReactivityLog {
+    return getDirectTransactionReactivityLog(this.tx) ??
+      reactivityLogFromActivities(this.tx.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return getTransactionReadActivities(this.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return getTransactionWriteDetails(this.tx, space);
   }
 
   status(): StorageTransactionStatus {
@@ -286,6 +310,23 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   get journal(): ITransactionJournal {
     return this.wrapped.journal;
+  }
+
+  getReactivityLog(): TransactionReactivityLog {
+    return this.wrapped.getReactivityLog?.() ??
+      reactivityLogFromActivities(this.wrapped.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return this.wrapped.getReadActivities?.() ??
+      getTransactionReadActivities(this.wrapped.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return this.wrapped.getWriteDetails?.(space) ??
+      getTransactionWriteDetails(this.wrapped.tx, space);
   }
 
   status(): StorageTransactionStatus {

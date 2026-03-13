@@ -8,6 +8,10 @@ import type {
   ITransactionJournal,
   TransactionReactivityLog,
 } from "../src/storage/interface.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();
@@ -111,6 +115,55 @@ describe("transaction inspection", () => {
         status: tx.status.bind(tx),
       } as unknown as IExtendedStorageTransaction;
       assertEquals(txToReactivityLog(extended), expected);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("forwards native v2 hooks through extended transaction wrappers", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const tx = storageManager.edit();
+      const id = "test:transaction-inspection-wrapped-v2" as const;
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { count: 1 } });
+      tx.read({
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      });
+
+      const expected: TransactionReactivityLog = {
+        reads: [{
+          space,
+          id,
+          type: "application/json",
+          path: [],
+        }],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: [],
+        }],
+      };
+
+      const extended = new ExtendedStorageTransaction(tx);
+      const wrapped = new TransactionWrapper(extended);
+
+      assertEquals(extended.getReactivityLog?.(), expected);
+      assertEquals(wrapped.getReactivityLog?.(), expected);
+      assertEquals(txToReactivityLog(wrapped), expected);
     } finally {
       await storageManager.close();
     }
