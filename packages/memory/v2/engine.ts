@@ -563,7 +563,7 @@ export const putBlob = (
   engine: Engine,
   options: PutBlobOptions,
 ): Blob => {
-  const hash = hashBlob(options.value);
+  const hash = hashBlobBytes(options.value);
   engine.database.prepare(INSERT_BLOB).run({
     hash,
     data: options.value,
@@ -1160,7 +1160,7 @@ const isEntityDocument = (
     );
 };
 
-const hashBlob = (value: Uint8Array): Reference => {
+export const hashBlobBytes = (value: Uint8Array): Reference => {
   return fromDigest(sha256(value)).toString() as Reference;
 };
 

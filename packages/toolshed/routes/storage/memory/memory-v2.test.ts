@@ -246,9 +246,10 @@ Deno.test("memory blob endpoints upload and download v2 payloads by hash", async
   const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
   const bytes = new TextEncoder().encode("hello from memory v2 blobs");
   const hash = await toBlobHash(bytes);
+  const space = `${identity.did()}:blob-route:${Date.now()}`;
   const blobUrl = new URL(
     `/api/storage/memory/blob/${encodeURIComponent(hash)}?space=${
-      encodeURIComponent(identity.did())
+      encodeURIComponent(space)
     }`,
     base,
   );
