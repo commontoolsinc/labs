@@ -184,6 +184,45 @@ describe("data URI inlining", () => {
       expect(result).toBe(link);
     });
 
+    it("should preserve object identity when no data URI links are present", () => {
+      const value = {
+        name: "Ada",
+        nested: {
+          count: 3,
+          tags: ["math", "logic"],
+        },
+      };
+
+      const result = findAndInlineDataURILinks(value);
+      expect(result).toBe(value);
+      expect(result.nested).toBe(value.nested);
+      expect(result.nested.tags).toBe(value.nested.tags);
+    });
+
+    it("should preserve unchanged branches when inlining nested data URI links", () => {
+      const dataURI = createDataCellURI("inline me");
+      const untouched = {
+        keep: true,
+        nested: { count: 1 },
+      };
+      const value = {
+        untouched,
+        change: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: dataURI,
+              path: [],
+            },
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(value);
+      expect(result).not.toBe(value);
+      expect(result.untouched).toBe(untouched);
+      expect(result.change).toBe("inline me");
+    });
+
     it("should handle primitives", () => {
       expect(findAndInlineDataURILinks("string")).toBe("string");
       expect(findAndInlineDataURILinks(42)).toBe(42);
