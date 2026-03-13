@@ -440,8 +440,10 @@ export class CTRadioGroup extends BaseElement {
 
 globalThis.customElements.define("ct-radio-group", CTRadioGroup);
 
-// @TODO(runtime-worker-refactor)
-// needs typed, not sure what these are
-function areLinksSame(_a: any, _b: any): boolean {
-  return false;
+/** Simple value equality for comparing radio values (strings, numbers, etc.) */
+function areLinksSame(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  // Compare stringified values for attribute-based comparisons
+  return String(a) === String(b);
 }

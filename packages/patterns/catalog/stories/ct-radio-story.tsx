@@ -13,6 +13,13 @@ interface RadioStoryOutput {
 export default pattern<RadioStoryInput, RadioStoryOutput>(() => {
   const orientation = Writable.of<"vertical" | "horizontal">("vertical");
   const disabled = Writable.of(false);
+  const selected = Writable.of("banana");
+
+  const fruitItems = [
+    { label: "Apple", value: "apple" },
+    { label: "Banana", value: "banana" },
+    { label: "Cherry", value: "cherry" },
+  ];
 
   return {
     [NAME]: "ct-radio Story",
@@ -38,13 +45,11 @@ export default pattern<RadioStoryInput, RadioStoryOutput>(() => {
           </div>
           <ct-radio-group
             name="fruit"
+            items={fruitItems}
+            $value={selected}
             orientation={orientation}
             disabled={disabled}
-          >
-            <ct-radio value="apple">Apple</ct-radio>
-            <ct-radio value="banana">Banana</ct-radio>
-            <ct-radio value="cherry">Cherry</ct-radio>
-          </ct-radio-group>
+          />
         </div>
       </div>
     ),
