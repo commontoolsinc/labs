@@ -1,11 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { MEMORY_V2_PROTOCOL } from "../v2.ts";
-import {
-  connect,
-  loopback,
-  type Transport,
-} from "../v2/client.ts";
+import { connect, loopback, type Transport } from "../v2/client.ts";
 
 Deno.test("memory v2 client transacts and receives graph subscription updates", async () => {
   const server = new Server({
@@ -27,15 +23,18 @@ Deno.test("memory v2 client transacts and receives graph subscription updates", 
     }],
   });
 
-  assertEquals(view.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 0,
-    document: null,
-  }]);
+  assertEquals(
+    view.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 0,
+      document: null,
+    }],
+  );
 
   const updates = view.subscribe();
   const pending = updates.next();
@@ -58,19 +57,22 @@ Deno.test("memory v2 client transacts and receives graph subscription updates", 
 
   const update = await pending;
   assertEquals(update.done, false);
-  assertEquals(update.value.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 1,
-    document: {
-      value: {
-        hello: "client",
+  assertEquals(
+    update.value.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 1,
+      document: {
+        value: {
+          hello: "client",
+        },
       },
-    },
-  }]);
+    }],
+  );
 
   await client.close();
   await server.close();
@@ -88,8 +90,9 @@ class ReconnectableLoopbackTransport implements Transport {
     await this.connection().receive(payload);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.disconnect();
+    return Promise.resolve();
   }
 
   setReceiver(receiver: (payload: string) => void): void {
@@ -135,7 +138,7 @@ class ScriptedReconnectTransport implements Transport {
     this.#closeReceiver = receiver;
   }
 
-  async send(payload: string): Promise<void> {
+  send(payload: string): Promise<void> {
     if (!this.#connected) {
       this.#connected = true;
       this.connectionCount++;
@@ -153,7 +156,7 @@ class ScriptedReconnectTransport implements Transport {
           type: "hello.ok",
           protocol: MEMORY_V2_PROTOCOL,
         });
-        return;
+        return Promise.resolve();
       case "session.open":
         this.#respond({
           type: "response",
@@ -163,7 +166,7 @@ class ScriptedReconnectTransport implements Transport {
             serverSeq: 0,
           },
         });
-        return;
+        return Promise.resolve();
       case "transact": {
         const localSeq = message.commit?.localSeq ?? -1;
         this.transactLocalSeqs.push(localSeq);
@@ -174,7 +177,7 @@ class ScriptedReconnectTransport implements Transport {
           this.#dropped.add(localSeq);
           this.#connected = false;
           this.#closeReceiver(new Error("disconnect"));
-          return;
+          return Promise.resolve();
         }
 
         this.#respond({
@@ -196,15 +199,16 @@ class ScriptedReconnectTransport implements Transport {
             }],
           },
         });
-        return;
+        return Promise.resolve();
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.#connected = false;
+    return Promise.resolve();
   }
 
   #respond(message: unknown): void {
@@ -225,7 +229,7 @@ class CloseOnSessionOpenTransport implements Transport {
     this.#closeReceiver = receiver;
   }
 
-  async send(payload: string): Promise<void> {
+  send(payload: string): Promise<void> {
     if (!this.#connected) {
       this.#connected = true;
     }
@@ -240,21 +244,22 @@ class CloseOnSessionOpenTransport implements Transport {
         type: "hello.ok",
         protocol: MEMORY_V2_PROTOCOL,
       }));
-      return;
+      return Promise.resolve();
     }
 
     if (message.type === "session.open") {
       this.#closeReceiver(
         new DOMException("memory/v2 transport closed", "NetworkError") as Error,
       );
-      return;
+      return Promise.resolve();
     }
 
     throw new Error(`Unhandled close-on-open message: ${message.type}`);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.#connected = false;
+    return Promise.resolve();
   }
 }
 
@@ -281,7 +286,9 @@ Deno.test("memory v2 client reconnects and reissues graph subscriptions", async 
     transport: loopback(server),
   });
   const space = await client.mount("did:key:z6Mk-memory-v2-client-reconnect");
-  const writer = await writerClient.mount("did:key:z6Mk-memory-v2-client-reconnect");
+  const writer = await writerClient.mount(
+    "did:key:z6Mk-memory-v2-client-reconnect",
+  );
   const originalSessionId = space.sessionId;
 
   const view = await space.queryGraph({
@@ -317,19 +324,22 @@ Deno.test("memory v2 client reconnects and reissues graph subscriptions", async 
   const update = await pending;
   assertEquals(update.done, false);
   assertEquals(space.sessionId, originalSessionId);
-  assertEquals(update.value.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 1,
-    document: {
-      value: {
-        hello: "reconnected",
+  assertEquals(
+    update.value.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 1,
+      document: {
+        value: {
+          hello: "reconnected",
+        },
       },
-    },
-  }]);
+    }],
+  );
 
   await writerClient.close();
   await client.close();
@@ -367,7 +377,9 @@ Deno.test("memory v2 client replays an in-flight transact after reconnect", asyn
 Deno.test("memory v2 client replays retained commits in localSeq order after reconnect", async () => {
   const transport = new ScriptedReconnectTransport([1]);
   const client = await connect({ transport });
-  const space = await client.mount("did:key:z6Mk-memory-v2-client-replay-order");
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-replay-order",
+  );
 
   try {
     const first = space.transact({

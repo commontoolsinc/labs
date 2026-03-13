@@ -3,7 +3,10 @@
 import { assert, assertEquals } from "@std/assert";
 import { Runtime } from "@commontools/runner";
 import { Identity, IdentityCreateConfig } from "@commontools/identity";
-import { Provider, StorageManager } from "@commontools/runner/storage/cache.deno";
+import {
+  Provider,
+  StorageManager,
+} from "@commontools/runner/storage/cache.deno";
 import { type JSONSchema } from "@commontools/runner";
 import { toURI } from "../src/uri-utils.ts";
 

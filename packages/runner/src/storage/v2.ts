@@ -10,12 +10,9 @@ import {
   type TransactionError,
   type URI,
 } from "@commontools/memory/interface";
-import { assert, iterate as iterateFacts, unclaimed } from "@commontools/memory/fact";
+import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
-import type {
-  EntitySnapshot,
-  GraphQueryResult,
-} from "@commontools/memory/v2";
+import type { EntitySnapshot, GraphQueryResult } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -35,13 +32,12 @@ import type {
   IMemoryAddress,
   IMergedChanges,
   IRemoteStorageProviderSettings,
+  ISpaceReplica,
   IStorageManager,
   IStorageNotification,
-  IStorageProvider,
   IStorageProviderWithReplica,
   IStorageSubscription,
   IStorageTransaction,
-  ISpaceReplica,
   MemoryVersion,
   OptStorageValue,
   PullError,
@@ -230,9 +226,9 @@ export class StorageManager implements IStorageManager {
 
   async close(): Promise<void> {
     await this.synced();
-    await Promise.all([...this.#providers.values()].map((provider) =>
-      provider.destroy()
-    ));
+    await Promise.all(
+      [...this.#providers.values()].map((provider) => provider.destroy()),
+    );
     this.#providers.clear();
   }
 
@@ -288,7 +284,7 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.resolveCrossSpace(resolve));
   }
 
-  private async syncDataURICell<T>(
+  private syncDataURICell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -382,7 +378,14 @@ export class StorageManager implements IStorageManager {
         ? schema.items as JSONSchema
         : undefined;
       for (const item of value) {
-        this.collectLinkedCellSyncs(item, base, itemSchema, cfc, promises, seen);
+        this.collectLinkedCellSyncs(
+          item,
+          base,
+          itemSchema,
+          cfc,
+          promises,
+          seen,
+        );
       }
       return;
     }
@@ -390,11 +393,22 @@ export class StorageManager implements IStorageManager {
     if (isRecord(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
-        if (child === null || child === undefined || typeof child !== "object") {
+        if (
+          child === null || child === undefined || typeof child !== "object"
+        ) {
           continue;
         }
-        const childSchema = schema ? cfc.getSchemaAtPath(schema, [key]) : undefined;
-        this.collectLinkedCellSyncs(child, base, childSchema, cfc, promises, seen);
+        const childSchema = schema
+          ? cfc.getSchemaAtPath(schema, [key])
+          : undefined;
+        this.collectLinkedCellSyncs(
+          child,
+          base,
+          childSchema,
+          cfc,
+          promises,
+          seen,
+        );
       }
     }
   }
@@ -475,7 +489,9 @@ class SpaceReplica implements ISpaceReplica {
   }>;
   readonly #docs = new Map<URI, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
-  readonly #commitPromises = new Set<Promise<Result<Unit, StorageTransactionRejected>>>();
+  readonly #commitPromises = new Set<
+    Promise<Result<Unit, StorageTransactionRejected>>
+  >();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<URI, Set<(value: StorageValue) => void>>();
@@ -495,7 +511,10 @@ class SpaceReplica implements ISpaceReplica {
     return this.getState(entry.id as URI);
   }
 
-  async sync(uri: URI, selector?: SchemaPathSelector): Promise<Result<Unit, PullError>> {
+  async sync(
+    uri: URI,
+    selector?: SchemaPathSelector,
+  ): Promise<Result<Unit, PullError>> {
     return await this.pull([[
       { id: uri, type: DOCUMENT_MIME as MIME },
       selector,
@@ -577,7 +596,9 @@ class SpaceReplica implements ISpaceReplica {
       return await existing.promise;
     }
 
-    const task = { promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>) };
+    const task = {
+      promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
+    };
     const promise = this.startSync(entries, task);
     task.promise = promise;
     this.#syncTasks.set(key, task);
@@ -677,12 +698,17 @@ class SpaceReplica implements ISpaceReplica {
       ),
     };
     const touched = operations.map((operation) => operation.id);
-    const before = Differential.checkout(this, touched.map((id) => snapshotState(this, id)));
+    const before = Differential.checkout(
+      this,
+      touched.map((id) => snapshotState(this, id)),
+    );
 
     for (const operation of operations) {
-      this.applyPending(operation.id, localSeq, operation.op === "delete"
-        ? undefined
-        : operation.value);
+      this.applyPending(
+        operation.id,
+        localSeq,
+        operation.op === "delete" ? undefined : operation.value,
+      );
     }
 
     const optimistic = before.compare(this);
@@ -694,7 +720,12 @@ class SpaceReplica implements ISpaceReplica {
     });
     this.notifySinks(optimistic);
 
-    const promise = this.pushCommit(localSeq, operations, commit as any, source);
+    const promise = this.pushCommit(
+      localSeq,
+      operations,
+      commit as any,
+      source,
+    );
     this.#commitPromises.add(promise);
     const result = await promise;
     this.#commitPromises.delete(promise);
@@ -735,7 +766,10 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private buildReads(source: IStorageTransaction | undefined, localSeq: number) {
+  private buildReads(
+    source: IStorageTransaction | undefined,
+    localSeq: number,
+  ) {
     const confirmed: Array<{ id: URI; path: string[]; seq: number }> = [];
     const pending: Array<{ id: URI; path: string[]; localSeq: number }> = [];
     if (!source) {
@@ -825,7 +859,11 @@ class SpaceReplica implements ISpaceReplica {
     return record;
   }
 
-  private applyPending(id: URI, localSeq: number, value: StorableDatum | undefined): void {
+  private applyPending(
+    id: URI,
+    localSeq: number,
+    value: StorableDatum | undefined,
+  ): void {
     const record = this.record(id);
     record.pending.push({ localSeq, value });
   }
@@ -841,7 +879,9 @@ class SpaceReplica implements ISpaceReplica {
     for (const operation of operations) {
       const record = this.record(operation.id);
       const fact = applied.facts.find((entry) => entry.id === operation.id);
-      const pending = record.pending.find((entry) => entry.localSeq === localSeq);
+      const pending = record.pending.find((entry) =>
+        entry.localSeq === localSeq
+      );
       if (!pending) {
         continue;
       }
@@ -850,7 +890,9 @@ class SpaceReplica implements ISpaceReplica {
         hash: fact?.hash,
         value: pending.value,
       };
-      record.pending = record.pending.filter((entry) => entry.localSeq !== localSeq);
+      record.pending = record.pending.filter((entry) =>
+        entry.localSeq !== localSeq
+      );
     }
   }
 
@@ -913,7 +955,9 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
     unclaimed({ of: id, the: DOCUMENT_MIME });
 };
 
-const toStoredDocument = (value: StorageValue | StorableDatum): StorableDatum => {
+const toStoredDocument = (
+  value: StorageValue | StorableDatum,
+): StorableDatum => {
   if (
     isRecord(value) &&
     ("value" in value || "source" in value)

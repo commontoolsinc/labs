@@ -1,12 +1,12 @@
-import type { MemorySpace, StorableDatum, URI } from "@commontools/memory/interface";
+import type {
+  MemorySpace,
+  StorableDatum,
+  URI,
+} from "@commontools/memory/interface";
 import { iterate as iterateFacts } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
-import {
-  type Options,
-  type SessionFactory,
-  StorageManager,
-} from "./v2.ts";
+import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
 
@@ -28,7 +28,9 @@ const toStoredDocument = (value: StorableDatum) => {
     ("value" in value || "source" in value)
   ) {
     return {
-      ...("value" in value ? { value: (value as { value: unknown }).value } : {}),
+      ...("value" in value
+        ? { value: (value as { value: unknown }).value }
+        : {}),
       ...("source" in value &&
           (value as { source?: unknown }).source !== undefined
         ? { source: (value as { source?: unknown }).source }

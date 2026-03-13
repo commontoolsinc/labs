@@ -1,19 +1,18 @@
 import type { JSONValue } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
-import type { Provider, Protocol } from "../provider.ts";
+import type { Protocol, Provider } from "../provider.ts";
 import {
-  MEMORY_V2_PROTOCOL,
   type Blob,
   type ClientMessage,
   type EntitySnapshot,
   type GraphQuery,
-  type GraphQueryResult,
   type GraphQueryRequest,
-  type GraphUnsubscribeRequest,
+  type GraphQueryResult,
   type HelloMessage,
   type LegacyServerMessage,
-  type ResponseMessage,
+  MEMORY_V2_PROTOCOL,
   type Reference,
+  type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
   type SessionOpenRequest,
@@ -64,7 +63,11 @@ const respondTypedError = <Result>(
 export class SessionRegistry {
   #sessions = new Map<string, SessionState>();
 
-  open(space: string, session: SessionDescriptor, serverSeq: number): SessionOpenResult {
+  open(
+    space: string,
+    session: SessionDescriptor,
+    serverSeq: number,
+  ): SessionOpenResult {
     const sessionId = session.sessionId ?? crypto.randomUUID();
     const existing = this.#sessions.get(sessionId);
     const seenSeq = session.seenSeq ?? existing?.seenSeq ?? 0;
@@ -100,7 +103,10 @@ class Connection {
       this.send({
         type: "response",
         requestId: "invalid",
-        error: toError("InvalidMessageError", "Unable to parse memory/v2 message"),
+        error: toError(
+          "InvalidMessageError",
+          "Unable to parse memory/v2 message",
+        ),
       });
       return;
     }
@@ -184,7 +190,10 @@ class Connection {
       return;
     }
     for (const subscription of this.subscriptionsForSpace(space)) {
-      const state = await this.server.evaluateGraphQuery(space, subscription.query);
+      const state = await this.server.evaluateGraphQuery(
+        space,
+        subscription.query,
+      );
       if (sameEntities(state.entities, subscription.entities)) {
         continue;
       }
@@ -255,7 +264,9 @@ export class Server {
     this.#connections.clear();
   }
 
-  async openSession(message: SessionOpenRequest): Promise<ResponseMessage<SessionOpenResult>> {
+  async openSession(
+    message: SessionOpenRequest,
+  ): Promise<ResponseMessage<SessionOpenResult>> {
     const engine = await this.openEngine(message.space);
     return {
       type: "response",
@@ -268,7 +279,9 @@ export class Server {
     };
   }
 
-  async transact(message: TransactRequest): Promise<ResponseMessage<Engine.AppliedCommit>> {
+  async transact(
+    message: TransactRequest,
+  ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     if (this.#sessions.get(message.space, message.sessionId) === null) {
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
@@ -306,7 +319,9 @@ export class Server {
     }
   }
 
-  async graphQuery(message: GraphQueryRequest): Promise<ResponseMessage<GraphQueryResult>> {
+  async graphQuery(
+    message: GraphQueryRequest,
+  ): Promise<ResponseMessage<GraphQueryResult>> {
     if (this.#sessions.get(message.space, message.sessionId) === null) {
       return respondTypedError<GraphQueryResult>(
         message.requestId,
@@ -315,7 +330,10 @@ export class Server {
     }
 
     try {
-      const result = await this.evaluateGraphQuery(message.space, message.query);
+      const result = await this.evaluateGraphQuery(
+        message.space,
+        message.query,
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -405,9 +423,7 @@ export class Server {
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
     while (true) {
-      const spaces = pending
-        ? [...pending]
-        : [...this.#dirtySpaces];
+      const spaces = pending ? [...pending] : [...this.#dirtySpaces];
       if (spaces.length === 0) {
         return;
       }
@@ -432,10 +448,12 @@ export class Server {
   async respond(payload: string): Promise<string | null> {
     const hello = parseHelloMessage(payload);
     if (hello !== null) {
-      return JSON.stringify({
-        type: "hello.ok",
-        protocol: MEMORY_V2_PROTOCOL,
-      } satisfies ServerMessage);
+      return JSON.stringify(
+        {
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+        } satisfies ServerMessage,
+      );
     }
 
     const legacy = parseLegacySessionOpen(payload);
@@ -449,11 +467,13 @@ export class Server {
       legacy.session,
       Engine.headSeq(engine),
     );
-    return JSON.stringify({
-      the: "task/return",
-      of: legacy.id as LegacyServerMessage["of"],
-      is: { ok: result },
-    } satisfies LegacyServerMessage);
+    return JSON.stringify(
+      {
+        the: "task/return",
+        of: legacy.id as LegacyServerMessage["of"],
+        is: { ok: result },
+      } satisfies LegacyServerMessage,
+    );
   }
 
   private openEngine(space: string): Promise<Engine.Engine> {

@@ -300,7 +300,7 @@ export class RuntimeProcessor {
         return args;
       },
 
-      navigateCallback: async (target) => {
+      navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
         self.postMessage({
           type: NotificationType.NavigateRequest,

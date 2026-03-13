@@ -3,7 +3,7 @@
 import { assertEquals } from "@std/assert";
 import app from "../../toolshed/app.ts";
 import { Identity } from "@commontools/identity";
-import { Runtime, type JSONSchema } from "@commontools/runner";
+import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const waitFor = async (
@@ -58,12 +58,22 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "runner-v2-link-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "runner-v2-link-address",
+      addressSchema,
+      tx,
+    );
     addressCell.set({ city: "San Francisco" });
     await tx.commit();
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "runner-v2-link-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "runner-v2-link-person",
+      personSchema,
+      tx,
+    );
     personCell.set({ name: "Alice" });
     await tx.commit();
     await runtime1.storageManager.synced();
@@ -71,7 +81,11 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     await runtime1.dispose();
 
     const runtime2 = createRuntime(identity, base);
-    const personCell2 = runtime2.getCell(space, "runner-v2-link-person", personSchema);
+    const personCell2 = runtime2.getCell(
+      space,
+      "runner-v2-link-person",
+      personSchema,
+    );
     await personCell2.sync();
     await runtime2.storageManager.synced();
     assertEquals(personCell2.get()?.address, undefined);
@@ -84,7 +98,11 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     });
 
     const runtime3 = createRuntime(identity, base);
-    const personCell3 = runtime3.getCell(space, "runner-v2-link-person", personSchema);
+    const personCell3 = runtime3.getCell(
+      space,
+      "runner-v2-link-person",
+      personSchema,
+    );
     await personCell3.sync();
     tx = runtime3.edit();
     personCell3.withTx(tx).setRawUntyped({
@@ -135,7 +153,12 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "runner-v2-linked-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "runner-v2-linked-address",
+      addressSchema,
+      tx,
+    );
     addressCell.set({ city: "New York" });
     await tx.commit();
     await addressCell.sync();
@@ -143,7 +166,12 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
     const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "runner-v2-linked-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "runner-v2-linked-person",
+      personSchema,
+      tx,
+    );
     personCell.setRawUntyped({
       name: "Bob",
       address: addressLink,
@@ -153,7 +181,11 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
     await runtime1.dispose();
 
     const runtime2 = createRuntime(identity, base);
-    const personCell2 = runtime2.getCell(space, "runner-v2-linked-person", personSchema);
+    const personCell2 = runtime2.getCell(
+      space,
+      "runner-v2-linked-person",
+      personSchema,
+    );
     await personCell2.sync();
     await runtime2.storageManager.synced();
     assertEquals(personCell2.get(), {
@@ -169,7 +201,11 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
     });
 
     const runtime3 = createRuntime(identity, base);
-    const addressCell3 = runtime3.getCell(space, "runner-v2-linked-address", addressSchema);
+    const addressCell3 = runtime3.getCell(
+      space,
+      "runner-v2-linked-address",
+      addressSchema,
+    );
     await addressCell3.sync();
     tx = runtime3.edit();
     addressCell3.withTx(tx).set({ city: "Los Angeles" });
@@ -227,7 +263,12 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const cityCell = runtime1.getCell(space, "runner-v2-deep-city", citySchema, tx);
+    const cityCell = runtime1.getCell(
+      space,
+      "runner-v2-deep-city",
+      citySchema,
+      tx,
+    );
     cityCell.set({ name: "Seattle", population: 750000 });
     await tx.commit();
     await cityCell.sync();
@@ -235,7 +276,12 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     const cityLink = structuredClone(cityCell.getAsLink());
 
     tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "runner-v2-deep-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "runner-v2-deep-address",
+      addressSchema,
+      tx,
+    );
     addressCell.setRawUntyped({
       street: "123 Main St",
       city: cityLink,
@@ -246,7 +292,12 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "runner-v2-deep-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "runner-v2-deep-person",
+      personSchema,
+      tx,
+    );
     personCell.setRawUntyped({
       name: "Charlie",
       address: addressLink,
@@ -256,7 +307,11 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     await runtime1.dispose();
 
     const runtime2 = createRuntime(identity, base);
-    const personCell2 = runtime2.getCell(space, "runner-v2-deep-person", personSchema);
+    const personCell2 = runtime2.getCell(
+      space,
+      "runner-v2-deep-person",
+      personSchema,
+    );
     await personCell2.sync();
     await runtime2.storageManager.synced();
     assertEquals(personCell2.get(), {
@@ -275,7 +330,11 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     });
 
     const runtime3 = createRuntime(identity, base);
-    const cityCell3 = runtime3.getCell(space, "runner-v2-deep-city", citySchema);
+    const cityCell3 = runtime3.getCell(
+      space,
+      "runner-v2-deep-city",
+      citySchema,
+    );
     await cityCell3.sync();
     tx = runtime3.edit();
     cityCell3.withTx(tx).set({ name: "Seattle", population: 800000 });

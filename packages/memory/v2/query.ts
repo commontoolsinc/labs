@@ -13,13 +13,9 @@ import {
 } from "@commontools/runner/traverse";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
-import { isObject, type Immutable } from "@commontools/utils/types";
+import { type Immutable, isObject } from "@commontools/utils/types";
 import type { MemorySpace, StorableDatum, URI } from "../interface.ts";
-import type {
-  EntitySnapshot,
-  GraphQuery,
-  Reference,
-} from "../v2.ts";
+import type { EntitySnapshot, GraphQuery, Reference } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
 type QueryDocKey = `${string}/${string}/${string}`;
@@ -164,11 +160,13 @@ const loadFactsForDoc = (
     return;
   }
 
-  const tx = new ExtendedStorageTransaction(new ManagedStorageTransaction({
-    load(address) {
-      return manager.load(address);
-    },
-  }));
+  const tx = new ExtendedStorageTransaction(
+    new ManagedStorageTransaction({
+      load(address) {
+        return manager.load(address);
+      },
+    }),
+  );
   const document = fact.value as { value: StorableDatum };
   const factValue: IMemorySpaceValueAttestation = {
     address: { ...fact.address, space: space as MemorySpace, path: ["value"] },

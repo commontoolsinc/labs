@@ -356,7 +356,9 @@ export default pattern<Input, Output>(
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
     const refreshing = Writable.of(false).for("airtable auth refreshing");
-    const refreshFailed = Writable.of(false).for("airtable auth refresh failed");
+    const refreshFailed = Writable.of(false).for(
+      "airtable auth refresh failed",
+    );
 
     const scopesDisplay = computed(() => scopes.join(", "));
 

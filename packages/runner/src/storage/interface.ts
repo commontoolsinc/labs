@@ -1,16 +1,16 @@
 import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
-import type { Cancel } from "../cancel.ts";
 import {
-  DEFAULT_MEMORY_VERSION,
   type Assertion,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
+  DEFAULT_MEMORY_VERSION,
   type DID,
   type Fact,
   type Invariant as IClaim,
   type MemorySpace,
+  type MemoryVersion,
   type QueryError as IQueryError,
   type Result,
   type SchemaPathSelector,
@@ -23,7 +23,6 @@ import {
   type Unit,
   type URI,
   type Variant,
-  type MemoryVersion,
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
@@ -34,8 +33,8 @@ export type {
   Fact,
   IClaim,
   MediaType,
-  MemoryVersion,
   MemorySpace,
+  MemoryVersion,
   Result,
   SchemaPathSelector,
   Signer,

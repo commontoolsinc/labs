@@ -1513,8 +1513,7 @@ export class ProviderConnection implements IStorageProvider {
       inspector,
       spaceIdentity,
       memoryVersion = DEFAULT_MEMORY_VERSION,
-    }:
-      ProviderConnectionOptions,
+    }: ProviderConnectionOptions,
   ) {
     this.address = address;
     this.provider = provider;

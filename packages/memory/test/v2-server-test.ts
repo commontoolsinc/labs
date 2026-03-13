@@ -1,8 +1,8 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import {
-  MEMORY_V2_PROTOCOL,
   type GraphUpdateMessage,
+  MEMORY_V2_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
 } from "../v2.ts";
@@ -100,19 +100,22 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
   const query = assertResponse(shiftMessage(messages));
   assertEquals(query.requestId, "query-1");
   assertEquals((query.ok as any)?.serverSeq, 1);
-  assertEquals((query.ok as any)?.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 1,
-    document: {
-      value: {
-        hello: "world",
+  assertEquals(
+    (query.ok as any)?.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 1,
+      document: {
+        value: {
+          hello: "world",
+        },
       },
-    },
-  }]);
+    }],
+  );
 
   await server.close();
 });
@@ -186,22 +189,25 @@ Deno.test("memory v2 server graph queries follow source lineage from source-only
   }));
 
   const query = assertResponse(shiftMessage(messages));
-  assertEquals((query.ok as any)?.entities.map((entity: any) => ({
-    id: entity.id,
-    document: entity.document,
-  })), [{
-    id: "of:piece:1",
-    document: {
-      source: { "/": "process:1" },
-    },
-  }, {
-    id: "of:process:1",
-    document: {
-      value: {
-        "$TYPE": "pattern:1",
+  assertEquals(
+    (query.ok as any)?.entities.map((entity: any) => ({
+      id: entity.id,
+      document: entity.document,
+    })),
+    [{
+      id: "of:piece:1",
+      document: {
+        source: { "/": "process:1" },
       },
-    },
-  }]);
+    }, {
+      id: "of:process:1",
+      document: {
+        value: {
+          "$TYPE": "pattern:1",
+        },
+      },
+    }],
+  );
 
   await server.close();
 });
@@ -279,19 +285,22 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
 
   const update = assertUpdate(shiftMessage(messages));
   assertEquals(update.subscriptionId, (subscribed.ok as any)?.subscriptionId);
-  assertEquals(update.result.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 1,
-    document: {
-      value: {
-        hello: "subscription",
+  assertEquals(
+    update.result.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 1,
+      document: {
+        value: {
+          hello: "subscription",
+        },
       },
-    },
-  }]);
+    }],
+  );
 
   await server.close();
 });
@@ -387,19 +396,22 @@ Deno.test("memory v2 server coalesces subscription refresh after pending commits
   const update = assertUpdate(shiftMessage(messages));
   assertEquals(update.subscriptionId, (subscribed.ok as any)?.subscriptionId);
   assertEquals(update.result.serverSeq, 2);
-  assertEquals(update.result.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 2,
-    document: {
-      value: {
-        count: 2,
+  assertEquals(
+    update.result.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 2,
+      document: {
+        value: {
+          count: 2,
+        },
       },
-    },
-  }]);
+    }],
+  );
   assertEquals(messages.length, 0);
 
   await server.close();
@@ -521,19 +533,22 @@ Deno.test("memory v2 server flushes subscription refresh before returning confli
   const update = assertUpdate(shiftMessage(messages));
   assertEquals(update.subscriptionId, (subscribed.ok as any)?.subscriptionId);
   assertEquals(update.result.serverSeq, 2);
-  assertEquals(update.result.entities.map((entity: any) => ({
-    id: entity.id,
-    seq: entity.seq,
-    document: entity.document,
-  })), [{
-    id: "of:doc:1",
-    seq: 2,
-    document: {
-      value: {
-        version: 3,
+  assertEquals(
+    update.result.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 2,
+      document: {
+        value: {
+          version: 3,
+        },
       },
-    },
-  }]);
+    }],
+  );
 
   const rejected = assertResponse(shiftMessage(messages));
   assertEquals(rejected.requestId, "tx-3");

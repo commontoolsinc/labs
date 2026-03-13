@@ -33,7 +33,9 @@ const memoryV2RootPath = Path.extname(storeUrl.pathname) === ""
   ? Path.join(Path.fromFileUrl(storeUrl), "v2-engine")
   : Path.join(
     Path.dirname(storeUrl.pathname),
-    `${Path.basename(storeUrl.pathname, Path.extname(storeUrl.pathname))}.v2-engine`,
+    `${
+      Path.basename(storeUrl.pathname, Path.extname(storeUrl.pathname))
+    }.v2-engine`,
   );
 const memoryV2StoreUrl = Path.toFileUrl(`${memoryV2RootPath}/`);
 await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));

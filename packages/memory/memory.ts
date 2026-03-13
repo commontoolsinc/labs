@@ -15,6 +15,7 @@ import {
   DEFAULT_MEMORY_VERSION,
   MemorySession,
   MemorySpace as Subject,
+  type MemoryVersion,
   Query,
   QueryResult,
   Result,
@@ -24,7 +25,6 @@ import {
   SystemError,
   Transaction,
   TransactionResult,
-  type MemoryVersion,
 } from "./interface.ts";
 export * from "./interface.ts";
 import { type DID } from "@commontools/identity";

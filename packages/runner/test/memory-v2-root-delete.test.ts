@@ -69,7 +69,12 @@ Deno.test("memory v2 source-backed cells clear to undefined", async () => {
   let tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    const parent = runtime.getCell(space, "memory-v2-root-delete-parent", undefined, tx);
+    const parent = runtime.getCell(
+      space,
+      "memory-v2-root-delete-parent",
+      undefined,
+      tx,
+    );
     const child = runtime.getCell<{ name: string }>(
       space,
       "memory-v2-root-delete-child",

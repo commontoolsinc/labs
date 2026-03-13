@@ -5,18 +5,18 @@ import type { JSONValue } from "../interface.ts";
 import { sha256 } from "../hash-impl.ts";
 import { applyPatch } from "./patch.ts";
 import {
-  DEFAULT_BRANCH,
-  EMPTY_VALUE_REF,
   type Blob,
   type BranchName,
   type ClientCommit,
+  DEFAULT_BRANCH,
+  EMPTY_VALUE_REF,
   type EntityDocument,
   type EntityId,
+  isSourceLink,
   type Operation,
   type PatchOp,
   type Reference,
   type SessionId,
-  isSourceLink,
 } from "../v2.ts";
 
 const PRAGMAS = `
@@ -512,9 +512,10 @@ export const readState = (
   const statement = seq === undefined
     ? engine.database.prepare(SELECT_CURRENT)
     : engine.database.prepare(SELECT_AT_SEQ);
-  const row = (seq === undefined
-    ? statement.get({ branch, id })
-    : statement.get({ branch, id, seq })) as ReadRow | undefined;
+  const row =
+    (seq === undefined
+      ? statement.get({ branch, id })
+      : statement.get({ branch, id, seq })) as ReadRow | undefined;
 
   if (!row) {
     return null;
@@ -659,9 +660,7 @@ const applyCommitTransaction = (
     authorization_ref: authorizationRef,
     original: JSON.stringify(commit),
     resolution: JSON.stringify(
-      resolvedPendingReads.length > 0
-        ? { seq, resolvedPendingReads }
-        : { seq },
+      resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
     ),
   });
 
@@ -834,7 +833,9 @@ const resolvePendingReads = (
       local_seq: read.localSeq,
     }) as { hash: string; seq: number } | undefined;
     if (!row) {
-      throw new ConflictError(`pending dependency not resolved: ${read.localSeq}`);
+      throw new ConflictError(
+        `pending dependency not resolved: ${read.localSeq}`,
+      );
     }
     resolutions.set(read.localSeq, {
       localSeq: read.localSeq,
@@ -846,7 +847,10 @@ const resolvePendingReads = (
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
 };
 
-const selectCommitFacts = (engine: Engine, commitSeq: number): AppliedFact[] => {
+const selectCommitFacts = (
+  engine: Engine,
+  commitSeq: number,
+): AppliedFact[] => {
   const rows = engine.database.prepare(SELECT_COMMIT_FACTS).all({
     commit_seq: commitSeq,
   }) as FactRow[];
@@ -1168,7 +1172,8 @@ const emptyReferenceFor = (id: EntityId): Reference => {
   return toReference({ id });
 };
 
-const headKey = (branch: BranchName, id: EntityId): string => `${branch}\0${id}`;
+const headKey = (branch: BranchName, id: EntityId): string =>
+  `${branch}\0${id}`;
 
 const toReference = (value: unknown): Reference => {
   return refer(value as NonNullable<unknown> | null).toString() as Reference;

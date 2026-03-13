@@ -3,7 +3,7 @@
 import { assertEquals } from "@std/assert";
 import app from "../../toolshed/app.ts";
 import { Identity } from "@commontools/identity";
-import { Runtime, type JSONSchema } from "@commontools/runner";
+import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const waitFor = async (
