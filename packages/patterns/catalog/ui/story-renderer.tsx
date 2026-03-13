@@ -162,8 +162,6 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TableStory({});
         case "alert":
           return AlertStory({});
-        case "code-editor":
-          return CodeEditorStory({});
         case "kbd":
           return KbdStory({});
         case "copy-button":
