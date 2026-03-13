@@ -831,11 +831,12 @@ function rewriteDeriveCallbackBodies(
     );
 
     // Pre-scan the callback body for local variable declarations that produce
-    // OpaqueRef values (e.g., const foo = derive(...)). These become the initial
-    // opaque roots for rewritePatternBody, which needs at least one root to
-    // avoid its early return. We walk the full AST (stopping at nested function
-    // boundaries) so declarations inside if/else/loops are also discovered.
-    const localOpaqueRoots = new Set<string>();
+    // OpaqueRef values (e.g., const foo = derive(...)). We collect only SYMBOLS
+    // (not names) to avoid false rewrites when a block-scoped opaque variable
+    // shares a name with an unrelated outer-scope variable. Names are discovered
+    // by rewritePatternBody's own setBindingOpaqueState as it walks declarations.
+    // We walk the full AST (stopping at nested function boundaries) so
+    // declarations inside if/else/loops are also discovered.
     const localOpaqueRootSymbols = new Set<ts.Symbol>();
     const scanForOpaqueDecls = (node: ts.Node): void => {
       if (ts.isFunctionLike(node)) return; // don't cross function boundaries
@@ -845,12 +846,11 @@ function rewriteDeriveCallbackBodies(
         ts.isIdentifier(node.name) &&
         isOpaqueSourceExpression(
           node.initializer,
-          localOpaqueRoots,
+          new Set(),
           localOpaqueRootSymbols,
           context,
         )
       ) {
-        localOpaqueRoots.add(node.name.text);
         const sym = context.checker.getSymbolAtLocation(node.name);
         if (sym) localOpaqueRootSymbols.add(sym);
       }
@@ -858,10 +858,13 @@ function rewriteDeriveCallbackBodies(
     };
     scanForOpaqueDecls(processedBody);
 
-    // Rewrite property accesses on local OpaqueRef variables
+    // Rewrite property accesses on local OpaqueRef variables.
+    // Pass empty name set — rewritePatternBody will populate activeOpaqueRoots
+    // via setBindingOpaqueState as it encounters declarations, respecting
+    // block scoping. The symbol set bypasses the early return guard.
     processedBody = rewritePatternBody(
       processedBody,
-      localOpaqueRoots,
+      new Set(),
       localOpaqueRootSymbols,
       context,
     );
