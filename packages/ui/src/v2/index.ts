@@ -119,6 +119,7 @@ export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/ct-picker/index.ts";
 export * from "./components/ct-secret-viewer/index.ts";
 export * from "./components/ct-webhook/index.ts";
+export * from "./components/ct-router/index.ts";
 
 // Type exports
 export type * from "./utils/types.ts";
