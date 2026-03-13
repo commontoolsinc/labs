@@ -28,6 +28,7 @@ interface Thread {
     muted: boolean;
     comments: Comment[];
 }
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const jumpToComment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -52,6 +53,7 @@ const jumpToComment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     },
     required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
 } as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+// [TRANSFORM] lift: input and output schemas injected
 const passthroughLabels = lift({
     type: "array",
     items: {
@@ -63,11 +65,14 @@ const passthroughLabels = lift({
         type: "string"
     }
 } as const satisfies __ctHelpers.JSONSchema, (labels: string[]) => labels);
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
+    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedCommentId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __ctHelpers.JSONSchema);
     const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
+    // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
     const visibleThreads = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -205,13 +210,16 @@ export default pattern((state) => {
     } as const satisfies __ctHelpers.JSONSchema, { state: {
             threads: state.key("threads"),
             showFlagged: state.key("showFlagged")
-        } }, ({ state }) => state.threads.map((thread, outerIndex) => ({
+        } }, ({ state }) => 
+    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
+    state.threads.map((thread, outerIndex) => ({
         thread,
         outerIndex,
         visibleComments: state.showFlagged
             ? thread.comments.filter((comment) => comment.flagged)
             : thread.comments,
     })));
+    // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
     const threadRows = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -323,9 +331,13 @@ export default pattern((state) => {
         state: {
             lane: state.key("lane")
         }
-    }, ({ visibleThreads, selectedCommentId, state }) => visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
+    }, ({ visibleThreads, selectedCommentId, state }) => 
+    // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
+    visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
+        // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
         const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
         const liftedSeparators = passthroughLabels(plainSeparators);
+        // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
         const reboundComments = __ctHelpers.derive({
             type: "object",
             properties: {
@@ -395,6 +407,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments);
         return (<article>
           <h2>{thread.title}</h2>
+          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
           {visibleComments.map((comment, innerIndex) => (<div>
               <button type="button" onClick={jumpToComment({
                     selectedCommentId: selectedCommentId,
@@ -406,7 +419,7 @@ export default pattern((state) => {
                 })}>
                 {comment.flagged
                     ? <strong>{comment.text}</strong>
-                    : ifElse({
+                    : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */ ifElse({
                         type: "boolean",
                         asOpaque: true
                     } as const satisfies __ctHelpers.JSONSchema, {
@@ -435,12 +448,15 @@ export default pattern((state) => {
                         }
                     } as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
               </button>
+              {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
               {comment.reactions.map((reaction, reactionIndex) => (<span>
                   {reactionIndex === innerIndex
                         ? `${state.lane}:${reaction}`
                         : reaction}
                 </span>))}
             </div>))}
+          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {reboundComments.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const comment = __ct_pattern_input.key("element");
                 const reboundIndex = __ct_pattern_input.key("index");
@@ -533,6 +549,8 @@ export default pattern((state) => {
                     lane: state.lane
                 }
             })}
+          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
+          {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {liftedSeparators.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const edge = __ct_pattern_input.key("element");
                 const edgeIndex = __ct_pattern_input.key("index");
@@ -599,11 +617,14 @@ export default pattern((state) => {
                     lane: state.lane
                 }
             })}
+          {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
           {plainSeparators.map((edge) => <small>{edge}</small>)}
         </article>);
     }));
     return {
         [UI]: (<div>
+        {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
+        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
         {laneLabels.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const label = __ct_pattern_input.key("element");
                 const labelIndex = __ct_pattern_input.key("index");
@@ -710,6 +731,7 @@ export default pattern((state) => {
                     lane: state.key("lane")
                 }
             })}
+        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
         {threadRows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
                 const rowIndex = __ct_pattern_input.key("index");
