@@ -12,7 +12,8 @@ const config = { bar: "module-level" };
 //   across lexical scopes and incorrectly rewrite unrelated same-named accesses.
 export default pattern(() => {
   const outer = computed(() => {
-    if (true) {
+    const condition = 1 > 0;
+    if (condition) {
       const config = computed(() => ({ bar: 1 }));
       return config.bar;
     }

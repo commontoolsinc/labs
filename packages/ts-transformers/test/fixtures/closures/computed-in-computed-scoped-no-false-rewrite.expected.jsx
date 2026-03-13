@@ -20,7 +20,8 @@ export default pattern(() => {
                 asOpaque: true
             }]
     } as const satisfies __ctHelpers.JSONSchema, {}, () => {
-        if (true) {
+        const condition = 1 > 0;
+        if (condition) {
             const config = __ctHelpers.derive({
                 type: "object",
                 properties: {}
