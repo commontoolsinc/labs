@@ -665,7 +665,49 @@ export function validateShrinkCoverage(
     return;
   }
 
-  // Case 2: concrete type but some paths didn't resolve.
+  // Case 2: concrete type but some accessed properties are typed `unknown`.
+  // This catches interfaces like `{ amounts?: unknown }` where the property
+  // exists but its type is `unknown`, meaning the runtime schema will contain
+  // `{ type: "unknown" }` and the runtime will return opaque undefined.
+  if (baseType) {
+    const nonNullable = checker.getNonNullableType(baseType);
+    const unknownProps: string[] = [];
+    for (const head of requestedHeads) {
+      const prop = nonNullable.getProperty(head) ??
+        (nonNullable.isUnion()
+          ? nonNullable.types.find((t) => t.getProperty(head))?.getProperty(
+            head,
+          )
+          : undefined);
+      if (!prop) continue;
+      const propType = checker.getTypeOfSymbol(prop);
+      // Check the raw property type for `unknown`. Note: we check propType
+      // directly rather than after getNonNullableType because TS maps
+      // getNonNullableType(unknown) to Object, losing the unknown flag.
+      // For optional props (`foo?: unknown`), the type is still `unknown`
+      // since `unknown | undefined` collapses to `unknown`.
+      if ((propType.flags & ts.TypeFlags.Unknown) !== 0) {
+        unknownProps.push(head);
+      }
+    }
+    if (unknownProps.length > 0) {
+      const propList = unknownProps.map((h) => `'.${h}'`).join(", ");
+      context.reportDiagnostic({
+        severity: "error",
+        type: "schema:unknown-type-access",
+        message: `Parameter '${paramSummary.name}' has ` +
+          `${unknownProps.length === 1 ? "property" : "properties"} ` +
+          `${propList} typed as 'unknown'. The generated schema cannot ` +
+          `express what data to fetch for unknown-typed properties. ` +
+          `Replace 'unknown' with a concrete type that describes the ` +
+          `expected shape.`,
+        node: fnNode,
+      });
+      return;
+    }
+  }
+
+  // Case 3: concrete type but some paths didn't resolve.
   const missing = [...requestedHeads].filter(
     (h) => !typeHasProperty(h, shrunk, baseTypeNode, baseType, checker),
   );
