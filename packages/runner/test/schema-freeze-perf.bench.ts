@@ -286,6 +286,34 @@ Deno.bench(
 );
 
 Deno.bench(
+  "traversal: simple object schema (warm/unfrozen schema, cache hit)",
+  { group: "traversal" },
+  (b) => {
+    const store = new Map<string, Revision<State>>();
+    const doc = makeDoc(store, "of:perf-simple-cache", {
+      name: "Carol",
+      age: 28,
+      email: "carol@test.com",
+    });
+    // Same unfrozen schema object reused — exercises the WeakMap cache
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        age: { type: "number" },
+        email: { type: "string" },
+      },
+    };
+    b.start();
+    for (let i = 0; i < 100; i++) {
+      const traverser = getTraverser(store, { path: ["value"], schema });
+      traverser.traverse(doc);
+    }
+    b.end();
+  },
+);
+
+Deno.bench(
   "traversal: simple object schema (warm/frozen schema)",
   { group: "traversal" },
   (b) => {
