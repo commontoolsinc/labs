@@ -738,6 +738,99 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
   }
 });
 
+Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{ id: "entity:source", path: [], seq: 0 }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({
+            profile: { name: "Alice" },
+            settings: { theme: "light" },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 1, actor: "other" },
+      },
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{ id: "entity:source", path: ["settings"], seq: 1 }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{
+            op: "replace",
+            path: "/settings/theme",
+            value: "dark",
+          }],
+        }],
+      },
+    });
+
+    const derived = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{ id: "entity:source", path: ["profile", "name"], seq: 1 }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:target",
+          value: toEntityDocument({ derivedFromName: true }),
+        }],
+      },
+    });
+
+    assertEquals(derived.seq, 3);
+    assertEquals(read(engine, { id: "entity:target" }), {
+      value: { derivedFromName: true },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine resolves pending reads by session localSeq", async () => {
   const { engine, path } = await createEngine();
 
