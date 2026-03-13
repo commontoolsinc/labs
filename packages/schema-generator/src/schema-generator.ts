@@ -713,6 +713,15 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (memberSchemas.some((schema) => schema === true)) {
         return true as SchemaDefinition;
       }
+      // unknown absorbs all other types in a union — collapse to unknown
+      if (
+        memberSchemas.some((schema) =>
+          typeof schema === "object" && schema !== null &&
+          (schema as Record<string, unknown>).type === "unknown"
+        )
+      ) {
+        return { type: "unknown" };
+      }
       if (memberSchemas.length === 1) {
         return memberSchemas[0]!;
       }

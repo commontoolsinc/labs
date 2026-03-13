@@ -122,6 +122,32 @@ type CalculatorRequest = {
       });
       expect(schema.required).toEqual(["0"]);
     });
+
+    it("collapses synthetic union containing unknown to { type: 'unknown' }", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      // Synthetic union: unknown | { foo: string }
+      const unionNode = ts.factory.createUnionTypeNode([
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+        ts.factory.createTypeLiteralNode([
+          ts.factory.createPropertySignature(
+            undefined,
+            ts.factory.createIdentifier("foo"),
+            undefined,
+            ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+          ),
+        ]),
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        unionNode,
+        checker,
+      );
+      expect(schema).toEqual({ type: "unknown" });
+    });
   });
 
   describe("anonymous recursion", () => {
