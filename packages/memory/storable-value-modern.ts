@@ -230,7 +230,7 @@ export function storableFromNativeValueRich(
   if (freeze && isDeepFrozenStorableValue(value)) {
     return value as StorableValue;
   }
-  return toDeepRichStorableValueInternal(
+  return storableFromNativeValueRichInternal(
     value,
     new Map(),
     freeze,
@@ -276,7 +276,7 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
  * Unlike the legacy version, this never returns OMIT -- `undefined` values
  * are preserved.
  */
-function toDeepRichStorableValueInternal(
+function storableFromNativeValueRichInternal(
   original: unknown,
   converted: Map<object, unknown>,
   freeze: boolean,
@@ -371,7 +371,7 @@ function toDeepRichStorableValueInternal(
         // This keeps the hole distinct from `undefined`.
         resultArray.length = i + 1;
       } else {
-        resultArray[i] = toDeepRichStorableValueInternal(
+        resultArray[i] = storableFromNativeValueRichInternal(
           value[i],
           converted,
           freeze,
@@ -387,7 +387,7 @@ function toDeepRichStorableValueInternal(
     const proto = Object.getPrototypeOf(value);
     const obj = Object.create(proto) as Record<string, StorableValue>;
     for (const [key, val] of Object.entries(value)) {
-      obj[key] = toDeepRichStorableValueInternal(
+      obj[key] = storableFromNativeValueRichInternal(
         val,
         converted,
         freeze,
@@ -433,7 +433,7 @@ function convertErrorInternals(
 
   // Recursively convert cause -- it could be a raw Error, Map, etc.
   if (error.cause !== undefined) {
-    result.cause = toDeepRichStorableValueInternal(
+    result.cause = storableFromNativeValueRichInternal(
       error.cause,
       converted,
       freeze,
@@ -446,7 +446,7 @@ function convertErrorInternals(
   for (const key of Object.keys(error)) {
     if (SKIP_KEYS.has(key) || UNSAFE_KEYS.has(key)) continue;
     (result as unknown as Record<string, unknown>)[key] =
-      toDeepRichStorableValueInternal(
+      storableFromNativeValueRichInternal(
         (error as unknown as Record<string, unknown>)[key],
         converted,
         freeze,

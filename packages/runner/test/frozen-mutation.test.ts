@@ -1,13 +1,13 @@
 /**
  * Contract tests for frozen-object safety.
  *
- * When `richStorableValues` is ON, `toDeepRichStorableValue()` deep-freezes all
+ * When `richStorableValues` is ON, `storableFromNativeValueRich()` deep-freezes all
  * stored objects at commit time. Code paths that read these frozen objects from
  * storage must clone before mutating.
  *
  * The writeOrThrow tests use a two-transaction pattern to exercise the real
  * freeze:
- * - tx1: write data and commit (toDeepStorableValue freezes the objects)
+ * - tx1: write data and commit (storableFromNativeValue freezes the objects)
  * - tx2: read the frozen data and exercise the code path under test
  *
  * The remaining tests verify the defensive cloning contracts directly: that
@@ -61,7 +61,7 @@ describe("frozen-object safety contracts", () => {
 
     it("writes through a frozen parent when intermediate path is missing", async () => {
       // tx1: write {value: {existing: "data"}} and commit. The commit
-      // freezes the value object via toDeepRichStorableValue.
+      // freezes the value object via storableFromNativeValueRich.
       const tx1 = runtime.edit();
       tx1.writeOrThrow({
         space,

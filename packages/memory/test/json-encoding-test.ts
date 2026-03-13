@@ -738,7 +738,7 @@ describe("json encoding", () => {
     });
 
     it("round-trips StorableError with pre-converted cause (raw Error)", () => {
-      // Simulates what toDeepStorableValue produces: a StorableError
+      // Simulates what storableFromNativeValue produces: a StorableError
       // wrapping an Error whose cause is itself a StorableError (not a
       // raw Error). The serializer's recurse on [DECONSTRUCT] output
       // must find StorableValue, not raw Error.
