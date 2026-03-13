@@ -38,7 +38,8 @@
 - [x] Fix the last real default-v2 product regression by registering same-space navigated pieces from the shell-side navigate handler, rather than papering over the piece list in the default-app pattern.
 - [x] Complete clean repo-wide `deno task test` and `deno task integration` sweeps with `DEFAULT_MEMORY_VERSION = "v2"`.
 - [x] Materialize v2 snapshots for patch-heavy entities and use them during current and point-in-time reads, so the engine no longer depends on pure replay for long patch chains.
-- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially conflict-precision, blob metadata/transport, and post-cutover optimizations.
+- [x] Tighten confirmed-read validation from whole-entity conflicts to path-aware overlap checks for later patch writes, while keeping conservative `set` and `delete` invalidation.
+- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially blob metadata/transport and post-cutover optimizations.
 
 ## Test Split For Default Flip
 - [x] Keep the old v1-internal tests explicitly on v1 when they depend on structures that do not exist in v2, such as `StorageManagerEmulator.mount()`, `StorageManager.openConnection(...).provider`, or `Provider.replica.heap`.
@@ -76,7 +77,7 @@
 - [x] Add snapshot creation and lookup to the read engine so point-in-time reads do not depend entirely on replay.
 - [x] Implement the core commit path for current v1-parity needs: parent resolution, global `seq` assignment, atomic fact/head/commit writes, and pending-read resolution from `(sessionId, localSeq)`.
 - [x] Reject stale confirmed reads conservatively on the v2 path.
-- [ ] Tighten overlap-path conflict analysis beyond the current conservative confirmed-read checks where existing v1 behavior requires more precision.
+- [x] Tighten overlap-path conflict analysis beyond the current conservative confirmed-read checks where existing v1 behavior requires more precision.
 - [x] Implement the phase-1 logical session model: websocket `hello`, `session.open`, resume by `sessionId`, and client-owned replay/resubscribe after reconnect.
 - [x] Keep the existing `/api/storage/memory` route, but dispatch v2 traffic through the new protocol while keeping one-shot compatibility handlers only for tests and tooling.
 - [x] Add foundational blob storage in the engine for immutable payload persistence.
