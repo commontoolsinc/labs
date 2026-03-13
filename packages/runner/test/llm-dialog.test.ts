@@ -6,7 +6,7 @@ import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
-  loadConversationFixtureFile,
+  loadConversationFixture,
 } from "@commontools/llm/client";
 import type {
   BuiltInLLMMessage,
@@ -17,10 +17,8 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
-import { join } from "@std/path";
 
 const signer = await Identity.fromPassphrase("test operator");
-const FIXTURES_DIR = join(import.meta.dirname!, "fixtures");
 const space = signer.did();
 
 // Enable mock mode once for all tests
@@ -58,9 +56,28 @@ describe("llmDialog", () => {
   });
 
   it("should support a multi-turn conversation via addMessage", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "dialog-multi-turn.json"),
-    );
+    loadConversationFixture({
+      description: "Multi-turn conversation: greeting then follow-up",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Hello"], messageCount: 1 },
+          response: { role: "assistant", content: "Hi there!", id: "r1" },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            messagesContain: ["Hello", "How are you?"],
+            messageCount: 3,
+          },
+          response: {
+            role: "assistant",
+            content: "I'm doing well, thanks!",
+            id: "r2",
+          },
+        },
+      ],
+    });
 
     const resultSchema = {
       type: "object",
@@ -119,9 +136,37 @@ describe("llmDialog", () => {
   });
 
   it("should support tool calls in llmDialog", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "dialog-tool-call.json"),
-    );
+    loadConversationFixture({
+      description: "Tool call: weather lookup with getWeather tool",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            lastMessageContains: "weather in San Francisco",
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "getWeather",
+              input: { location: "San Francisco" },
+            }],
+            id: "r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: "The weather in San Francisco is sunny and 25C.",
+            id: "r2",
+          },
+        },
+      ],
+    });
 
     const resultSchema = {
       type: "object",
@@ -213,9 +258,37 @@ describe("llmDialog", () => {
   });
 
   it("should support pinning cells via pin tool", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "dialog-pin.json"),
-    );
+    loadConversationFixture({
+      description: "Pin tool: pin a cell via tool call",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            lastMessageContains: "pin this cell",
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "pin_call_1",
+              toolName: "pin",
+              input: { path: { "@link": "/of:test123" }, name: "Test Cell" },
+            }],
+            id: "r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: "Cell has been pinned successfully.",
+            id: "r2",
+          },
+        },
+      ],
+    });
 
     const resultSchema = {
       type: "object",
@@ -279,9 +352,63 @@ describe("llmDialog", () => {
   });
 
   it("should support unpinning cells via unpin tool", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "dialog-unpin.json"),
-    );
+    loadConversationFixture({
+      description: "Unpin tool: pin then unpin a cell",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            lastMessageContains: "pin this cell",
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "pin_call_unpin_test",
+              toolName: "pin",
+              input: { path: { "@link": "/of:test123" }, name: "Test Cell" },
+            }],
+            id: "r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: "Cell has been pinned.",
+            id: "r2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: {
+            lastMessageContains: "unpin that cell",
+            messageCount: 5,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "unpin_call_1",
+              toolName: "unpin",
+              input: { path: { "@link": "/of:test123" } },
+            }],
+            id: "r3",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 7 },
+          response: {
+            role: "assistant",
+            content: "Cell has been unpinned.",
+            id: "r4",
+          },
+        },
+      ],
+    });
 
     const resultSchema = {
       type: "object",
