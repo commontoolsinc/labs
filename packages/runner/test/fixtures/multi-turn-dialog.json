@@ -1,0 +1,48 @@
+{
+  "description": "Multi-turn conversation: greeting, follow-up, then tool call with weather lookup",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": "Hi there! How can I help you today?",
+        "id": "turn-1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello", "weather in San Francisco"],
+        "messageCount": 3,
+        "hasTools": ["getWeather"]
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_weather_1",
+            "toolName": "getWeather",
+            "input": { "location": "San Francisco" }
+          }
+        ],
+        "id": "turn-2-tool-call"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 5
+      },
+      "response": {
+        "role": "assistant",
+        "content": "The weather in San Francisco is sunny and 72°F. Anything else?",
+        "id": "turn-2-final"
+      }
+    }
+  ]
+}

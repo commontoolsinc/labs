@@ -4,9 +4,11 @@ import {
   addMockObjectResponse,
   addMockResponse,
   clearMockResponses,
+  type ConversationFixture,
   disableMockMode,
   enableMockMode,
   LLMClient,
+  loadConversationFixture,
   resetMockMode,
 } from "./client.ts";
 
@@ -126,6 +128,170 @@ describe("LLMClient test-environment guard", () => {
         stream: false,
       }),
     ).rejects.toThrow("no matching mock response found");
+
+    resetMockMode();
+  });
+
+  it("conversation fixture queues sequential responses", async () => {
+    resetMockMode();
+
+    const fixture: ConversationFixture = {
+      description: "test fixture",
+      responses: [
+        {
+          type: "sendRequest",
+          response: { role: "assistant", content: "first", id: "fix-1" },
+        },
+        {
+          type: "sendRequest",
+          response: { role: "assistant", content: "second", id: "fix-2" },
+        },
+        {
+          type: "generateObject",
+          response: { object: { name: "Alice" }, id: "fix-3" },
+        },
+      ],
+    };
+
+    loadConversationFixture(fixture);
+
+    const r1 = await client.sendRequest({
+      messages: [{ role: "user", content: "one" }],
+      model: "test",
+      stream: false,
+    });
+    expect(r1.content).toBe("first");
+
+    const r2 = await client.sendRequest({
+      messages: [{ role: "user", content: "two" }],
+      model: "test",
+      stream: false,
+    });
+    expect(r2.content).toBe("second");
+
+    const r3 = await client.generateObject({
+      messages: [{ role: "user", content: "three" }],
+      schema: { type: "object", properties: { name: { type: "string" } } },
+    });
+    expect(r3.object).toEqual({ name: "Alice" });
+
+    resetMockMode();
+  });
+
+  it("conversation fixture assertions pass on correct request", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            messageCount: 1,
+            messagesContain: ["hello"],
+            lastMessageContains: "hello",
+          },
+          response: { role: "assistant", content: "ok", id: "assert-1" },
+        },
+      ],
+    });
+
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hello world" }],
+      model: "test",
+      stream: false,
+    });
+    expect(result.content).toBe("ok");
+
+    resetMockMode();
+  });
+
+  it("conversation fixture assertions throw on mismatch with description", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      description: "my test conversation",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            messagesContain: ["expected-keyword"],
+          },
+          response: { role: "assistant", content: "ok", id: "assert-2" },
+        },
+      ],
+    });
+
+    await expect(
+      client.sendRequest({
+        messages: [{ role: "user", content: "something else" }],
+        model: "test",
+        stream: false,
+      }),
+    ).rejects.toThrow(
+      'Fixture "my test conversation" entry 0: expected some message to contain "expected-keyword"',
+    );
+
+    resetMockMode();
+  });
+
+  it("conversation fixture hasTools assertion works", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["search", "calculate"],
+          },
+          response: { role: "assistant", content: "ok", id: "tools-1" },
+        },
+      ],
+    });
+
+    // Should pass with matching tools
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hi" }],
+      model: "test",
+      stream: false,
+      tools: {
+        search: {
+          description: "Search",
+          inputSchema: { type: "object" },
+        },
+        calculate: {
+          description: "Calculate",
+          inputSchema: { type: "object" },
+        },
+      },
+    });
+    expect(result.content).toBe("ok");
+
+    resetMockMode();
+  });
+
+  it("conversation fixture systemContains assertion works", async () => {
+    resetMockMode();
+
+    loadConversationFixture({
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            systemContains: "helpful assistant",
+          },
+          response: { role: "assistant", content: "ok", id: "sys-1" },
+        },
+      ],
+    });
+
+    const result = await client.sendRequest({
+      messages: [{ role: "user", content: "hi" }],
+      model: "test",
+      system: "You are a helpful assistant.",
+      stream: false,
+    });
+    expect(result.content).toBe("ok");
 
     resetMockMode();
   });
