@@ -196,6 +196,21 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
+  async registerNavigatedPiece(cell: CellHandle<unknown>): Promise<void> {
+    this.#check();
+    if (cell.space() !== this.#space) return;
+    try {
+      const spaceRoot = await this.getSpaceRootPattern();
+      const addPiece = spaceRoot.cell().key("addPiece" as any);
+      await (addPiece as any).send({ piece: cell });
+    } catch (e) {
+      console.error(
+        "[RuntimeInternals] Failed to register navigated piece:",
+        e,
+      );
+    }
+  }
+
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {
@@ -211,6 +226,7 @@ export class RuntimeInternals extends EventTarget {
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
     if (cell.space() === this.#space && this.#spaceName) {
+      void this.registerNavigatedPiece(cell);
       navigate({
         spaceName: this.#spaceName,
         pieceId,
