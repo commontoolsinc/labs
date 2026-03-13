@@ -101,3 +101,8 @@ const omnibot = Chatbot({
 ```
 
 This pattern is useful when a sub-pattern needs to accept additional configuration (e.g. extra chatbot tools, extra fields) from its caller while also defining its own base set internally.
+
+## See Also
+
+- [View Switching](./view-switching.md) — dynamically switching between sub-patterns
+- [Navigation](./navigation.md) — `navigateTo()` for drill-down to detail views
