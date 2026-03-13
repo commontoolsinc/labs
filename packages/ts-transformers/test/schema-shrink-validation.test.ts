@@ -259,6 +259,142 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when interface property is typed unknown in handler",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: unknown;",
+        "  note?: unknown;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown-typed property in interface",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when interface property is typed unknown in pattern",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "interface State {",
+        "  data?: unknown;",
+        "}",
+        "",
+        "export default pattern((state: State) => {",
+        "  const x = state.data;",
+        "  return { x };",
+        "});",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown-typed property in pattern",
+      );
+    },
+  );
+
+  await t.step(
+    "no error when interface property is typed any (not unknown)",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: any;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for 'any'-typed property but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when interface property is typed with concrete type",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "interface BatchEvent {",
+        "  amounts?: number[];",
+        "  note?: string;",
+        "}",
+        "",
+        "export const h = handler(",
+        "  (event: BatchEvent) => {",
+        "    const x = event.amounts;",
+        "    return {};",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for concrete-typed properties but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler parameter type is a type alias",
     async () => {
       const source = [
