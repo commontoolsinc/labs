@@ -35,6 +35,8 @@
 - [x] Align the v2 runner/toolshed test suites with the cleaned-up storage interfaces on current `main`, including test-local provider helpers and `setRawUntyped()` for storage-layer link writes.
 - [x] Reproduce the remaining CLI notebook case with the same `ct test --timeout 180000 --root packages/patterns` harness used by repo integration and confirm it passes in isolation, so it is not currently a proven Memory v2 blocker.
 - [x] Run an initial v1/v2 benchmark survey across the runner benches and record the current outlier clusters before deliberate tuning. The main regressions currently cluster in no-op/equal-value commits, repeated small `Cell.set()` updates, and subscription-heavy scheduler fan-out.
+- [x] Fix the last real default-v2 product regression by registering same-space navigated pieces from the shell-side navigate handler, rather than papering over the piece list in the default-app pattern.
+- [x] Complete clean repo-wide `deno task test` and `deno task integration` sweeps with `DEFAULT_MEMORY_VERSION = "v2"`.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
 
 ## Test Split For Default Flip
@@ -63,7 +65,7 @@
 - [x] Keep `IStorageManager`, `IStorageProvider`, `IExtendedStorageTransaction`, `StorageValue`, `syncCell()`, and `subscribe()` stable at the runtime boundary for phase 1.
 - [x] Introduce `IStorageNotification` / `StorageNotificationRelay` as the canonical internal names for scheduler notifications, while keeping temporary aliases for `IStorageSubscription` / `StorageSubscription`.
 - [x] Keep compatibility-only fields such as classification and labels accepted at the cutover boundary, but ignore them on the v2 path and stop creating label side-writes in v2.
-- [ ] Add explicit v1 guard assertions at the remaining v1 provider, transaction, consumer, and server entry points so a runtime configured for v2 fails immediately if it ever reaches a v1-only path.
+- [x] Add explicit v1 guard assertions at the remaining v1 provider, transaction, consumer, and server entry points so a runtime configured for v2 fails immediately if it ever reaches a v1-only path.
 
 ## Phase 1: Core V2 Stack Required Before Cutover
 - [x] Define the shared v2 types and codecs around `EntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`.
@@ -93,13 +95,13 @@
 - [x] Keep cutover independent of direct patch emission from `Cell.set()`. True patch generation remains a post-cutover phase.
 
 ## Cutover Exit Criteria
-- [ ] A runtime instantiated with `memoryVersion: "v2"` can run existing runner, pattern, and CLI flows without reaching any v1 code path.
+- [x] A runtime instantiated with `memoryVersion: "v2"` can run existing runner, pattern, and CLI flows without reaching any v1 code path.
 - [x] The remaining runner integration suites that matter for v1 behavior pass against a real toolshed server with v2 enabled, while the intentionally v1-internal suites stay pinned to explicit v1.
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
 - [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
 - [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
-- [ ] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now passes in isolation under the same harness, so any remaining hang signal must be reproduced at the aggregate runner level.
+- [x] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now also passes in the aggregate runner.
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
