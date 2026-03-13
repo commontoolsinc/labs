@@ -30,8 +30,8 @@ import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
+  cloneIfNecessary,
   isArrayIndexPropertyName,
-  shallowStorableFromNativeValue,
 } from "@commontools/memory/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
@@ -143,10 +143,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // When richStorableValues is ON, stored objects are deep-frozen by
         // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
         // TypeError on frozen objects.
-        valueObj = shallowStorableFromNativeValue(
-          currentValue,
-          false,
-        ) as StorableObject;
+        valueObj = cloneIfNecessary(currentValue as StorableValue, {
+          deep: false,
+          frozen: false,
+        }) as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
