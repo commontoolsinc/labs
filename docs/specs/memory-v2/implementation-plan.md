@@ -41,6 +41,7 @@
 - [x] Materialize v2 snapshots for patch-heavy entities and use them during current and point-in-time reads, so the engine no longer depends on pure replay for long patch chains.
 - [x] Tighten confirmed-read validation from whole-entity conflicts to path-aware overlap checks for later patch writes, while keeping conservative `set` and `delete` invalidation.
 - [x] Add minimal v2 blob upload/download routes and pin the phase-1 split between immutable blob payloads and ordinary `urn:blob-meta:<hash>` entity metadata.
+- [x] Preserve rich-storable immutability on the v2 transaction path by isolating caller-owned writes and freezing raw transaction reads at the boundary, while keeping the internal working copy mutable.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially post-cutover optimizations and advanced features beyond v1 parity.
 
 ## Test Split For Default Flip

@@ -53,6 +53,7 @@ test followed by the code that makes it pass.
 18. [Anti-Patterns](#18-anti-patterns)
 19. [Minimal Transaction Compatibility Surface](#19-minimal-transaction-compatibility-surface)
 20. [Raw vs Extended Addressing](#20-raw-vs-extended-addressing)
+21. [Rich-Storable Reads Freeze at the Boundary](#21-rich-storable-reads-freeze-at-the-boundary)
 Appendix A. [Required Spec Changes](#appendix-a-required-spec-changes)
 
 ---
@@ -109,15 +110,17 @@ interfaces used outside storage code stable and adapt underneath them.
 
 ## 3. V1/V2 Coexistence
 
-Both v1 and v2 code paths must exist in parallel during the transition. A global
-flag controls which is active.
+Both v1 and v2 code paths must exist in parallel during the transition. A
+shared code-level default controls which is active, and specific runtimes or
+tests may still opt into the non-default path when they are intentionally
+exercising it.
 
 ### Global Flag
 
 ```typescript
-// Module-level constant — set directly in code, not via env var.
+// Shared constant — set directly in code, not via env var.
 // Browsers don't see environment variables, so this must be a code-level switch.
-const MEMORY_VERSION: "v1" | "v2" = "v1"; // Flip to "v2" when ready
+export const DEFAULT_MEMORY_VERSION: "v1" | "v2" = "v2";
 ```
 
 **Important:** Do not use environment variables for this flag. The runtime
@@ -125,21 +128,30 @@ executes in browsers (Vite-built, eval'd patterns, iframes) where env vars are
 not available. The flag must be a code-level constant that is changed by editing
 the source.
 
+The current branch state assumes `DEFAULT_MEMORY_VERSION === "v2"`. Explicit
+`"v1"` selection should remain only for:
+
+- tests that intentionally exercise v1-only internals
+- side-by-side v1/v2 comparison coverage
+- temporary debugging when proving a regression is version-specific
+
 ### StorageManager
 
-`StorageManager` reads the global flag and creates the appropriate provider:
+`Runtime` resolves `options.memoryVersion ?? DEFAULT_MEMORY_VERSION` and threads
+that resolved value into `StorageManager`, which then creates the appropriate
+provider/transaction path:
 
 ```typescript
 class StorageManager {
   open(space: MemorySpace): IStorageProviderWithReplica {
-    if (MEMORY_VERSION === "v2") {
+    if (this.memoryVersion === "v2") {
       return V2Provider.connect({ ... });
     }
     return V1Provider.connect({ ... });
   }
 
   edit(): IStorageTransaction {
-    if (MEMORY_VERSION === "v2") {
+    if (this.memoryVersion === "v2") {
       return V2Transaction.create(this);
     }
     return Transaction.create(this);
@@ -157,19 +169,25 @@ until the redesigned metadata model lands.
 
 ### Test Selection
 
-Only `StorageManager.emulate()` accepts a version parameter, and only for tests
-that need to compare implementations:
+Tests may explicitly pin the non-default version, but only when that choice is
+semantically important:
 
 ```typescript
-static emulate(options: {
-  as: Signer;
-  version?: "v1" | "v2";  // defaults to global flag
-}): StorageManager
+new Runtime({
+  memoryVersion: "v1",
+  ...
+});
+
+StorageManager.emulate({
+  as: signer,
+  memoryVersion: "v1",
+});
 ```
 
-Individual tests should NOT select a version. The code-level `MEMORY_VERSION`
-constant controls which version runs. The exception is the parallel comparison
-test (see [section 14](#14-randomized-v1v2-parallel-test)).
+Most tests should continue to inherit the shared default so that a default flip
+surfaces the real failure set. Explicit pinning is appropriate for tests that
+probe v1-only internals such as replica heap shape or v1-specific harness
+helpers.
 
 ### Server Endpoint
 
@@ -184,7 +202,7 @@ Add a runtime guard to v1 code paths that fires when the v2 flag is active:
 
 ```typescript
 function assertV1Active(context: string): void {
-  if (MEMORY_VERSION === "v2") {
+  if (this.memoryVersion === "v2") {
     throw new Error(
       `v1 code path reached with v2 flag active: ${context}. ` +
         `This indicates v2 wiring is incomplete.`,
@@ -1233,6 +1251,47 @@ When writing v2-native tests, decide explicitly which layer is under test:
 - Use raw transactions to test native storage-core behavior.
 - Use `IExtendedStorageTransaction` to test the compatibility contract that
   runner code already depends on.
+
+---
+
+## 21. Rich-Storable Reads Freeze at the Boundary
+
+When `richStorableValues` is enabled, the v2 transaction core should preserve
+the same caller-visible immutability contract that existing runner code already
+observes on the v1 path.
+
+The rule is:
+
+- keep the **internal working copy mutable**
+- isolate caller-owned values on write before they enter transaction state
+- freeze values only at the **read boundary** exposed to callers
+
+That means a v2 transaction should not deep-freeze its live working copy while a
+transaction is still open. Instead it should expose a cached frozen snapshot for
+raw reads such as `tx.readValueOrThrow(...)`, `reader.read(...)`, and any other
+read API that returns stored values under rich mode.
+
+Why this matters:
+
+1. It preserves the v1-visible invariant that rich-storable reads are immutable.
+2. It prevents callers from mutating transaction-local state by changing the
+   object returned from a read.
+3. It avoids freezing the internal working set that subsequent writes still need
+   to update efficiently.
+4. It keeps query-result proxy behavior stable, because proxy targets still see
+   the same frozen-object semantics that the rest of the runner expects.
+
+Implementation guidance:
+
+- Clone plain arrays / plain records on write before placing them into the
+  working copy so later caller mutation cannot backdoor- mutate transaction
+  state.
+- Keep one cached frozen snapshot per document entry and invalidate it on the
+  next write to that document.
+- Freeze the stored payload value, not the mutable bookkeeping that wraps the
+  document entry.
+- Treat this as a read-contract guarantee, not as a requirement that the v2
+  transaction core itself be immutable internally.
 
 ---
 

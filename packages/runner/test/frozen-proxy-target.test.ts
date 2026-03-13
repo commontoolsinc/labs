@@ -1,16 +1,15 @@
 /**
  * Tests for the frozen proxy target fix in `query-result-proxy.ts`.
  *
- * When `modernDataModel` is enabled, stored objects are deep-frozen at
+ * When `richStorableValues` is enabled, stored objects are deep-frozen at
  * commit time. After commit, reads in a new transaction return direct
  * references to these frozen objects. The proxy creation function must still
  * wrap them (using an unfrozen stub as the proxy target) so that link
  * resolution and all proxy traps work correctly.
  *
- * These tests simulate the frozen state by deep-freezing values before writing
- * them to the transaction. This is equivalent to what happens after a commit
- * with modernDataModel enabled, without requiring multi-transaction setups
- * that trigger background sync operations.
+ * These tests now go through a real commit/reopen cycle. The v2 transaction
+ * core isolates caller-owned values on write, so pre-freezing inputs is no
+ * longer a faithful simulation of post-commit frozen storage state.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -20,19 +19,15 @@ import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 
 const signer = await Identity.fromPassphrase("test frozen proxy");
 const space = signer.did();
 
 /**
- * Helper: write a deep-frozen value into a cell via the transaction, then
- * return a NormalizedFullLink for reading it back through the proxy.
- *
- * This simulates the state of data after a commit with modernDataModel
- * enabled: the value in the transaction's working copy is deep-frozen.
+ * Helper: write a value into a cell via the normal `Cell.set()` path, then return a
+ * NormalizedFullLink for reading it back through the proxy after commit.
  */
-function writeFrozenCell(
+function writeCell(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   cellName: string,
@@ -40,24 +35,38 @@ function writeFrozenCell(
 ): NormalizedFullLink {
   const cell = runtime.getCell(space, cellName, undefined, tx);
   const link = cell.getAsNormalizedFullLink();
-  // Write the value deep-frozen, simulating post-commit heap state.
-  tx.writeValueOrThrow(link, deepFreeze(value) as any);
+  cell.set(value as any);
   return link;
 }
 
-describe("frozen proxy target: link resolution through frozen objects", () => {
+async function commitAndReopen(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+): Promise<IExtendedStorageTransaction> {
+  const result = await tx.commit();
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+  return runtime.edit();
+}
+
+describe("frozen proxy target: v1 link resolution through frozen objects", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
       experimental: {
-        modernDataModel: true,
-        modernHash: true,
+        richStorableValues: true,
+        canonicalHashing: true,
       },
     });
     tx = runtime.edit();
@@ -69,7 +78,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     await storageManager?.close();
   });
 
-  it("resolves sigil links inside a frozen stored object (regression)", () => {
+  it("resolves sigil links inside a frozen stored object (regression)", async () => {
     // Set up a target cell with a value to be linked to.
     const targetCell = runtime.getCell<{ answer: number }>(
       space,
@@ -80,8 +89,8 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     targetCell.set({ answer: 42 });
 
     // Set up a cell whose value contains a sigil link to the target.
-    // Write it deep-frozen to simulate post-commit state with modernDataModel.
-    const sourceLink = writeFrozenCell(
+    // Write it deep-frozen to simulate post-commit state with richStorableValues.
+    const sourceLink = writeCell(
       runtime,
       tx,
       "frozen-link-source",
@@ -89,6 +98,8 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
         ref: targetCell.key("answer").getAsWriteRedirectLink(),
       },
     );
+
+    tx = await commitAndReopen(runtime, tx);
 
     // Verify the stored value is indeed frozen (precondition).
     const rawValue = tx.readValueOrThrow(sourceLink);
@@ -112,19 +123,23 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
   });
 });
 
-describe("frozen proxy target: proxy wrapping and trap behavior", () => {
+describe("frozen proxy target: v1 proxy wrapping and trap behavior", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      memoryVersion: "v1",
       experimental: {
-        modernDataModel: true,
-        modernHash: true,
+        richStorableValues: true,
+        canonicalHashing: true,
       },
     });
     tx = runtime.edit();
@@ -136,11 +151,13 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     await storageManager?.close();
   });
 
-  it("wraps a deep-frozen stored object in a proxy (not returned raw)", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-wrap-check", {
+  it("wraps a deep-frozen stored object in a proxy (not returned raw)", async () => {
+    const link = writeCell(runtime, tx, "frozen-wrap-check", {
       a: 1,
       b: "hello",
     });
+
+    tx = await commitAndReopen(runtime, tx);
 
     const rawValue = tx.readValueOrThrow(link);
     expect(Object.isFrozen(rawValue)).toBe(true);
@@ -160,7 +177,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(String(proxy.b)).toBe("hello");
   });
 
-  it("resolves nested links multiple levels deep in a frozen tree", () => {
+  it("resolves nested links multiple levels deep in a frozen tree", async () => {
     // Create a target cell.
     const innerCell = runtime.getCell<{ deep: string }>(
       space,
@@ -171,7 +188,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     innerCell.set({ deep: "found it" });
 
     // Create a cell with nested structure containing a link.
-    const outerLink = writeFrozenCell(
+    const outerLink = writeCell(
       runtime,
       tx,
       "frozen-nested-source",
@@ -184,6 +201,8 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       },
     );
 
+    tx = await commitAndReopen(runtime, tx);
+
     const proxy = createQueryResultProxy<any>(
       runtime,
       tx,
@@ -195,7 +214,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(String(proxy.level1.level2.link)).toBe("found it");
   });
 
-  it("iterates frozen arrays via Symbol.iterator with link resolution", () => {
+  it("iterates frozen arrays via Symbol.iterator with link resolution", async () => {
     // Create target cells for each array element to link to.
     const cell1 = runtime.getCell<number>(
       space,
@@ -213,7 +232,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     cell2.set(20 as any);
 
     // Write frozen array of links.
-    const arrLink = writeFrozenCell(
+    const arrLink = writeCell(
       runtime,
       tx,
       "frozen-array-iter",
@@ -222,6 +241,8 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
         cell2.getAsWriteRedirectLink(),
       ],
     );
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy = createQueryResultProxy<number[]>(
       runtime,
@@ -239,13 +260,15 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(values).toEqual([10, 20]);
   });
 
-  it("Array.isArray returns true for proxied frozen arrays", () => {
-    const link = writeFrozenCell(
+  it("Array.isArray returns true for proxied frozen arrays", async () => {
+    const link = writeCell(
       runtime,
       tx,
       "frozen-array-isarray",
       [1, 2, 3],
     );
+
+    tx = await commitAndReopen(runtime, tx);
 
     const rawValue = tx.readValueOrThrow(link);
     expect(Object.isFrozen(rawValue)).toBe(true);
@@ -262,10 +285,12 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(Array.isArray(proxy)).toBe(true);
   });
 
-  it("returns the same proxy instance for the same frozen value (cache hit)", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-cache-check", {
+  it("returns the same proxy instance for the same frozen value (cache hit)", async () => {
+    const link = writeCell(runtime, tx, "frozen-cache-check", {
       x: 99,
     });
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy1 = createQueryResultProxy<{ x: number }>(
       runtime,
@@ -286,11 +311,13 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(proxy1).toBe(proxy2);
   });
 
-  it("Object.keys returns correct keys for a proxied frozen object", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-ownkeys", {
+  it("Object.keys returns correct keys for a proxied frozen object", async () => {
+    const link = writeCell(runtime, tx, "frozen-ownkeys", {
       name: "Alice",
       age: 30,
     });
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy = createQueryResultProxy<{ name: string; age: number }>(
       runtime,
@@ -306,10 +333,12 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(keys.length).toBe(2);
   });
 
-  it("'in' operator works correctly for proxied frozen objects", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-has-trap", {
+  it("'in' operator works correctly for proxied frozen objects", async () => {
+    const link = writeCell(runtime, tx, "frozen-has-trap", {
       present: true,
     });
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy = createQueryResultProxy<{ present: boolean }>(
       runtime,
@@ -323,11 +352,13 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect("missing" in proxy).toBe(false);
   });
 
-  it("spread operator works on proxied frozen objects", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-spread", {
+  it("spread operator works on proxied frozen objects", async () => {
+    const link = writeCell(runtime, tx, "frozen-spread", {
       a: 1,
       b: 2,
     });
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy = createQueryResultProxy<{ a: number; b: number }>(
       runtime,
@@ -344,12 +375,14 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(Number(spread.b)).toBe(2);
   });
 
-  it("frozen array spread yields proxied elements", () => {
-    const link = writeFrozenCell(runtime, tx, "frozen-array-spread", [
+  it("frozen array spread yields proxied elements", async () => {
+    const link = writeCell(runtime, tx, "frozen-array-spread", [
       10,
       20,
       30,
     ]);
+
+    tx = await commitAndReopen(runtime, tx);
 
     const proxy = createQueryResultProxy<number[]>(
       runtime,
@@ -366,7 +399,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(Number(spread[2])).toBe(30);
   });
 
-  it("mixed frozen/unfrozen siblings both resolve correctly", () => {
+  it("mixed frozen/unfrozen siblings both resolve correctly", async () => {
     // Create a target cell for links.
     const targetCell = runtime.getCell<string>(
       space,
@@ -377,7 +410,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     targetCell.set("resolved" as any);
 
     // Write a frozen object with a link in the "kept" branch.
-    writeFrozenCell(
+    writeCell(
       runtime,
       tx,
       "mixed-freeze-state",
@@ -386,6 +419,8 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
         changed: { link: targetCell.getAsWriteRedirectLink() },
       },
     );
+
+    tx = await commitAndReopen(runtime, tx);
 
     // Now overwrite the "changed" branch with an unfrozen direct value.
     // This simulates structural sharing after a write: "kept" stays frozen,
@@ -417,18 +452,24 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
   });
 });
 
-describe("frozen proxy target: legacy behavior with modernDataModel OFF", () => {
+describe("frozen proxy target: v2 committed reads with richStorableValues ON", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    // Explicitly set modernDataModel OFF for legacy behavior test.
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { modernDataModel: false },
+      memoryVersion: "v2",
+      experimental: {
+        richStorableValues: true,
+        canonicalHashing: true,
+      },
     });
     tx = runtime.edit();
   });
@@ -439,14 +480,90 @@ describe("frozen proxy target: legacy behavior with modernDataModel OFF", () => 
     await storageManager?.close();
   });
 
-  it("returns frozen objects raw when modernDataModel is OFF", () => {
-    const link = writeFrozenCell(runtime, tx, "legacy-frozen-raw", {
+  it("resolves sigil links and freezes raw tx reads in rich mode", async () => {
+    const targetCell = runtime.getCell<{ answer: number }>(
+      space,
+      "v2-rich-link-target",
+      undefined,
+      tx,
+    );
+    targetCell.set({ answer: 42 });
+
+    const sourceLink = writeCell(runtime, tx, "v2-rich-link-source", {
+      ref: targetCell.key("answer").getAsWriteRedirectLink(),
+    });
+
+    tx = await commitAndReopen(runtime, tx);
+
+    const rawValue = tx.readValueOrThrow(sourceLink);
+    expect(Object.isFrozen(rawValue)).toBe(true);
+
+    const proxy = createQueryResultProxy<{ ref: number }>(
+      runtime,
+      tx,
+      sourceLink,
+      0,
+      false,
+    );
+
+    expect(proxy.ref).toBe(42);
+  });
+
+  it("keeps array semantics for committed frozen query result proxies", async () => {
+    const link = writeCell(runtime, tx, "v2-rich-array-source", [1, 2, 3]);
+
+    tx = await commitAndReopen(runtime, tx);
+
+    const rawValue = tx.readValueOrThrow(link);
+    expect(Object.isFrozen(rawValue)).toBe(true);
+
+    const proxy = createQueryResultProxy<number[]>(
+      runtime,
+      tx,
+      link,
+      0,
+      false,
+    );
+
+    expect(Array.isArray(proxy)).toBe(true);
+    expect([...proxy]).toEqual([1, 2, 3]);
+  });
+});
+
+describe("frozen proxy target: committed reads with richStorableValues OFF", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    // No experimental flags -- richStorableValues defaults to false.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("returns unfrozen committed objects when richStorableValues is OFF", async () => {
+    const link = writeCell(runtime, tx, "legacy-frozen-raw", {
       a: 1,
       b: 2,
     });
 
+    tx = await commitAndReopen(runtime, tx);
     const rawValue = tx.readValueOrThrow(link);
-    expect(Object.isFrozen(rawValue)).toBe(true);
+    expect(Object.isFrozen(rawValue)).toBe(false);
 
     const result = createQueryResultProxy<{ a: number; b: number }>(
       runtime,
@@ -456,8 +573,7 @@ describe("frozen proxy target: legacy behavior with modernDataModel OFF", () => 
       false,
     );
 
-    // With modernDataModel OFF, frozen objects should be returned as-is
-    // (the original "frozen = terminal" behavior).
-    expect(result).toBe(rawValue);
+    expect(Number(result.a)).toBe(1);
+    expect(Number(result.b)).toBe(2);
   });
 });
