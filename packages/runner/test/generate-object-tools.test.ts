@@ -16,6 +16,7 @@ import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
+  loadConversationFixtureFile,
 } from "@commontools/llm/client";
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commontools/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
@@ -23,8 +24,10 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { join } from "@std/path";
 
 const signer = await Identity.fromPassphrase("test operator");
+const FIXTURES_DIR = join(import.meta.dirname!, "fixtures");
 const space = signer.did();
 
 // Enable mock mode once for all tests
@@ -523,6 +526,10 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle multiple tool calls with handler-based tools before presentResult", async () => {
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "gen-obj-handler-tools.json"),
+    );
+
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -532,100 +539,17 @@ describe("generateObject with tools", () => {
       required: ["summary", "count"],
     };
 
-    const testPrompt = "test-multi-tool-handler-based";
-
-    // Track tool calls
     const toolCallLog: string[] = [];
 
-    // Mock the multi-step interaction
-    // Step 1: Call getData
-    addMockResponse(
-      (req) =>
-        req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(testPrompt)
-        ) &&
-        req.tools?.["getData"] !== undefined &&
-        req.tools?.["countItems"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined,
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_getData_1",
-            toolName: "getData",
-            input: {},
-          },
-        ],
-        id: "mock-multi-tool-step1",
-      },
-    );
-
-    // Step 2: After getData result, call countItems
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_getData_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_countItems_1",
-            toolName: "countItems",
-            input: {},
-          },
-        ],
-        id: "mock-multi-tool-step2",
-      },
-    );
-
-    // Step 3: After countItems result, call presentResult
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_countItems_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_presentResult_1",
-            toolName: "presentResult",
-            input: {
-              summary: "Found 3 items",
-              count: 3,
-            },
-          },
-        ],
-        id: "mock-multi-tool-step3",
-      },
-    );
-
-    // Create handler-based tools similar to listRecent in chatbot.tsx
     const getDataHandler = handler(
       {
         type: "object",
-        properties: {
-          result: { type: "object", asCell: true },
-        },
+        properties: { result: { type: "object", asCell: true } },
         required: ["result"],
       },
       {
         type: "object",
-        properties: {
-          dataSource: { type: "object", asCell: true },
-        },
+        properties: { dataSource: { type: "object", asCell: true } },
         required: ["dataSource"],
       },
       (args: { result: any }, _state: { dataSource: any }) => {
@@ -637,16 +561,12 @@ describe("generateObject with tools", () => {
     const countHandler = handler(
       {
         type: "object",
-        properties: {
-          result: { type: "object", asCell: true },
-        },
+        properties: { result: { type: "object", asCell: true } },
         required: ["result"],
       },
       {
         type: "object",
-        properties: {
-          counter: { type: "object", asCell: true },
-        },
+        properties: { counter: { type: "object", asCell: true } },
         required: ["counter"],
       },
       (args: { result: any }, _state: { counter: any }) => {
@@ -659,9 +579,8 @@ describe("generateObject with tools", () => {
       () => {
         const dataSource = Cell.of({ ready: true });
         const counter = Cell.of({ value: 0 });
-
         const result = generateObject({
-          prompt: testPrompt,
+          prompt: "test-multi-tool-handler-based",
           schema: resultSchema,
           tools: {
             getData: {
@@ -688,12 +607,9 @@ describe("generateObject with tools", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    // Wait for pending to become false using sink with timeout
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-
     await runtime.idle();
 
-    // Verify all tools were called in sequence
     expect(toolCallLog).toEqual(["getData called", "countItems called"]);
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toEqual({
@@ -703,6 +619,10 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle multiple tool calls with patternTool-based tools before presentResult", async () => {
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "gen-obj-pattern-tools.json"),
+    );
+
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -712,83 +632,6 @@ describe("generateObject with tools", () => {
       required: ["name", "itemCount"],
     };
 
-    const testPrompt = "test-multi-tool-pattern-based";
-
-    // Mock the multi-step interaction
-    // Step 1: Call listItems
-    addMockResponse(
-      (req) =>
-        req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(testPrompt)
-        ) &&
-        req.tools?.["listItems"] !== undefined &&
-        req.tools?.["countItems"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined,
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_listItems_1",
-            toolName: "listItems",
-            input: {},
-          },
-        ],
-        id: "mock-pattern-tool-step1",
-      },
-    );
-
-    // Step 2: After listItems result, call countItems
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_listItems_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_countItems_1",
-            toolName: "countItems",
-            input: {},
-          },
-        ],
-        id: "mock-pattern-tool-step2",
-      },
-    );
-
-    // Step 3: After countItems result, call presentResult
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_countItems_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_presentResult_1",
-            toolName: "presentResult",
-            input: {
-              name: "Item Collection",
-              itemCount: 3,
-            },
-          },
-        ],
-        id: "mock-pattern-tool-step3",
-      },
-    );
-
     const testPattern = pattern<Record<string, never>>(
       () => {
         const itemsData = Cell.of([
@@ -797,7 +640,6 @@ describe("generateObject with tools", () => {
           { label: "Item C", value: "c" },
         ]);
 
-        // Create a pattern tool similar to listMentionable in chatbot.tsx
         const listItems = pattern<
           { items: Array<{ label: string; value: string }> },
           { result: Array<{ label: string; value: string }> }
@@ -824,7 +666,7 @@ describe("generateObject with tools", () => {
         );
 
         const result = generateObject({
-          prompt: testPrompt,
+          prompt: "test-multi-tool-pattern-based",
           schema: resultSchema,
           tools: {
             listItems: patternTool(listItems, {
@@ -849,9 +691,7 @@ describe("generateObject with tools", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    // Wait for pending to become false using sink with timeout
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-
     await runtime.idle();
 
     expect(result.key("pending").get()).toBe(false);
@@ -863,6 +703,10 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle mixed handler and patternTool-based tools", async () => {
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "gen-obj-mixed-tools.json"),
+    );
+
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -872,102 +716,18 @@ describe("generateObject with tools", () => {
       required: ["analysis", "total"],
     };
 
-    const testPrompt = "test-mixed-tools";
-
-    // Mock the multi-step interaction
-    // Step 1: Call fetchData (handler)
-    addMockResponse(
-      (req) =>
-        req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(testPrompt)
-        ) &&
-        req.tools?.["fetchData"] !== undefined &&
-        req.tools?.["analyzeData"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined,
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_fetchData_1",
-            toolName: "fetchData",
-            input: {},
-          },
-        ],
-        id: "mock-mixed-step1",
-      },
-    );
-
-    // Step 2: Call analyzeData (pattern)
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_fetchData_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_analyzeData_1",
-            toolName: "analyzeData",
-            input: {},
-          },
-        ],
-        id: "mock-mixed-step2",
-      },
-    );
-
-    // Step 3: Call presentResult
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_analyzeData_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_presentResult_1",
-            toolName: "presentResult",
-            input: {
-              analysis: "Data contains 5 numeric values",
-              total: 5,
-            },
-          },
-        ],
-        id: "mock-mixed-step3",
-      },
-    );
-
-    // Handler-based tool
     const fetchData = handler(
       {
         type: "object",
-        properties: {
-          result: { type: "object", asCell: true },
-        },
+        properties: { result: { type: "object", asCell: true } },
         required: ["result"],
       },
-      {
-        type: "object",
-        properties: {},
-      },
+      { type: "object", properties: {} },
       (args: { result: any }) => {
         args.result.set({ data: [1, 2, 3, 4, 5] });
       },
     );
 
-    // Pattern-based tool
     const analyzeData = pattern(({ data }) => {
       const analysis = str`Analyzed ${data.length} items`;
       return { analysis };
@@ -984,9 +744,8 @@ describe("generateObject with tools", () => {
     const testPattern = pattern<Record<string, never>>(
       () => {
         const dataCell = Cell.of([1, 2, 3, 4, 5]);
-
         const result = generateObject({
-          prompt: testPrompt,
+          prompt: "test-mixed-tools",
           schema: resultSchema,
           tools: {
             fetchData: {
@@ -1012,9 +771,7 @@ describe("generateObject with tools", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    // Wait for pending to become false using sink with timeout
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-
     await runtime.idle();
 
     expect(result.key("pending").get()).toBe(false);
@@ -1026,6 +783,10 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle parallel tool calls before presentResult", async () => {
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "gen-obj-parallel-tools.json"),
+    );
+
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -1034,85 +795,15 @@ describe("generateObject with tools", () => {
       required: ["combined"],
     };
 
-    const testPrompt = "test-parallel-tools";
-
     const toolCallLog: string[] = [];
-
-    // Mock parallel tool calls followed by presentResult
-    // Step 1: Call both toolA and toolB in parallel
-    addMockResponse(
-      (req) =>
-        req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(testPrompt)
-        ) &&
-        req.tools?.["toolA"] !== undefined &&
-        req.tools?.["toolB"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined,
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_toolA_1",
-            toolName: "toolA",
-            input: {},
-          },
-          {
-            type: "tool-call",
-            toolCallId: "call_toolB_1",
-            toolName: "toolB",
-            input: {},
-          },
-        ],
-        id: "mock-parallel-step1",
-      },
-    );
-
-    // Step 2: After both results, call presentResult
-    addMockResponse(
-      (req) =>
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_toolA_1"
-          )
-        ) &&
-        req.messages.some((m: any) =>
-          m.role === "tool" &&
-          Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolCallId === "call_toolB_1"
-          )
-        ),
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_presentResult_1",
-            toolName: "presentResult",
-            input: {
-              combined: "A and B",
-            },
-          },
-        ],
-        id: "mock-parallel-step2",
-      },
-    );
 
     const toolA = handler(
       {
         type: "object",
-        properties: {
-          result: { type: "object", asCell: true },
-        },
+        properties: { result: { type: "object", asCell: true } },
         required: ["result"],
       },
-      {
-        type: "object",
-        properties: {},
-      },
+      { type: "object", properties: {} },
       (args: { result: any }) => {
         toolCallLog.push("toolA");
         args.result.set({ value: "A" });
@@ -1122,15 +813,10 @@ describe("generateObject with tools", () => {
     const toolB = handler(
       {
         type: "object",
-        properties: {
-          result: { type: "object", asCell: true },
-        },
+        properties: { result: { type: "object", asCell: true } },
         required: ["result"],
       },
-      {
-        type: "object",
-        properties: {},
-      },
+      { type: "object", properties: {} },
       (args: { result: any }) => {
         toolCallLog.push("toolB");
         args.result.set({ value: "B" });
@@ -1140,7 +826,7 @@ describe("generateObject with tools", () => {
     const testPattern = pattern<Record<string, never>>(
       () => {
         const result = generateObject({
-          prompt: testPrompt,
+          prompt: "test-parallel-tools",
           schema: resultSchema,
           tools: {
             toolA: {
@@ -1167,12 +853,9 @@ describe("generateObject with tools", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    // Wait for pending to become false using sink with timeout
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-
     await runtime.idle();
 
-    // Both tools should have been called
     expect(toolCallLog).toContain("toolA");
     expect(toolCallLog).toContain("toolB");
     expect(result.key("pending").get()).toBe(false);

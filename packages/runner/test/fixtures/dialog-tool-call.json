@@ -1,0 +1,35 @@
+{
+  "description": "Tool call: weather lookup with getWeather tool",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "lastMessageContains": "weather in San Francisco",
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_123",
+            "toolName": "getWeather",
+            "input": { "location": "San Francisco" }
+          }
+        ],
+        "id": "mock-tool-call-response"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": "The weather in San Francisco is sunny and 25C.",
+        "id": "mock-final-response"
+      }
+    }
+  ]
+}

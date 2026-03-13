@@ -1,0 +1,47 @@
+{
+  "description": "Parallel tool calls: toolA + toolB in parallel, then presentResult",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "hasTools": ["toolA", "toolB", "presentResult"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_toolA_1",
+            "toolName": "toolA",
+            "input": {}
+          },
+          {
+            "type": "tool-call",
+            "toolCallId": "call_toolB_1",
+            "toolName": "toolB",
+            "input": {}
+          }
+        ],
+        "id": "mock-parallel-step1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_presentResult_1",
+            "toolName": "presentResult",
+            "input": {
+              "combined": "A and B"
+            }
+          }
+        ],
+        "id": "mock-parallel-step2"
+      }
+    }
+  ]
+}

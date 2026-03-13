@@ -1,0 +1,38 @@
+{
+  "description": "Pin tool: pin a cell via tool call",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "lastMessageContains": "pin this cell",
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "pin_call_1",
+            "toolName": "pin",
+            "input": {
+              "path": { "@link": "/of:test123" },
+              "name": "Test Cell"
+            }
+          }
+        ],
+        "id": "mock-pin-response"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": "Cell has been pinned successfully.",
+        "id": "mock-pin-final-response"
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "description": "Multi-step tool chain with handler-based tools: getData → countItems → presentResult",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "hasTools": ["getData", "countItems", "presentResult"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_getData_1",
+            "toolName": "getData",
+            "input": {}
+          }
+        ],
+        "id": "mock-multi-tool-step1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_countItems_1",
+            "toolName": "countItems",
+            "input": {}
+          }
+        ],
+        "id": "mock-multi-tool-step2"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 5
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_presentResult_1",
+            "toolName": "presentResult",
+            "input": {
+              "summary": "Found 3 items",
+              "count": 3
+            }
+          }
+        ],
+        "id": "mock-multi-tool-step3"
+      }
+    }
+  ]
+}

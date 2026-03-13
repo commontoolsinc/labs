@@ -1,0 +1,29 @@
+{
+  "description": "Multi-turn conversation: greeting then follow-up",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": "Hi there!",
+        "id": "mock-initial-response"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messagesContain": ["Hello", "How are you?"],
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": "I'm doing well, thanks!",
+        "id": "mock-followup-response"
+      }
+    }
+  ]
+}

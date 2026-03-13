@@ -6,6 +6,7 @@ import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
+  loadConversationFixtureFile,
 } from "@commontools/llm/client";
 import type {
   BuiltInLLMMessage,
@@ -16,8 +17,10 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { join } from "@std/path";
 
 const signer = await Identity.fromPassphrase("test operator");
+const FIXTURES_DIR = join(import.meta.dirname!, "fixtures");
 const space = signer.did();
 
 // Enable mock mode once for all tests
@@ -55,59 +58,8 @@ describe("llmDialog", () => {
   });
 
   it("should support a multi-turn conversation via addMessage", async () => {
-    const initialMessage = "Hello";
-    const initialResponse = "Hi there!";
-    const followUpMessage = "How are you?";
-    const followUpResponse = "I'm doing well, thanks!";
-
-    let initialResponseCalled = false;
-    let followUpResponseCalled = false;
-
-    // Mock initial response
-    addMockResponse(
-      (req) => {
-        const match = req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(initialMessage)
-        );
-        if (
-          match &&
-          !req.messages.some((m) =>
-            typeof m.content === "string" && m.content.includes(followUpMessage)
-          )
-        ) {
-          initialResponseCalled = true;
-          return true;
-        }
-        return false;
-      },
-      {
-        role: "assistant",
-        content: initialResponse,
-        id: "mock-initial-response",
-      },
-    );
-
-    // Mock follow-up response
-    addMockResponse(
-      (req) => {
-        const hasInitial = req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(initialMessage)
-        );
-        const hasFollowUp = req.messages.some((m) =>
-          typeof m.content === "string" && m.content.includes(followUpMessage)
-        );
-        const match = hasInitial && hasFollowUp;
-        if (match) {
-          followUpResponseCalled = true;
-          return true;
-        }
-        return false;
-      },
-      {
-        role: "assistant",
-        content: followUpResponse,
-        id: "mock-followup-response",
-      },
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "dialog-multi-turn.json"),
     );
 
     const resultSchema = {
@@ -127,9 +79,7 @@ describe("llmDialog", () => {
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
-          messages,
-        });
+        const dialog = llmDialog({ messages });
         return {
           addMessage: dialog.addMessage,
           pending: dialog.pending,
@@ -141,13 +91,6 @@ describe("llmDialog", () => {
       resultSchema,
     );
 
-    // We need to define the result schema for the pattern to include addMessage as a stream
-    // The pattern builder infers this from the return value, but we might need to be explicit if it's a stream?
-    // The user said: "setting the result schema to { asStream: true } for that part"
-    // This usually implies using `pattern(...).schema(...)` or relying on inference if it works.
-    // But `dialog.addMessage` comes from `llmDialog` result which already has `asStream: true` in its schema.
-    // So hopefully inference works.
-
     const resultCell = runtime.getCell(
       space,
       "llmDialog-test",
@@ -158,87 +101,26 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    // Get the addMessage handler
     const addMessage = await result.key("addMessage").pull();
 
-    // Send initial message
-    addMessage.send({
-      role: "user",
-      content: initialMessage,
-    });
-
-    // Wait for initial processing: 1 user message + 1 assistant response = 2 messages
+    // Turn 1: send greeting
+    addMessage.send({ role: "user", content: "Hello" });
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
 
-    // Send follow-up message
-    addMessage.send({
-      role: "user",
-      content: followUpMessage,
-    });
-
-    // Wait for follow-up processing: 2 existing + 1 user message + 1 assistant response = 4 messages
+    // Turn 2: send follow-up
+    addMessage.send({ role: "user", content: "How are you?" });
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
-    // Verify mocks were hit
-    // Note: The initial message might trigger a generation immediately upon creation if the logic dictates,
-    // or only when `addMessage` is called.
-    // `llmDialog` usually starts with existing messages. If the last message is User, it replies.
-    // So it should reply to "Hello" immediately.
-
-    expect(initialResponseCalled).toBe(true);
-    expect(followUpResponseCalled).toBe(true);
+    const msgs = (await result.key("messages").pull())!;
+    expect(msgs[0].content).toBe("Hello");
+    expect(msgs[1].content).toBe("Hi there!");
+    expect(msgs[2].content).toBe("How are you?");
+    expect(msgs[3].content).toBe("I'm doing well, thanks!");
   });
 
   it("should support tool calls in llmDialog", async () => {
-    const initialMessage = "What is the weather in San Francisco?";
-    const toolCallId = "call_123";
-    const toolResult = "Sunny, 25C";
-    const finalResponse = "The weather in San Francisco is sunny and 25C.";
-
-    let toolCalled = false;
-
-    // Mock initial response (Tool Call)
-    addMockResponse(
-      (req) => {
-        const lastMsg = req.messages[req.messages.length - 1];
-        return (
-          typeof lastMsg.content === "string" &&
-          lastMsg.content.includes(initialMessage)
-        );
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: toolCallId,
-            toolName: "getWeather",
-            input: { location: "San Francisco" },
-          },
-        ],
-        id: "mock-tool-call-response",
-      },
-    );
-
-    // Mock final response (After Tool Result)
-    addMockResponse(
-      (req) => {
-        // Check if the request contains the tool result
-        const toolMsg = req.messages.find(
-          (m) =>
-            m.role === "assistant" &&
-            Array.isArray(m.content) &&
-            m.content.some((c) =>
-              c.type === "tool-call" && c.toolName === "getWeather"
-            ),
-        );
-        return !!toolMsg;
-      },
-      {
-        role: "assistant",
-        content: finalResponse,
-        id: "mock-final-response",
-      },
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "dialog-tool-call.json"),
     );
 
     const resultSchema = {
@@ -255,17 +137,17 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
+    let toolCalled = false;
+
     const getWeatherTool = pattern(
       ({ location: _location }: any) => {
         toolCalled = true;
-        return toolResult;
+        return "Sunny, 25C";
       },
       {
         description: "Get the weather for a location",
         type: "object",
-        properties: {
-          location: { type: "string" },
-        },
+        properties: { location: { type: "string" } },
         required: ["location"],
       } as const satisfies JSONSchema,
       { type: "string" },
@@ -305,23 +187,16 @@ describe("llmDialog", () => {
 
     const addMessage = await result.key("addMessage").pull();
 
-    // Send initial message
     addMessage.send({
       role: "user",
-      content: initialMessage,
+      content: "What is the weather in San Francisco?",
     });
 
-    // Wait for processing:
-    // 1. User message
-    // 2. Assistant tool call
-    // 3. Tool result
-    // 4. Assistant final response
-    // Total = 4 messages
+    // user msg + assistant tool-call + tool result + assistant final = 4
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
     expect(toolCalled).toBe(true);
 
-    // Verify the conversation history
     const messages = (await result.key("messages").pull())!;
     expect(messages).toHaveLength(4);
     expect(messages[1].role).toBe("assistant");
@@ -332,58 +207,14 @@ describe("llmDialog", () => {
     expect(messages[2].role).toBe("tool");
     expect((messages[2].content as any)[0].toolName).toEqual("getWeather");
     expect(messages[3].role).toBe("assistant");
-    expect(messages[3].content).toBe(finalResponse);
+    expect(messages[3].content).toBe(
+      "The weather in San Francisco is sunny and 25C.",
+    );
   });
 
   it("should support pinning cells via pin tool", async () => {
-    const initialMessage = "Please pin this cell";
-    const cellPath = "/of:test123";
-    const cellName = "Test Cell";
-
-    // Mock response that calls pin tool
-    addMockResponse(
-      (req) => {
-        const lastMsg = req.messages[req.messages.length - 1];
-        return (
-          typeof lastMsg.content === "string" &&
-          lastMsg.content.includes(initialMessage)
-        );
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "pin_call_1",
-            toolName: "pin",
-            input: {
-              path: { "@link": cellPath },
-              name: cellName,
-            },
-          },
-        ],
-        id: "mock-pin-response",
-      },
-    );
-
-    // Mock final response after pin
-    addMockResponse(
-      (req) => {
-        const toolMsg = req.messages.find(
-          (m) =>
-            m.role === "assistant" &&
-            Array.isArray(m.content) &&
-            m.content.some((c) =>
-              c.type === "tool-call" && c.toolName === "pin"
-            ),
-        );
-        return !!toolMsg;
-      },
-      {
-        role: "assistant",
-        content: "Cell has been pinned successfully.",
-        id: "mock-pin-final-response",
-      },
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "dialog-pin.json"),
     );
 
     const resultSchema = {
@@ -412,9 +243,7 @@ describe("llmDialog", () => {
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
-          messages,
-        });
+        const dialog = llmDialog({ messages });
         return {
           addMessage: dialog.addMessage,
           pending: dialog.pending,
@@ -438,120 +267,20 @@ describe("llmDialog", () => {
 
     const addMessage = await result.key("addMessage").pull();
 
-    // Send message to trigger pin
-    addMessage.send({
-      role: "user",
-      content: initialMessage,
-    });
-
-    // Wait for: user message, assistant tool call, tool result, final response
+    addMessage.send({ role: "user", content: "Please pin this cell" });
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
-    // Verify pinned cells
     const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
     expect(pinnedCells?.length).toBe(1);
-    expect(pinnedCells?.[0].path).toBe(cellPath);
-    expect(pinnedCells?.[0].name).toBe(cellName);
+    expect(pinnedCells?.[0].path).toBe("/of:test123");
+    expect(pinnedCells?.[0].name).toBe("Test Cell");
   });
 
   it("should support unpinning cells via unpin tool", async () => {
-    const pinMessage = "Please pin this cell";
-    const unpinMessage = "Please unpin that cell";
-    const cellPath = "/of:test123";
-    const cellName = "Test Cell";
-
-    // Mock response that calls pin tool first
-    addMockResponse(
-      (req) => {
-        const lastMsg = req.messages[req.messages.length - 1];
-        return (
-          typeof lastMsg.content === "string" &&
-          lastMsg.content.includes(pinMessage)
-        );
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "pin_call_unpin_test",
-            toolName: "pin",
-            input: {
-              path: { "@link": cellPath },
-              name: cellName,
-            },
-          },
-        ],
-        id: "mock-pin-for-unpin-response",
-      },
-    );
-
-    // Mock response after pin
-    addMockResponse(
-      (req) => {
-        const toolMsg = req.messages.find(
-          (m) =>
-            m.role === "assistant" &&
-            Array.isArray(m.content) &&
-            m.content.some((c) =>
-              c.type === "tool-call" && c.toolName === "pin" &&
-              c.toolCallId === "pin_call_unpin_test"
-            ),
-        );
-        return !!toolMsg;
-      },
-      {
-        role: "assistant",
-        content: "Cell has been pinned.",
-        id: "mock-pin-for-unpin-final",
-      },
-    );
-
-    // Mock response that calls unpin tool
-    addMockResponse(
-      (req) => {
-        const lastMsg = req.messages[req.messages.length - 1];
-        return (
-          typeof lastMsg.content === "string" &&
-          lastMsg.content.includes(unpinMessage)
-        );
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "unpin_call_1",
-            toolName: "unpin",
-            input: {
-              path: { "@link": cellPath },
-            },
-          },
-        ],
-        id: "mock-unpin-response",
-      },
-    );
-
-    // Mock final response after unpin
-    addMockResponse(
-      (req) => {
-        const toolMsg = req.messages.find(
-          (m) =>
-            m.role === "assistant" &&
-            Array.isArray(m.content) &&
-            m.content.some((c) =>
-              c.type === "tool-call" && c.toolName === "unpin"
-            ),
-        );
-        return !!toolMsg;
-      },
-      {
-        role: "assistant",
-        content: "Cell has been unpinned.",
-        id: "mock-unpin-final-response",
-      },
+    await loadConversationFixtureFile(
+      join(FIXTURES_DIR, "dialog-unpin.json"),
     );
 
     const resultSchema = {
@@ -580,9 +309,7 @@ describe("llmDialog", () => {
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
-          messages,
-        });
+        const dialog = llmDialog({ messages });
         return {
           addMessage: dialog.addMessage,
           pending: dialog.pending,
@@ -607,29 +334,17 @@ describe("llmDialog", () => {
     const addMessage = await result.key("addMessage").pull();
 
     // First pin a cell
-    addMessage.send({
-      role: "user",
-      content: pinMessage,
-    });
-
-    // Wait for pin to complete (4 messages: user, assistant tool call, tool result, final)
+    addMessage.send({ role: "user", content: "Please pin this cell" });
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
-    // Verify cell was pinned
     let pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells?.length).toBe(1);
-    expect(pinnedCells?.[0].path).toBe(cellPath);
+    expect(pinnedCells?.[0].path).toBe("/of:test123");
 
     // Now unpin it
-    addMessage.send({
-      role: "user",
-      content: unpinMessage,
-    });
-
-    // Wait for unpin to complete (8 messages total: previous 4 + new 4)
+    addMessage.send({ role: "user", content: "Please unpin that cell" });
     await expect(waitForMessages(result, 8)).resolves.toBeUndefined();
 
-    // Verify pinned cells is now empty
     pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
