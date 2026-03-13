@@ -1,0 +1,63 @@
+{
+  "description": "Multi-step tool chain with patternTool-based tools: listItems → countItems → presentResult",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "hasTools": ["listItems", "countItems", "presentResult"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_listItems_1",
+            "toolName": "listItems",
+            "input": {}
+          }
+        ],
+        "id": "mock-pattern-tool-step1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_countItems_1",
+            "toolName": "countItems",
+            "input": {}
+          }
+        ],
+        "id": "mock-pattern-tool-step2"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 5
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_presentResult_1",
+            "toolName": "presentResult",
+            "input": {
+              "name": "Item Collection",
+              "itemCount": 3
+            }
+          }
+        ],
+        "id": "mock-pattern-tool-step3"
+      }
+    }
+  ]
+}

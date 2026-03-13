@@ -1,0 +1,63 @@
+{
+  "description": "Multi-step tool chain with mixed handler and patternTool: fetchData → analyzeData → presentResult",
+  "responses": [
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "hasTools": ["fetchData", "analyzeData", "presentResult"],
+        "messageCount": 1
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_fetchData_1",
+            "toolName": "fetchData",
+            "input": {}
+          }
+        ],
+        "id": "mock-mixed-step1"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 3
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_analyzeData_1",
+            "toolName": "analyzeData",
+            "input": {}
+          }
+        ],
+        "id": "mock-mixed-step2"
+      }
+    },
+    {
+      "type": "sendRequest",
+      "expectRequest": {
+        "messageCount": 5
+      },
+      "response": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call_presentResult_1",
+            "toolName": "presentResult",
+            "input": {
+              "analysis": "Data contains 5 numeric values",
+              "total": 5
+            }
+          }
+        ],
+        "id": "mock-mixed-step3"
+      }
+    }
+  ]
+}
