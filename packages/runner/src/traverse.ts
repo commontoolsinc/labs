@@ -120,6 +120,7 @@ const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
 const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
+const _frozenSchemaCache = new WeakMap<object, JSONSchema>();
 
 function internSet(
   cache: Map<string, JSONSchema>,
@@ -1971,7 +1972,17 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
     if (!isDeepFrozen(schema)) {
-      schema = deepFreeze(structuredClone(schema));
+      if (typeof schema === "object" && schema !== null) {
+        let frozen = _frozenSchemaCache.get(schema);
+        if (!frozen) {
+          frozen = deepFreeze(structuredClone(schema));
+          _frozenSchemaCache.set(schema, frozen);
+        }
+        schema = frozen;
+      } else {
+        // Primitives (boolean `true`/`false`) are already frozen by nature.
+        schema = deepFreeze(schema);
+      }
     }
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
