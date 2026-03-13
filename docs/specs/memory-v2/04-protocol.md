@@ -267,6 +267,12 @@ interface TransactCommand {
 //   { id, branch: "feature", path: [], seq }   // Optional branch override for merge proposals
 //   { id, path: ["profile", "name"], localSeq }
 //
+// Clients should compact redundant descendant reads before sending the
+// transaction. If a recursive ancestor read already covers a descendant for the
+// same dependency version (`seq` for confirmed, `localSeq` for pending), only
+// the ancestor needs to be sent. Descendants beneath a `nonRecursive` read must
+// be preserved.
+//
 // Wire operations are parent-free (UserOperation format):
 //   { op: "set", id, value }
 //   { op: "patch", id, patches }
