@@ -110,7 +110,7 @@ class MockCatalog {
     );
     if (index === -1) return undefined;
     const [mock] = this.mocks.splice(index, 1);
-    return (mock as MockEntry & { type: "sendRequest" }).response;
+    if (mock.type === "sendRequest") return mock.response;
   }
 
   /**
@@ -125,7 +125,7 @@ class MockCatalog {
     );
     if (index === -1) return undefined;
     const [mock] = this.mocks.splice(index, 1);
-    return (mock as MockEntry & { type: "generateObject" }).response;
+    if (mock.type === "generateObject") return mock.response;
   }
 }
 
@@ -398,6 +398,11 @@ export async function loadConversationFixtureFile(
 ): Promise<void> {
   const text = await Deno.readTextFile(path);
   const fixture: ConversationFixture = JSON.parse(text);
+  if (!Array.isArray(fixture.responses)) {
+    throw new Error(
+      `Invalid fixture at ${path}: "responses" must be an array`,
+    );
+  }
   loadConversationFixture(fixture);
 }
 
