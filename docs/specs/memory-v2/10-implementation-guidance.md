@@ -1194,6 +1194,9 @@ Implementation guidance:
 - Conflict tracking should probe `getReadActivities()` first.
 - Human-facing transaction summaries/debug views should probe
   `getWriteDetails(space)` first.
+- Compatibility wrappers such as `ExtendedStorageTransaction` and
+  `TransactionWrapper` should forward these narrow hooks instead of forcing
+  callers to unwrap `.tx` just to reach the native v2 data.
 - If a future caller needs more detail, add another **narrow** native hook
   instead of recreating broad v1 journal machinery inside v2.
 
