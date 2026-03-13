@@ -53,6 +53,10 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "toggle-group", label: "Toggle Group" },
                   { id: "message-input", label: "Message Input" },
                   { id: "calendar", label: "Calendar" },
+                  { id: "radio", label: "Radio" },
+                  { id: "slider", label: "Slider" },
+                  { id: "autocomplete", label: "Autocomplete" },
+                  { id: "tags", label: "Tags" },
                   { id: "fab", label: "FAB" },
                 ],
               },
@@ -68,6 +72,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "hgroup", label: "HGroup" },
                   { id: "vscroll", label: "VScroll" },
                   { id: "hscroll", label: "HScroll" },
+                  { id: "grid", label: "Grid" },
                 ],
               },
               {
@@ -80,6 +85,9 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "separator", label: "Separator" },
                   { id: "markdown", label: "Markdown" },
                   { id: "svg", label: "SVG" },
+                  { id: "kbd", label: "Kbd" },
+                  { id: "code-editor", label: "Code Editor" },
+                  { id: "copy-button", label: "Copy Button" },
                 ],
               },
               {
@@ -88,6 +96,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "progress", label: "Progress" },
                   { id: "loader", label: "Loader" },
                   { id: "skeleton", label: "Skeleton" },
+                  { id: "alert", label: "Alert" },
                 ],
               },
               {
@@ -96,6 +105,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "collapsible", label: "Collapsible" },
                   { id: "tab-list", label: "Tab List" },
                   { id: "tabs", label: "Tabs" },
+                  { id: "table", label: "Table" },
                 ],
               },
               {
