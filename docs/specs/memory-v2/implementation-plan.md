@@ -39,7 +39,8 @@
 - [x] Complete clean repo-wide `deno task test` and `deno task integration` sweeps with `DEFAULT_MEMORY_VERSION = "v2"`.
 - [x] Materialize v2 snapshots for patch-heavy entities and use them during current and point-in-time reads, so the engine no longer depends on pure replay for long patch chains.
 - [x] Tighten confirmed-read validation from whole-entity conflicts to path-aware overlap checks for later patch writes, while keeping conservative `set` and `delete` invalidation.
-- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially blob metadata/transport and post-cutover optimizations.
+- [x] Add minimal v2 blob upload/download routes and pin the phase-1 split between immutable blob payloads and ordinary `urn:blob-meta:<hash>` entity metadata.
+- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially post-cutover optimizations and advanced features beyond v1 parity.
 
 ## Test Split For Default Flip
 - [x] Keep the old v1-internal tests explicitly on v1 when they depend on structures that do not exist in v2, such as `StorageManagerEmulator.mount()`, `StorageManager.openConnection(...).provider`, or `Provider.replica.heap`.
@@ -81,7 +82,7 @@
 - [x] Implement the phase-1 logical session model: websocket `hello`, `session.open`, resume by `sessionId`, and client-owned replay/resubscribe after reconnect.
 - [x] Keep the existing `/api/storage/memory` route, but dispatch v2 traffic through the new protocol while keeping one-shot compatibility handlers only for tests and tooling.
 - [x] Add foundational blob storage in the engine for immutable payload persistence.
-- [ ] Add the phase-1 mutable blob metadata split and any transport endpoints actually needed for runtime cutover.
+- [x] Add the phase-1 mutable blob metadata split and any transport endpoints actually needed for runtime cutover.
 - [x] Build v2 emulation on top of the real v2 server code rather than maintaining a fake-only v2 test backend.
 
 ## Phase 1: Client Provider And Transaction Adapter
@@ -101,7 +102,7 @@
 - [x] The remaining runner integration suites that matter for v1 behavior pass against a real toolshed server with v2 enabled, while the intentionally v1-internal suites stay pinned to explicit v1.
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
-- [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
+- [x] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
 - [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
 - [x] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now also passes in the aggregate runner.
 
