@@ -8,9 +8,12 @@
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  ITransactionJournal,
 } from "./interface.ts";
 import type { MemorySpace } from "../runtime.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
 
 /**
  * Condensed summary of a transaction suitable for LLM consumption
@@ -64,13 +67,12 @@ export function summarizeTransaction(
   space?: MemorySpace,
 ): TransactionSummary {
   const status = tx.status();
-  const journal = status.journal;
 
   // Summarize activity
-  const activity = summarizeActivity(journal);
+  const activity = summarizeActivity(tx);
 
   // Extract actual writes with values
-  const writes = space ? extractWrites(journal, space) : [];
+  const writes = space ? extractWrites(tx, space) : [];
 
   // Generate summary
   const summary = generateSummary(activity, writes, status.status);
@@ -169,16 +171,20 @@ export function debugTransactionWrites(
   tx: IExtendedStorageTransaction,
 ): string {
   const status = tx.status();
-  const journal = status.journal;
 
   const parts: string[] = [];
   parts.push("=== Transaction Debug ===");
 
   // List all write operations from activity
   const writes: IMemorySpaceAddress[] = [];
-  for (const activity of journal.activity()) {
-    if ("write" in activity && activity.write) {
-      writes.push(activity.write);
+  const directLog = getDirectTransactionReactivityLog(tx);
+  if (directLog) {
+    writes.push(...directLog.writes);
+  } else {
+    for (const activity of status.journal.activity()) {
+      if ("write" in activity && activity.write) {
+        writes.push(activity.write);
+      }
     }
   }
 
@@ -197,7 +203,8 @@ export function debugTransactionWrites(
   }
 
   for (const space of spaces) {
-    const noveltyCount = Array.from(journal.novelty(space)).length;
+    const noveltyCount =
+      Array.from(getTransactionWriteDetails(tx, space)).length;
     parts.push(`  ${space}: ${noveltyCount} attestation(s)`);
   }
 
@@ -207,14 +214,22 @@ export function debugTransactionWrites(
 /**
  * Summarize activity from transaction journal
  */
-function summarizeActivity(journal: ITransactionJournal): {
+function summarizeActivity(tx: IExtendedStorageTransaction): {
   reads: number;
   writes: number;
 } {
+  const directLog = getDirectTransactionReactivityLog(tx);
+  if (directLog) {
+    return {
+      reads: directLog.reads.length + directLog.shallowReads.length,
+      writes: directLog.writes.length,
+    };
+  }
+
   let reads = 0;
   let writes = 0;
 
-  for (const activity of journal.activity()) {
+  for (const activity of tx.journal.activity()) {
     if ("read" in activity) {
       reads++;
     } else if ("write" in activity) {
@@ -229,35 +244,23 @@ function summarizeActivity(journal: ITransactionJournal): {
  * Extract actual writes with their values from novelty attestations
  */
 function extractWrites(
-  journal: ITransactionJournal,
+  tx: IExtendedStorageTransaction,
   space: MemorySpace,
 ): WriteDetail[] {
-  // Build a map of previous values from history
-  const previousValues = new Map<string, unknown>();
-  for (const attestation of journal.history(space)) {
-    const key = `${attestation.address.id}:${
-      attestation.address.path.join(".")
-    }`;
-    previousValues.set(key, attestation.value);
-  }
-
   const writes: WriteDetail[] = [];
 
-  for (const attestation of journal.novelty(space)) {
-    const fullObjectId = attestation.address.id;
-    const path = attestation.address.path.join(".");
-    const value = attestation.value;
+  for (const detail of getTransactionWriteDetails(tx, space)) {
+    const fullObjectId = detail.address.id;
+    const path = detail.address.path.join(".");
+    const value = detail.value;
     const isDeleted = value === undefined;
-
-    const key = `${fullObjectId}:${path}`;
-    const previousValue = previousValues.get(key);
 
     writes.push({
       objectId: shortenId(fullObjectId),
       fullObjectId,
       path,
       value: truncateValue(value, 100),
-      previousValue: truncateValue(previousValue, 100),
+      previousValue: truncateValue(detail.previousValue, 100),
       isDeleted,
     });
   }

@@ -50,7 +50,8 @@ import type {
   Unit,
 } from "./interface.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import * as Transaction from "./transaction.ts";
+import { getTransactionReadActivities } from "./transaction-inspection.ts";
+import * as V2Transaction from "./v2-transaction.ts";
 
 const logger = getLogger("storage.v2", {
   enabled: true,
@@ -233,7 +234,7 @@ export class StorageManager implements IStorageManager {
   }
 
   edit(): IStorageTransaction {
-    return Transaction.create(this);
+    return V2Transaction.V2StorageTransaction.create(this);
   }
 
   synced(): Promise<void> {
@@ -777,14 +778,7 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const seen = new Set<string>();
-    for (const activity of source.journal.activity()) {
-      if (!("read" in activity)) {
-        continue;
-      }
-      const read = activity.read;
-      if (!read) {
-        continue;
-      }
+    for (const read of getTransactionReadActivities(source)) {
       if (read.space !== this.#space || read.type !== DOCUMENT_MIME) {
         continue;
       }

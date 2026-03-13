@@ -20,6 +20,7 @@
 - [x] Implement the phase-1 logical session model: the first WebSocket message negotiates `memory/v2`, `session.open` returns or resumes `sessionId`, the server keeps only lightweight session state, and the client owns replay of outstanding commits and subscriptions after reconnect.
 - [x] Keep the existing `/api/storage/memory` route, but dispatch v2 WebSocket traffic through the new session protocol and keep PATCH transact/query handlers as thin compatibility adapters for tests and one-shot tooling.
 - [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
+- [x] Initially reused the existing `Journal` / `Chronicle` / `StorageTransaction` stack for the first cutover seam before replacing it with a v2-native transaction core.
 
 ## Current Status
 - [x] Establish the runtime cutover seam with `memoryVersion: "v2"` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts) and the runner storage manager.
@@ -89,7 +90,7 @@
 - [x] Cut runtime `memoryVersion: "v2"` over to a real v2 storage path in the runner rather than the old compatibility-backed route.
 - [x] Preserve the current provider/transaction surface so runner and scheduler call sites remain unchanged.
 - [x] Keep `syncCell()` and schema sync on `graph.query`; one-shot query remains only a compatibility and testing path.
-- [x] Reuse the existing `Journal`, `Chronicle`, `StorageTransaction`, and `ExtendedStorageTransaction` shapes for the phase-1 adapter.
+- [x] Replace the temporary v1-style transaction adapter with a v2-native transaction core and narrow inspection hooks (`getReadActivities()`, `getWriteDetails()`) so v2 no longer depends on `Journal` / `Chronicle` internally.
 - [x] Preserve basic notification timing for optimistic commit, revert, integrate, `load`, `pull`, and `reset`, with explicit coverage for conflict-before-revert ordering.
 - [x] Reconnect the shared v2 client and resubscribe active `graph.query` views after websocket loss.
 - [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
@@ -108,6 +109,7 @@
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
+- [ ] Extend the v2-native transaction core with a direct reactivity-log export if the remaining scheduler consumers still justify it, otherwise delete the last journal-activity fallback path.
 - [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [ ] Add a short-lived server-side subscription and session resume cache to reduce replay traffic without changing the client contract.
