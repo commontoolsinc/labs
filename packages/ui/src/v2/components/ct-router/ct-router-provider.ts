@@ -1,10 +1,12 @@
 import { html, LitElement } from "lit";
 import { provide } from "@lit/context";
 import { type RouterStore, routerStoreContext } from "../router-context.ts";
+import { state } from "lit/decorators.js";
 
 export class CTRouterProvider extends LitElement {
   @provide({ context: routerStoreContext })
-  store: RouterStore = {
+  @state()
+  private store: RouterStore = {
     url: "/",
     setUrl: (url: string) => {
       this.store = { ...this.store, url };

@@ -3,25 +3,21 @@ import { consume } from "@lit/context";
 import { type RouterStore, routerStoreContext } from "../router-context.ts";
 import { property } from "lit/decorators.js";
 
-export class CTRoute extends LitElement {
+export class CTLink extends LitElement {
   @consume({ context: routerStoreContext, subscribe: true })
   @property({ attribute: false })
   declare store: RouterStore;
 
   @property({ type: String })
-  declare path: string;
+  declare to: string;
 
   override render() {
-    if (this.store.url !== this.path) {
-      return null;
-    }
-
     return html`
-      <p>Current: ${this.store?.url}</p>
-      <p>This: ${this.path}</p>
-      <slot></slot>
+      <button @click="${() => this.store?.setUrl(this.to)}">
+        Navigate to: ${this.to}
+      </button>
     `;
   }
 }
 
-globalThis.customElements.define("ct-route", CTRoute);
+globalThis.customElements.define("ct-link", CTLink);

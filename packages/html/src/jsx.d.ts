@@ -2930,6 +2930,7 @@ interface CTWebhookElement extends CTHTMLElement {}
 interface CTSecretViewerElement extends CTHTMLElement {}
 interface CTRouterProviderElement extends CTHTMLElement {}
 interface CTRouteElement extends CTHTMLElement {}
+interface CTLinkElement extends CTHTMLElement {}
 
 // Chart components
 interface CTChartElement extends CTHTMLElement {}
@@ -3324,7 +3325,13 @@ interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTRouterProviderAttributes<T> extends CTHTMLAttributes<T> {}
-interface CTRouteAttributes<T> extends CTHTMLAttributes<T> {}
+interface CTRouteAttributes<T> extends CTHTMLAttributes<T> {
+  "path": string;
+}
+
+interface CTLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "to": string;
+}
 
 interface CTCalendarAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: CellLike<string> | string;
@@ -4717,6 +4724,10 @@ declare global {
       "ct-route": CTDOM.DetailedHTMLProps<
         CTRouteAttributes<CTRouteElement>,
         CTRouteElement
+      >;
+      "ct-link": CTDOM.DetailedHTMLProps<
+        CTLinkAttributes<CTLinkElement>,
+        CTLinkElement
       >;
       "ct-calendar": CTDOM.DetailedHTMLProps<
         CTCalendarAttributes<CTCalendarElement>,
