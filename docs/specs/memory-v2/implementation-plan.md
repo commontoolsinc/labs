@@ -33,6 +33,8 @@
 - [x] Replace the old reconnect harness with a real v2 runner integration test that survives an actual server restart and resumes subscribed runtime updates.
 - [x] Centralize the default memory version in `DEFAULT_MEMORY_VERSION` and set it to `"v2"`, while keeping explicit `memoryVersion: "v1"` opt-ins only where tests intentionally depend on v1 internals.
 - [x] Align the v2 runner/toolshed test suites with the cleaned-up storage interfaces on current `main`, including test-local provider helpers and `setRawUntyped()` for storage-layer link writes.
+- [x] Reproduce the remaining CLI notebook case with the same `ct test --timeout 180000 --root packages/patterns` harness used by repo integration and confirm it passes in isolation, so it is not currently a proven Memory v2 blocker.
+- [x] Run an initial v1/v2 benchmark survey across the runner benches and record the current outlier clusters before deliberate tuning. The main regressions currently cluster in no-op/equal-value commits, repeated small `Cell.set()` updates, and subscription-heavy scheduler fan-out.
 - [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
 
 ## Test Split For Default Flip
@@ -97,7 +99,7 @@
 - [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
 - [ ] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
 - [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
-- [ ] Finish a completely clean repo-wide `deno task integration` pass under the v2 default, including the remaining CLI notebook teardown hang or proving it is unrelated to Memory v2.
+- [ ] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now passes in isolation under the same harness, so any remaining hang signal must be reproduced at the aggregate runner level.
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
