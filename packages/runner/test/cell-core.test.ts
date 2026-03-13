@@ -678,6 +678,77 @@ describe("Cell utility functions", () => {
       cell.set({ x: 10, y: 20 });
       expect(cell.getRawUntypedMutable()).toEqual(cell.getRaw());
     });
+
+    it("setRawUntyped accepts an array", () => {
+      const cell = runtime.getCell<number[]>(
+        space,
+        "setRawUntyped array",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped([1, 2, 3] as StorableValue);
+      expect(cell.getRawUntyped()).toEqual([1, 2, 3]);
+    });
+
+    it("setRawUntyped accepts a nested object", () => {
+      const cell = runtime.getCell<{ a: { b: { c: number } } }>(
+        space,
+        "setRawUntyped nested",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped({ a: { b: { c: 42 } } } as StorableValue);
+      const raw = cell.getRawUntyped() as { a: { b: { c: number } } };
+      expect(raw.a.b.c).toBe(42);
+    });
+
+    it("setRawUntyped accepts null", () => {
+      const cell = runtime.getCell<number | null>(
+        space,
+        "setRawUntyped null",
+        undefined,
+        tx,
+      );
+      cell.set(10);
+      cell.setRawUntyped(null as StorableValue);
+      expect(cell.getRawUntyped()).toBe(null);
+    });
+
+    it("setRawUntyped accepts an empty array", () => {
+      const cell = runtime.getCell<unknown[]>(
+        space,
+        "setRawUntyped empty array",
+        undefined,
+        tx,
+      );
+      cell.setRawUntyped([] as StorableValue);
+      expect(cell.getRawUntyped()).toEqual([]);
+    });
+
+    it("setRawUntyped throws without a transaction", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "setRawUntyped no tx",
+      );
+      expect(() => cell.setRawUntyped(42 as StorableValue)).toThrow(
+        "Transaction required",
+      );
+    });
+
+    it("getRawUntypedMutable is identity passthrough (flag OFF)", () => {
+      // With richStorableValues OFF, cloneIfNecessary is a no-op, so
+      // getRawUntypedMutable returns the same reference as the stored value.
+      const cell = runtime.getCell<{ items: number[] }>(
+        space,
+        "getRawUntypedMutable passthrough off",
+        undefined,
+        tx,
+      );
+      cell.set({ items: [1, 2] });
+      const result = cell.getRawUntypedMutable();
+      expect(result).toEqual({ items: [1, 2] });
+      expect(result).toBe(cell.getRawUntyped());
+    });
   });
 });
 
@@ -769,5 +840,106 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
     expect(typed).toEqual(untyped);
     expect(Object.isFrozen(typed)).toBe(true);
     expect(Object.isFrozen(untyped)).toBe(true);
+  });
+
+  it("setRawUntyped stores arrays correctly (rich path)", () => {
+    const cell = runtime.getCell<number[]>(
+      richSpace,
+      "setRawUntyped array rich",
+      undefined,
+      tx,
+    );
+    cell.setRawUntyped([10, 20, 30] as StorableValue);
+    const raw = cell.getRawUntyped();
+    expect(raw).toEqual([10, 20, 30]);
+    expect(Object.isFrozen(raw)).toBe(true);
+  });
+
+  it("setRawUntyped stores nested objects correctly (rich path)", () => {
+    const cell = runtime.getCell<{ a: { b: number[] } }>(
+      richSpace,
+      "setRawUntyped nested rich",
+      undefined,
+      tx,
+    );
+    cell.setRawUntyped({ a: { b: [1, 2] } } as StorableValue);
+    const raw = cell.getRawUntyped() as { a: { b: readonly number[] } };
+    expect(raw.a.b).toEqual([1, 2]);
+    expect(Object.isFrozen(raw)).toBe(true);
+    expect(Object.isFrozen(raw.a)).toBe(true);
+    expect(Object.isFrozen(raw.a.b)).toBe(true);
+  });
+
+  it("setRawUntyped stores null (rich path)", () => {
+    const cell = runtime.getCell<number | null>(
+      richSpace,
+      "setRawUntyped null rich",
+      undefined,
+      tx,
+    );
+    cell.set(5);
+    cell.setRawUntyped(null as StorableValue);
+    expect(cell.getRawUntyped()).toBe(null);
+  });
+
+  it("getRawUntypedMutable returns mutable array copy", () => {
+    const cell = runtime.getCell<number[]>(
+      richSpace,
+      "getRawUntypedMutable array",
+      undefined,
+      tx,
+    );
+    cell.set([10, 20, 30]);
+    const mutable = cell.getRawUntypedMutable() as number[];
+    expect(Object.isFrozen(mutable)).toBe(false);
+    mutable.push(40);
+    expect(cell.getRaw() as readonly number[]).toEqual([10, 20, 30]);
+  });
+
+  it("getRawUntypedMutable returns mutable deeply nested copy", () => {
+    const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
+      richSpace,
+      "getRawUntypedMutable deep nested",
+      undefined,
+      tx,
+    );
+    cell.set({ a: { b: { c: [1, 2] } } });
+    const mutable = cell.getRawUntypedMutable() as {
+      a: { b: { c: number[] } };
+    };
+    expect(Object.isFrozen(mutable)).toBe(false);
+    expect(Object.isFrozen(mutable.a)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b)).toBe(false);
+    expect(Object.isFrozen(mutable.a.b.c)).toBe(false);
+    mutable.a.b.c.push(3);
+    const raw = cell.getRaw() as { a: { b: { c: readonly number[] } } };
+    expect(raw.a.b.c).toEqual([1, 2]);
+  });
+
+  it("getRawUntypedMutable with empty array", () => {
+    const cell = runtime.getCell<unknown[]>(
+      richSpace,
+      "getRawUntypedMutable empty array",
+      undefined,
+      tx,
+    );
+    cell.set([]);
+    const mutable = cell.getRawUntypedMutable() as unknown[];
+    expect(mutable).toEqual([]);
+    expect(Object.isFrozen(mutable)).toBe(false);
+  });
+
+  it("getRawUntypedMutable successive calls return independent copies", () => {
+    const cell = runtime.getCell<{ val: number }>(
+      richSpace,
+      "getRawUntypedMutable independence",
+      undefined,
+      tx,
+    );
+    cell.set({ val: 1 });
+    const copy1 = cell.getRawUntypedMutable() as { val: number };
+    const copy2 = cell.getRawUntypedMutable() as { val: number };
+    copy1.val = 99;
+    expect(copy2.val).toBe(1);
   });
 });
