@@ -462,6 +462,47 @@ This is a case-by-case choice. Some operations (like `Cell.set()` which always
 reads first via `diffAndUpdate()`) will naturally produce a read. Blind writes
 that don't need conflict detection can omit the read.
 
+### Compact Redundant Read Dependencies Before Sending A Commit
+
+Clients should compact `reads.confirmed` and `reads.pending` before sending a
+commit.
+
+If a recursive read already covers a descendant path for the same entity and
+the same dependency version, the descendant read is redundant and should be
+omitted from the wire payload.
+
+Examples:
+
+```typescript
+// Keep just the root read; the child reads are redundant.
+[
+  { id, path: [], seq: 17 },
+  { id, path: ["profile"], seq: 17 },
+  { id, path: ["profile", "name"], seq: 17 },
+]
+// becomes:
+[{ id, path: [], seq: 17 }]
+```
+
+```typescript
+// Same rule for pending reads.
+[
+  { id, path: [], localSeq: 4 },
+  { id, path: ["profile", "name"], localSeq: 4 },
+]
+// becomes:
+[{ id, path: [], localSeq: 4 }]
+```
+
+This compaction must only happen when the ancestor read is recursive and the
+dependency version matches:
+
+- `ConfirmedRead`: same `id`, same `branch` resolution, same `seq`
+- `PendingRead`: same `id`, same `localSeq`
+
+Do **not** compact a descendant under a `nonRecursive` ancestor read. Those
+represent different dependency scopes and must stay distinct.
+
 ---
 
 ## 8. Server-Side Parent Resolution

@@ -19,6 +19,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { stableHash } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -78,6 +79,20 @@ type DocumentRecord = {
   pending: PendingVersion[];
 };
 
+type ConfirmedCommitRead = {
+  id: URI;
+  path: string[];
+  seq: number;
+  nonRecursive?: boolean;
+};
+
+type PendingCommitRead = {
+  id: URI;
+  path: string[];
+  localSeq: number;
+  nonRecursive?: boolean;
+};
+
 export interface Options {
   as: Signer;
   address: URL;
@@ -97,6 +112,122 @@ export interface SessionFactory {
     session: MemoryV2Client.SpaceSession;
   }>;
 }
+
+const comparePath = (left: readonly string[], right: readonly string[]) => {
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    const compared = left[index].localeCompare(right[index]);
+    if (compared !== 0) {
+      return compared;
+    }
+  }
+  return 0;
+};
+
+const compactCommitReads = <
+  Read extends ConfirmedCommitRead | PendingCommitRead,
+>(
+  space: MemorySpace,
+  reads: Read[],
+): Read[] => {
+  const sorted = [...reads].sort((left, right) => {
+    const idCompared = left.id.localeCompare(right.id);
+    if (idCompared !== 0) {
+      return idCompared;
+    }
+
+    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
+      return left.seq - right.seq;
+    }
+
+    if (
+      "localSeq" in left && "localSeq" in right &&
+      left.localSeq !== right.localSeq
+    ) {
+      return left.localSeq - right.localSeq;
+    }
+
+    if (left.nonRecursive !== right.nonRecursive) {
+      return left.nonRecursive === true ? 1 : -1;
+    }
+
+    return comparePath(left.path, right.path);
+  });
+
+  const grouped = new Map<string, {
+    recursiveByPath: Map<string, Read>;
+    nonRecursiveByPath: Map<string, Read>;
+  }>();
+  for (const candidate of sorted) {
+    const dependencyKey = "seq" in candidate
+      ? `confirmed:${candidate.id}:${candidate.seq}`
+      : `pending:${candidate.id}:${candidate.localSeq}`;
+    let group = grouped.get(dependencyKey);
+    if (!group) {
+      group = {
+        recursiveByPath: new Map(),
+        nonRecursiveByPath: new Map(),
+      };
+      grouped.set(dependencyKey, group);
+    }
+    const pathKey = candidate.path.join("\0");
+    if (candidate.nonRecursive === true) {
+      if (group.recursiveByPath.has(pathKey)) {
+        continue;
+      }
+      group.nonRecursiveByPath.set(pathKey, candidate);
+    } else {
+      group.nonRecursiveByPath.delete(pathKey);
+      group.recursiveByPath.set(pathKey, candidate);
+    }
+  }
+
+  const compacted: Read[] = [];
+  for (const group of grouped.values()) {
+    const compactedRecursive = sortAndCompactPaths(
+      [...group.recursiveByPath.values()].map((read) => ({
+        space,
+        id: read.id,
+        type: DOCUMENT_MIME,
+        path: read.path,
+      })),
+    );
+    for (const address of compactedRecursive) {
+      const read = group.recursiveByPath.get(address.path.join("\0"));
+      if (read) {
+        compacted.push(read);
+      }
+    }
+    compacted.push(...group.nonRecursiveByPath.values());
+  }
+
+  return compacted.toSorted((left, right) => {
+    const idCompared = left.id.localeCompare(right.id);
+    if (idCompared !== 0) {
+      return idCompared;
+    }
+
+    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
+      return left.seq - right.seq;
+    }
+
+    if (
+      "localSeq" in left && "localSeq" in right &&
+      left.localSeq !== right.localSeq
+    ) {
+      return left.localSeq - right.localSeq;
+    }
+
+    if (left.nonRecursive !== right.nonRecursive) {
+      return left.nonRecursive === true ? -1 : 1;
+    }
+
+    return comparePath(left.path, right.path);
+  });
+};
 
 class WebSocketTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
@@ -771,22 +902,16 @@ class SpaceReplica implements ISpaceReplica {
     source: IStorageTransaction | undefined,
     localSeq: number,
   ) {
-    const confirmed: Array<{ id: URI; path: string[]; seq: number }> = [];
-    const pending: Array<{ id: URI; path: string[]; localSeq: number }> = [];
+    const confirmed: ConfirmedCommitRead[] = [];
+    const pending: PendingCommitRead[] = [];
     if (!source) {
       return { confirmed, pending };
     }
 
-    const seen = new Set<string>();
     for (const read of getTransactionReadActivities(source)) {
       if (read.space !== this.#space || read.type !== DOCUMENT_MIME) {
         continue;
       }
-      const key = `${read.id}|${read.path.join("/")}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
 
       const record = this.#docs.get(read.id as URI);
       const pendingLocalSeq = record?.pending
@@ -797,6 +922,7 @@ class SpaceReplica implements ISpaceReplica {
           id: read.id as URI,
           path: ["value", ...read.path.map(String)],
           localSeq: pendingLocalSeq,
+          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
         });
       } else {
         confirmed.push({
@@ -805,10 +931,18 @@ class SpaceReplica implements ISpaceReplica {
           seq: typeof read.meta?.seq === "number"
             ? read.meta.seq
             : record?.confirmed.seq ?? 0,
+          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
         });
       }
     }
-    return { confirmed, pending };
+    return {
+      confirmed: compactCommitReads(this.#space, confirmed).map((
+        { nonRecursive: _skip, ...read },
+      ) => read),
+      pending: compactCommitReads(this.#space, pending).map((
+        { nonRecursive: _skip, ...read },
+      ) => read),
+    };
   }
 
   private applyQueryResult(
