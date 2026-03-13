@@ -25,7 +25,9 @@ interface Section {
     accent?: string;
     tasks: Task[];
 }
-const selectTask = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const selectTask = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedTaskId: {

@@ -28,7 +28,9 @@ interface Thread {
     muted: boolean;
     comments: Comment[];
 }
-const jumpToComment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const jumpToComment = handler({
+    type: "unknown"
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedCommentId: {

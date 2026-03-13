@@ -52,8 +52,8 @@ export class ArrayFormatter implements TypeFormatter {
     }
 
     if ((elementFlags & ts.TypeFlags.Unknown) && !info.elementNode) {
-      // unknown[] - allow any item type (type safety at compile time)
-      return { type: "array", items: true };
+      // unknown[] - items are unknown type
+      return { type: "array", items: { type: "unknown" } };
     }
 
     if (elementFlags & ts.TypeFlags.Never) {

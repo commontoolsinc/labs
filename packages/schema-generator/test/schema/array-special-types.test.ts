@@ -54,7 +54,7 @@ describe("Schema: Array special types", () => {
     expect(schema.items).toBe(false);
   });
 
-  it("should use items: true for unknown[] arrays", async () => {
+  it("should use items: { type: 'unknown' } for unknown[] arrays", async () => {
     const { type, checker, typeNode } = await getTypeFromCode(
       "type UnknownArray = unknown[];",
       "UnknownArray",
@@ -63,10 +63,10 @@ describe("Schema: Array special types", () => {
       transformer.generateSchema(type, checker, typeNode),
     );
     expect(schema.type).toBe("array");
-    expect(schema.items).toBe(true);
+    expect(schema.items).toEqual({ type: "unknown" });
   });
 
-  it("should use items: true for Array<unknown>", async () => {
+  it("should use items: { type: 'unknown' } for Array<unknown>", async () => {
     const { type, checker, typeNode } = await getTypeFromCode(
       "type UnknownArray = Array<unknown>;",
       "UnknownArray",
@@ -75,7 +75,7 @@ describe("Schema: Array special types", () => {
       transformer.generateSchema(type, checker, typeNode),
     );
     expect(schema.type).toBe("array");
-    expect(schema.items).toBe(true);
+    expect(schema.items).toEqual({ type: "unknown" });
   });
 
   it("should generate normal schemas for regular array types", async () => {
