@@ -37,7 +37,8 @@
 - [x] Run an initial v1/v2 benchmark survey across the runner benches and record the current outlier clusters before deliberate tuning. The main regressions currently cluster in no-op/equal-value commits, repeated small `Cell.set()` updates, and subscription-heavy scheduler fan-out.
 - [x] Fix the last real default-v2 product regression by registering same-space navigated pieces from the shell-side navigate handler, rather than papering over the piece list in the default-app pattern.
 - [x] Complete clean repo-wide `deno task test` and `deno task integration` sweeps with `DEFAULT_MEMORY_VERSION = "v2"`.
-- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially snapshots and post-cutover optimizations.
+- [x] Materialize v2 snapshots for patch-heavy entities and use them during current and point-in-time reads, so the engine no longer depends on pure replay for long patch chains.
+- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially conflict-precision, blob metadata/transport, and post-cutover optimizations.
 
 ## Test Split For Default Flip
 - [x] Keep the old v1-internal tests explicitly on v1 when they depend on structures that do not exist in v2, such as `StorageManagerEmulator.mount()`, `StorageManager.openConnection(...).provider`, or `Provider.replica.heap`.
@@ -72,7 +73,7 @@
 - [x] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, including pragmas and default-branch bootstrap.
 - [x] Implement the core read path for current v1-parity needs: head lookup, point-in-time reconstruction by `seq`, patch replay, `source` link traversal, and schema-driven `graph.query` using the shared traversal code path.
 - [x] Make `graph.query` follow write redirects for plain alias sync as well as schema-bearing selectors, so live alias retargeting stays subscription-safe.
-- [ ] Add snapshot creation and lookup to the read engine so point-in-time reads do not depend entirely on replay.
+- [x] Add snapshot creation and lookup to the read engine so point-in-time reads do not depend entirely on replay.
 - [x] Implement the core commit path for current v1-parity needs: parent resolution, global `seq` assignment, atomic fact/head/commit writes, and pending-read resolution from `(sessionId, localSeq)`.
 - [x] Reject stale confirmed reads conservatively on the v2 path.
 - [ ] Tighten overlap-path conflict analysis beyond the current conservative confirmed-read checks where existing v1 behavior requires more precision.
@@ -104,7 +105,7 @@
 - [x] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now also passes in the aggregate runner.
 
 ## Phase 2: Post-Cutover Optimizations
-- [ ] Add snapshot cadence and lookup so long histories do not depend on pure replay.
+- [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
 - [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [ ] Add a short-lived server-side subscription and session resume cache to reduce replay traffic without changing the client contract.
