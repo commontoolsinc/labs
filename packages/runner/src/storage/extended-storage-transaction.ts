@@ -146,6 +146,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         valueObj = cloneIfNecessary(currentValue as StorableValue, {
           deep: false,
           frozen: false,
+          force: false,
         }) as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
