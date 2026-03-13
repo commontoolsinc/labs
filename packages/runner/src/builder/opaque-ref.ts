@@ -8,6 +8,7 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import { createCell } from "../cell.ts";
+import { asImmutableJSONSchema } from "../link-types.ts";
 
 /**
  * Implementation of opaqueRef that creates actual Cells.
@@ -46,7 +47,7 @@ function opaqueRefWithCell<T>(
     frame.runtime,
     {
       path: [],
-      ...(schema !== undefined && { schema }),
+      ...(schema !== undefined && { schema: asImmutableJSONSchema(schema) }),
       ...(frame.space && { space: frame.space }),
     },
     frame.tx,

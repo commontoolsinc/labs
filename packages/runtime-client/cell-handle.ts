@@ -3,6 +3,7 @@
  */
 
 import {
+  asImmutableJSONSchema,
   type Cancel,
   isLegacyAlias,
   isSigilLink,
@@ -251,7 +252,7 @@ export class CellHandle<T = unknown> {
     const { schema: _schema, ...rest } = this.#ref;
     const newCell = new CellHandle(this.#rt, {
       ...rest,
-      schema,
+      schema: asImmutableJSONSchema(schema),
     });
     newCell.#value = this.#value;
     return newCell as CellHandle<U>;
@@ -484,7 +485,9 @@ function parseAsCellRef(
       space: linkData.space ?? from.space,
       path: (linkData.path ?? []).map((p) => p.toString()),
       type: "application/json",
-      ...(linkData.schema !== undefined && { schema: linkData.schema }),
+      ...(linkData.schema !== undefined && {
+        schema: asImmutableJSONSchema(linkData.schema),
+      }),
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
@@ -503,7 +506,9 @@ function parseAsCellRef(
       space: from.space,
       path: aliasPath,
       type: "application/json",
-      ...(alias.schema !== undefined && { schema: alias.schema }),
+      ...(alias.schema !== undefined && {
+        schema: asImmutableJSONSchema(alias.schema),
+      }),
     };
   }
 }

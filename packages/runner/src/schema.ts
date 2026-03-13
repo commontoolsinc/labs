@@ -15,7 +15,11 @@ import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  asImmutableJSONSchema,
+  type ImmutableJSONSchema,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -61,7 +65,7 @@ const logger = getLogger("validateAndTransform", {
 export function resolveSchema(
   schema: JSONSchema | undefined,
   filterAsCell = false,
-): JSONSchema | undefined {
+): ImmutableJSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
   // We don't use ContextualFlowControl.isTrueSchema here, since we want to
   // handle flags like default or ifc
@@ -105,18 +109,20 @@ export function resolveSchema(
     return undefined;
   }
 
-  return resolvedSchema;
+  return asImmutableJSONSchema(resolvedSchema);
 }
 
-function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
+function filterAsCell(
+  schema: JSONSchema | undefined,
+): ImmutableJSONSchema | undefined {
   if (typeof schema !== "object") {
-    return schema;
+    return schema as ImmutableJSONSchema | undefined;
   }
   const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
   if (restSchema === undefined || Object.keys(restSchema).length === 0) {
     return undefined;
   }
-  return restSchema;
+  return asImmutableJSONSchema(restSchema);
 }
 
 /**
@@ -191,8 +197,9 @@ export function processDefaultValue(
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
       for (
-        const [key, propSchema] of Object.entries(resolvedSchema.properties)
+        const [key, rawPropSchema] of Object.entries(resolvedSchema.properties)
       ) {
+        const propSchema = asImmutableJSONSchema(rawPropSchema);
         if (key in defaultValue) {
           result[key] = processDefaultValue(
             runtime,
@@ -240,7 +247,7 @@ export function processDefaultValue(
     if (resolvedSchema.additionalProperties) {
       const additionalPropertiesSchema =
         typeof resolvedSchema.additionalProperties === "object"
-          ? resolvedSchema.additionalProperties
+          ? asImmutableJSONSchema(resolvedSchema.additionalProperties)
           : undefined;
 
       for (const key in defaultValue) {
@@ -271,10 +278,10 @@ export function processDefaultValue(
     resolvedSchema.items
   ) {
     // Handle boolean items values
-    let itemSchema: JSONSchema;
+    let itemSchema: ImmutableJSONSchema;
     if (resolvedSchema.items === true) {
       // items: true means allow any item type
-      itemSchema = {};
+      itemSchema = asImmutableJSONSchema({});
     } else if ((resolvedSchema.items as any) === false) {
       // items: false means no additional items allowed (empty arrays only)
       // For default value processing, we'll treat this as an error
@@ -284,7 +291,7 @@ export function processDefaultValue(
       );
     } else {
       // items is a JSONSchema object
-      itemSchema = resolvedSchema.items as JSONSchema;
+      itemSchema = asImmutableJSONSchema(resolvedSchema.items as JSONSchema);
     }
 
     const result = defaultValue.map((item, i) =>
@@ -310,7 +317,7 @@ export function processDefaultValue(
 function mergeDefaults(
   schema: JSONSchema | undefined,
   defaultValue: Readonly<StorableDatum>,
-): JSONSchema {
+): ImmutableJSONSchema {
   const result: JSONSchemaMutable = {
     ...(isObject(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
   };
@@ -327,7 +334,7 @@ function mergeDefaults(
     } as JSONValue;
   } else result.default = defaultValue as JSONValue;
 
-  return result;
+  return asImmutableJSONSchema(result);
 }
 
 function annotateWithBackToCellSymbols(
@@ -608,7 +615,7 @@ class TransformObjectCreator
                 {
                   ...link,
                   path: [...link.path, propName],
-                  schema: propSchema,
+                  schema: asImmutableJSONSchema(propSchema),
                 },
                 undefined,
                 this.synced,

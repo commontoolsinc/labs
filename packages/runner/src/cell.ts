@@ -73,6 +73,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import {
   areLinksSame,
+  asImmutableJSONSchema,
   createDataCellURI,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
@@ -999,7 +1000,9 @@ export class CellImpl<T extends StorableValue>
       currentLink = {
         ...currentLink,
         path: [...currentLink.path, key.toString()] as string[],
-        schema: childSchema,
+        schema: childSchema !== undefined
+          ? asImmutableJSONSchema(childSchema)
+          : undefined,
       };
     }
 
@@ -1034,7 +1037,7 @@ export class CellImpl<T extends StorableValue>
     // Create a new link with modified schema
     const siblingLink: NormalizedLink = {
       ...this._link,
-      schema: schema,
+      schema: schema !== undefined ? asImmutableJSONSchema(schema) : undefined,
     };
 
     return new CellImpl(
@@ -1291,7 +1294,7 @@ export class CellImpl<T extends StorableValue>
       path: [],
       id: toURI(sourceCellId),
       type: "application/json",
-      schema: schema,
+      schema: schema !== undefined ? asImmutableJSONSchema(schema) : undefined,
     }, this.tx) as Cell<any>;
   }
 
@@ -1344,7 +1347,7 @@ export class CellImpl<T extends StorableValue>
       );
     }
     // Since we don't have a cause yet, we can modify the link's schema
-    this._link = { ...this._link, schema: newSchema };
+    this._link = { ...this._link, schema: asImmutableJSONSchema(newSchema) };
   }
 
   /**
@@ -2189,7 +2192,9 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         frame.runtime,
         {
           path: [],
-          ...(schema !== undefined && { schema }),
+          ...(schema !== undefined && {
+            schema: asImmutableJSONSchema(schema),
+          }),
           ...(frame.space && { space: frame.space }),
         },
         frame.tx,

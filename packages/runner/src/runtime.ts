@@ -41,6 +41,7 @@ import { createRef, EntityId } from "./create-ref.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
 import {
+  asImmutableJSONSchema,
   CellLink,
   isCellLink,
   isNormalizedFullLink,
@@ -556,7 +557,9 @@ export class Runtime {
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
-    if (schema !== undefined) link = { ...link, schema };
+    if (schema !== undefined) {
+      link = { ...link, schema: asImmutableJSONSchema(schema) };
+    }
     return createCell(this, link as NormalizedFullLink, tx);
   }
 
@@ -586,7 +589,7 @@ export class Runtime {
       path: [],
       id: asDataURI,
       type: "application/json",
-      schema,
+      ...(schema !== undefined && { schema: asImmutableJSONSchema(schema) }),
     }, tx);
   }
 

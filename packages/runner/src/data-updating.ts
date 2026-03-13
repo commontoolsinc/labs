@@ -16,6 +16,7 @@ import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
+  asImmutableJSONSchema,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
@@ -523,7 +524,7 @@ export function normalizeAndDiff(
         location: {
           ...link,
           path: [...link.path, "length"],
-          schema: childSchema,
+          schema: asImmutableJSONSchema(childSchema),
         },
         value: newValue.length,
       });

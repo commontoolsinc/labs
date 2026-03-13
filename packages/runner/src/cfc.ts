@@ -2,6 +2,10 @@ import { JSONSchemaObj } from "@commontools/api";
 import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
+import {
+  asImmutableJSONSchema,
+  type ImmutableJSONSchema,
+} from "./link-types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
@@ -574,12 +578,16 @@ export class ContextualFlowControl {
     schema: JSONSchema | undefined,
     path: string[],
     extraClassifications?: Set<string>,
-  ): JSONSchema | undefined {
+  ): ImmutableJSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
     }
     const result = this.schemaAtPath(schema, path, extraClassifications);
-    return result === false ? undefined : result === true ? {} : result;
+    return result === false
+      ? undefined
+      : result === true
+      ? asImmutableJSONSchema({})
+      : result;
   }
 
   /**
@@ -615,17 +623,17 @@ export class ContextualFlowControl {
     extraClassifications?: Set<string>,
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
-  ): JSONSchema {
+  ): ImmutableJSONSchema {
     // Take defs from schema if available
     const defs = isObject(schema) && schema.$defs ? schema.$defs : undefined;
-    return this.schemaAtPathInternal(
+    return asImmutableJSONSchema(this.schemaAtPathInternal(
       schema,
       path,
       defs,
       extraClassifications,
       defaultEmptyProperties,
       defaultMissingProperty,
-    );
+    ));
   }
 
   private schemaAtPathInternal(

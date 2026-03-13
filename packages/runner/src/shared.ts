@@ -5,6 +5,7 @@
  */
 
 export {
+  asImmutableJSONSchema,
   isLegacyAlias,
   isSigilLink,
   type NormalizedFullLink,

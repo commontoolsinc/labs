@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   areLinksSame,
+  asImmutableJSONSchema,
   createDataCellURI,
   createLLMFriendlyLink,
   createSigilLinkFromParsedLink,
@@ -487,7 +488,7 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        schema: { type: "number" },
+        schema: asImmutableJSONSchema({ type: "number" }),
       };
 
       const result = createSigilLinkFromParsedLink(normalizedLink, {

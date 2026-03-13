@@ -1,5 +1,6 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
+import { type JSONSchemaObj } from "@commontools/api";
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
@@ -16,6 +17,36 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 
+declare const IMMUTABLE_JSON_SCHEMA_BRAND: unique symbol;
+
+/**
+ * A `JSONSchemaObj` that is known to be deeply immutable at runtime (e.g.,
+ * deep-frozen or produced by a cache that returns frozen objects).
+ */
+type ImmutableJSONSchemaObj = JSONSchemaObj & {
+  readonly [IMMUTABLE_JSON_SCHEMA_BRAND]: true;
+};
+
+/**
+ * A `JSONSchema` that is known to be deeply immutable at runtime.
+ *
+ * Implemented as a branded subtype of `JSONSchema`: it is assignable anywhere
+ * `JSONSchema` is accepted, but plain `JSONSchema` cannot be assigned to it
+ * without an explicit coercion via {@link asImmutableJSONSchema}. The brand is
+ * applied only to the object branch (`JSONSchemaObj`) so that the `boolean`
+ * branch (`true`/`false`) retains its normal narrowing behavior.
+ */
+export type ImmutableJSONSchema = ImmutableJSONSchemaObj | boolean;
+
+/**
+ * Mark a `JSONSchema` as deeply immutable. Use only at production sites where
+ * the schema is known to be frozen (e.g., after `deepFreeze`,
+ * `structuredClone` + `deepFreeze`, or retrieval from a frozen cache).
+ */
+export function asImmutableJSONSchema(s: JSONSchema): ImmutableJSONSchema {
+  return s as ImmutableJSONSchema;
+}
+
 /**
  * Normalized link structure returned by parsers
  */
@@ -24,7 +55,7 @@ export type NormalizedLink = {
   path: readonly MemoryAddressPathComponent[];
   space?: MemorySpace;
   type?: string; // Default is "application/json"
-  schema?: JSONSchema;
+  schema?: ImmutableJSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
@@ -158,7 +189,9 @@ export function parseLinkPrimitive(
       path: path.map((p) => p.toString()),
       ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
-      ...(link.schema !== undefined && { schema: link.schema }),
+      ...(link.schema !== undefined && {
+        schema: asImmutableJSONSchema(link.schema),
+      }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   } else if (isLegacyAlias(value)) {
@@ -184,7 +217,9 @@ export function parseLinkPrimitive(
         : [],
       ...(base?.space && { space: base.space }),
       type: "application/json",
-      ...(alias.schema !== undefined && { schema: alias.schema }),
+      ...(alias.schema !== undefined && {
+        schema: asImmutableJSONSchema(alias.schema),
+      }),
       overwrite: "redirect",
     };
   }

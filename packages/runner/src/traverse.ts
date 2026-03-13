@@ -26,7 +26,9 @@ import { ContextualFlowControl } from "./cfc.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
+  asImmutableJSONSchema,
   createDataCellURI,
+  type ImmutableJSONSchema,
   isPrimitiveCellLink,
   NormalizedFullLink,
   parseLink,
@@ -599,7 +601,7 @@ function getNormalizedLink(
     id,
     type,
     path: path.slice(1),
-    ...(schema !== undefined && { schema }),
+    ...(schema !== undefined && { schema: asImmutableJSONSchema(schema) }),
   };
 }
 
@@ -1363,13 +1365,16 @@ function combineOptionalSchema(
 }
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
-export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
+export function mergeSchemaFlags(
+  flagSchema: JSONSchema,
+  schema: JSONSchema,
+): ImmutableJSONSchema {
   const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return asImmutableJSONSchema(cached);
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
   internSet(_mergeSchemaFlagsCache, key, result);
-  return result;
+  return asImmutableJSONSchema(result);
 }
 
 function _mergeSchemaFlagsUncached(
@@ -1425,13 +1430,13 @@ function _mergeSchemaFlagsUncached(
 export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
-): JSONSchema {
+): ImmutableJSONSchema {
   const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
   const cached = _combineSchemaCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return asImmutableJSONSchema(cached);
   const result = _combineSchemaUncached(parentSchema, linkSchema);
   internSet(_combineSchemaCache, key, result);
-  return result;
+  return asImmutableJSONSchema(result);
 }
 
 function _combineSchemaUncached(
