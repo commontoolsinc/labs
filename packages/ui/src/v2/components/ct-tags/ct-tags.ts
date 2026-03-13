@@ -2,6 +2,9 @@ import { css, html } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 
+// TODO(v2-token-migration): Migrate this component to component-level tokens,
+// matching the prior phase-1 token migration pattern.
+
 /**
  * CTTags - A tags component that renders tags as pills with add/remove functionality
  *
