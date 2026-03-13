@@ -84,3 +84,4 @@ See `packages/patterns/reading-list/` for a complete implementation:
 - [Writable Methods](../concepts/types-and-schemas/writable.md) - `.key()` and other methods
 - [Two-Way Binding](./two-way-binding.md) - `$value` binding syntax
 - [Conditional Rendering](./conditional.md) - Using ifElse for show/hide
+- [View Switching](./view-switching.md) - Switching between views inline (without navigation)

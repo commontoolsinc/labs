@@ -33,3 +33,7 @@ const processedItems = items.map(item =>
   )
 );
 ```
+
+## See Also
+
+- [View Switching](./view-switching.md) — switching between entire sub-patterns or cell references
