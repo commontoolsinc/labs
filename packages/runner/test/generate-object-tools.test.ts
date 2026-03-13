@@ -16,7 +16,7 @@ import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
-  loadConversationFixtureFile,
+  loadConversationFixture,
 } from "@commontools/llm/client";
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commontools/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
@@ -24,10 +24,8 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { join } from "@std/path";
 
 const signer = await Identity.fromPassphrase("test operator");
-const FIXTURES_DIR = join(import.meta.dirname!, "fixtures");
 const space = signer.did();
 
 // Enable mock mode once for all tests
@@ -526,9 +524,56 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle multiple tool calls with handler-based tools before presentResult", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "gen-obj-handler-tools.json"),
-    );
+    loadConversationFixture({
+      description: "getData → countItems → presentResult",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["getData", "countItems", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_getData_1",
+              toolName: "getData",
+              input: {},
+            }],
+            id: "s1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_countItems_1",
+              toolName: "countItems",
+              input: {},
+            }],
+            id: "s2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 5 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_presentResult_1",
+              toolName: "presentResult",
+              input: { summary: "Found 3 items", count: 3 },
+            }],
+            id: "s3",
+          },
+        },
+      ],
+    });
 
     const resultSchema: JSONSchema = {
       type: "object",
@@ -619,9 +664,56 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle multiple tool calls with patternTool-based tools before presentResult", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "gen-obj-pattern-tools.json"),
-    );
+    loadConversationFixture({
+      description: "listItems → countItems → presentResult",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["listItems", "countItems", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_listItems_1",
+              toolName: "listItems",
+              input: {},
+            }],
+            id: "s1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_countItems_1",
+              toolName: "countItems",
+              input: {},
+            }],
+            id: "s2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 5 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_presentResult_1",
+              toolName: "presentResult",
+              input: { name: "Item Collection", itemCount: 3 },
+            }],
+            id: "s3",
+          },
+        },
+      ],
+    });
 
     const resultSchema: JSONSchema = {
       type: "object",
@@ -703,9 +795,56 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle mixed handler and patternTool-based tools", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "gen-obj-mixed-tools.json"),
-    );
+    loadConversationFixture({
+      description: "fetchData → analyzeData → presentResult",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["fetchData", "analyzeData", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_fetchData_1",
+              toolName: "fetchData",
+              input: {},
+            }],
+            id: "s1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_analyzeData_1",
+              toolName: "analyzeData",
+              input: {},
+            }],
+            id: "s2",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 5 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_presentResult_1",
+              toolName: "presentResult",
+              input: { analysis: "Data contains 5 numeric values", total: 5 },
+            }],
+            id: "s3",
+          },
+        },
+      ],
+    });
 
     const resultSchema: JSONSchema = {
       type: "object",
@@ -783,9 +922,49 @@ describe("generateObject with tools", () => {
   });
 
   it("should handle parallel tool calls before presentResult", async () => {
-    await loadConversationFixtureFile(
-      join(FIXTURES_DIR, "gen-obj-parallel-tools.json"),
-    );
+    loadConversationFixture({
+      description: "toolA + toolB in parallel → presentResult",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["toolA", "toolB", "presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_toolA_1",
+                toolName: "toolA",
+                input: {},
+              },
+              {
+                type: "tool-call",
+                toolCallId: "call_toolB_1",
+                toolName: "toolB",
+                input: {},
+              },
+            ],
+            id: "s1",
+          },
+        },
+        {
+          type: "sendRequest",
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_presentResult_1",
+              toolName: "presentResult",
+              input: { combined: "A and B" },
+            }],
+            id: "s2",
+          },
+        },
+      ],
+    });
 
     const resultSchema: JSONSchema = {
       type: "object",
