@@ -147,4 +147,30 @@ describe("piece pull materialization", () => {
 
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
   });
+
+  it("restarts stopped pieces when runWithPattern is called with start", async () => {
+    const piece = await manager.runPersistent(
+      doublePattern(),
+      { input: 5 },
+      undefined,
+      undefined,
+      { start: true },
+    );
+
+    expect(runtime.runner.cancels.size).toBe(1);
+
+    await manager.stopPiece(piece);
+
+    expect(runtime.runner.cancels.size).toBe(0);
+
+    await manager.runWithPattern(
+      tenfoldPattern(),
+      piece.entityId!["/"] as string,
+      { input: 5 },
+      { start: true },
+    );
+
+    expect(runtime.runner.cancels.size).toBe(1);
+    expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+  });
 });

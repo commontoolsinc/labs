@@ -786,15 +786,10 @@ export class PieceManager {
     });
     await piece.sync();
     const start = options?.start ?? true;
-    if (start) {
-      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
-    } else {
-      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
-    }
+    await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     await this.syncPattern(piece);
     if (start) {
-      await this.getResult(piece).pull();
-      await this.synced();
+      await this.startPiece(piece);
     }
 
     return piece;
