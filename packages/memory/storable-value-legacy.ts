@@ -208,7 +208,7 @@ export function shallowStorableFromNativeValueLegacy(
 }
 
 // Sentinel value used to indicate that a property should be omitted during
-// conversion in `toDeepStorableValue()`.
+// conversion in `storableFromNativeValueLegacy()`.
 const OMIT = Symbol("OMIT");
 
 // Sentinel value used in the `converted` map to indicate an object is currently

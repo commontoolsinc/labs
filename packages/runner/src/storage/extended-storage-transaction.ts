@@ -141,7 +141,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           );
         }
         // When richStorableValues is ON, stored objects are deep-frozen by
-        // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
+        // storableFromNativeValueRich(). Shallow-clone before mutation to avoid
         // TypeError on frozen objects. force defaults to true (always clone)
         // because the value may be the transaction's working copy, which
         // must not be mutated in place.

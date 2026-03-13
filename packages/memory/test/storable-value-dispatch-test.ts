@@ -31,7 +31,7 @@ describe("storable-value-dispatch", () => {
   describe("default state (flag OFF)", () => {
     it("storableFromNativeValue performs legacy deep conversion", () => {
       const value = { hello: "world" } as StorableValue;
-      // toDeepStorableValue returns a new frozen copy for objects.
+      // storableFromNativeValue returns a new frozen copy for objects.
       const stored = storableFromNativeValue(value);
       expect(stored).toEqual({ hello: "world" });
     });
@@ -42,8 +42,8 @@ describe("storable-value-dispatch", () => {
     });
 
     it("storableFromNativeValue converts Error via legacy path", () => {
-      // storableFromNativeValue now subsumes toDeepStorableValue, so Error conversion
-      // happens directly without needing an explicit toDeepStorableValue call.
+      // storableFromNativeValue handles Error conversion directly (the old
+      // toDeepStorableValue function has been subsumed).
       const error = new Error("legacy error");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       expect(stored).not.toBeInstanceOf(Error);
