@@ -5,8 +5,11 @@ import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
-import { type StorableDatum } from "@commontools/memory/interface";
-import { shallowStorableFromNativeValue } from "@commontools/memory/storable-value";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
+import { cloneIfNecessary } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -584,9 +587,12 @@ class TransformObjectCreator
       // default.
       if (isObject(value) && link.schema.properties !== undefined) {
         // Ensure value is mutable before injecting default properties.
-        // shallowStorableFromNativeValue(v, false) is a no-op for unfrozen
-        // objects and shallow-clones frozen ones (richStorableValues ON).
-        value = shallowStorableFromNativeValue(value, false) as typeof value;
+        // cloneIfNecessary with { deep: false, frozen: false } is an identity
+        // passthrough for unfrozen objects and shallow-clones frozen ones.
+        value = cloneIfNecessary(value as StorableValue, {
+          deep: false,
+          frozen: false,
+        }) as typeof value;
         const propertyEntries = Object.entries(link.schema.properties) as [
           string,
           JSONSchema,
