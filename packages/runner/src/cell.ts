@@ -2006,6 +2006,7 @@ export function recursivelyAddIDIfNeeded<T>(
 
   if (Array.isArray(value)) {
     const result = new Array<unknown>(value.length);
+    let changed = false;
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
@@ -2016,23 +2017,38 @@ export function recursivelyAddIDIfNeeded<T>(
       if (
         isObject(v) && !isCellLink(v) && !(ID in v)
       ) {
+        changed = true;
         result[i] = { [ID]: frame.generatedIdCounter++, ...v };
       } else {
+        if (!Object.is(v, el)) {
+          changed = true;
+        }
         result[i] = v;
       }
     });
+
+    if (!changed) {
+      seen.set(value, value);
+      return value;
+    }
+
     return result as T;
   } else {
     // At this point we know `value` is a non-array record (we returned early
     // for primitives and `Array.isArray` was false).
     const valueRecord = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
+    let changed = false;
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
 
     Object.entries(valueRecord).forEach(([key, v]) => {
-      result[key] = recursivelyAddIDIfNeeded(v, frame, seen);
+      const next = recursivelyAddIDIfNeeded(v, frame, seen);
+      if (!Object.is(next, v)) {
+        changed = true;
+      }
+      result[key] = next;
     });
 
     // Copy supported symbols from original value.
@@ -2042,6 +2058,11 @@ export function recursivelyAddIDIfNeeded<T>(
           (valueRecord as IDFields)[symbol as keyof IDFields];
       }
     });
+
+    if (!changed) {
+      seen.set(value, value);
+      return value;
+    }
 
     return result as T;
   }
