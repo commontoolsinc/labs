@@ -316,13 +316,13 @@ WHERE session_id = :session_id
 `;
 
 const SELECT_LATEST_CONFLICT = `
-SELECT seq
+SELECT seq, fact_type, data
 FROM fact
+JOIN value ON value.hash = fact.value_ref
 WHERE branch = :branch
   AND id = :id
   AND seq > :after_seq
 ORDER BY seq DESC
-LIMIT 1
 `;
 
 const SELECT_PENDING_RESOLUTION = `
@@ -717,17 +717,102 @@ const validateConfirmedReads = (
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureActiveBranch(engine, readBranch);
-    const conflict = engine.database.prepare(SELECT_LATEST_CONFLICT).get({
+    const conflicts = engine.database.prepare(SELECT_LATEST_CONFLICT).all({
       branch: readBranch,
       id: read.id,
       after_seq: read.seq,
-    }) as { seq: number } | undefined;
-    if (conflict) {
+    }) as Array<{
+      seq: number;
+      fact_type: Operation["op"];
+      data: string | null;
+    }>;
+    const conflict = conflicts.find((candidate) =>
+      factOverlapsRead(candidate, read.path)
+    );
+    if (conflict !== undefined) {
       throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflict.seq}`,
       );
     }
   }
+};
+
+const factOverlapsRead = (
+  fact: {
+    fact_type: Operation["op"];
+    data: string | null;
+  },
+  readPath: readonly string[],
+): boolean => {
+  switch (fact.fact_type) {
+    case "set":
+    case "delete":
+      return true;
+    case "patch":
+      return patchOverlapsRead(
+        JSON.parse(fact.data ?? "[]") as PatchOp[],
+        readPath,
+      );
+  }
+};
+
+const patchOverlapsRead = (
+  patches: readonly PatchOp[],
+  readPath: readonly string[],
+): boolean => {
+  return patches.some((patch) =>
+    touchedPathsForPatch(patch).some((path) => pathsOverlap(path, readPath))
+  );
+};
+
+const touchedPathsForPatch = (patch: PatchOp): string[][] => {
+  switch (patch.op) {
+    case "replace":
+      return [parsePointer(patch.path)];
+    case "add":
+    case "remove": {
+      const path = parsePointer(patch.path);
+      return [path, parentPath(path)];
+    }
+    case "move": {
+      const from = parsePointer(patch.from);
+      const to = parsePointer(patch.path);
+      return [from, to, parentPath(from), parentPath(to)];
+    }
+    case "splice":
+      return [parsePointer(patch.path)];
+  }
+};
+
+const pathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => isPrefixPath(left, right) || isPrefixPath(right, left);
+
+const isPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean => {
+  if (prefix.length > path.length) {
+    return false;
+  }
+  return prefix.every((segment, index) => path[index] === segment);
+};
+
+const parentPath = (path: readonly string[]): string[] => {
+  return path.length === 0 ? [] : [...path.slice(0, -1)];
+};
+
+const parsePointer = (path: string): string[] => {
+  if (path === "") {
+    return [];
+  }
+  if (!path.startsWith("/")) {
+    throw new Error(`invalid JSON pointer: ${path}`);
+  }
+  return path.slice(1).split("/").map((segment) =>
+    segment.replaceAll("~1", "/").replaceAll("~0", "~")
+  );
 };
 
 const resolvePendingReads = (
