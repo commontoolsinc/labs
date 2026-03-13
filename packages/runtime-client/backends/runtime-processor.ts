@@ -302,34 +302,6 @@ export class RuntimeProcessor {
 
       navigateCallback: async (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        // Add to the space's piece list here if it's from the
-        // same space.
-        if (link.space !== space) {
-          console.warn("Navigating cross-space, not adding to pieces list.");
-        } else {
-          try {
-            await pieceManager!.add([target]);
-          } catch (e: unknown) {
-            console.error(
-              "[RuntimeProcessor] Failed to register navigated piece:",
-              {
-                error: e instanceof Error ? e.message : e,
-              },
-            );
-          }
-
-          try {
-            await RuntimeProcessor.trackRecentPiece(pieceManager!, target);
-          } catch (e: unknown) {
-            console.error(
-              "[RuntimeProcessor] Failed to track recent piece:",
-              {
-                error: e instanceof Error ? e.message : e,
-              },
-            );
-          }
-        }
-
         self.postMessage({
           type: NotificationType.NavigateRequest,
           targetCellRef: link,
@@ -738,24 +710,6 @@ export class RuntimeProcessor {
       marker,
     });
   };
-
-  private static async trackRecentPiece(
-    pieceManager: PieceManager,
-    target: unknown,
-  ): Promise<void> {
-    const defaultPattern = await pieceManager.getDefaultPattern();
-    if (!defaultPattern) return;
-
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        trackRecent: { asStream: true },
-      },
-      required: ["trackRecent"],
-    });
-    const handler = cell.key("trackRecent");
-    handler.send({ piece: target });
-  }
 
   async detectNonIdempotent(
     _request: DetectNonIdempotentRequest,

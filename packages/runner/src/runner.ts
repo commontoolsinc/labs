@@ -1336,10 +1336,9 @@ export class Runner {
           const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
-            if (
-              validateAndCheckOpaqueRefs(result, name) ||
-              frame.opaqueRefs.size > 0
-            ) {
+            const hasOpaqueRefs = validateAndCheckOpaqueRefs(result, name) ||
+              frame.opaqueRefs.size > 0;
+            if (hasOpaqueRefs) {
               const resultPattern = patternFromFrame(
                 () => result,
               );
