@@ -42,7 +42,9 @@ describe("shell worker runtime", () => {
       });
     });
 
-    await waitFor(() => Promise.resolve((probe as { type: string }).type !== "timeout"));
+    await waitFor(() =>
+      Promise.resolve((probe as { type: string }).type !== "timeout")
+    );
 
     if ((probe as { type: string }).type !== "message") {
       throw new Error(

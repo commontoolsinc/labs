@@ -6,7 +6,12 @@ type TestProvider = {
   get(uri: string): { value: unknown } | undefined;
   send(
     batch: { uri: string; value: { value: unknown } }[],
-  ): Promise<{ ok?: {}; error?: { name?: string; message?: string } }>;
+  ): Promise<
+    {
+      ok?: Record<PropertyKey, never>;
+      error?: { name?: string; message?: string };
+    }
+  >;
 };
 
 const mulberry32 = (seed: number) => {

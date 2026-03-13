@@ -227,9 +227,7 @@ export const putBlob: AppRouteHandler<typeof Routes.putBlob> = async (c) => {
       });
       span.setAttribute("memory.status", "success");
       return new Response(null, {
-        status: result.created
-          ? HttpStatusCodes.CREATED
-          : HttpStatusCodes.OK,
+        status: result.created ? HttpStatusCodes.CREATED : HttpStatusCodes.OK,
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -262,14 +260,17 @@ export const getBlob: AppRouteHandler<typeof Routes.getBlob> = async (c) => {
     }
 
     span.setAttribute("memory.status", "success");
-    return new Response(new Blob([Uint8Array.from(blob.value)], {
-      type: blob.contentType,
-    }), {
-      status: HttpStatusCodes.OK,
-      headers: {
-        "content-type": blob.contentType,
-        "content-length": String(blob.size),
+    return new Response(
+      new Blob([Uint8Array.from(blob.value)], {
+        type: blob.contentType,
+      }),
+      {
+        status: HttpStatusCodes.OK,
+        headers: {
+          "content-type": blob.contentType,
+          "content-length": String(blob.size),
+        },
       },
-    });
+    );
   });
 };

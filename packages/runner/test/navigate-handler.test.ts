@@ -14,7 +14,7 @@ Deno.test("handler can update local state and still navigate", async () => {
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    navigateCallback: async (target) => {
+    navigateCallback: (target) => {
       navigations.push(target.entityId?.["/"] ?? "");
     },
   });
@@ -95,7 +95,7 @@ Deno.test(
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      navigateCallback: async (target) => {
+      navigateCallback: (target) => {
         navigations.push(target.entityId?.["/"] ?? "");
       },
     });

@@ -109,8 +109,9 @@ export const read = (
   if (error) {
     return { error };
   } else {
-    const loaded = branch.load({ id: address.id, type: address.type }) as
-      & { since?: number };
+    const loaded = branch.load({ id: address.id, type: address.type }) as {
+      since?: number;
+    };
     const meta = {
       ...(options?.meta ?? {}),
       ...(typeof loaded.since === "number" ? { seq: loaded.since } : {}),

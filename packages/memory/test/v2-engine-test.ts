@@ -9,11 +9,11 @@ import {
 import {
   applyCommit,
   close,
+  type Engine,
   getBlob,
   open,
   putBlob,
   read,
-  type Engine,
 } from "../v2/engine.ts";
 
 const createEngine = async (): Promise<{
@@ -354,7 +354,10 @@ Deno.test("memory v2 engine allows multiple commits to reuse the same invocation
 
     assertEquals(first.seq, 1);
     assertEquals(second.seq, 2);
-    assertEquals(read(engine, { id: "entity:2" }), toEntityDocument({ hello: "again" }));
+    assertEquals(
+      read(engine, { id: "entity:2" }),
+      toEntityDocument({ hello: "again" }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -930,7 +933,11 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
       commit: {
         localSeq: 2,
         reads: {
-          confirmed: [{ id: "entity:source", path: ["profile", "name"], seq: 1 }],
+          confirmed: [{
+            id: "entity:source",
+            path: ["profile", "name"],
+            seq: 1,
+          }],
           pending: [],
         },
         operations: [{

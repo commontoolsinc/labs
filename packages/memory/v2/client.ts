@@ -1,10 +1,10 @@
 import {
-  MEMORY_V2_PROTOCOL,
   type ClientCommit,
   type EntitySnapshot,
   type GraphQuery,
   type GraphQueryResult,
   type GraphUpdateMessage,
+  MEMORY_V2_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
 } from "../v2.ts";
@@ -62,9 +62,17 @@ export class Client {
     await this.#reconnecting?.catch(() => undefined);
   }
 
-  async mount(space: string, options: MountOptions = {}): Promise<SpaceSession> {
+  async mount(
+    space: string,
+    options: MountOptions = {},
+  ): Promise<SpaceSession> {
     const result = await this.openSession(space, options);
-    const session = new SpaceSession(this, space, result.sessionId, result.serverSeq);
+    const session = new SpaceSession(
+      this,
+      space,
+      result.sessionId,
+      result.serverSeq,
+    );
     this.#spaces.add(session);
     return session;
   }
@@ -96,7 +104,11 @@ export class Client {
     });
   }
 
-  registerSubscription(id: string, session: SpaceSession, view: QueryView): void {
+  registerSubscription(
+    id: string,
+    session: SpaceSession,
+    view: QueryView,
+  ): void {
     this.#subscriptions.set(id, { session, view });
   }
 
@@ -447,7 +459,9 @@ export class QueryView {
         if (queued) {
           return { done: false, value: queued };
         }
-        const pending = Promise.withResolvers<IteratorResult<GraphQueryResult>>();
+        const pending = Promise.withResolvers<
+          IteratorResult<GraphQueryResult>
+        >();
         this.#pending.add(pending);
         return await pending.promise;
       },
@@ -508,8 +522,9 @@ export const loopback = (server: Server): Transport => {
     async send(payload: string) {
       await connection.receive(payload);
     },
-    async close() {
+    close() {
       connection.close();
+      return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
@@ -533,7 +548,9 @@ const isConnectionError = (error: unknown): boolean =>
     error.message.includes("transport closed") ||
     error.message.includes("disconnect"));
 
-const isHelloOk = (message: unknown): message is Extract<ServerMessage, { type: "hello.ok" }> => {
+const isHelloOk = (
+  message: unknown,
+): message is Extract<ServerMessage, { type: "hello.ok" }> => {
   return typeof message === "object" && message !== null &&
     (message as { type?: string }).type === "hello.ok";
 };

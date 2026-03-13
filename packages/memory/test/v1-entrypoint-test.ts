@@ -1,9 +1,4 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import * as Memory from "../memory.ts";
 import * as Provider from "../provider.ts";
 
@@ -19,7 +14,9 @@ Deno.test("legacy memory entry points default to v1 internally", async () => {
     serviceDid,
   });
   if (!opened.ok) {
-    throw new Error(`Expected memory.open to succeed, got ${opened.error.message}`);
+    throw new Error(
+      `Expected memory.open to succeed, got ${opened.error.message}`,
+    );
   }
   assertEquals(opened.ok.memoryVersion, "v1");
   await opened.ok.close();

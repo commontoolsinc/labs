@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
 import { MEMORY_V2_PROTOCOL } from "@commontools/memory/v2";
 import { Identity } from "@commontools/identity";
-import { Runtime, type JSONSchema } from "@commontools/runner";
+import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { fromDigest } from "merkle-reference";
 
@@ -15,7 +15,9 @@ const openSocket = async (url: URL): Promise<WebSocket> => {
   return socket;
 };
 
-const readJsonMessage = async <Message>(socket: WebSocket): Promise<Message> => {
+const readJsonMessage = async <Message>(
+  socket: WebSocket,
+): Promise<Message> => {
   const payload = await new Promise<string>((resolve, reject) => {
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") {
@@ -343,12 +345,22 @@ Deno.test("memory websocket discovers newly linked documents for a subscribed v2
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "v2-link-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "v2-link-address",
+      addressSchema,
+      tx,
+    );
     addressCell.set({ city: "San Francisco" });
     await tx.commit();
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "v2-link-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "v2-link-person",
+      personSchema,
+      tx,
+    );
     personCell.set({ name: "Alice" });
     await tx.commit();
     await runtime1.storageManager.synced();
@@ -420,7 +432,12 @@ Deno.test("memory websocket propagates linked document changes to a subscribed v
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "v2-linked-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "v2-linked-address",
+      addressSchema,
+      tx,
+    );
     addressCell.set({ city: "New York" });
     await tx.commit();
     await addressCell.sync();
@@ -428,7 +445,12 @@ Deno.test("memory websocket propagates linked document changes to a subscribed v
     const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "v2-linked-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "v2-linked-person",
+      personSchema,
+      tx,
+    );
     personCell.setRawUntyped({
       name: "Bob",
       address: addressLink,
@@ -438,7 +460,11 @@ Deno.test("memory websocket propagates linked document changes to a subscribed v
     await runtime1.dispose();
 
     const runtime2 = createRuntime(identity, base);
-    const personCell2 = runtime2.getCell(space, "v2-linked-person", personSchema);
+    const personCell2 = runtime2.getCell(
+      space,
+      "v2-linked-person",
+      personSchema,
+    );
     await personCell2.sync();
     await runtime2.storageManager.synced();
     assertEquals(personCell2.get(), {
@@ -454,7 +480,11 @@ Deno.test("memory websocket propagates linked document changes to a subscribed v
     });
 
     const runtime3 = createRuntime(identity, base);
-    const addressCell3 = runtime3.getCell(space, "v2-linked-address", addressSchema);
+    const addressCell3 = runtime3.getCell(
+      space,
+      "v2-linked-address",
+      addressSchema,
+    );
     await addressCell3.sync();
     tx = runtime3.edit();
     addressCell3.withTx(tx).set({ city: "Los Angeles" });
@@ -520,7 +550,12 @@ Deno.test("memory websocket keeps deep linked chains live for a subscribed v2 ru
     const cityLink = structuredClone(cityCell.getAsLink());
 
     tx = runtime1.edit();
-    const addressCell = runtime1.getCell(space, "v2-deep-address", addressSchema, tx);
+    const addressCell = runtime1.getCell(
+      space,
+      "v2-deep-address",
+      addressSchema,
+      tx,
+    );
     addressCell.setRawUntyped({
       street: "123 Main St",
       city: cityLink,
@@ -531,7 +566,12 @@ Deno.test("memory websocket keeps deep linked chains live for a subscribed v2 ru
     const addressLink = structuredClone(addressCell.getAsLink());
 
     tx = runtime1.edit();
-    const personCell = runtime1.getCell(space, "v2-deep-person", personSchema, tx);
+    const personCell = runtime1.getCell(
+      space,
+      "v2-deep-person",
+      personSchema,
+      tx,
+    );
     personCell.setRawUntyped({
       name: "Charlie",
       address: addressLink,
@@ -603,7 +643,12 @@ Deno.test("memory websocket re-establishes subscribed v2 runtimes after server r
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const writer = runtime1.getCell(space, "v2-reconnect-counter", counterSchema, tx);
+    const writer = runtime1.getCell(
+      space,
+      "v2-reconnect-counter",
+      counterSchema,
+      tx,
+    );
     writer.set({ count: 1 });
     await tx.commit();
     await runtime1.storageManager.synced();
@@ -631,7 +676,11 @@ Deno.test("memory websocket re-establishes subscribed v2 runtimes after server r
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const runtime2 = createRuntime(identity, base);
-    const counterWriter = runtime2.getCell(space, "v2-reconnect-counter", counterSchema);
+    const counterWriter = runtime2.getCell(
+      space,
+      "v2-reconnect-counter",
+      counterSchema,
+    );
     await counterWriter.sync();
     tx = runtime2.edit();
     counterWriter.withTx(tx).set({ count: 2 });
@@ -666,13 +715,25 @@ Deno.test("memory websocket round-trips alias schema metadata through synced v2 
 
   try {
     const runtime1 = createRuntime(identity, base);
-    let tx = runtime1.edit();
-    const targetCell = runtime1.getCell(space, "v2-alias-schema-target", undefined, tx);
+    const tx = runtime1.edit();
+    const targetCell = runtime1.getCell(
+      space,
+      "v2-alias-schema-target",
+      undefined,
+      tx,
+    );
     targetCell.set({ count: 42, label: "test" });
 
-    const aliasCell = runtime1.getCell(space, "v2-alias-schema-source", undefined, tx);
+    const aliasCell = runtime1.getCell(
+      space,
+      "v2-alias-schema-source",
+      undefined,
+      tx,
+    );
     aliasCell.setRaw(
-      targetCell.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+      targetCell.asSchema(schema).getAsWriteRedirectLink({
+        includeSchema: true,
+      }),
     );
     await tx.commit();
     await runtime1.storageManager.synced();
@@ -715,18 +776,32 @@ Deno.test("memory websocket preserves alias-derived schemas after v2 reconnect",
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const targetCell = runtime1.getCell(space, "v2-alias-reconnect-target", undefined, tx);
+    const targetCell = runtime1.getCell(
+      space,
+      "v2-alias-reconnect-target",
+      undefined,
+      tx,
+    );
     targetCell.set({ count: 1, label: "start" });
-    const aliasCell = runtime1.getCell(space, "v2-alias-reconnect-source", undefined, tx);
+    const aliasCell = runtime1.getCell(
+      space,
+      "v2-alias-reconnect-source",
+      undefined,
+      tx,
+    );
     aliasCell.setRaw(
-      targetCell.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+      targetCell.asSchema(schema).getAsWriteRedirectLink({
+        includeSchema: true,
+      }),
     );
     await tx.commit();
     await runtime1.storageManager.synced();
     await runtime1.dispose();
 
     const subscriberRuntime = createRuntime(identity, base);
-    const aliasCell2 = subscriberRuntime.getCell<{ count: number; label: string }>(
+    const aliasCell2 = subscriberRuntime.getCell<
+      { count: number; label: string }
+    >(
       space,
       "v2-alias-reconnect-source",
     );
@@ -785,19 +860,38 @@ Deno.test("memory websocket keeps retargeted aliases live for subscribed v2 runt
   try {
     const runtime1 = createRuntime(identity, base);
     let tx = runtime1.edit();
-    const firstTarget = runtime1.getCell(space, "v2-alias-retarget-first", undefined, tx);
+    const firstTarget = runtime1.getCell(
+      space,
+      "v2-alias-retarget-first",
+      undefined,
+      tx,
+    );
     firstTarget.set({ count: 1, label: "first" });
-    const secondTarget = runtime1.getCell(space, "v2-alias-retarget-second", undefined, tx);
+    const secondTarget = runtime1.getCell(
+      space,
+      "v2-alias-retarget-second",
+      undefined,
+      tx,
+    );
     secondTarget.set({ count: 2, label: "second" });
-    const aliasCell = runtime1.getCell(space, "v2-alias-retarget-source", undefined, tx);
+    const aliasCell = runtime1.getCell(
+      space,
+      "v2-alias-retarget-source",
+      undefined,
+      tx,
+    );
     aliasCell.setRaw(
-      firstTarget.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+      firstTarget.asSchema(schema).getAsWriteRedirectLink({
+        includeSchema: true,
+      }),
     );
     await tx.commit();
     await runtime1.storageManager.synced();
 
     const subscriberRuntime = createRuntime(identity, base);
-    const aliasCell2 = subscriberRuntime.getCell<{ count: number; label: string }>(
+    const aliasCell2 = subscriberRuntime.getCell<
+      { count: number; label: string }
+    >(
       space,
       "v2-alias-retarget-source",
     );
@@ -814,7 +908,9 @@ Deno.test("memory websocket keeps retargeted aliases live for subscribed v2 runt
 
     tx = runtime1.edit();
     aliasCell.withTx(tx).setRaw(
-      secondTarget.asSchema(schema).getAsWriteRedirectLink({ includeSchema: true }),
+      secondTarget.asSchema(schema).getAsWriteRedirectLink({
+        includeSchema: true,
+      }),
     );
     await tx.commit();
     await runtime1.storageManager.synced();

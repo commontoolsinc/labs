@@ -11,7 +11,10 @@ import * as Changes from "@commontools/memory/changes";
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
 
-const waitFor = async (predicate: () => boolean, timeout = 500): Promise<void> => {
+const waitFor = async (
+  predicate: () => boolean,
+  timeout = 500,
+): Promise<void> => {
   const started = Date.now();
   while (!predicate()) {
     if (Date.now() - started > timeout) {

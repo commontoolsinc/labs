@@ -23,7 +23,13 @@ const applyOp = (state: JSONValue, op: PatchOp): JSONValue => {
     case "move":
       return moveValue(state, parsePointer(op.from), parsePointer(op.path));
     case "splice":
-      return spliceAtPath(state, parsePointer(op.path), op.index, op.remove, op.add);
+      return spliceAtPath(
+        state,
+        parsePointer(op.path),
+        op.index,
+        op.remove,
+        op.add,
+      );
   }
 };
 
@@ -233,9 +239,10 @@ const parsePointer = (path: string): string[] => {
 const encodePointer = (path: string[]): string => {
   return path.length === 0
     ? ""
-    : `/${path.map((segment) =>
-      segment.replaceAll("~", "~0").replaceAll("/", "~1")
-    ).join("/")}`;
+    : `/${
+      path.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
+        .join("/")
+    }`;
 };
 
 const parseArrayIndex = (segment: string): number => {

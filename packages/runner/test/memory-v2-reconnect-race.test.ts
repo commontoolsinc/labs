@@ -7,8 +7,8 @@ import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import {
-  type IStorageProviderWithReplica,
   type IStorageNotification,
+  type IStorageProviderWithReplica,
   type StorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -25,7 +25,12 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): { value: unknown } | undefined;
   send(
     batch: { uri: URI; value: { value: Record<string, unknown> } }[],
-  ): Promise<{ ok?: {}; error?: { name?: string; message?: string } }>;
+  ): Promise<
+    {
+      ok?: Record<PropertyKey, never>;
+      error?: { name?: string; message?: string };
+    }
+  >;
 };
 
 class NotificationRecorder implements IStorageNotification {
@@ -91,8 +96,9 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     await this.connection().receive(payload);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.disconnect();
+    return Promise.resolve();
   }
 
   disconnect(): void {
@@ -208,8 +214,9 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
     }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.#closeReceiver();
+    return Promise.resolve();
   }
 
   #respond(message: unknown): void {
@@ -310,7 +317,10 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
     assertEquals(await localSend, { ok: {} });
     await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 7);
 
-    const commitChanges = notificationChanges(notifications.notifications, "commit");
+    const commitChanges = notificationChanges(
+      notifications.notifications,
+      "commit",
+    );
     const integrateChanges = notificationChanges(
       notifications.notifications,
       "integrate",
@@ -328,8 +338,8 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
       integrateChanges.some((change) =>
         change.address.id === remoteUri &&
         JSON.stringify(change.after) === JSON.stringify({
-          value: { remote: 7 },
-        })
+            value: { remote: 7 },
+          })
       ),
       true,
     );
@@ -417,8 +427,8 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
       integrateChanges.some((change) =>
         change.address.id === remoteUri &&
         JSON.stringify(change.after) === JSON.stringify({
-          value: { remote: 9 },
-        })
+            value: { remote: 9 },
+          })
       ),
       true,
     );
@@ -492,20 +502,21 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     assert("error" in stale);
     assertEquals(provider.get(uri), { value: { version: 3 } });
 
-    const currentSeq = (provider.replica.get(address) as { since?: number } | undefined)
-      ?.since;
+    const currentSeq =
+      (provider.replica.get(address) as { since?: number } | undefined)
+        ?.since;
     assert(typeof currentSeq === "number");
 
     const retry = await commitWithSeq(currentSeq, 4);
     assertEquals(retry, { ok: {} });
     assertEquals(provider.get(uri), { value: { version: 4 } });
 
-    const revertNotifications = notifications.notifications.filter((notification) =>
-      notification.type === "revert"
-    );
-    const commitNotifications = notifications.notifications.filter((notification) =>
-      notification.type === "commit"
-    );
+    const revertNotifications = notifications.notifications.filter((
+      notification,
+    ) => notification.type === "revert");
+    const commitNotifications = notifications.notifications.filter((
+      notification,
+    ) => notification.type === "commit");
 
     assertEquals(revertNotifications.length, 1);
     assertEquals(commitNotifications.length >= 2, true);

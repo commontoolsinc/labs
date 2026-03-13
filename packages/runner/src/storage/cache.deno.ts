@@ -81,12 +81,18 @@ export class StorageManager extends BaseStorageManager {
   ): V2Storage.StorageManager | V2Emulate.EmulatedStorageManager;
   static override open(
     options: Options,
-  ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
-    V2Emulate.EmulatedStorageManager;
+  ):
+    | StorageManager
+    | StorageManagerEmulator
+    | V2Storage.StorageManager
+    | V2Emulate.EmulatedStorageManager;
   static override open(
     options: Options,
-  ): StorageManager | StorageManagerEmulator | V2Storage.StorageManager |
-    V2Emulate.EmulatedStorageManager {
+  ):
+    | StorageManager
+    | StorageManagerEmulator
+    | V2Storage.StorageManager
+    | V2Emulate.EmulatedStorageManager {
     const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
     if (memoryVersion === "v2") {
       if (options.address.protocol === "memory:") {

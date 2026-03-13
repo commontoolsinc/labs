@@ -36,7 +36,10 @@ class Subscription implements IStorageNotification {
   }
 }
 
-const waitFor = async (predicate: () => boolean, timeout = 250): Promise<void> => {
+const waitFor = async (
+  predicate: () => boolean,
+  timeout = 250,
+): Promise<void> => {
   const start = Date.now();
   while (!predicate()) {
     if (Date.now() - start > timeout) {
@@ -94,7 +97,9 @@ describe("Memory v2 storage notifications", () => {
       space,
       source: tx.tx,
     });
-    expect([...subscription.commits.at(-1)!.changes].map((change) => change.after))
+    expect(
+      [...subscription.commits.at(-1)!.changes].map((change) => change.after),
+    )
       .toContainEqual({ value: "hello" });
   });
 
@@ -122,7 +127,9 @@ describe("Memory v2 storage notifications", () => {
       })]),
     });
     await waitFor(() =>
-      JSON.stringify(replica.get({ id: uri, type: "application/json" as MIME })?.is) ===
+      JSON.stringify(
+        replica.get({ id: uri, type: "application/json" as MIME })?.is,
+      ) ===
         JSON.stringify({ value: { version: 3 } })
     );
 
@@ -188,7 +195,9 @@ describe("Memory v2 storage notifications", () => {
       })]),
     });
     await waitFor(() =>
-      JSON.stringify(replica.get({ id: uri, type: "application/json" as MIME })?.is) ===
+      JSON.stringify(
+        replica.get({ id: uri, type: "application/json" as MIME })?.is,
+      ) ===
         JSON.stringify({ value: { version: 1 } })
     );
 
