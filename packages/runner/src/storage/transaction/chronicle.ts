@@ -1,9 +1,6 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import type {
   Assertion,
   IAttestation,
@@ -20,6 +17,10 @@ import type {
   Result,
   State,
 } from "../interface.ts";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commonfabric/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -32,8 +33,32 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { refer } from "@commonfabric/memory/reference";
 import * as Edit from "./edit.ts";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStoredDocumentEnvelope = (
+  value: StorableValue | undefined,
+): value is { value?: StorableValue; source?: StorableValue } =>
+  isRecord(value) && ("value" in value || "source" in value);
+
+const alignRootWriteWithLoadedShape = (
+  loaded: StorableValue | undefined,
+  merged: StorableValue | undefined,
+): StorableValue | undefined => {
+  if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
+    return merged;
+  }
+
+  return {
+    ...("source" in loaded && loaded.source !== undefined
+      ? { source: loaded.source }
+      : {}),
+    ...(merged !== undefined ? { value: merged } : {}),
+  };
+};
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
@@ -123,7 +148,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: FabricValue,
+    value?: StorableDatum,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -267,24 +292,29 @@ export class Chronicle {
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.
-        const normalizedMerged = fabricFromNativeValue(merged.value);
-        const normalizedLoaded = fabricFromNativeValue(loaded.is);
+        const normalizedMerged = storableFromNativeValue(merged.value);
+        const normalizedLoaded = storableFromNativeValue(loaded.is);
 
-        if (deepEqual(normalizedMerged, normalizedLoaded)) {
+        const alignedMerged = alignRootWriteWithLoadedShape(
+          normalizedLoaded,
+          normalizedMerged,
+        );
+
+        if (deepEqual(alignedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.
           edit.claim(loaded);
-        } else if (normalizedMerged === undefined) {
+        } else if (alignedMerged === undefined) {
           // If the normalized value is `undefined`, retract the fact.
           edit.retract(loaded as Assertion);
         } else {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = hashOf(factToRefer);
+          const causeRef = refer(factToRefer);
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as FabricValue,
+            is: alignedMerged as StorableDatum,
             cause: causeRef,
           });
         }
@@ -523,7 +553,7 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: FabricValue,
+    value: StorableValue,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
