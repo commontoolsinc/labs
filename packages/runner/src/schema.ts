@@ -587,11 +587,12 @@ class TransformObjectCreator
       // default.
       if (isObject(value) && link.schema.properties !== undefined) {
         // Ensure value is mutable before injecting default properties.
-        // cloneIfNecessary with { deep: false, frozen: false } is an identity
-        // passthrough for unfrozen objects and shallow-clones frozen ones.
+        // cloneIfNecessary with { deep: false, frozen: false, force: false }
+        // is a no-op for unfrozen objects and shallow-clones frozen ones.
         value = cloneIfNecessary(value as StorableValue, {
           deep: false,
           frozen: false,
+          force: false,
         }) as typeof value;
         const propertyEntries = Object.entries(link.schema.properties) as [
           string,
