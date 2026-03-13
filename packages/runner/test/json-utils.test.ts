@@ -322,6 +322,79 @@ describe("createJsonSchema", () => {
       },
     });
   });
+  it("should serialize shared object references correctly", () => {
+    // Regression test: shared style objects used across siblings in .map()
+    // should all serialize with full data, not {} for the 3rd+ occurrence.
+    const sharedStyle = {
+      background: "white",
+      borderRadius: "8px",
+      padding: "16px",
+    };
+
+    // Simulate a VNode-like tree where multiple siblings share the same style
+    const tree = {
+      type: "vnode",
+      children: [
+        { type: "vnode", props: { style: sharedStyle }, children: ["A"] },
+        { type: "vnode", props: { style: sharedStyle }, children: ["B"] },
+        { type: "vnode", props: { style: sharedStyle }, children: ["C"] },
+        { type: "vnode", props: { style: sharedStyle }, children: ["D"] },
+        { type: "vnode", props: { style: sharedStyle }, children: ["E"] },
+      ],
+    };
+
+    const result = toJSONWithLegacyAliases(
+      tree as any,
+      new Map(),
+    ) as any;
+
+    // All 5 children should have the full style object
+    for (let i = 0; i < 5; i++) {
+      expect(result.children[i].props.style).toEqual({
+        background: "white",
+        borderRadius: "8px",
+        padding: "16px",
+      });
+    }
+  });
+
+  it("should still guard against circular references", () => {
+    const circular: any = { name: "root", child: {} };
+    circular.child.parent = circular; // true circular reference
+
+    const result = toJSONWithLegacyAliases(
+      circular as any,
+      new Map(),
+    ) as any;
+
+    // The root should serialize, but the circular back-reference should be {}
+    expect(result.name).toEqual("root");
+    expect(result.child.parent).toEqual({});
+  });
+
+  it("should handle shared nested objects at different depths", () => {
+    const sharedMeta = { author: "test", version: 1 };
+    const tree = {
+      items: [
+        { data: "a", meta: sharedMeta },
+        { data: "b", meta: sharedMeta },
+        { data: "c", nested: { deep: { meta: sharedMeta } } },
+      ],
+    };
+
+    const result = toJSONWithLegacyAliases(
+      tree as any,
+      new Map(),
+    ) as any;
+
+    expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
+    expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
+    expect(result.items[2].nested.deep.meta).toEqual({
+      author: "test",
+      version: 1,
+    });
+  });
+
   it("should preserve false schema in toJSONWithLegacyAliases", () => {
     const cellWithFalseSchema = createCell(runtime, {
       space,
