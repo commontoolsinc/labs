@@ -175,6 +175,41 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     },
   );
 
+  await t.step(
+    "errors on spread of pattern input outside computed()",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      interface State {
+        name: string;
+        count: number;
+      }
+
+      export default pattern<State>((input) => {
+        return { ...input };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const spreadErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+      assertGreater(
+        spreadErrors.length,
+        0,
+        "Spreading pattern input outside computed() should produce an error",
+      );
+      assertEquals(
+        spreadErrors[0]!.message.includes("computed"),
+        true,
+        "Error should suggest using computed()",
+      );
+    },
+  );
+
   await t.step("allows .get() calls inside JSX expressions", async () => {
     const source = `/// <cts-enable />
       import { pattern, Cell, h } from "commontools";
