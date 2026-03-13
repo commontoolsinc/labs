@@ -36,6 +36,30 @@ import {
 import { refer } from "@commontools/memory/reference";
 import * as Edit from "./edit.ts";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStoredDocumentEnvelope = (
+  value: StorableValue | undefined,
+): value is { value?: StorableValue; source?: StorableValue } =>
+  isRecord(value) && ("value" in value || "source" in value);
+
+const alignRootWriteWithLoadedShape = (
+  loaded: StorableValue | undefined,
+  merged: StorableValue | undefined,
+): StorableValue | undefined => {
+  if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
+    return merged;
+  }
+
+  return {
+    ...("source" in loaded && loaded.source !== undefined
+      ? { source: loaded.source }
+      : {}),
+    ...(merged !== undefined ? { value: merged } : {}),
+  };
+};
+
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
 export {
@@ -271,10 +295,15 @@ export class Chronicle {
         const normalizedMerged = storableFromNativeValue(merged.value);
         const normalizedLoaded = storableFromNativeValue(loaded.is);
 
-        if (deepEqual(normalizedMerged, normalizedLoaded)) {
+        const alignedMerged = alignRootWriteWithLoadedShape(
+          normalizedLoaded,
+          normalizedMerged,
+        );
+
+        if (deepEqual(alignedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.
           edit.claim(loaded);
-        } else if (normalizedMerged === undefined) {
+        } else if (alignedMerged === undefined) {
           // If the normalized value is `undefined`, retract the fact.
           edit.retract(loaded as Assertion);
         } else {
@@ -285,7 +314,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as StorableDatum,
+            is: alignedMerged as StorableDatum,
             cause: causeRef,
           });
         }
