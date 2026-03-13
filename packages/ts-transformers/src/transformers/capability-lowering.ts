@@ -833,31 +833,30 @@ function rewriteDeriveCallbackBodies(
     // Pre-scan the callback body for local variable declarations that produce
     // OpaqueRef values (e.g., const foo = derive(...)). These become the initial
     // opaque roots for rewritePatternBody, which needs at least one root to
-    // avoid its early return.
+    // avoid its early return. We walk the full AST (stopping at nested function
+    // boundaries) so declarations inside if/else/loops are also discovered.
     const localOpaqueRoots = new Set<string>();
     const localOpaqueRootSymbols = new Set<ts.Symbol>();
-    if (ts.isBlock(processedBody)) {
-      for (const stmt of processedBody.statements) {
-        if (!ts.isVariableStatement(stmt)) continue;
-        for (const decl of stmt.declarationList.declarations) {
-          if (
-            !decl.initializer || !ts.isIdentifier(decl.name)
-          ) continue;
-          if (
-            isOpaqueSourceExpression(
-              decl.initializer,
-              localOpaqueRoots,
-              localOpaqueRootSymbols,
-              context,
-            )
-          ) {
-            localOpaqueRoots.add(decl.name.text);
-            const sym = context.checker.getSymbolAtLocation(decl.name);
-            if (sym) localOpaqueRootSymbols.add(sym);
-          }
-        }
+    const scanForOpaqueDecls = (node: ts.Node): void => {
+      if (ts.isFunctionLike(node)) return; // don't cross function boundaries
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        ts.isIdentifier(node.name) &&
+        isOpaqueSourceExpression(
+          node.initializer,
+          localOpaqueRoots,
+          localOpaqueRootSymbols,
+          context,
+        )
+      ) {
+        localOpaqueRoots.add(node.name.text);
+        const sym = context.checker.getSymbolAtLocation(node.name);
+        if (sym) localOpaqueRootSymbols.add(sym);
       }
-    }
+      ts.forEachChild(node, scanForOpaqueDecls);
+    };
+    scanForOpaqueDecls(processedBody);
 
     // Rewrite property accesses on local OpaqueRef variables
     processedBody = rewritePatternBody(
