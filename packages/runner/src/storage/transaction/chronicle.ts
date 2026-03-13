@@ -1,4 +1,5 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
+import { isRecord } from "@commontools/utils/types";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type {
@@ -35,9 +36,6 @@ import {
 } from "./attestation.ts";
 import { refer } from "@commontools/memory/reference";
 import * as Edit from "./edit.ts";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isStoredDocumentEnvelope = (
   value: StorableValue | undefined,
