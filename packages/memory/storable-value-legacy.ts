@@ -228,14 +228,18 @@ export function storableFromNativeValueLegacy(value: unknown): StorableValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
-  return toDeepStorableValueInternal(value, new Map(), false) as StorableValue;
+  return storableFromNativeValueLegacyInternal(
+    value,
+    new Map(),
+    false,
+  ) as StorableValue;
 }
 
 /**
  * Internal recursive implementation. Can return `OMIT` for nested values that
  * should be omitted from objects (functions without toJSON, undefined).
  */
-function toDeepStorableValueInternal(
+function storableFromNativeValueLegacyInternal(
   original: unknown,
   converted: Map<object, unknown>,
   inArray: boolean,
@@ -277,7 +281,7 @@ function toDeepStorableValueInternal(
   }
 
   // Try to convert the top level to storable form. Calls the legacy function
-  // directly since toDeepStorableValueInternal is part of the legacy path.
+  // directly since storableFromNativeValueLegacyInternal is part of the legacy path.
   let value: StorableValueLayer;
   try {
     value = shallowStorableFromNativeValueLegacy(original);
@@ -312,13 +316,17 @@ function toDeepStorableValueInternal(
   if (Array.isArray(value)) {
     const arr = new Array(value.length);
     value.forEach((v, i) => {
-      arr[i] = toDeepStorableValueInternal(v, converted, true);
+      arr[i] = storableFromNativeValueLegacyInternal(v, converted, true);
     });
     result = arr as StorableValue;
   } else {
     const entries: [string, StorableValue][] = [];
     for (const [key, val] of Object.entries(value)) {
-      const convertedVal = toDeepStorableValueInternal(val, converted, false);
+      const convertedVal = storableFromNativeValueLegacyInternal(
+        val,
+        converted,
+        false,
+      );
       if (convertedVal !== OMIT) {
         entries.push([key, convertedVal]);
       }
