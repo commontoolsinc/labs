@@ -1,62 +1,37 @@
-# Style Object Reference Gotcha
+# Style Object Reference Repro
 
-## What the bug is
+## What the bug was
 
-When multiple sibling elements share the same style object _reference_, only the
-first sibling gets the styles applied. The remaining siblings render without
-styling (no background, no border-radius, no box-shadow, etc.).
+When multiple sibling elements shared the same style object _reference_, only
+the first two siblings got styles applied. Siblings 3+ rendered without styling
+(no background, no border-radius, no box-shadow, etc.).
 
-## Why it happens
+## Why it happened
 
-The Common Fabric runtime uses reference equality to optimize style application.
-When it encounters the same object reference on a second element, it assumes the
-style has already been processed and skips re-applying it. This is an
-optimization that works correctly when a single element's style doesn't change
-between renders, but breaks when the same object is intentionally shared across
-multiple sibling elements.
+The `toJSONWithLegacyAliases` function in
+`packages/runner/src/builder/json-utils.ts` used a `WeakSet` to guard against
+circular object references during pattern serialization. However, this guard
+also triggered on shared (non-circular) references, returning `{}` instead of
+re-serializing the value.
 
-In short: **same reference = "no change" to the runtime**, even when the style
-needs to be applied to a different DOM node.
+The reason 2 siblings worked (not just 1) is that `traverseValue` upstream
+creates one copy of the shared object and returns the original for subsequent
+encounters, giving `toJSONWithLegacyAliases` 2 distinct object identities before
+it hits duplicates on the 3rd+.
 
 ## The fix
 
-Use a factory function that returns a fresh object for each element:
-
-```tsx
-// BUG: shared reference -- only first sibling gets styled
-const cardStyle = { background: "white", borderRadius: "8px", padding: "16px" };
-
-items.map((item) => <div style={cardStyle}>...</div>);
-
-// FIX: factory function -- every sibling gets a new object
-function makeCardStyle() {
-  return { background: "white", borderRadius: "8px", padding: "16px" };
-}
-
-items.map((item) => <div style={makeCardStyle()}>...</div>);
-```
-
-Each call to `makeCardStyle()` returns a new object with a distinct reference,
-so the runtime treats each one as fresh and applies the styles correctly.
-
-## When you'd encounter this
-
-Any time you reuse a style object across sibling elements:
-
-- Mapping over a list and applying the same style object to each item
-- Rendering a fixed set of sibling divs that share a common style variable
-- Extracting a "theme" object and applying it to multiple elements at the same
-  level
-
-This does NOT affect:
-
-- String styles (`style="color: red"`) -- strings are compared by value
-- Styles on elements that are NOT siblings (e.g., nested at different levels)
-- Styles that are only used on a single element
+The `WeakSet` was replaced with a `WeakMap<object, number>` that tracks
+recursion depth. Only returns `{}` when `depth > 0` (we're currently inside this
+object's serialization — actual circularity), not when `depth === 0` (shared
+reference that was already fully processed). Shared style objects now serialize
+correctly regardless of how many siblings reference them.
 
 ## Reproduction
 
-Run this pattern with `deno task ct check main.tsx` and observe:
+This pattern demonstrates the bug scenario (shared `const` style object) and the
+old workaround (factory function). With the fix applied, both sections render
+identically — all 10 cards are styled.
 
-- **Bug Demo** (blue left border): Only the first card is styled
-- **Fix Demo** (green left border): All cards are styled correctly
+Run with `deno task ct check main.tsx --pattern-json` and verify all cards have
+full style data.

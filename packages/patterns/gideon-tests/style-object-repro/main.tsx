@@ -57,7 +57,7 @@ const StyleObjectRepro = pattern<ReproInput, ReproOutput>(() => {
             <ct-heading level={5} style="color: #ef4444;">
               Bug Demo (shared style object)
             </ct-heading>
-            <div style="color: var(--ct-color-gray-500); fontSize: 0.875rem; marginBottom: 8px;">
+            <div style="color: var(--ct-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
               These boxes share a style object reference — only the first one
               renders correctly:
             </div>
@@ -84,7 +84,7 @@ const StyleObjectRepro = pattern<ReproInput, ReproOutput>(() => {
             <ct-heading level={5} style="color: #10b981;">
               Fix Demo (factory function)
             </ct-heading>
-            <div style="color: var(--ct-color-gray-500); fontSize: 0.875rem; marginBottom: 8px;">
+            <div style="color: var(--ct-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
               These boxes each get a fresh style object from a factory function
               — all render correctly:
             </div>
