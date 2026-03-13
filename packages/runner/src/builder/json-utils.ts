@@ -33,7 +33,7 @@ export function toJSONWithLegacyAliases(
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
-  seen?: WeakSet<object>,
+  seen?: WeakMap<object, number>,
 ): JSONValue | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
@@ -100,9 +100,10 @@ export function toJSONWithLegacyAliases(
   if (isRecord(value) || isPattern(value)) {
     // Guard against circular object references (e.g. schema objects with
     // shared identity between $defs and sibling properties).
-    if (!seen) seen = new WeakSet();
-    if (seen.has(value as object)) return {};
-    seen.add(value as object);
+    if (!seen) seen = new WeakMap();
+    const depth = seen.get(value as object) ?? 0;
+    if (depth > 0) return {}; // Actually circular
+    seen.set(value as object, depth + 1);
 
     // If this is a pattern, call its toJSON method to get the properly
     // serialized version.
@@ -124,6 +125,9 @@ export function toJSONWithLegacyAliases(
         result[key] = jsonValue;
       }
     }
+
+    // Restore depth so shared references can be re-serialized
+    seen.set(value as object, depth);
 
     // Retain the original pattern reference for downstream processing.
     if (isPattern(value)) result[unsafe_originalPattern] = value;
