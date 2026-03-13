@@ -185,15 +185,23 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw storable value as `Immutable<StorableValue>`, bypassing the
+     * Reads the cell's raw storable value as `StorableValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
+     * By default (or with `{ frozen: true }`), returns a deep-frozen
+     * `Immutable<StorableValue>`. Pass `{ frozen: false }` to get a mutable
+     * deep copy instead.
+     *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
-    getRawUntyped(options?: IReadOptions): Immutable<StorableValue>;
-    /** Read the cell's raw storable value as a mutable deep copy. */
-    getRawUntypedMutable(options?: IReadOptions): StorableValue;
+    getRawUntyped(
+      options?: IReadOptions & { frozen?: true },
+    ): Immutable<StorableValue>;
+    getRawUntyped(
+      options: IReadOptions & { frozen: false },
+    ): StorableValue;
+    getRawUntyped(options?: IReadOptions): StorableValue;
     setRaw(value: (NoInfer<T> & StorableValue) | undefined): void;
     /**
      * Sets the raw cell value to any `StorableValue`, bypassing the cell's
@@ -308,7 +316,6 @@ const cellMethods = new Set<
   "getAsWriteRedirectLink",
   "getRaw",
   "getRawUntyped",
-  "getRawUntypedMutable",
   "setRaw",
   "setRawUntyped",
   "getSourceCell",
@@ -1201,26 +1208,16 @@ export class CellImpl<T extends StorableValue>
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
-  getRawUntyped(options?: IReadOptions): Immutable<StorableValue> {
-    return this._getRawUntyped(options, true);
-  }
-
-  getRawUntypedMutable(options?: IReadOptions): StorableValue {
-    return this._getRawUntyped(options, false);
-  }
-
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: true,
+  getRawUntyped(
+    options?: IReadOptions & { frozen?: true },
   ): Immutable<StorableValue>;
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: false,
+  getRawUntyped(
+    options: IReadOptions & { frozen: false },
   ): StorableValue;
-  private _getRawUntyped(
-    options: IReadOptions | undefined,
-    frozen: boolean,
+  getRawUntyped(
+    options?: IReadOptions & { frozen?: boolean },
   ): StorableValue {
+    const frozen = options?.frozen ?? true;
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
