@@ -644,6 +644,126 @@ Deno.test("memory v2 engine stores immutable blobs separately from entity facts"
   }
 });
 
+Deno.test("memory v2 blob metadata remains ordinary entity state separate from blob payloads", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const payload = new Uint8Array([6, 5, 4, 3, 2, 1]);
+    const blob = putBlob(engine, {
+      value: payload,
+      contentType: "application/octet-stream",
+    });
+    const metadataId = toBlobMetadataId(blob.hash);
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:blob-meta",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: metadataId,
+          value: toEntityDocument({
+            blob: blob.hash,
+            label: "profile-photo",
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:blob-meta",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:attachment",
+          value: toEntityDocument({
+            attachment: { "/": blob.hash },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:blob-meta",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 3 },
+      },
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "delete",
+          id: "entity:attachment",
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: metadataId }), {
+      value: {
+        blob: blob.hash,
+        label: "profile-photo",
+      },
+    });
+    assertEquals(getBlob(engine, blob.hash), {
+      hash: blob.hash,
+      value: payload,
+      contentType: "application/octet-stream",
+      size: payload.byteLength,
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:blob-meta",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 4 },
+      },
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "delete",
+          id: metadataId,
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: metadataId }), null);
+    assertEquals(getBlob(engine, blob.hash), {
+      hash: blob.hash,
+      value: payload,
+      contentType: "application/octet-stream",
+      size: payload.byteLength,
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine rejects commits with stale confirmed reads", async () => {
   const { engine, path } = await createEngine();
 
