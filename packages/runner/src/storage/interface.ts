@@ -451,6 +451,30 @@ export interface IStorageTransaction {
   readonly journal: ITransactionJournal;
 
   /**
+   * Optional lightweight dependency summary.
+   *
+   * V2 transactions can provide this directly instead of requiring callers to
+   * reconstruct it from journal activity.
+   */
+  getReactivityLog?(): TransactionReactivityLog;
+
+  /**
+   * Optional raw read observations recorded by this transaction.
+   *
+   * V2 transactions can provide these directly instead of requiring callers to
+   * scan journal activity.
+   */
+  getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional write details for the given space.
+   *
+   * V2 transactions can provide the current and previous values directly
+   * instead of materializing novelty/history attestations.
+   */
+  getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+
+  /**
    * Describes current status of the transaction. Returns a union type with
    * status field indicating the current state:
    * - `"ready"`: Transaction is being built and ready for operations
@@ -886,6 +910,19 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
+}
+
+export interface TransactionReactivityLog {
+  reads: IMemorySpaceAddress[];
+  shallowReads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
+  potentialWrites?: IMemorySpaceAddress[];
+}
+
+export interface TransactionWriteDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<StorableDatum>;
+  previousValue?: Immutable<StorableDatum>;
 }
 
 export interface ITransaction {

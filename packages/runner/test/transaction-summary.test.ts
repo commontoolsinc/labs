@@ -8,6 +8,7 @@ import type {
   IAttestation,
   IExtendedStorageTransaction,
   ITransactionJournal,
+  TransactionWriteDetail,
 } from "../src/storage/interface.ts";
 
 // Simple test transaction journal
@@ -50,6 +51,17 @@ function createTestTransaction(
   const journal = new TestJournal(novelty, history);
   return {
     journal,
+    status: () => ({ status: "done" as const, journal }),
+  } as any;
+}
+
+function createInspectableTransaction(
+  writes: TransactionWriteDetail[],
+): IExtendedStorageTransaction {
+  const journal = new TestJournal();
+  return {
+    journal,
+    getWriteDetails: () => writes,
     status: () => ({ status: "done" as const, journal }),
   } as any;
 }
@@ -152,5 +164,31 @@ describe("transaction-summary", () => {
 
     const formatted = formatTransactionSummary(tx, "did:key:test" as any);
     assertEquals(formatted, "Empty transaction");
+  });
+
+  it("should summarize direct write details without journal novelty/history", () => {
+    const tx = createInspectableTransaction([
+      {
+        address: {
+          space: "did:key:test" as any,
+          id: "of:abc123" as any,
+          type: "application/json",
+          path: ["value", "count"],
+        },
+        value: 42,
+        previousValue: 10,
+      },
+    ]);
+
+    const summary = summarizeTransaction(tx, "did:key:test" as any);
+
+    assertEquals(summary.writes, [{
+      objectId: "abc123...",
+      fullObjectId: "of:abc123",
+      path: "value.count",
+      value: 42,
+      previousValue: 10,
+      isDeleted: false,
+    }]);
   });
 });

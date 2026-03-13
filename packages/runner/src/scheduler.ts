@@ -41,6 +41,10 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionWriteDetails,
+} from "./storage/transaction-inspection.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -444,18 +448,20 @@ export class Scheduler {
     log: ReactivityLog,
   ): Map<string, unknown> {
     const writes = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = this.makeAddressKey(write);
-      for (const att of tx.journal.novelty(write.space)) {
-        if (att.address.id === write.id) {
-          // Normalize: post-commit journals wrap values in {value: ...},
-          // pre-commit journals store raw values. Unwrap for consistency.
-          const raw = att.value;
+      let details = writeDetailsBySpace.get(write.space);
+      if (!details) {
+        details = new Map<string, unknown>();
+        for (const detail of getTransactionWriteDetails(tx, write.space)) {
+          const raw = detail.value;
           const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-          writes.set(key, value);
-          break;
+          details.set(this.makeAddressKey(detail.address), value);
         }
+        writeDetailsBySpace.set(write.space, details);
       }
+      writes.set(key, details.get(key));
       if (!writes.has(key)) writes.set(key, undefined);
     }
     return writes;
@@ -2409,18 +2415,20 @@ export class Scheduler {
 
     // Capture write values from the action's transaction journal
     const writeValues = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = makeKey(write);
       try {
-        for (const att of tx.journal.novelty(write.space)) {
-          if (att.address.id === write.id) {
-            writeValues.set(key, att.value);
-            break;
+        let details = writeDetailsBySpace.get(write.space);
+        if (!details) {
+          details = new Map<string, unknown>();
+          for (const detail of getTransactionWriteDetails(tx, write.space)) {
+            details.set(makeKey(detail.address), detail.value);
           }
+          writeDetailsBySpace.set(write.space, details);
         }
-        if (!writeValues.has(key)) {
-          writeValues.set(key, undefined);
-        }
+        writeValues.set(key, details.get(key));
+        if (!writeValues.has(key)) writeValues.set(key, undefined);
       } catch {
         writeValues.set(key, "[write-error]");
       }
@@ -3402,6 +3410,11 @@ function topologicalSort(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
+  const direct = getDirectTransactionReactivityLog(tx);
+  if (direct) {
+    return direct;
+  }
+
   const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
