@@ -196,7 +196,7 @@ describe("Engine.evaluate()", () => {
   });
 });
 
-describe("Engine compile + evaluate equivalence with process", () => {
+describe("Engine compile + evaluate", () => {
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -213,31 +213,6 @@ describe("Engine compile + evaluate equivalence with process", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  it("compile+evaluate produces same exports as process", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [
-        {
-          name: "/main.tsx",
-          contents: "export default 42; export const name = 'test';",
-        },
-      ],
-    };
-
-    // Use process() to get the combined result
-    const processResult = await engine.process(program);
-
-    // Use compile() + evaluate() separately
-    const { jsScript, id } = await engine.compile(program);
-    const evalResult = await engine.evaluate(id, jsScript, program.files);
-
-    // The JS output from compile should match process
-    expect(jsScript.js).toBe(processResult.output.js);
-
-    // The exports should match
-    expect(evalResult.main!["default"]).toBe(processResult.main!["default"]);
   });
 
   it("compile+evaluate works with pattern source", async () => {
@@ -284,46 +259,7 @@ describe("Engine compile + evaluate equivalence with process", () => {
     expect(result.main!["default"]).toBe("hello");
   });
 
-  it("process with noRun only compiles", async () => {
-    const program: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [
-        {
-          name: "/main.tsx",
-          contents: "export default 42;",
-        },
-      ],
-    };
-
-    const result = await engine.process(program, { noRun: true });
-
-    expect(result.output).toBeDefined();
-    expect(result.output.js).toBeDefined();
-    expect(result.main).toBeUndefined();
-    expect(result.exportMap).toBeUndefined();
-  });
-});
-
-describe("Engine.run() with refactored process()", () => {
-  let runtime: Runtime;
-  let engine: Engine;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    engine = runtime.harness as Engine;
-  });
-
-  afterEach(async () => {
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("run() returns the default export pattern", async () => {
+  it("compile+evaluate returns the default export pattern", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -337,13 +273,15 @@ describe("Engine.run() with refactored process()", () => {
       ],
     };
 
-    const result = await engine.run(program);
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
 
-    expect(result).toBeDefined();
-    expect(result.nodes).toBeDefined();
+    expect(main).toBeDefined();
+    expect(main!["default"]).toBeDefined();
+    expect(main!["default"].nodes).toBeDefined();
   });
 
-  it("run() throws if named export is missing", async () => {
+  it("evaluate returns undefined for missing named export", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       mainExport: "nonExistent",
@@ -355,12 +293,14 @@ describe("Engine.run() with refactored process()", () => {
       ],
     };
 
-    await expect(engine.run(program)).rejects.toThrow(
-      'No "nonExistent" export found',
-    );
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main).toBeDefined();
+    expect(main!["nonExistent"]).toBeUndefined();
   });
 
-  it("run() uses mainExport when specified", async () => {
+  it("compile+evaluate retrieves named export", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       mainExport: "myPattern",
@@ -375,8 +315,11 @@ describe("Engine.run() with refactored process()", () => {
       ],
     };
 
-    const result = await engine.run(program);
-    expect(result).toBeDefined();
-    expect(result.nodes).toBeDefined();
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main).toBeDefined();
+    expect(main!["myPattern"]).toBeDefined();
+    expect(main!["myPattern"].nodes).toBeDefined();
   });
 });

@@ -463,10 +463,6 @@ async evaluate(
 ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
   // ... execute jsScript, build export map, strip id prefix ...
 }
-
-// TODO(@mpsalisbury): run() and process() are no longer called by
-// PatternManager — it now uses compile() + evaluate() directly.
-// Remove from Engine and Harness interface.
 ```
 
 The `id` field is critical: `compile()` derives a content-based id (via
@@ -496,8 +492,6 @@ async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
     if (!compileResult) {
       compileResult = await this.runtime.harness.compile(program);
       // Fire-and-forget cache write.
-      // CachedCompiler.set() logs errors internally via logger.warn,
-      // so the caller swallows the rejection silently.
       cachedCompiler.set(programHash, compileResult).catch(() => {});
     }
     return this.evaluateToPattern(compileResult, program);
@@ -560,9 +554,6 @@ to the interface is safe. The `Harness` interface (`harness/types.ts`) gains
 
 ```typescript
 interface Harness extends EventTarget {
-  // TODO(@mpsalisbury): No longer called — remove from interface and Engine.
-  run(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<Pattern>;
-
   // Compile without evaluation — returns CompileResult { id, jsScript }
   compile(source: RuntimeProgram, options?: TypeScriptHarnessProcessOptions): Promise<CompileResult>;
   // Evaluate pre-compiled JS — id and files from compile(), not recomputed
@@ -695,7 +686,7 @@ All phases are complete.
 
 1. Split `Engine.process()` into `compile()` + `evaluate()`.
 2. Update `Harness` interface with `CompileResult` type.
-3. `run()` and `process()` remain but are marked for removal (TODO).
+3. `run()` removed from the Harness interface, and `run()`/`process()` removed from `Engine`.
 4. All existing tests pass.
 
 ### Phase 2: Cache Infrastructure -- DONE
