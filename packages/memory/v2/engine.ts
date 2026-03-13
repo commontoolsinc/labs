@@ -221,6 +221,11 @@ ON CONFLICT (branch, id) DO UPDATE
 SET fact_hash = :fact_hash, seq = :seq
 `;
 
+const INSERT_SNAPSHOT = `
+INSERT OR REPLACE INTO snapshot (id, seq, value_ref, branch)
+VALUES (:id, :seq, :value_ref, :branch)
+`;
+
 const UPDATE_BRANCH_HEAD = `
 UPDATE branch
 SET head_seq = :seq
@@ -265,6 +270,17 @@ ORDER BY f.seq DESC
 LIMIT 1
 `;
 
+const SELECT_LATEST_SNAPSHOT = `
+SELECT s.seq, v.data
+FROM snapshot s
+JOIN value v ON v.hash = s.value_ref
+WHERE s.branch = :branch
+  AND s.id = :id
+  AND s.seq <= :seq
+ORDER BY s.seq DESC
+LIMIT 1
+`;
+
 const SELECT_PATCHES = `
 SELECT v.data AS patch_ops, f.seq
 FROM fact f
@@ -275,6 +291,16 @@ WHERE f.branch = :branch
   AND f.seq > :base_seq
   AND f.seq <= :seq
 ORDER BY f.seq ASC
+`;
+
+const SELECT_PATCH_COUNT = `
+SELECT COUNT(*) AS count
+FROM fact
+WHERE branch = :branch
+  AND id = :id
+  AND fact_type = 'patch'
+  AND seq > :after_seq
+  AND seq <= :seq
 `;
 
 const SELECT_NEXT_SEQ = `
@@ -339,6 +365,7 @@ WHERE hash = :hash
 export interface Engine {
   url: URL;
   database: Database;
+  snapshotInterval: number;
 }
 
 export class ConflictError extends Error {
@@ -350,6 +377,7 @@ export class ConflictError extends Error {
 
 export interface OpenOptions {
   url: URL;
+  snapshotInterval?: number;
 }
 
 export interface InvocationRecord {
@@ -443,18 +471,27 @@ type PatchRow = {
   seq: number;
 };
 
+type SnapshotRow = {
+  seq: number;
+  data: string | null;
+};
+
 type BlobRow = {
   data: Uint8Array;
   content_type: string;
   size: number;
 };
 
-export const open = async ({ url }: OpenOptions): Promise<Engine> => {
+export const DEFAULT_SNAPSHOT_INTERVAL = 10;
+
+export const open = async (
+  { url, snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL }: OpenOptions,
+): Promise<Engine> => {
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
   database.exec(INIT);
-  return { url, database };
+  return { url, database, snapshotInterval };
 };
 
 export const close = (engine: Engine): void => {
@@ -655,6 +692,7 @@ const applyCommitTransaction = (
   }
 
   engine.database.prepare(UPDATE_BRANCH_HEAD).run({ branch, seq });
+  materializeSnapshots(engine, branch, facts);
 
   return { seq, hash, branch, facts };
 };
@@ -888,10 +926,20 @@ const reconstructPatchedDocument = (
     id,
     seq,
   }) as ReadRow | undefined;
+  const snapshotRow = engine.database.prepare(SELECT_LATEST_SNAPSHOT).get({
+    branch,
+    id,
+    seq,
+  }) as SnapshotRow | undefined;
 
   let baseSeq = 0;
   let document = emptyEntityDocument();
-  if (baseRow) {
+  if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
+    baseSeq = snapshotRow.seq;
+    document = normalizeEntityDocument(
+      JSON.parse(snapshotRow.data ?? "null") as JSONValue,
+    );
+  } else if (baseRow) {
     baseSeq = baseRow.seq;
     if (baseRow.fact_type === "set") {
       document = normalizeEntityDocument(
@@ -915,6 +963,83 @@ const reconstructPatchedDocument = (
   }
 
   return document;
+};
+
+const materializeSnapshots = (
+  engine: Engine,
+  branch: BranchName,
+  facts: readonly AppliedFact[],
+): void => {
+  if (engine.snapshotInterval <= 0) {
+    return;
+  }
+
+  const seen = new Set<string>();
+  for (const fact of facts) {
+    const key = headKey(branch, fact.id);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    maybeMaterializeSnapshot(engine, branch, fact.id);
+  }
+};
+
+const maybeMaterializeSnapshot = (
+  engine: Engine,
+  branch: BranchName,
+  id: EntityId,
+): void => {
+  const state = readState(engine, { id, branch });
+  if (state === null || state.document === null || state.factType !== "patch") {
+    return;
+  }
+
+  const baseSeq = latestMaterializationSeq(engine, branch, id, state.seq);
+  const patchCount = (
+    engine.database.prepare(SELECT_PATCH_COUNT).get({
+      branch,
+      id,
+      after_seq: baseSeq,
+      seq: state.seq,
+    }) as { count: number }
+  ).count;
+
+  if (patchCount < engine.snapshotInterval) {
+    return;
+  }
+
+  const valueRef = toReference(state.document);
+  engine.database.prepare(INSERT_VALUE).run({
+    hash: valueRef,
+    data: JSON.stringify(state.document),
+  });
+  engine.database.prepare(INSERT_SNAPSHOT).run({
+    id,
+    seq: state.seq,
+    value_ref: valueRef,
+    branch,
+  });
+};
+
+const latestMaterializationSeq = (
+  engine: Engine,
+  branch: BranchName,
+  id: EntityId,
+  seq: number,
+): number => {
+  const baseRow = engine.database.prepare(SELECT_LATEST_BASE).get({
+    branch,
+    id,
+    seq,
+  }) as ReadRow | undefined;
+  const snapshotRow = engine.database.prepare(SELECT_LATEST_SNAPSHOT).get({
+    branch,
+    id,
+    seq,
+  }) as SnapshotRow | undefined;
+
+  return Math.max(baseRow?.seq ?? 0, snapshotRow?.seq ?? 0);
 };
 
 const applyPatchDocument = (
