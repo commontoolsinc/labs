@@ -104,6 +104,7 @@ export class CTTextarea extends BaseElement {
       --ct-textarea-color-error: var(--ct-theme-color-error, #dc2626);
       --ct-textarea-color-surface: var(--ct-theme-color-surface, #f1f5f9);
       --ct-textarea-color-text-muted: var(--ct-theme-color-text-muted, #64748b);
+      --ct-textarea-color-placeholder: #94a3b8;
       --ct-textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
       --ct-textarea-font-family: var(--ct-theme-font-family, inherit);
       --ct-textarea-animation-duration: var(--ct-theme-animation-duration, 150ms);
@@ -116,7 +117,7 @@ export class CTTextarea extends BaseElement {
       --destructive: var(--ct-textarea-color-error, #dc2626);
       --muted: var(--ct-textarea-color-surface, #f1f5f9);
       --muted-foreground: var(--ct-textarea-color-text-muted, #64748b);
-      --placeholder: var(--ct-textarea-color-text-muted, #94a3b8);
+      --placeholder: var(--ct-textarea-color-placeholder, #94a3b8);
 
       /* Textarea dimensions */
       --textarea-padding-x: 0.75rem;

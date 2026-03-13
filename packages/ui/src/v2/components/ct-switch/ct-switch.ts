@@ -30,12 +30,7 @@ export class CTSwitch extends BaseElement {
     :host {
       /* Default color values if not provided */
       --ct-switch-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-switch-color-foreground: var(--ct-theme-color-text, #0f172a);
       --ct-switch-color-primary: var(--ct-theme-color-primary, #0f172a);
-      --ct-switch-color-primary-foreground: var(
-        --ct-theme-color-primary-foreground,
-        #f8fafc
-      );
       --ct-switch-color-border: var(--ct-theme-color-border, #e2e8f0);
       --ct-switch-color-ring: var(--ct-theme-color-primary, #94a3b8);
       --ct-switch-color-input: var(--ct-theme-color-border, #e2e8f0);

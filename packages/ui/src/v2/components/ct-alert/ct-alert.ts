@@ -53,12 +53,21 @@ export class CTAlert extends BaseElement {
         --ct-theme-color-error-foreground,
         #fef2f2
       );
-      --ct-alert-color-warning: #f59e0b;
-      --ct-alert-color-warning-foreground: #451a03;
-      --ct-alert-color-success: #10b981;
-      --ct-alert-color-success-foreground: #f0fdf4;
-      --ct-alert-color-info: #3b82f6;
-      --ct-alert-color-info-foreground: #eff6ff;
+      --ct-alert-color-warning: var(--ct-theme-color-warning, #f59e0b);
+      --ct-alert-color-warning-foreground: var(
+        --ct-theme-color-warning-foreground,
+        #451a03
+      );
+      --ct-alert-color-success: var(--ct-theme-color-success, #10b981);
+      --ct-alert-color-success-foreground: var(
+        --ct-theme-color-success-foreground,
+        #f0fdf4
+      );
+      --ct-alert-color-info: var(--ct-theme-color-primary, #3b82f6);
+      --ct-alert-color-info-foreground: var(
+        --ct-theme-color-primary-foreground,
+        #eff6ff
+      );
       --ct-alert-color-border: var(--ct-theme-color-border, #e2e8f0);
       --ct-alert-color-ring: var(--ct-theme-color-primary, #94a3b8);
 
@@ -185,7 +194,7 @@ export class CTAlert extends BaseElement {
 
     /* Warning variant */
     .alert.variant-warning {
-      background-color: #fef3c7;
+      background-color: var(--ct-alert-color-warning-foreground, #fef3c7);
       color: var(--ct-alert-color-warning-foreground, #451a03);
       border-color: var(--ct-alert-color-warning, #f59e0b);
     }
@@ -206,7 +215,7 @@ export class CTAlert extends BaseElement {
     /* Success variant */
     .alert.variant-success {
       background-color: var(--ct-alert-color-success-foreground, #f0fdf4);
-      color: #065f46;
+      color: var(--ct-alert-color-success, #10b981);
       border-color: var(--ct-alert-color-success, #10b981);
     }
 
@@ -215,18 +224,18 @@ export class CTAlert extends BaseElement {
     }
 
     .alert.variant-success .alert-title {
-      color: #065f46;
+      color: var(--ct-alert-color-success, #10b981);
     }
 
     .alert.variant-success .alert-description {
-      color: #065f46;
+      color: var(--ct-alert-color-success, #10b981);
       opacity: 0.8;
     }
 
     /* Info variant */
     .alert.variant-info {
       background-color: var(--ct-alert-color-info-foreground, #eff6ff);
-      color: #1e3a8a;
+      color: var(--ct-alert-color-info, #3b82f6);
       border-color: var(--ct-alert-color-info, #3b82f6);
     }
 
@@ -235,11 +244,11 @@ export class CTAlert extends BaseElement {
     }
 
     .alert.variant-info .alert-title {
-      color: #1e3a8a;
+      color: var(--ct-alert-color-info, #3b82f6);
     }
 
     .alert.variant-info .alert-description {
-      color: #1e3a8a;
+      color: var(--ct-alert-color-info, #3b82f6);
       opacity: 0.8;
     }
 

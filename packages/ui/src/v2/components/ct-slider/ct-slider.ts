@@ -241,20 +241,6 @@ export class CTSlider extends BaseElement {
               transition: none;
             }
           }
-
-          /* Dark mode support (when CSS variables are updated) */
-          @media (prefers-color-scheme: dark) {
-            :host {
-              --ct-slider-color-background: #0f172a;
-              --ct-slider-color-foreground: #f8fafc;
-              --ct-slider-color-border: #334155;
-              --ct-slider-color-ring: #64748b;
-              --ct-slider-color-primary: #60a5fa;
-              --ct-slider-color-primary-foreground: #0f172a;
-              --ct-slider-color-muted: #1e293b;
-              --ct-slider-color-muted-foreground: #94a3b8;
-            }
-          }
         `;
 
         declare value: number;

@@ -8,13 +8,16 @@ export const styles = css`
     );
     --ct-button-border-radius-full: var(
       --ct-theme-border-radius-full,
-      var(--ct-radius-full, 9999px)
+      var(--ct-border-radius-full, 9999px)
     );
     --ct-button-font-family: var(--ct-theme-font-family, inherit);
     --ct-button-animation-duration: var(--ct-theme-animation-duration, 0.2s);
     --ct-button-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
     --ct-button-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
     --ct-button-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+    --ct-button-spacing-x-lg: 2rem;
+    --ct-button-icon-size: 2.5rem;
+    --ct-button-icon-padding: 0;
     --ct-button-color-primary: var(
       --ct-theme-color-primary,
       var(--ct-colors-primary-500, #3b82f6)
@@ -126,15 +129,15 @@ export const styles = css`
     .button.lg {
       height: 2.75rem;
       padding: var(--ct-button-spacing-normal, 0.5rem)
-        var(--ct-button-spacing-loose, 2rem);
+        var(--ct-button-spacing-x-lg, 2rem);
       font-size: 1rem;
       line-height: 1.5rem;
     }
 
     .button.icon {
-      height: 2.5rem;
-      width: 2.5rem;
-      padding: 0;
+      height: var(--ct-button-icon-size, 2.5rem);
+      width: var(--ct-button-icon-size, 2.5rem);
+      padding: var(--ct-button-icon-padding, 0);
     }
 
     .button.md {

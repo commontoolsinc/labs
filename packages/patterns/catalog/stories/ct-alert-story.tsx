@@ -36,7 +36,7 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
             variant={variant}
             dismissible={dismissible}
           >
-            {showIcon ? <span slot="icon">{icon}</span> : null}
+            {showIcon.get() ? <span slot="icon">{icon}</span> : null}
             <span slot="title">{title}</span>
             <span slot="description">{description}</span>
             {body}

@@ -5,14 +5,20 @@
 export const progressStyles = `
   :host {
     /* Default color values if not provided */
-    --ct-progress-color-background: #ffffff;
-    --ct-progress-color-foreground: #0f172a;
-    --ct-progress-color-track: #e2e8f0;
-    --ct-progress-color-ring: #94a3b8;
-    --ct-progress-color-indicator: #3b82f6;
-    --ct-progress-color-indicator-foreground: #ffffff;
-    --ct-progress-color-muted: #f8fafc;
-    --ct-progress-color-muted-foreground: #64748b;
+    --ct-progress-color-background: var(--ct-theme-color-background, #ffffff);
+    --ct-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
+    --ct-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
+    --ct-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
+    --ct-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
+    --ct-progress-color-indicator-foreground: var(
+      --ct-theme-color-primary-foreground,
+      #ffffff
+    );
+    --ct-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
+    --ct-progress-color-muted-foreground: var(
+      --ct-theme-color-text-muted,
+      #64748b
+    );
     
     /* Progress dimensions */
     --progress-height: 0.5rem; /* h-2 equivalent */
@@ -96,20 +102,6 @@ export const progressStyles = `
     }
   }
 
-  /* Dark mode support (when CSS variables are updated) */
-  @media (prefers-color-scheme: dark) {
-    :host {
-      --ct-progress-color-background: #0f172a;
-      --ct-progress-color-foreground: #f8fafc;
-      --ct-progress-color-track: #334155;
-      --ct-progress-color-ring: #64748b;
-      --ct-progress-color-indicator: #60a5fa;
-      --ct-progress-color-indicator-foreground: #0f172a;
-      --ct-progress-color-muted: #1e293b;
-      --ct-progress-color-muted-foreground: #94a3b8;
-    }
-  }
-
   /* Size variants via CSS custom properties */
   :host([size="sm"]) {
     --progress-height: 0.25rem;
@@ -125,15 +117,15 @@ export const progressStyles = `
 
   /* Custom styling support */
   :host([variant="success"]) {
-    --ct-progress-color-indicator: #22c55e;
+    --ct-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
   }
 
   :host([variant="warning"]) {
-    --ct-progress-color-indicator: #f59e0b;
+    --ct-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
   }
 
   :host([variant="error"]) {
-    --ct-progress-color-indicator: #ef4444;
+    --ct-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
   }
 
   :host([variant="info"]) {
