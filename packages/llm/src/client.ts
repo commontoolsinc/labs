@@ -398,7 +398,9 @@ export async function loadConversationFixtureFile(
 ): Promise<void> {
   const text = await Deno.readTextFile(path);
   const fixture: ConversationFixture = JSON.parse(text);
-  if (!Array.isArray(fixture.responses)) {
+  if (
+    !fixture || typeof fixture !== "object" || !Array.isArray(fixture.responses)
+  ) {
     throw new Error(
       `Invalid fixture at ${path}: "responses" must be an array`,
     );
