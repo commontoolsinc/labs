@@ -39,6 +39,8 @@ import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
 import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
+import ChatStory from "../stories/ct-chat-story.tsx";
+import CalendarStory from "../stories/ct-calendar-story.tsx";
 
 interface StoryRendererInput {
   selected: Writable<string>;
@@ -136,6 +138,10 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return NoteStory({});
         case "kitchen-sink":
           return KitchenSinkStory({});
+        case "chat":
+          return ChatStory({});
+        case "calendar":
+          return CalendarStory({});
         default:
           return null;
       }

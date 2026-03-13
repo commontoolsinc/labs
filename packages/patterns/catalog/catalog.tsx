@@ -52,6 +52,7 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "toggle", label: "Toggle" },
                   { id: "toggle-group", label: "Toggle Group" },
                   { id: "message-input", label: "Message Input" },
+                  { id: "calendar", label: "Calendar" },
                   { id: "fab", label: "FAB" },
                 ],
               },
@@ -96,6 +97,10 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "tab-list", label: "Tab List" },
                   { id: "tabs", label: "Tabs" },
                 ],
+              },
+              {
+                name: "Chat",
+                items: [{ id: "chat", label: "Chat" }],
               },
               {
                 name: "Data Visualization",
