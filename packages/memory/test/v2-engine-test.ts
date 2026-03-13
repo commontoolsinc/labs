@@ -25,6 +25,17 @@ const createEngine = async (): Promise<{
   return { engine, path };
 };
 
+const createEngineWithOptions = async (
+  options: Omit<Parameters<typeof open>[0], "url">,
+): Promise<{
+  engine: Engine;
+  path: string;
+}> => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const engine = await open({ url: toFileUrl(path), ...options });
+  return { engine, path };
+};
+
 Deno.test("memory v2 engine bootstraps the spec-native schema", async () => {
   const { engine, path } = await createEngine();
 
@@ -447,6 +458,148 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
         add: ["two", "three"],
       },
     ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine materializes snapshots and reuses them for later reads", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    snapshotInterval: 2,
+  });
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+    const original = toEntityDocument({
+      tags: ["one"],
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "entity:snapshot", value: original }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:snapshot",
+          patches: [{
+            op: "splice",
+            path: "/tags",
+            index: 1,
+            remove: 0,
+            add: ["two"],
+          }],
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 3 },
+      },
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:snapshot",
+          patches: [{
+            op: "splice",
+            path: "/tags",
+            index: 2,
+            remove: 0,
+            add: ["three"],
+          }],
+        }],
+      },
+    });
+
+    const snapshotRow = engine.database.prepare(
+      `SELECT seq, value_ref
+       FROM snapshot
+       WHERE branch = '' AND id = 'entity:snapshot'
+       ORDER BY seq DESC
+       LIMIT 1`,
+    ).get() as
+      | {
+        seq: number;
+        value_ref: string;
+      }
+      | undefined;
+    assertExists(snapshotRow);
+    assertEquals(snapshotRow.seq, 3);
+
+    const snapshotValue = engine.database.prepare(
+      "SELECT data FROM value WHERE hash = ?",
+    ).get([snapshotRow.value_ref]) as { data: string } | undefined;
+    assertEquals(JSON.parse(snapshotValue?.data ?? "null"), {
+      value: { tags: ["one", "two", "three"] },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 4 },
+      },
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:snapshot",
+          patches: [{
+            op: "splice",
+            path: "/tags",
+            index: 3,
+            remove: 0,
+            add: ["four"],
+          }],
+        }],
+      },
+    });
+
+    engine.database.prepare(
+      "DELETE FROM fact WHERE id = 'entity:snapshot' AND seq = 2",
+    ).run();
+
+    assertEquals(read(engine, { id: "entity:snapshot", seq: 3 }), {
+      value: { tags: ["one", "two", "three"] },
+    });
+    assertEquals(read(engine, { id: "entity:snapshot" }), {
+      value: { tags: ["one", "two", "three", "four"] },
+    });
   } finally {
     close(engine);
     await Deno.remove(path);
