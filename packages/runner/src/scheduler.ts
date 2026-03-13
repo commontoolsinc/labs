@@ -32,7 +32,6 @@ import type {
   IStorageSubscription,
   MediaType,
   MemoryAddressPathComponent,
-  Metadata,
 } from "./storage/interface.ts";
 import {
   addressesToPathByEntity,
@@ -45,6 +44,11 @@ import {
   getDirectTransactionReactivityLog,
   getTransactionWriteDetails,
 } from "./storage/transaction-inspection.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+  reactivityLogFromActivities,
+} from "./storage/reactivity-log.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -119,21 +123,7 @@ export type ReactivityLog = {
   potentialWrites?: IMemorySpaceAddress[];
 };
 
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
-
-export const ignoreReadForScheduling: Metadata = {
-  [ignoreReadForSchedulingMarker]: true,
-};
-
-export const markReadAsPotentialWrite: Metadata = {
-  [markReadAsPotentialWriteMarker]: true,
-};
+export { ignoreReadForScheduling, markReadAsPotentialWrite };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
@@ -3414,40 +3404,7 @@ export function txToReactivityLog(
   if (direct) {
     return direct;
   }
-
-  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
-  for (const activity of tx.journal.activity()) {
-    if ("read" in activity && activity.read) {
-      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
-      const address = {
-        space: activity.read.space,
-        id: activity.read.id,
-        type: activity.read.type,
-        path: activity.read.path.slice(1), // Remove the "value" prefix
-      };
-      if (activity.read.nonRecursive === true) {
-        log.shallowReads.push(address);
-      } else {
-        log.reads.push(address);
-      }
-      // If marked as potential write, also add to potentialWrites
-      if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
-        if (!log.potentialWrites) {
-          log.potentialWrites = [];
-        }
-        log.potentialWrites.push(address);
-      }
-    }
-    if ("write" in activity && activity.write) {
-      log.writes.push({
-        space: activity.write.space,
-        id: activity.write.id,
-        type: activity.write.type,
-        path: activity.write.path.slice(1),
-      });
-    }
-  }
-  return log;
+  return reactivityLogFromActivities(tx.journal.activity());
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {
