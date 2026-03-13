@@ -451,10 +451,30 @@ export class Scheduler {
         }
         writeDetailsBySpace.set(write.space, details);
       }
-      writes.set(key, details.get(key));
+      writes.set(key, this.lookupComparableWriteValue(details, write));
       if (!writes.has(key)) writes.set(key, undefined);
     }
     return writes;
+  }
+
+  private lookupComparableWriteValue(
+    details: Map<string, unknown>,
+    write: IMemorySpaceAddress,
+  ): unknown {
+    const exactKey = this.makeAddressKey(write);
+    if (details.has(exactKey)) {
+      return details.get(exactKey);
+    }
+    if (write.type === "application/json") {
+      const valueKey = this.makeAddressKey({
+        ...write,
+        path: ["value", ...write.path],
+      });
+      if (details.has(valueKey)) {
+        return details.get(valueKey);
+      }
+    }
+    return undefined;
   }
 
   private runIdempotencyRecheck(
@@ -2413,11 +2433,16 @@ export class Scheduler {
         if (!details) {
           details = new Map<string, unknown>();
           for (const detail of getTransactionWriteDetails(tx, write.space)) {
-            details.set(makeKey(detail.address), detail.value);
+            const raw = detail.value;
+            const value = isRecord(raw) && "value" in raw ? raw.value : raw;
+            details.set(makeKey(detail.address), value);
           }
           writeDetailsBySpace.set(write.space, details);
         }
-        writeValues.set(key, details.get(key));
+        writeValues.set(
+          key,
+          this.lookupComparableWriteValue(details, write),
+        );
         if (!writeValues.has(key)) writeValues.set(key, undefined);
       } catch {
         writeValues.set(key, "[write-error]");

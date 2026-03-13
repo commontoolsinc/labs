@@ -1,4 +1,6 @@
 import { unclaimed } from "@commontools/memory/fact";
+import { deepFreeze } from "@commontools/memory/deep-freeze";
+import { getExperimentalStorableConfig } from "@commontools/memory/storable-value";
 import type { StorableDatum } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type {
@@ -48,6 +50,7 @@ type RootAttestation = IAttestation;
 type DocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
+  readonlyCurrent?: RootAttestation;
   seq?: number;
   writeDetails: Map<string, TransactionWriteDetail>;
 };
@@ -75,6 +78,45 @@ type DoneState = {
 };
 
 type TxState = ReadyState | DoneState | PendingState;
+
+const isolateTransactionValue = <T>(
+  value: T,
+  seen: Map<object, unknown> = new Map(),
+): T => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return seen.get(value) as T;
+  }
+
+  if (Array.isArray(value)) {
+    const copy = new Array(value.length);
+    seen.set(value, copy);
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) {
+        copy[i] = isolateTransactionValue(value[i], seen);
+      }
+    }
+    return copy as T;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return value;
+  }
+
+  const copy = Object.create(prototype) as Record<PropertyKey, unknown>;
+  seen.set(value, copy);
+  for (const key of Reflect.ownKeys(value)) {
+    copy[key] = isolateTransactionValue(
+      (value as Record<PropertyKey, unknown>)[key],
+      seen,
+    );
+  }
+  return copy as T;
+};
 
 class V2TransactionJournal implements ITransactionJournal {
   constructor(private readonly tx: V2StorageTransaction) {}
@@ -267,7 +309,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const { space: _, ...memoryAddress } = address;
-    const result = readAttestation(doc.current, memoryAddress);
+    const result = readAttestation(this.readable(doc), memoryAddress);
     if (
       !address.id.startsWith("data:") &&
       !branch.validations.has(this.docKey(address))
@@ -303,12 +345,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     const branch = this.branch(space);
     const { doc } = this.document(branch, address);
     const previous = readAttestation(doc.current, address);
-    const result = writeAttestation(doc.current, address, value);
+    const isolatedValue = value === undefined
+      ? undefined
+      : isolateTransactionValue(value) as StorableDatum;
+    const result = writeAttestation(doc.current, address, isolatedValue);
     if (result.error) {
       return { error: result.error.from(space) };
     }
 
     doc.current = result.ok as RootAttestation;
+    doc.readonlyCurrent = undefined;
     this.#activity.push({
       write: {
         space,
@@ -322,7 +368,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const existing = doc.writeDetails.get(key);
     doc.writeDetails.set(key, {
       address: { ...address, space },
-      value,
+      value: isolatedValue,
       previousValue: existing?.previousValue ?? previous.ok?.value,
     });
 
@@ -474,6 +520,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     return { ok: {} };
+  }
+
+  private readable(doc: DocumentEntry): RootAttestation {
+    if (!getExperimentalStorableConfig().richStorableValues) {
+      return doc.current;
+    }
+
+    if (!doc.readonlyCurrent) {
+      doc.readonlyCurrent = {
+        ...doc.current,
+        value: deepFreeze(
+          isolateTransactionValue(doc.current.value),
+        ) as StorableDatum,
+      };
+    }
+    return doc.readonlyCurrent;
   }
 
   private buildTransaction(

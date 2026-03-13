@@ -22,7 +22,7 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   };
 
   const tx1 = runtime.edit();
-  tx1.write({ ...address, space }, { foo: "bar" });
+  tx1.writeValueOrThrow({ ...address, space }, { foo: "bar" });
   assert((await tx1.commit()).ok);
 
   const provider = storage.open(space);
@@ -40,7 +40,7 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   });
 
   const tx2 = runtime.edit();
-  tx2.write({ ...address, space }, { foo: "bar" });
+  tx2.writeValueOrThrow({ ...address, space }, { foo: "bar" });
   assert((await tx2.commit()).ok);
 
   const finalState = provider.replica.get(address) as
