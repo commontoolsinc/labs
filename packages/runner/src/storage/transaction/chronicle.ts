@@ -1,4 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
 import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import type {
@@ -35,9 +36,6 @@ import {
 } from "./attestation.ts";
 import { refer } from "@commonfabric/memory/reference";
 import * as Edit from "./edit.ts";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isStoredDocumentEnvelope = (
   value: StorableValue | undefined,
