@@ -90,7 +90,7 @@
 - [x] Cut runtime `memoryVersion: "v2"` over to a real v2 storage path in the runner rather than the old compatibility-backed route.
 - [x] Preserve the current provider/transaction surface so runner and scheduler call sites remain unchanged.
 - [x] Keep `syncCell()` and schema sync on `graph.query`; one-shot query remains only a compatibility and testing path.
-- [x] Replace the temporary v1-style transaction adapter with a v2-native transaction core and narrow inspection hooks (`getReadActivities()`, `getWriteDetails()`) so v2 no longer depends on `Journal` / `Chronicle` internally.
+- [x] Replace the temporary v1-style transaction adapter with a v2-native transaction core and narrow inspection hooks (`getReactivityLog()`, `getReadActivities()`, `getWriteDetails()`) so v2 no longer depends on `Journal` / `Chronicle` internally.
 - [x] Preserve basic notification timing for optimistic commit, revert, integrate, `load`, `pull`, and `reset`, with explicit coverage for conflict-before-revert ordering.
 - [x] Reconnect the shared v2 client and resubscribe active `graph.query` views after websocket loss.
 - [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
@@ -109,11 +109,12 @@
 
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
-- [ ] Extend the v2-native transaction core with a direct reactivity-log export if the remaining scheduler consumers still justify it, otherwise delete the last journal-activity fallback path.
+- [x] Extend the v2-native transaction core with a direct reactivity-log export, while keeping the journal-activity path only as a compatibility fallback for older callers and tests.
 - [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [ ] Add a short-lived server-side subscription and session resume cache to reduce replay traffic without changing the client contract.
 - [ ] Tune prepared-statement caching and blob I/O only after the cutover suite is green.
+- [ ] Revisit any future bulk-write shortcut only after benchmark evidence shows it clearly beats the existing `writeValueOrThrow()` compatibility path.
 
 ## Phase 3: Advanced Features After The Cutover
 - [ ] Wire up branches end to end using the already-created `branch` table: create/delete/list, branch-scoped head resolution, merge proposals, branch-aware queries/subscriptions, and point-in-time reads on branches.

@@ -41,6 +41,7 @@ import {
   TransactionCompleteError,
   WriteIsolationError,
 } from "./transaction.ts";
+import { reactivityLogFromActivities } from "./reactivity-log.ts";
 
 type RootAttestation = IAttestation;
 
@@ -73,7 +74,7 @@ type DoneState = {
   result: Result<Unit, StorageTransactionFailed>;
 };
 
-type TxState = ReadyState | PendingState | DoneState;
+type TxState = ReadyState | DoneState | PendingState;
 
 class V2TransactionJournal implements ITransactionJournal {
   constructor(private readonly tx: V2StorageTransaction) {}
@@ -181,6 +182,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getReadActivities() {
     return this.#readActivities;
+  }
+
+  getReactivityLog() {
+    return reactivityLogFromActivities(this.#activity);
   }
 
   *getWriteDetails(space: MemorySpace): Iterable<TransactionWriteDetail> {
@@ -323,7 +328,6 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     return result;
   }
-
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
     const ready = this.editable();
     if (ready.error) {

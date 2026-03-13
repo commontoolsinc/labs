@@ -51,7 +51,9 @@ test followed by the code that makes it pass.
 16. [Phasing](#16-phasing)
 17. [Gotchas](#17-gotchas)
 18. [Anti-Patterns](#18-anti-patterns)
-19. [Appendix A: Required Spec Changes](#appendix-a-required-spec-changes)
+19. [Minimal Transaction Compatibility Surface](#19-minimal-transaction-compatibility-surface)
+20. [Raw vs Extended Addressing](#20-raw-vs-extended-addressing)
+Appendix A. [Required Spec Changes](#appendix-a-required-spec-changes)
 
 ---
 
@@ -1123,6 +1125,114 @@ If entity has no local state → reads.confirmed with { path, seq: 0 }
 
 No hash comparison needed. A complex hash comparison algorithm for this routing
 is unnecessary complexity.
+
+### Do NOT Add Speculative Bulk-Write Hooks Without Measurement
+
+`Cell.set()` performance is not dominated by every abstraction layer equally.
+Before adding a new bulk write path or bypass around
+`IExtendedStorageTransaction.writeValueOrThrow()`, measure the real hotspot.
+
+In practice, the largest remaining v2 costs have clustered around:
+
+- `normalizeAndDiff()` and other `Cell.set()` preprocessing
+- repeated transaction-local object updates
+- scheduler/query invalidation work
+
+A naive "bulk apply the change set directly to the raw transaction" hook may add
+surface area without materially improving the dominant benchmarks. Only keep a
+new fast path if the benchmark delta is clear enough to justify the extra API.
+
+---
+
+## 19. Minimal Transaction Compatibility Surface
+
+The v2 runner does **not** need a full v1-style `Journal` / `Chronicle`
+reconstruction internally.
+
+What the current runtime actually consumes from a completed transaction is much
+smaller:
+
+1. A scheduler-facing **reactivity log**
+2. A commit/conflict-facing stream of **read activities**
+3. A debug/summary-facing stream of **write details**
+
+That means the preferred native v2 transaction surface is:
+
+```typescript
+interface IStorageTransaction {
+  getReactivityLog?(): TransactionReactivityLog;
+  getReadActivities?(): Iterable<IReadActivity>;
+  getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+}
+```
+
+`journal.activity()`, `journal.novelty(space)`, and `journal.history(space)`
+should remain only as compatibility fallbacks for legacy code and tests. They
+must not dictate the internal structure of the v2 transaction core.
+
+Implementation guidance:
+
+- `txToReactivityLog()` should probe `getReactivityLog()` first.
+- Conflict tracking should probe `getReadActivities()` first.
+- Human-facing transaction summaries/debug views should probe
+  `getWriteDetails(space)` first.
+- If a future caller needs more detail, add another **narrow** native hook
+  instead of recreating broad v1 journal machinery inside v2.
+
+This is the intended direction for simplifying the v2 runner integration: keep
+`IExtendedStorageTransaction` stable, but make the internal v2 transaction core
+export exactly the native products the runner uses.
+
+---
+
+## 20. Raw vs Extended Addressing
+
+There are two address layers in runner storage code, and mixing them up causes
+subtle bugs:
+
+### Raw `IStorageTransaction`
+
+Raw transaction reads and writes operate on the **stored document envelope**.
+For JSON entities that means the top level may contain siblings such as:
+
+```json
+{
+  "value": { ... },
+  "source": { "/": "..." }
+}
+```
+
+Examples:
+
+- Write the entire stored document: path `[]`, value `{ value: {...} }`
+- Read the user-visible payload: path `["value"]`
+- Read lineage metadata: path `["source"]`
+
+### `IExtendedStorageTransaction`
+
+The extended wrapper exists to preserve runner-facing convenience methods:
+
+- `readValueOrThrow(address)` prepends `["value"]`
+- `writeValueOrThrow(address, value)` prepends `["value"]`
+- nested writes create missing parents when needed
+
+This means a raw v2 transaction test is **not** interchangeable with an
+extended transaction test.
+
+Important consequences:
+
+- A raw nested write to `["value", ...path]` will fail on a missing document
+  unless the caller first creates the document or writes the whole envelope.
+- The extended wrapper is the compatibility layer that provides parent
+  creation for nested value writes.
+- Scheduler-facing reactivity logs should strip the leading `"value"` segment
+  before exposing paths to the rest of the runtime.
+
+When writing v2-native tests, decide explicitly which layer is under test:
+
+- Use raw transactions to test native storage-core behavior.
+- Use `IExtendedStorageTransaction` to test the compatibility contract that
+  runner code already depends on.
 
 ---
 
