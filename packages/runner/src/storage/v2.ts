@@ -40,6 +40,7 @@ import type {
   IStorageSubscription,
   IStorageTransaction,
   MemoryVersion,
+  NativeStorageCommit,
   OptStorageValue,
   PullError,
   PushError,
@@ -755,6 +756,29 @@ class SpaceReplica implements ISpaceReplica {
             op: "set" as const,
             id: fact.of as URI,
             value: toStoredDocument(fact.is as StorableDatum),
+          }
+      );
+
+    if (operations.length === 0) {
+      return { ok: {} };
+    }
+
+    return await this.commitOperations(operations, source);
+  }
+
+  async commitNative(
+    transaction: NativeStorageCommit,
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const operations = transaction.operations
+      .filter((operation) => operation.type === DOCUMENT_MIME)
+      .map((operation) =>
+        operation.value === undefined
+          ? { op: "delete" as const, id: operation.id }
+          : {
+            op: "set" as const,
+            id: operation.id,
+            value: toStoredDocument(operation.value),
           }
       );
 
