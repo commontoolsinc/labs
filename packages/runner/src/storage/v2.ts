@@ -12,6 +12,7 @@ import {
 } from "@commontools/memory/interface";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
+import type { PatchOp } from "@commontools/memory/v2";
 import type { EntitySnapshot, GraphQueryResult } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
@@ -773,8 +774,15 @@ class SpaceReplica implements ISpaceReplica {
     const operations = transaction.operations
       .filter((operation) => operation.type === DOCUMENT_MIME)
       .map((operation) =>
-        operation.value === undefined
+        operation.op === "delete"
           ? { op: "delete" as const, id: operation.id }
+          : operation.op === "patch"
+          ? {
+            op: "patch" as const,
+            id: operation.id,
+            patches: operation.patches,
+            value: operation.value,
+          }
           : {
             op: "set" as const,
             id: operation.id,
@@ -839,6 +847,7 @@ class SpaceReplica implements ISpaceReplica {
   private async commitOperations(
     operations: Array<
       | { op: "set"; id: URI; value: StorableDatum }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
       | { op: "delete"; id: URI }
     >,
     source?: IStorageTransaction,
@@ -847,11 +856,24 @@ class SpaceReplica implements ISpaceReplica {
     const commit = {
       localSeq,
       reads: this.buildReads(source, localSeq),
-      operations: operations.map((operation) =>
-        operation.op === "delete"
-          ? operation
-          : { ...operation, value: operation.value as any }
-      ),
+      operations: operations.map((operation) => {
+        switch (operation.op) {
+          case "delete":
+            return operation;
+          case "patch":
+            return {
+              op: "patch" as const,
+              id: operation.id,
+              patches: operation.patches,
+            };
+          case "set":
+            return {
+              op: "set" as const,
+              id: operation.id,
+              value: operation.value as any,
+            };
+        }
+      }),
     };
     const touched = operations.map((operation) => operation.id);
     const before = Differential.checkout(
@@ -892,6 +914,7 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: Array<
       | { op: "set"; id: URI; value: StorableDatum }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
       | { op: "delete"; id: URI }
     >,
     commit: any,
@@ -1024,6 +1047,7 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: Array<
       | { op: "set"; id: URI; value: StorableDatum }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
       | { op: "delete"; id: URI }
     >,
     applied: AppliedCommit,
