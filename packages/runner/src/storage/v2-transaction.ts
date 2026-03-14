@@ -1,10 +1,11 @@
 import { unclaimed } from "@commontools/memory/fact";
 import { deepFreeze } from "@commontools/memory/deep-freeze";
+import type { PatchOp } from "@commontools/memory/v2";
 import {
   getExperimentalStorableConfig,
   isArrayIndexPropertyName,
 } from "@commontools/memory/storable-value";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { JSONValue, StorableDatum } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import type {
@@ -177,6 +178,65 @@ const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
   return deepFreeze(isolateTransactionValue(value)) as T;
 };
 
+const isPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean => {
+  if (prefix.length > path.length) {
+    return false;
+  }
+  return prefix.every((segment, index) => path[index] === segment);
+};
+
+const pathsOverlap = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => isPrefixPath(left, right) || isPrefixPath(right, left);
+
+const encodePointer = (path: readonly string[]): string => {
+  if (path.length === 0) {
+    return "";
+  }
+  return `/${
+    path.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
+      .join("/")
+  }`;
+};
+
+const isJSONPatchValue = (
+  value: StorableDatum | undefined,
+): value is JSONValue | undefined => {
+  if (
+    value === undefined || value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+
+  if (typeof value === "bigint") {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((entry) => isJSONPatchValue(entry as StorableDatum));
+  }
+
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) =>
+    isJSONPatchValue(entry as StorableDatum)
+  );
+};
+
 class V2TransactionJournal implements ITransactionJournal {
   constructor(private readonly tx: V2StorageTransaction) {}
 
@@ -305,13 +365,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
 
       const { id, type } = this.parseDocKey(key);
-      operations.push({
-        id,
-        type,
-        ...(doc.current.value === undefined
-          ? {}
-          : { value: doc.current.value }),
-      });
+      const patch = this.buildPatchOperation(id, type, doc);
+      if (patch) {
+        operations.push(patch);
+        continue;
+      }
+
+      operations.push(
+        doc.current.value === undefined
+          ? { op: "delete", id, type }
+          : { op: "set", id, type, value: doc.current.value },
+      );
     }
 
     return { operations };
@@ -779,5 +843,61 @@ export class V2StorageTransaction implements IStorageTransaction {
   private parseDocKey(key: string): { id: URI; type: MediaType } {
     const [id, type] = key.split("|");
     return { id: id as URI, type: type as MediaType };
+  }
+
+  private buildPatchOperation(
+    id: URI,
+    type: MediaType,
+    doc: DocumentEntry,
+  ): NativeStorageCommitOperation | null {
+    if (doc.initial.value === undefined || doc.current.value === undefined) {
+      return null;
+    }
+
+    const details = [...doc.writeDetails.values()];
+    const relativePaths = details.map((detail) => detail.address.path.slice(1));
+    if (
+      relativePaths.some((path) =>
+        path.length === 0 ||
+        path.some((segment) => isArrayIndexPropertyName(segment))
+      )
+    ) {
+      return null;
+    }
+
+    if (
+      !details.every((detail) =>
+        isJSONPatchValue(detail.value) && isJSONPatchValue(detail.previousValue)
+      )
+    ) {
+      return null;
+    }
+
+    for (let index = 0; index < relativePaths.length; index += 1) {
+      for (let other = index + 1; other < relativePaths.length; other += 1) {
+        if (pathsOverlap(relativePaths[index]!, relativePaths[other]!)) {
+          return null;
+        }
+      }
+    }
+
+    const jsonDetails = details.map((detail) => ({
+      path: detail.address.path.slice(1),
+      value: detail.value as JSONValue | undefined,
+      previousValue: detail.previousValue as JSONValue | undefined,
+    }));
+
+    const patches: PatchOp[] = jsonDetails.map((detail) => {
+      const path = encodePointer(detail.path);
+      if (detail.value === undefined) {
+        return { op: "remove", path };
+      }
+      if (detail.previousValue === undefined) {
+        return { op: "add", path, value: detail.value };
+      }
+      return { op: "replace", path, value: detail.value };
+    });
+
+    return { op: "patch", id, type, patches, value: doc.current.value };
   }
 }

@@ -905,9 +905,21 @@ full `set` operations (replacing the entire entity value). This creates
 path-aware read dependencies because `diffAndUpdate()` reads the current value
 to compute diffs.
 
-Later phases will optimize: `Cell.set()` can directly produce `patch`
-operations, and eventually `Cell.push()` / `Cell.remove()` can produce more
-targeted operations. But not all patches are equal:
+The current branch now has a conservative direct-patch fast path for the
+v2-native commit draft hook:
+
+- Stable object-path writes can emit `patch` operations directly.
+- Today that includes `replace`, `add`, and `remove` on non-array JSON paths.
+- Array-index writes still fall back to full `set`.
+- Overlapping writes within the same transaction still fall back to full `set`.
+
+This means `Cell.set()` and path writes no longer always have to materialize a
+whole-document `set` when the transaction core can prove the write is a simple,
+position-independent object-path update.
+
+Later phases will widen this safely: `Cell.push()` / `Cell.remove()` can
+produce more targeted operations, and some patch classes may eventually shed
+unnecessary read dependencies. But not all patches are equal:
 
 - **Position-independent patches** overwrite stable keys and are candidates for
   future read-free fast paths.
@@ -915,6 +927,18 @@ targeted operations. But not all patches are equal:
   document. `splice`, positional array edits, and today's `remove` behavior are
   in this class and should retain read dependencies until we add stronger
   semantics.
+
+### Native Commit Drafts May Carry Local-Only Materialized Values
+
+The v2 runner path uses a native commit-draft hook between the transaction core
+and the local replica. For `patch` operations, that draft may include both:
+
+- the wire-visible patch list (`patches`)
+- the materialized post-patch document value used for optimistic local apply
+
+This is a local optimization boundary only. The final wire commit still sends
+just `{ op: "patch", id, patches }`. Do not treat the materialized value as a
+protocol field.
 
 ### Concurrent Patches Without Overlapping Reads
 

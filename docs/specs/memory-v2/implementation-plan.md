@@ -117,7 +117,7 @@
 - [x] Route v2 transactions to v2 replicas through a native commit-draft hook, so the hot path no longer has to round-trip through legacy `{ the, of, is }` facts before building `ClientCommit`.
 - [x] Compact redundant descendant confirmed/pending read dependencies before sending v2 commits, while preserving distinct `nonRecursive` read scopes.
 - [x] Add a native v2 batched-write hook behind `IExtendedStorageTransaction`, but keep `applyChangeSet()` on the one-write-at-a-time compatibility path until unschematized proxy reads prove they stay behaviorally identical.
-- [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.
+- [x] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe. The current fast path covers non-array object-path `replace` / `add` / `remove`; array-index and overlapping writes still fall back to full `set`.
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [x] Add a short-lived server-side subscription and session resume cache so reconnecting clients can reuse unchanged subscribed query results without changing the `session.open` / `graph.query` contract.
 - [ ] Tune prepared-statement caching and blob I/O only after the cutover suite is green.

@@ -1,4 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
+import type { PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
   type Assertion,
@@ -23,7 +24,6 @@ import {
   type Unit,
   type URI,
   type Variant,
-  type MemoryVersion,
 } from "@commonfabric/memory/interface";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
@@ -958,11 +958,25 @@ export interface TransactionWriteDetail {
   previousValue?: Immutable<StorableDatum>;
 }
 
-export interface NativeStorageCommitOperation {
-  id: URI;
-  type: MediaType;
-  value?: StorableDatum;
-}
+export type NativeStorageCommitOperation =
+  | {
+    op: "set";
+    id: URI;
+    type: MediaType;
+    value: StorableDatum;
+  }
+  | {
+    op: "delete";
+    id: URI;
+    type: MediaType;
+  }
+  | {
+    op: "patch";
+    id: URI;
+    type: MediaType;
+    patches: PatchOp[];
+    value: StorableDatum;
+  };
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
