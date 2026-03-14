@@ -27,6 +27,19 @@ const assertUpdate = (message: ServerMessage): GraphUpdateMessage => {
   return message as GraphUpdateMessage;
 };
 
+class CountingServer extends Server {
+  queryCount = 0;
+
+  override async evaluateGraphQuery(
+    space: string,
+    query: Parameters<Server["evaluateGraphQuery"]>[1],
+    engine?: Parameters<Server["evaluateGraphQuery"]>[2],
+  ) {
+    this.queryCount += 1;
+    return await super.evaluateGraphQuery(space, query, engine);
+  }
+}
+
 Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-server"),
@@ -413,6 +426,184 @@ Deno.test("memory v2 server coalesces subscription refresh after pending commits
     }],
   );
   assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server reuses cached subscribed graph queries across reconnect when head is unchanged", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-resume-cache"),
+  });
+  const space = "did:key:z6Mk-memory-v2-resume-cache";
+  const query = {
+    subscribe: true,
+    roots: [{
+      id: "of:doc:1",
+      selector: {
+        path: [],
+        schema: false,
+      },
+    }],
+  } as const;
+
+  const messages1: ServerMessage[] = [];
+  const connection1 = server.connect((message) => messages1.push(message));
+  await connection1.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages1);
+
+  await connection1.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened1 = assertResponse(shiftMessage(messages1));
+  const sessionId = (opened1.ok as any).sessionId;
+
+  await connection1.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query,
+  }));
+  const subscribed1 = assertResponse(shiftMessage(messages1));
+  assertExists((subscribed1.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 1);
+  connection1.close();
+
+  const messages2: ServerMessage[] = [];
+  const connection2 = server.connect((message) => messages2.push(message));
+  await connection2.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages2);
+
+  await connection2.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-2",
+    space,
+    session: {
+      sessionId,
+      seenSeq: (subscribed1.ok as any)?.serverSeq ?? 0,
+    },
+  }));
+  assertResponse(shiftMessage(messages2));
+
+  await connection2.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-2",
+    space,
+    sessionId,
+    query,
+  }));
+  const subscribed2 = assertResponse(shiftMessage(messages2));
+  assertExists((subscribed2.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 1);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server invalidates cached subscribed graph queries after head changes", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-resume-cache-stale"),
+  });
+  const space = "did:key:z6Mk-memory-v2-resume-cache-stale";
+  const query = {
+    subscribe: true,
+    roots: [{
+      id: "of:doc:1",
+      selector: {
+        path: [],
+        schema: false,
+      },
+    }],
+  } as const;
+
+  const messages1: ServerMessage[] = [];
+  const connection1 = server.connect((message) => messages1.push(message));
+  await connection1.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages1);
+
+  await connection1.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened1 = assertResponse(shiftMessage(messages1));
+  const sessionId = (opened1.ok as any).sessionId;
+
+  await connection1.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query,
+  }));
+  const subscribed1 = assertResponse(shiftMessage(messages1));
+  assertExists((subscribed1.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 1);
+  connection1.close();
+
+  const messages2: ServerMessage[] = [];
+  const connection2 = server.connect((message) => messages2.push(message));
+  await connection2.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages2);
+
+  await connection2.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-2",
+    space,
+    session: {
+      sessionId,
+      seenSeq: (subscribed1.ok as any)?.serverSeq ?? 0,
+    },
+  }));
+  assertResponse(shiftMessage(messages2));
+
+  await connection2.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            hello: "fresh",
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages2)).requestId, "tx-1");
+
+  await connection2.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-2",
+    space,
+    sessionId,
+    query,
+  }));
+  const subscribed2 = assertResponse(shiftMessage(messages2));
+  assertExists((subscribed2.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 2);
+  assertEquals((subscribed2.ok as any)?.serverSeq, 1);
 
   await server.close();
 });
