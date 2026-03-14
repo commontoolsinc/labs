@@ -27,6 +27,8 @@ type SessionState = {
   id: string;
   space: string;
   seenSeq: number;
+  cachedSubscriptions: Map<string, CachedSubscription>;
+  expiresAt: number | null;
 };
 
 type SubscriptionState = {
@@ -35,6 +37,12 @@ type SubscriptionState = {
   sessionId: string;
   query: GraphQuery;
   entities: EntitySnapshot[];
+  serverSeq: number;
+};
+
+type CachedSubscription = {
+  query: GraphQuery;
+  result: GraphQueryResult;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -61,27 +69,91 @@ const respondTypedError = <Result>(
   respondError(requestId, error) as ResponseMessage<Result>;
 
 export class SessionRegistry {
+  readonly #ttlMs: number;
   #sessions = new Map<string, SessionState>();
+
+  constructor(options: { ttlMs?: number } = {}) {
+    this.#ttlMs = options.ttlMs ?? 30_000;
+  }
+
+  #prune(now = Date.now()): void {
+    for (const [sessionId, session] of this.#sessions) {
+      if (session.expiresAt !== null && session.expiresAt <= now) {
+        this.#sessions.delete(sessionId);
+      }
+    }
+  }
 
   open(
     space: string,
     session: SessionDescriptor,
     serverSeq: number,
   ): SessionOpenResult {
+    this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
     const existing = this.#sessions.get(sessionId);
     const seenSeq = session.seenSeq ?? existing?.seenSeq ?? 0;
-    const state = { id: sessionId, space, seenSeq };
+    const state = {
+      id: sessionId,
+      space,
+      seenSeq,
+      cachedSubscriptions: existing?.space === space
+        ? existing.cachedSubscriptions
+        : new Map(),
+      expiresAt: null,
+    };
     this.#sessions.set(sessionId, state);
     return { sessionId, serverSeq };
   }
 
   get(space: string, sessionId: string): SessionState | null {
+    this.#prune();
     const session = this.#sessions.get(sessionId);
     if (session === undefined || session.space !== space) {
       return null;
     }
     return session;
+  }
+
+  cacheSubscriptions(
+    space: string,
+    sessionId: string,
+    subscriptions: Iterable<SubscriptionState>,
+  ): void {
+    const session = this.get(space, sessionId);
+    if (session === null) {
+      return;
+    }
+
+    session.cachedSubscriptions.clear();
+    for (const subscription of subscriptions) {
+      session.cachedSubscriptions.set(queryCacheKey(subscription.query), {
+        query: subscription.query,
+        result: {
+          serverSeq: subscription.serverSeq,
+          entities: subscription.entities,
+        },
+      });
+    }
+    session.expiresAt = Date.now() + this.#ttlMs;
+  }
+
+  getCachedQuery(
+    space: string,
+    sessionId: string,
+    query: GraphQuery,
+    serverSeq: number,
+  ): GraphQueryResult | null {
+    const session = this.get(space, sessionId);
+    if (session === null) {
+      return null;
+    }
+
+    const cached = session.cachedSubscriptions.get(queryCacheKey(query));
+    if (cached === undefined || cached.result.serverSeq !== serverSeq) {
+      return null;
+    }
+    return cached.result;
   }
 }
 
@@ -163,6 +235,7 @@ class Connection {
             sessionId: parsed.sessionId,
             query: parsed.query,
             entities: response.ok.entities,
+            serverSeq: response.ok.serverSeq,
           });
         }
         return;
@@ -198,6 +271,7 @@ class Connection {
         continue;
       }
       subscription.entities = state.entities;
+      subscription.serverSeq = state.serverSeq;
       this.send({
         type: "graph.update",
         subscriptionId: subscription.id,
@@ -215,6 +289,7 @@ class Connection {
       return;
     }
     this.#closed = true;
+    this.server.cacheSubscriptions(this.#subscriptions.values());
     this.#subscriptions.clear();
     this.server.disconnect(this);
   }
@@ -249,6 +324,26 @@ export class Server {
 
   disconnect(connection: Connection): void {
     this.#connections.delete(connection);
+  }
+
+  cacheSubscriptions(subscriptions: Iterable<SubscriptionState>): void {
+    const bySession = new Map<string, SubscriptionState[]>();
+    for (const subscription of subscriptions) {
+      let bucket = bySession.get(subscription.sessionId);
+      if (!bucket) {
+        bucket = [];
+        bySession.set(subscription.sessionId, bucket);
+      }
+      bucket.push(subscription);
+    }
+
+    for (const [sessionId, group] of bySession) {
+      const first = group[0];
+      if (!first) {
+        continue;
+      }
+      this.#sessions.cacheSubscriptions(first.space, sessionId, group);
+    }
   }
 
   async close(): Promise<void> {
@@ -330,10 +425,18 @@ export class Server {
     }
 
     try {
-      const result = await this.evaluateGraphQuery(
-        message.space,
-        message.query,
-      );
+      const engine = await this.openEngine(message.space);
+      const serverSeq = Engine.headSeq(engine);
+      const cached = message.query.subscribe === true
+        ? this.#sessions.getCachedQuery(
+          message.space,
+          message.sessionId,
+          message.query,
+          serverSeq,
+        )
+        : null;
+      const result = cached ??
+        await this.evaluateGraphQuery(message.space, message.query, engine);
       return {
         type: "response",
         requestId: message.requestId,
@@ -355,9 +458,12 @@ export class Server {
     }
   }
 
-  async evaluateGraphQuery(space: string, query: GraphQuery) {
-    const engine = await this.openEngine(space);
-    return queryGraph(space, engine, query);
+  async evaluateGraphQuery(
+    space: string,
+    query: GraphQuery,
+    engine?: Engine.Engine,
+  ) {
+    return queryGraph(space, engine ?? await this.openEngine(space), query);
   }
 
   async putBlob(
@@ -533,6 +639,8 @@ const sameEntities = (
       JSON.stringify(entity.document) === JSON.stringify(other.document);
   });
 };
+
+const queryCacheKey = (query: GraphQuery): string => JSON.stringify(query);
 
 export const parseClientMessage = (
   payload: string,

@@ -1155,6 +1155,13 @@ For subscription delivery, the ordering rule is:
   affected subscription queries before returning the conflict response. This
   ensures that a client receiving a local `"revert"` can retry immediately
   against fresh enough subscribed state.
+- The server MAY keep a **short-lived cache** of subscribed `graph.query`
+  results across transient disconnects, keyed by `(sessionId, query)`. This is
+  an optimization only: the client contract is unchanged, so clients still
+  reconnect with `session.open` and reissue `graph.query`.
+- Such a cached result is reusable only when the branch head has not advanced
+  beyond the cached `serverSeq`. If the head moved, the server MUST evaluate
+  the query again before responding.
 
 ---
 
