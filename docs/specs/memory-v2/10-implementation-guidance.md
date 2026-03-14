@@ -1375,10 +1375,11 @@ Implementation guidance:
 - Clone plain arrays / plain records on write before placing them into the
   working copy so later caller mutation cannot backdoor- mutate transaction
   state.
-- Keep one cached frozen snapshot per document entry and invalidate it on the
-  next write to that document.
-- Freeze the stored payload value, not the mutable bookkeeping that wraps the
-  document entry.
+- Freeze the **returned read value**, not the entire current document, so
+  nested-path reads do not repeatedly deep-freeze unrelated siblings during
+  large `Cell.set()` traversals.
+- Freeze the stored payload value that crosses the read boundary, not the
+  mutable bookkeeping or working copy that the transaction continues to update.
 - Treat this as a read-contract guarantee, not as a requirement that the v2
   transaction core itself be immutable internally.
 
