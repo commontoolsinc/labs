@@ -742,22 +742,30 @@ VALUES (:entity_id, :seq, :value_hash, :branch);
 ### 6.3 Snapshot Compaction
 
 Old snapshots can be removed to reclaim space. Only the most recent snapshot per
-entity per branch is needed for efficient reads. A compaction query:
+entity per branch is needed for efficient current-value reads. In practice, the
+engine may keep a small configurable number of recent snapshots per
+entity/branch (for example `2`) so very recent point-in-time reads also avoid
+full replay. A compaction query:
 
 ```sql
--- Keep only the latest snapshot per entity per branch
+-- Keep only the most recent N snapshots per entity per branch
 DELETE FROM snapshot
-WHERE rowid NOT IN (
-  SELECT rowid FROM snapshot s1
-  WHERE s1.seq = (
-    SELECT MAX(s2.seq) FROM snapshot s2
-    WHERE s2.branch = s1.branch AND s2.id = s1.id
+WHERE branch = :branch
+  AND id = :entity_id
+  AND seq NOT IN (
+    SELECT seq
+    FROM snapshot
+    WHERE branch = :branch
+      AND id = :entity_id
+    ORDER BY seq DESC
+    LIMIT :retention
   )
-);
+  );
 ```
 
-In practice, keeping a few historical snapshots can speed up point-in-time reads
-for popular seqs.
+With `retention = 1`, this reduces to “keep only the latest snapshot.” Higher
+retention preserves more recent historical materializations without affecting
+correctness.
 
 ---
 

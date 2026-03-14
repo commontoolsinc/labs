@@ -609,6 +609,91 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
   }
 });
 
+Deno.test("memory v2 engine compacts old snapshots beyond retention", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    snapshotInterval: 1,
+    snapshotRetention: 2,
+  });
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-retention",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:snapshot-retention",
+          value: toEntityDocument({ tags: ["one"] }),
+        }],
+      },
+    });
+
+    for (
+      const [localSeq, value] of [[2, "two"], [3, "three"], [
+        4,
+        "four",
+      ]] as const
+    ) {
+      applyCommit(engine, {
+        sessionId: "session:snapshot-retention",
+        invocation: {
+          ...invocation,
+          args: { localSeq },
+        },
+        authorization,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: "entity:snapshot-retention",
+            patches: [{
+              op: "splice",
+              path: "/tags",
+              index: localSeq - 1,
+              remove: 0,
+              add: [value],
+            }],
+          }],
+        },
+      });
+    }
+
+    const snapshotRows = engine.database.prepare(
+      `SELECT seq
+       FROM snapshot
+       WHERE branch = '' AND id = 'entity:snapshot-retention'
+       ORDER BY seq ASC`,
+    ).all() as Array<{ seq: number }>;
+    assertEquals(snapshotRows, [{ seq: 3 }, { seq: 4 }]);
+
+    assertEquals(read(engine, { id: "entity:snapshot-retention", seq: 2 }), {
+      value: { tags: ["one", "two"] },
+    });
+    assertEquals(read(engine, { id: "entity:snapshot-retention" }), {
+      value: { tags: ["one", "two", "three", "four"] },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine stores immutable blobs separately from entity facts", async () => {
   const { engine, path } = await createEngine();
 

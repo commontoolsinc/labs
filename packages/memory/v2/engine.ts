@@ -226,6 +226,20 @@ INSERT OR REPLACE INTO snapshot (id, seq, value_ref, branch)
 VALUES (:id, :seq, :value_ref, :branch)
 `;
 
+const DELETE_OLD_SNAPSHOTS = `
+DELETE FROM snapshot
+WHERE branch = :branch
+  AND id = :id
+  AND seq NOT IN (
+    SELECT seq
+    FROM snapshot
+    WHERE branch = :branch
+      AND id = :id
+    ORDER BY seq DESC
+    LIMIT :retention
+  )
+`;
+
 const UPDATE_BRANCH_HEAD = `
 UPDATE branch
 SET head_seq = :seq
@@ -366,6 +380,7 @@ export interface Engine {
   url: URL;
   database: Database;
   snapshotInterval: number;
+  snapshotRetention: number;
 }
 
 export class ConflictError extends Error {
@@ -378,6 +393,7 @@ export class ConflictError extends Error {
 export interface OpenOptions {
   url: URL;
   snapshotInterval?: number;
+  snapshotRetention?: number;
 }
 
 export interface InvocationRecord {
@@ -483,15 +499,20 @@ type BlobRow = {
 };
 
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
+export const DEFAULT_SNAPSHOT_RETENTION = 2;
 
 export const open = async (
-  { url, snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL }: OpenOptions,
+  {
+    url,
+    snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL,
+    snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
+  }: OpenOptions,
 ): Promise<Engine> => {
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
   database.exec(INIT);
-  return { url, database, snapshotInterval };
+  return { url, database, snapshotInterval, snapshotRetention };
 };
 
 export const close = (engine: Engine): void => {
@@ -1108,6 +1129,23 @@ const maybeMaterializeSnapshot = (
     seq: state.seq,
     value_ref: valueRef,
     branch,
+  });
+  compactSnapshots(engine, branch, id);
+};
+
+const compactSnapshots = (
+  engine: Engine,
+  branch: BranchName,
+  id: EntityId,
+): void => {
+  if (engine.snapshotRetention <= 0) {
+    return;
+  }
+
+  engine.database.prepare(DELETE_OLD_SNAPSHOTS).run({
+    branch,
+    id,
+    retention: engine.snapshotRetention,
   });
 };
 
