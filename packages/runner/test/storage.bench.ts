@@ -143,6 +143,50 @@ Deno.bench(
   },
 );
 
+Deno.bench(
+  "Storage - tx.writeValueOrThrow nested loop (100x)",
+  { group: "write-batch" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `test:nested-loop-${i}`,
+          type: "application/json",
+          path: ["profile", "name"],
+        },
+        `user-${i}`,
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Storage - tx.writeValuesOrThrow nested batch (100x)",
+  { group: "write-batch" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    tx.writeValuesOrThrow?.(
+      Array.from({ length: 100 }, (_, i) => ({
+        address: {
+          space,
+          id: `test:nested-batch-${i}`,
+          type: "application/json" as const,
+          path: ["profile", "name"],
+        },
+        value: `user-${i}`,
+      })),
+    );
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
 // ============================================================================
 // Read operations
 // ============================================================================
