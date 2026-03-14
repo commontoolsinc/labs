@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
-import { Controls, SwitchControl } from "../ui/controls/controls.tsx";
+import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface PickerStoryInput {}

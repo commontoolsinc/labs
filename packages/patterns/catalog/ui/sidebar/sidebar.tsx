@@ -25,6 +25,9 @@ const styles = {
     flexShrink: "0",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
   },
   header: {
     padding: "0 16px 16px",
