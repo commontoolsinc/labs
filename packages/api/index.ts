@@ -1112,6 +1112,24 @@ export interface IDFields {
   [ID_FIELD]?: unknown;
 }
 
+/**
+ * Recursively adds `readonly` to all properties of `T`.
+ *
+ * Mirrors the definition in `@commontools/utils/types` but is duplicated here
+ * so that `@commontools/api` remains dependency-free.
+ */
+type Immutable<T> = T extends ReadonlyArray<infer U>
+  ? ReadonlyArray<Immutable<U>>
+  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
+  : T;
+
+/**
+ * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
+ * like `default`, `const`, `enum`, and `examples` whose values must not be
+ * mutated after construction.
+ */
+export type ImmutableJSONValue = Immutable<JSONValue>;
+
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
   | "object"
@@ -1162,8 +1180,8 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly Readonly<JSONValue>[]; // not validated
-  readonly const?: Readonly<JSONValue>; // not validated
+  readonly enum?: readonly ImmutableJSONValue[]; // not validated
+  readonly const?: ImmutableJSONValue; // not validated
   // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
@@ -1197,10 +1215,10 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: Readonly<JSONValue>;
+  readonly default?: ImmutableJSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly Readonly<JSONValue>[];
+  readonly examples?: readonly ImmutableJSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
