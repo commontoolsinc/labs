@@ -143,6 +143,10 @@ const logger = getLogger("storage.cache", {
   logCountEvery: 0, // Disable auto-logging of counts
 });
 
+const isExpectedSessionCancel = (error: unknown): boolean => {
+  return error instanceof Error && error.message === "session cancel";
+};
+
 // Module-level cache: data URI + schema hash + path + space → Promise
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const _dataURISyncCache = new Map<string, Promise<Cell<any>>>();
@@ -836,10 +840,12 @@ export class Replica {
       // the nursery/heap and sent out change information.
       const integratedPromise = query.promise.then(async (result) => {
         if (result.error) {
-          logger.error(
-            "query-error",
-            () => ["query failure", queryArgs, result.error],
-          );
+          if (!isExpectedSessionCancel(result.error)) {
+            logger.error(
+              "query-error",
+              () => ["query failure", queryArgs, result.error],
+            );
+          }
           // Surface auth errors prominently so they're not silently swallowed
           if ((result.error as any).name === "AuthorizationError") {
             console.error(
@@ -919,10 +925,12 @@ export class Replica {
     // Check for errors
     for (const result of results) {
       if ((result as any).error) {
-        logger.error(
-          "pull-error",
-          () => ["query failure", queryArgs, (result as any).error],
-        );
+        if (!isExpectedSessionCancel((result as any).error)) {
+          logger.error(
+            "pull-error",
+            () => ["query failure", queryArgs, (result as any).error],
+          );
+        }
         return { error: (result as any).error as PullError };
       }
     }
