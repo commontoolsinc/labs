@@ -59,7 +59,6 @@ type RootAttestation = IAttestation;
 type DocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
-  readonlyCurrent?: RootAttestation;
   seq?: number;
   writeDetails: Map<string, TransactionWriteDetail>;
 };
@@ -166,6 +165,16 @@ const ensureParentContainers = (
   }
 
   return root;
+};
+
+const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
+  if (
+    value === undefined || value === null ||
+    typeof value !== "object"
+  ) {
+    return value;
+  }
+  return deepFreeze(isolateTransactionValue(value)) as T;
 };
 
 class V2TransactionJournal implements ITransactionJournal {
@@ -387,7 +396,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const { space: _, ...memoryAddress } = address;
-    const result = readAttestation(this.readable(doc), memoryAddress);
+    const result = readAttestation(doc.current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
       !branch.validations.has(this.docKey(address))
@@ -397,7 +406,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (result.error) {
       return { error: result.error.from(address.space) };
     }
-    return result;
+    if (!getExperimentalStorableConfig().richStorableValues) {
+      return result;
+    }
+
+    return {
+      ok: {
+        ...result.ok,
+        value: freezeReadValue(result.ok.value),
+      },
+    };
   }
 
   write(
@@ -461,7 +479,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = next;
-    doc.readonlyCurrent = undefined;
     this.#activity.push({
       write: {
         space,
@@ -559,7 +576,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = next;
-    doc.readonlyCurrent = undefined;
     this.#activity.push({
       write: {
         space,
@@ -728,22 +744,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     return { ok: {} };
-  }
-
-  private readable(doc: DocumentEntry): RootAttestation {
-    if (!getExperimentalStorableConfig().richStorableValues) {
-      return doc.current;
-    }
-
-    if (!doc.readonlyCurrent) {
-      doc.readonlyCurrent = {
-        ...doc.current,
-        value: deepFreeze(
-          isolateTransactionValue(doc.current.value),
-        ) as StorableDatum,
-      };
-    }
-    return doc.readonlyCurrent;
   }
 
   private buildTransaction(
