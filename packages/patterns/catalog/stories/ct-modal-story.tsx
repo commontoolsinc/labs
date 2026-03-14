@@ -1,7 +1,11 @@
 /// <cts-enable />
 import { action, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
-import { Controls, SelectControl, SwitchControl } from "../ui/controls.tsx";
+import {
+  Controls,
+  SelectControl,
+  SwitchControl,
+} from "../ui/controls/controls.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface ModalStoryInput {}

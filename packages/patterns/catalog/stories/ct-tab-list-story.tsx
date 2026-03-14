@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
-import { Controls, SelectControl } from "../ui/controls.tsx";
+import { Controls, SelectControl } from "../ui/controls/controls.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface TabListStoryInput {}
