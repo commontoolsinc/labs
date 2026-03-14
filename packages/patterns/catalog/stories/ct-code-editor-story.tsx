@@ -5,7 +5,7 @@ import {
   SelectControl,
   SwitchControl,
   TextControl,
-} from "../ui/controls/controls.tsx";
+} from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface CodeEditorStoryInput {}
