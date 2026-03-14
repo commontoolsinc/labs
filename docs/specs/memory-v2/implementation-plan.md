@@ -113,6 +113,7 @@
 ## Phase 2: Post-Cutover Optimizations
 - [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
 - [x] Extend the v2-native transaction core with a direct reactivity-log export, while keeping the journal-activity path only as a compatibility fallback for older callers and tests.
+- [x] Route v2 transactions to v2 replicas through a native commit-draft hook, so the hot path no longer has to round-trip through legacy `{ the, of, is }` facts before building `ClientCommit`.
 - [x] Compact redundant descendant confirmed/pending read dependencies before sending v2 commits, while preserving distinct `nonRecursive` read scopes.
 - [x] Add a native v2 batched-write hook behind `IExtendedStorageTransaction`, but keep `applyChangeSet()` on the one-write-at-a-time compatibility path until unschematized proxy reads prove they stay behaviorally identical.
 - [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.

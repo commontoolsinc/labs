@@ -577,6 +577,12 @@ export interface IStorageTransaction {
    * calls.
    */
   commit(): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Optional native commit draft hook for storage backends that can consume a
+   * more direct representation than legacy fact archives.
+   */
+  getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -898,6 +904,11 @@ export interface ISpaceReplica extends ISpace {
     transaction: ITransaction,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  commitNative?(
+    transaction: NativeStorageCommit,
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
 export type PushError =
@@ -944,6 +955,16 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<StorableDatum>;
   previousValue?: Immutable<StorableDatum>;
+}
+
+export interface NativeStorageCommitOperation {
+  id: URI;
+  type: MediaType;
+  value?: StorableDatum;
+}
+
+export interface NativeStorageCommit {
+  operations: readonly NativeStorageCommitOperation[];
 }
 
 export interface ITransaction {

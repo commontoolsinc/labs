@@ -24,7 +24,10 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
+  MediaType,
   MemorySpace,
+  NativeStorageCommit,
+  NativeStorageCommitOperation,
   ReaderError,
   ReadError,
   Result,
@@ -33,6 +36,7 @@ import type {
   StorageTransactionStatus,
   TransactionWriteDetail,
   Unit,
+  URI,
   WriteError,
   WriterError,
 } from "./interface.ts";
@@ -274,6 +278,34 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getReactivityLog() {
     return reactivityLogFromActivities(this.#activity);
+  }
+
+  getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
+    const branch = this.#branches.get(space);
+    if (!branch) {
+      return undefined;
+    }
+
+    const operations: NativeStorageCommitOperation[] = [];
+    for (const [key, doc] of branch.docs.entries()) {
+      if (doc.writeDetails.size === 0) {
+        continue;
+      }
+      if (deepEqual(doc.current.value, doc.initial.value)) {
+        continue;
+      }
+
+      const { id, type } = this.parseDocKey(key);
+      operations.push({
+        id,
+        type,
+        ...(doc.current.value === undefined
+          ? {}
+          : { value: doc.current.value }),
+      });
+    }
+
+    return { operations };
   }
 
   *getWriteDetails(space: MemorySpace): Iterable<TransactionWriteDetail> {
@@ -581,15 +613,18 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const transaction = this.buildTransaction(writeSpace);
-    if (transaction.facts.length === 0) {
+    const replica = this.storage.open(writeSpace).replica;
+    const native = this.getNativeCommit(writeSpace);
+    const operations = native?.operations ?? [];
+    if (operations.length === 0) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
     }
 
-    const replica = this.storage.open(writeSpace).replica;
-    const promise = replica.commit(transaction, this);
+    const promise = replica.commitNative
+      ? replica.commitNative(native!, this)
+      : replica.commit(this.buildTransaction(writeSpace), this);
     this.#state = { status: "pending", promise };
     const result = await promise;
     this.#state = { status: "done", result };
@@ -741,8 +776,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     return `${address.id}|${address.type}`;
   }
 
-  private parseDocKey(key: string): { id: string; type: string } {
+  private parseDocKey(key: string): { id: URI; type: MediaType } {
     const [id, type] = key.split("|");
-    return { id, type };
+    return { id: id as URI, type: type as MediaType };
   }
 }

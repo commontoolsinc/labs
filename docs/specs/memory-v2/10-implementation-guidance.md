@@ -1229,6 +1229,7 @@ interface IStorageTransaction {
   getReactivityLog?(): TransactionReactivityLog;
   getReadActivities?(): Iterable<IReadActivity>;
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+  getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
   writeBatch?(writes: Iterable<ITransactionWriteRequest>): Result<Unit, WriterError | WriteError>;
 }
 ```
@@ -1249,6 +1250,10 @@ Implementation guidance:
 - Equal-value writes should be dropped at write time, not only filtered later
   during commit building. Otherwise the v2 transaction accumulates dead
   `writeDetails`, dead reactivity-log entries, and avoidable no-op commit work.
+- If the replica can consume native v2 operations directly, expose them through
+  a narrow `getNativeCommit()` hook and call a replica-side `commitNative()`
+  path instead of re-encoding the write set as legacy `{ the, of, is }` facts
+  only to decode them again before `ClientCommit` creation.
 - If v2 adds a native `writeBatch()` / `writeValuesOrThrow()` pair, treat it as
   scaffolding for later optimization, not proof that every higher-level change
   producer should use it immediately.
@@ -1258,6 +1263,32 @@ Implementation guidance:
 This is the intended direction for simplifying the v2 runner integration: keep
 `IExtendedStorageTransaction` stable, but make the internal v2 transaction core
 export exactly the native products the runner uses.
+
+### Native Commit Draft Hook
+
+The last major v1-shaped translation layer in the runner is often the commit
+payload boundary, not the transaction working copy itself.
+
+Concretely, a clean v2 transaction core may already:
+
+- track reads directly as `IReadActivity`
+- track writes directly as per-document working copies
+- export a direct scheduler-facing reactivity log
+
+and still lose that simplicity if `commit()` first serializes the result back
+into legacy `facts` and `claims`, only for the v2 replica to immediately turn
+those same writes back into `Operation[]` for the wire protocol.
+
+Preferred shape:
+
+1. Keep `IExtendedStorageTransaction` unchanged for runner callers.
+2. Let the native v2 transaction expose a narrow `getNativeCommit(space)` hook.
+3. Let the native v2 replica expose a narrow `commitNative(draft, source)` hook.
+4. Keep the old `commit(ITransaction, source)` path only as fallback for v1 and
+   any remaining compatibility callers.
+
+This keeps the runtime boundary stable while removing a large amount of
+accidental v1 structure from the v2 hot path.
 
 ---
 
