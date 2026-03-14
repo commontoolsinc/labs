@@ -50,7 +50,7 @@ import TagsStory from "../stories/ct-tags-story.tsx";
 import GridStory from "../stories/ct-grid-story.tsx";
 
 interface StoryRendererInput {
-  selected: Writable<string>;
+  selectedStory: Writable<string>;
 }
 
 interface StoryRendererOutput {
@@ -66,9 +66,9 @@ type CatalogStory = {
 } | null;
 
 export default pattern<StoryRendererInput, StoryRendererOutput>(
-  ({ selected }) => {
+  ({ selectedStory }) => {
     const story = computed<CatalogStory>(() => {
-      switch (selected.get()) {
+      switch (selectedStory.get()) {
         case "button":
           return ButtonStory({});
         case "checkbox":
