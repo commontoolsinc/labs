@@ -111,7 +111,8 @@
 - [x] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now also passes in the aggregate runner.
 
 ## Phase 2: Post-Cutover Optimizations
-- [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
+- [x] Add snapshot-retention-based compaction so the engine keeps only a configurable number of recent snapshots per entity/branch after materialization.
+- [ ] Continue tuning snapshot cadence and retention defaults beyond the current interval-plus-retention policy.
 - [x] Extend the v2-native transaction core with a direct reactivity-log export, while keeping the journal-activity path only as a compatibility fallback for older callers and tests.
 - [x] Route v2 transactions to v2 replicas through a native commit-draft hook, so the hot path no longer has to round-trip through legacy `{ the, of, is }` facts before building `ClientCommit`.
 - [x] Compact redundant descendant confirmed/pending read dependencies before sending v2 commits, while preserving distinct `nonRecursive` read scopes.
