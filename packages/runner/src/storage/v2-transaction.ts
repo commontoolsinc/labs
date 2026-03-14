@@ -1,8 +1,12 @@
 import { unclaimed } from "@commontools/memory/fact";
 import { deepFreeze } from "@commontools/memory/deep-freeze";
-import { getExperimentalStorableConfig } from "@commontools/memory/storable-value";
+import {
+  getExperimentalStorableConfig,
+  isArrayIndexPropertyName,
+} from "@commontools/memory/storable-value";
 import type { StorableDatum } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
+import { isRecord } from "@commontools/utils/types";
 import type {
   Activity,
   ChangeGroup,
@@ -19,6 +23,7 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  ITransactionWriteRequest,
   MemorySpace,
   ReaderError,
   ReadError,
@@ -116,6 +121,47 @@ const isolateTransactionValue = <T>(
     );
   }
   return copy as T;
+};
+
+const createMissingContainer = (
+  nextKey: string,
+): StorableDatum => isArrayIndexPropertyName(nextKey) ? [] : {};
+
+const ensureParentContainers = (
+  root: StorableDatum,
+  path: readonly string[],
+  lastKey: string,
+): StorableDatum => {
+  if (path.length === 0) {
+    return root;
+  }
+
+  let current = root as Record<string, StorableDatum> | StorableDatum[];
+  for (let index = 0; index < path.length; index += 1) {
+    const key = path[index]!;
+    const nextKey = path[index + 1] ?? lastKey;
+    const container = createMissingContainer(nextKey);
+
+    if (Array.isArray(current)) {
+      const slot = Number(key);
+      const existing = current[slot];
+      if (!isRecord(existing) && !Array.isArray(existing)) {
+        current[slot] = container;
+      }
+      current = current[slot] as
+        | Record<string, StorableDatum>
+        | StorableDatum[];
+      continue;
+    }
+
+    const existing = current[key];
+    if (!isRecord(existing) && !Array.isArray(existing)) {
+      current[key] = container;
+    }
+    current = current[key] as Record<string, StorableDatum> | StorableDatum[];
+  }
+
+  return root;
 };
 
 class V2TransactionJournal implements ITransactionJournal {
@@ -333,6 +379,26 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.writeWithinSpace(address.space, address, value);
   }
 
+  writeBatch(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError> {
+    for (const { address, value } of writes) {
+      const { error } = this.writer(address.space);
+      if (error) {
+        return { error };
+      }
+      const result = this.writeWithinSpaceCreatingParents(
+        address.space,
+        address,
+        value,
+      );
+      if (result.error) {
+        return { error: result.error };
+      }
+    }
+    return { ok: {} };
+  }
+
   writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
@@ -379,6 +445,104 @@ export class V2StorageTransaction implements IStorageTransaction {
       address: { ...address, space },
       value: isolatedValue,
       previousValue: existing?.previousValue ?? previous.ok?.value,
+    });
+
+    return { ok: next };
+  }
+
+  private writeWithinSpaceCreatingParents(
+    space: MemorySpace,
+    address: IMemoryAddress,
+    value?: StorableDatum,
+  ): Result<IAttestation, WriteError> {
+    const direct = this.writeWithinSpace(space, address, value);
+    if (direct.ok || direct.error?.name !== "NotFoundError") {
+      return direct;
+    }
+
+    if (value === undefined) {
+      return { ok: this.document(this.branch(space), address).doc.current };
+    }
+
+    const branch = this.branch(space);
+    const { doc } = this.document(branch, address);
+    const errorPath = direct.error.path;
+    const lastExistingPath = errorPath.slice(0, -1);
+    const remainingPath = address.path.slice(lastExistingPath.length);
+    if (remainingPath.length === 0) {
+      return direct;
+    }
+
+    let parentValue: StorableDatum;
+    if (lastExistingPath.length === 0) {
+      parentValue = {};
+    } else {
+      const parentRead = readAttestation(doc.current, {
+        ...address,
+        path: lastExistingPath,
+      });
+      if (parentRead.error) {
+        return { error: parentRead.error.from(space) };
+      }
+      const existingParent = parentRead.ok.value;
+      if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
+        return direct;
+      }
+      parentValue = isolateTransactionValue(existingParent) as StorableDatum;
+    }
+
+    const seededParent = ensureParentContainers(
+      parentValue,
+      remainingPath.slice(0, -1),
+      remainingPath[remainingPath.length - 1]!,
+    );
+    const isolatedValue = isolateTransactionValue(value) as StorableDatum;
+    const parentWrite = writeAttestation(
+      {
+        address: {
+          id: address.id,
+          type: address.type,
+          path: lastExistingPath,
+        },
+        value: seededParent,
+      },
+      address,
+      isolatedValue,
+    );
+    if (parentWrite.error) {
+      return { error: parentWrite.error.from(space) };
+    }
+
+    const rootWrite = writeAttestation(doc.current, {
+      ...address,
+      path: lastExistingPath,
+    }, parentWrite.ok.value);
+    if (rootWrite.error) {
+      return { error: rootWrite.error.from(space) };
+    }
+
+    const next = rootWrite.ok as RootAttestation;
+    if (next === doc.current) {
+      return { ok: next };
+    }
+
+    doc.current = next;
+    doc.readonlyCurrent = undefined;
+    this.#activity.push({
+      write: {
+        space,
+        id: address.id,
+        type: address.type,
+        path: address.path,
+      },
+    });
+
+    const key = JSON.stringify(address.path);
+    const existing = doc.writeDetails.get(key);
+    doc.writeDetails.set(key, {
+      address: { ...address, space },
+      value: isolatedValue,
+      previousValue: existing?.previousValue,
     });
 
     return { ok: next };

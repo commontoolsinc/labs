@@ -1580,4 +1580,36 @@ describe("compactChangeSet", () => {
       expect(result[0].location.path).toEqual(["items"]);
     });
   });
+
+  describe("batched applyChangeSet", () => {
+    it("lets the v2 transaction batch hook materialize missing parents", async () => {
+      const localStorageManager = StorageManager.emulate({ as: signer });
+      const localRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: localStorageManager,
+      });
+      const localTx = localRuntime.edit();
+
+      try {
+        const testCell = localRuntime.getCell<{ profile?: { name?: string } }>(
+          space,
+          "batched applyChangeSet materializes parents",
+          undefined,
+          localTx,
+        );
+
+        localTx.writeValuesOrThrow?.([{
+          address: testCell.key("profile").key("name")
+            .getAsNormalizedFullLink(),
+          value: "Ada",
+        }]);
+
+        expect(testCell.get()).toEqual({ profile: { name: "Ada" } });
+      } finally {
+        await localTx.commit();
+        await localRuntime.dispose();
+        await localStorageManager.close();
+      }
+    });
+  });
 });

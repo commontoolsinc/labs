@@ -1201,6 +1201,13 @@ A naive "bulk apply the change set directly to the raw transaction" hook may add
 surface area without materially improving the dominant benchmarks. Only keep a
 new fast path if the benchmark delta is clear enough to justify the extra API.
 
+One concrete safe intermediate step is a **native batched path-write hook**
+behind `IExtendedStorageTransaction`, while leaving `applyChangeSet()` on the
+existing one-write-at-a-time path until unschematized proxy reads prove they
+observe the same in-transaction state. The hook itself can simplify v2-native
+parent materialization and future patch emission work, but flipping higher-level
+call sites over to it should remain benchmark- and parity-driven.
+
 ---
 
 ## 19. Minimal Transaction Compatibility Surface
@@ -1222,6 +1229,7 @@ interface IStorageTransaction {
   getReactivityLog?(): TransactionReactivityLog;
   getReadActivities?(): Iterable<IReadActivity>;
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
+  writeBatch?(writes: Iterable<ITransactionWriteRequest>): Result<Unit, WriterError | WriteError>;
 }
 ```
 
@@ -1241,6 +1249,9 @@ Implementation guidance:
 - Equal-value writes should be dropped at write time, not only filtered later
   during commit building. Otherwise the v2 transaction accumulates dead
   `writeDetails`, dead reactivity-log entries, and avoidable no-op commit work.
+- If v2 adds a native `writeBatch()` / `writeValuesOrThrow()` pair, treat it as
+  scaffolding for later optimization, not proof that every higher-level change
+  producer should use it immediately.
 - If a future caller needs more detail, add another **narrow** native hook
   instead of recreating broad v1 journal machinery inside v2.
 
