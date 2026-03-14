@@ -114,6 +114,7 @@
 - [ ] Tune snapshot cadence, retention, and compaction beyond the current default interval-based materialization.
 - [x] Extend the v2-native transaction core with a direct reactivity-log export, while keeping the journal-activity path only as a compatibility fallback for older callers and tests.
 - [x] Compact redundant descendant confirmed/pending read dependencies before sending v2 commits, while preserving distinct `nonRecursive` read scopes.
+- [x] Add a native v2 batched-write hook behind `IExtendedStorageTransaction`, but keep `applyChangeSet()` on the one-write-at-a-time compatibility path until unschematized proxy reads prove they stay behaviorally identical.
 - [ ] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe.
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [ ] Add a short-lived server-side subscription and session resume cache to reduce replay traffic without changing the client contract.

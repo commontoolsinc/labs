@@ -398,6 +398,11 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+export interface ITransactionWriteRequest {
+  address: IMemorySpaceAddress;
+  value: StorableValue;
+}
+
 export interface IMemoryChange {
   /**
    * Memory address that was changed.
@@ -530,6 +535,14 @@ export interface IStorageTransaction {
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
+   * Optional batched write hook for transactions that can apply multiple path
+   * writes more efficiently than one-at-a-time.
+   */
+  writeBatch?(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError>;
+
+  /**
    * Creates a memory space reader for inside this transaction. Fails if
    * transaction is no longer in progress. Requesting a reader for the same
    * memory space will return same reader instance.
@@ -637,6 +650,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   writeValueOrThrow(
     address: IMemorySpaceAddress,
     value: StorableValue,
+  ): void;
+
+  /**
+   * Optional batched write helper that preserves the extended transaction's
+   * `["value", ...path]` addressing semantics.
+   */
+  writeValuesOrThrow?(
+    writes: Iterable<ITransactionWriteRequest>,
   ): void;
 }
 
