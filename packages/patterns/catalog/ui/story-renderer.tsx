@@ -39,6 +39,15 @@ import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
 import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
+import ChatStory from "../stories/ct-chat-story.tsx";
+import CalendarStory from "../stories/ct-calendar-story.tsx";
+import RadioStory from "../stories/ct-radio-story.tsx";
+import AutocompleteStory from "../stories/ct-autocomplete-story.tsx";
+import TableStory from "../stories/ct-table-story.tsx";
+import KbdStory from "../stories/ct-kbd-story.tsx";
+import CopyButtonStory from "../stories/ct-copy-button-story.tsx";
+import TagsStory from "../stories/ct-tags-story.tsx";
+import GridStory from "../stories/ct-grid-story.tsx";
 
 interface StoryRendererInput {
   selected: Writable<string>;
@@ -136,6 +145,24 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return NoteStory({});
         case "kitchen-sink":
           return KitchenSinkStory({});
+        case "chat":
+          return ChatStory({});
+        case "calendar":
+          return CalendarStory({});
+        case "radio":
+          return RadioStory({});
+        case "autocomplete":
+          return AutocompleteStory({});
+        case "table":
+          return TableStory({});
+        case "kbd":
+          return KbdStory({});
+        case "copy-button":
+          return CopyButtonStory({});
+        case "tags":
+          return TagsStory({});
+        case "grid":
+          return GridStory({});
         default:
           return null;
       }

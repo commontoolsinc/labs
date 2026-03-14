@@ -1,6 +1,9 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
+// TODO(v2-token-migration): Migrate this component to component-level tokens,
+// matching the prior phase-1 token migration pattern.
+
 /**
  * CTCopyButton - Copy to clipboard button with automatic visual feedback
  *

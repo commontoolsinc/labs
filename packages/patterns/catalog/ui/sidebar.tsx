@@ -330,6 +330,89 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               Message Input
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "calendar" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "calendar"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "calendar" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "calendar", selected })}
+            >
+              Calendar
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "radio" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "radio"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "radio" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "radio", selected })}
+            >
+              Radio
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "slider" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "slider"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "slider" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "slider", selected })}
+            >
+              Slider
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "autocomplete" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "autocomplete"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "autocomplete" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "autocomplete", selected })}
+            >
+              Autocomplete
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "tags" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "tags" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "tags" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "tags", selected })}
+            >
+              Tags
+            </div>
           </div>
 
           {/* Layout */}
@@ -497,6 +580,21 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               HScroll
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "grid" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "grid" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "grid" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "grid", selected })}
+            >
+              Grid
+            </div>
           </div>
 
           {/* Display */}
@@ -628,6 +726,55 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               SVG
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "kbd" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "kbd" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "kbd" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "kbd", selected })}
+            >
+              Kbd
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "code-editor" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "code-editor"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "code-editor" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "code-editor", selected })}
+            >
+              Code Editor
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "copy-button" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "copy-button"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "copy-button" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "copy-button", selected })}
+            >
+              Copy Button
+            </div>
           </div>
 
           {/* Feedback */}
@@ -712,6 +859,23 @@ export default pattern<SidebarInput, SidebarOutput>(
             >
               Skeleton
             </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "alert" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "alert"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "alert" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "alert", selected })}
+            >
+              Alert
+            </div>
           </div>
 
           {/* Interactive */}
@@ -776,6 +940,54 @@ export default pattern<SidebarInput, SidebarOutput>(
               onClick={selectItem({ id: "tabs", selected })}
             >
               Tabs
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "table" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "table"
+                  ? "#e8f4fd"
+                  : "transparent",
+                fontWeight: current === "table" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "table", selected })}
+            >
+              Table
+            </div>
+          </div>
+
+          {/* Chat */}
+          <div style={{ marginBottom: "8px" }}>
+            <div
+              style={{
+                padding: "4px 16px 6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                color: "#798186",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Chat
+            </div>
+            <div
+              style={{
+                padding: "4px 12px",
+                margin: "1px 8px",
+                borderRadius: "4px",
+                fontSize: "13px",
+                color: current === "chat" ? "#1ea7fd" : "#2e3438",
+                backgroundColor: current === "chat" ? "#e8f4fd" : "transparent",
+                fontWeight: current === "chat" ? "600" : "400",
+                cursor: "pointer",
+              }}
+              onClick={selectItem({ id: "chat", selected })}
+            >
+              Chat
             </div>
           </div>
 

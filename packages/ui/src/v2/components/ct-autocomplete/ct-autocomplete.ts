@@ -14,6 +14,9 @@ import type { Schema } from "@commontools/api/schema";
 import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
 
+// TODO(v2-token-migration): Migrate this component to component-level tokens,
+// matching the prior phase-1 token migration pattern.
+
 // Schema for AutocompleteItem array
 const AutocompleteItemArraySchema = {
   type: "array",

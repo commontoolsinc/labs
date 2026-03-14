@@ -1,7 +1,6 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
-
-import { Controls, SelectControl } from "../ui/controls.tsx";
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { Controls, TextControl } from "../ui/controls.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface SvgStoryInput {}
@@ -12,18 +11,33 @@ interface SvgStoryOutput {
 }
 
 export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
-  const icon = Writable.of("sun");
+  const defaultSvg =
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40" fill="#3b82f6"/></svg>';
 
-  const content = computed(() => {
-    switch (icon.get()) {
-      case "moon":
-        return `<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="48" fill="#0ea5e9"/><path d="M77 30a33 33 0 1 0 13 63 40 40 0 1 1-13-63z" fill="#f8fafc"/></svg>`;
-      case "bolt":
-        return `<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="8" y="8" width="104" height="104" rx="20" fill="#fef3c7"/><path d="M67 14 33 66h22l-2 40 34-52H65z" fill="#f59e0b"/></svg>`;
-      default:
-        return `<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="8" y="8" width="104" height="104" rx="20" fill="#dbeafe"/><circle cx="60" cy="60" r="24" fill="#fbbf24"/><path d="M60 18v14M60 88v14M18 60h14M88 60h14M30.3 30.3l10 10M79.7 79.7l10 10M89.7 30.3l-10 10M40.3 79.7l-10 10" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/></svg>`;
-    }
-  });
+  const customSvg = Writable.of(defaultSvg);
+
+  const shapesSvg =
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="30" cy="50" r="25" fill="#3b82f6"/><rect x="60" y="25" width="30" height="50" rx="4" fill="#10b981"/></svg>';
+
+  const gradientSvg =
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#ec4899"/></linearGradient></defs><circle cx="50" cy="50" r="40" fill="url(#g1)"/></svg>';
+
+  const starSvg =
+    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#f59e0b"/></svg>';
+
+  const labelStyle = {
+    fontSize: "11px",
+    color: "#9ca3af",
+    textAlign: "center" as const,
+    marginTop: "6px",
+  };
+
+  const svgWrapperStyle = {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    width: "120px",
+  };
 
   return {
     [NAME]: "ct-svg Story",
@@ -31,33 +45,64 @@ export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
       <div style={{ padding: "1rem" }}>
         <div
           style={{
-            width: "140px",
-            height: "140px",
-            border: "1px solid #e2e8f0",
-            borderRadius: "10px",
-            padding: "10px",
-            backgroundColor: "#ffffff",
+            fontSize: "12px",
+            fontWeight: "600",
+            color: "#374151",
+            marginBottom: "12px",
+            textTransform: "uppercase" as const,
+            letterSpacing: "0.05em",
           }}
         >
-          <ct-svg $content={content} style="width: 100%; height: 100%;" />
+          Sample SVGs
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: "16px",
+            alignItems: "flex-start",
+            flexWrap: "wrap",
+            marginBottom: "24px",
+          }}
+        >
+          <div style={svgWrapperStyle}>
+            <ct-svg content={shapesSvg} />
+            <div style={labelStyle}>Simple shapes</div>
+          </div>
+          <div style={svgWrapperStyle}>
+            <ct-svg content={gradientSvg} />
+            <div style={labelStyle}>Gradient</div>
+          </div>
+          <div style={svgWrapperStyle}>
+            <ct-svg content={starSvg} />
+            <div style={labelStyle}>Path icon</div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            fontSize: "12px",
+            fontWeight: "600",
+            color: "#374151",
+            marginBottom: "12px",
+            textTransform: "uppercase" as const,
+            letterSpacing: "0.05em",
+          }}
+        >
+          Custom SVG
+        </div>
+        <div style={{ width: "120px" }}>
+          <ct-svg content={customSvg} />
         </div>
       </div>
     ),
     controls: (
       <Controls>
-        <>
-          <SelectControl
-            label="icon"
-            description="Selects the SVG content string"
-            defaultValue="sun"
-            value={icon as any}
-            items={[
-              { label: "sun", value: "sun" },
-              { label: "moon", value: "moon" },
-              { label: "bolt", value: "bolt" },
-            ]}
-          />
-        </>
+        <TextControl
+          label="content"
+          description="SVG markup string"
+          defaultValue={defaultSvg}
+          value={customSvg}
+        />
       </Controls>
     ),
   };
