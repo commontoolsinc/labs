@@ -1,11 +1,103 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import {
+  action,
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
-import Sidebar from "./ui/sidebar.tsx";
+import { Sidebar } from "./ui/sidebar/sidebar.tsx";
 import StoryRenderer from "./ui/story-renderer.tsx";
 
+export interface CategoryItem {
+  id: string;
+  label: string;
+}
+
+export interface Category {
+  name: string;
+  items: CategoryItem[];
+}
 interface CatalogInput {
   selectedStory?: Writable<Default<string, "button">>;
+  categories?: Default<Category[], [
+    {
+      name: "Overview";
+      items: [{ id: "kitchen-sink"; label: "Kitchen Sink" }];
+    },
+    {
+      name: "Inputs";
+      items: [
+        { id: "button"; label: "Button" },
+        { id: "checkbox"; label: "Checkbox" },
+        { id: "code-editor"; label: "Code Editor" },
+        { id: "input"; label: "Input" },
+        { id: "picker"; label: "Picker" },
+        { id: "textarea"; label: "Textarea" },
+        { id: "select"; label: "Select" },
+        { id: "slider"; label: "Slider" },
+        { id: "switch"; label: "Switch" },
+        { id: "toggle"; label: "Toggle" },
+        { id: "toggle-group"; label: "Toggle Group" },
+        { id: "message-input"; label: "Message Input" },
+        { id: "fab"; label: "FAB" },
+      ];
+    },
+    {
+      name: "Layout";
+      items: [
+        { id: "card"; label: "Card" },
+        { id: "modal"; label: "Modal" },
+        { id: "toolbar"; label: "Toolbar" },
+        { id: "vstack"; label: "VStack" },
+        { id: "hstack"; label: "HStack" },
+        { id: "vgroup"; label: "VGroup" },
+        { id: "hgroup"; label: "HGroup" },
+        { id: "vscroll"; label: "VScroll" },
+        { id: "hscroll"; label: "HScroll" },
+      ];
+    },
+    {
+      name: "Display";
+      items: [
+        { id: "heading"; label: "Heading" },
+        { id: "label"; label: "Label" },
+        { id: "chip"; label: "Chip" },
+        { id: "badge"; label: "Badge" },
+        { id: "separator"; label: "Separator" },
+        { id: "markdown"; label: "Markdown" },
+        { id: "svg"; label: "SVG" },
+      ];
+    },
+    {
+      name: "Feedback";
+      items: [
+        { id: "progress"; label: "Progress" },
+        { id: "loader"; label: "Loader" },
+        { id: "skeleton"; label: "Skeleton" },
+      ];
+    },
+    {
+      name: "Interactive";
+      items: [
+        { id: "collapsible"; label: "Collapsible" },
+        { id: "tab-list"; label: "Tab List" },
+        { id: "tabs"; label: "Tabs" },
+      ];
+    },
+    {
+      name: "Data Visualization";
+      items: [{ id: "chart"; label: "Chart" }];
+    },
+    {
+      name: "Patterns";
+      items: [{ id: "note"; label: "Note" }];
+    },
+  ]>;
 }
 
 interface CatalogOutput {
@@ -14,148 +106,83 @@ interface CatalogOutput {
   selectedStory: string;
 }
 
-export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
-  const stories = StoryRenderer({ selected: selectedStory });
+export default pattern<CatalogInput, CatalogOutput>(
+  ({ selectedStory, categories }) => {
+    const handleSelect = action(({ id }: { id: string }) => {
+      selectedStory.set(id);
+    });
 
-  return {
-    [NAME]: "Component Catalog",
-    [UI]: (
-      <ct-screen>
-        <div
-          style={{
-            display: "flex",
-            flex: "1",
-            overflow: "hidden",
-            fontFamily:
-              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          }}
-        >
-          <Sidebar
-            selected={selectedStory}
-            categories={[
-              {
-                name: "Overview",
-                items: [{ id: "kitchen-sink", label: "Kitchen Sink" }],
-              },
-              {
-                name: "Inputs",
-                items: [
-                  { id: "button", label: "Button" },
-                  { id: "checkbox", label: "Checkbox" },
-                  { id: "code-editor", label: "Code Editor" },
-                  { id: "input", label: "Input" },
-                  { id: "picker", label: "Picker" },
-                  { id: "textarea", label: "Textarea" },
-                  { id: "select", label: "Select" },
-                  { id: "slider", label: "Slider" },
-                  { id: "switch", label: "Switch" },
-                  { id: "toggle", label: "Toggle" },
-                  { id: "toggle-group", label: "Toggle Group" },
-                  { id: "message-input", label: "Message Input" },
-                  { id: "fab", label: "FAB" },
-                ],
-              },
-              {
-                name: "Layout",
-                items: [
-                  { id: "card", label: "Card" },
-                  { id: "modal", label: "Modal" },
-                  { id: "toolbar", label: "Toolbar" },
-                  { id: "vstack", label: "VStack" },
-                  { id: "hstack", label: "HStack" },
-                  { id: "vgroup", label: "VGroup" },
-                  { id: "hgroup", label: "HGroup" },
-                  { id: "vscroll", label: "VScroll" },
-                  { id: "hscroll", label: "HScroll" },
-                ],
-              },
-              {
-                name: "Display",
-                items: [
-                  { id: "heading", label: "Heading" },
-                  { id: "label", label: "Label" },
-                  { id: "chip", label: "Chip" },
-                  { id: "badge", label: "Badge" },
-                  { id: "separator", label: "Separator" },
-                  { id: "markdown", label: "Markdown" },
-                  { id: "svg", label: "SVG" },
-                ],
-              },
-              {
-                name: "Feedback",
-                items: [
-                  { id: "progress", label: "Progress" },
-                  { id: "loader", label: "Loader" },
-                  { id: "skeleton", label: "Skeleton" },
-                ],
-              },
-              {
-                name: "Interactive",
-                items: [
-                  { id: "collapsible", label: "Collapsible" },
-                  { id: "tab-list", label: "Tab List" },
-                  { id: "tabs", label: "Tabs" },
-                ],
-              },
-              {
-                name: "Data Visualization",
-                items: [{ id: "chart", label: "Chart" }],
-              },
-              {
-                name: "Patterns",
-                items: [{ id: "note", label: "Note" }],
-              },
-            ]}
-          />
+    const story = StoryRenderer({ selectedStory });
+    const selected = computed(() => selectedStory.get());
 
-          {/* Main content area */}
+    return {
+      [NAME]: "Component Catalog",
+      [UI]: (
+        <ct-screen>
           <div
             style={{
-              flex: "1",
               display: "flex",
-              flexDirection: "column",
+              flex: "1",
               overflow: "hidden",
+              fontFamily:
+                '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             }}
           >
-            {/* Preview */}
+            <Sidebar
+              selected={selected}
+              categories={categories}
+              onSelect={handleSelect}
+            />
+
+            {/* Main content area */}
             <div
               style={{
                 flex: "1",
-                overflow: "auto",
-                backgroundColor: "#ffffff",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
               }}
             >
-              {stories}
-            </div>
-
-            {/* Controls panel */}
-            <div
-              style={{
-                borderTop: "1px solid #e6e9ed",
-                padding: "16px",
-                backgroundColor: "#fafafa",
-                maxHeight: "400px",
-                overflow: "auto",
-              }}
-            >
+              {/* Preview */}
               <div
                 style={{
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  color: "#798186",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  marginBottom: "12px",
+                  flex: "1",
+                  overflow: "auto",
+                  backgroundColor: "#ffffff",
                 }}
               >
-                Controls
+                {story}
               </div>
-              {stories.controls}
+
+              {/* Controls panel */}
+              <div
+                style={{
+                  borderTop: "1px solid #e6e9ed",
+                  padding: "16px",
+                  backgroundColor: "#fafafa",
+                  maxHeight: "400px",
+                  overflow: "auto",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    color: "#798186",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Controls
+                </div>
+                {story.controls}
+              </div>
             </div>
           </div>
-        </div>
-      </ct-screen>
-    ),
-    selectedStory,
-  };
-});
+        </ct-screen>
+      ),
+      selectedStory,
+    };
+  },
+);
