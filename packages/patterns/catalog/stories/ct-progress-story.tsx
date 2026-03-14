@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
-import { Controls, SwitchControl } from "../ui/controls.tsx";
+import { Controls, SwitchControl } from "../ui/controls/controls.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface ProgressStoryInput {}
