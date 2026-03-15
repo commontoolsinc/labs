@@ -96,6 +96,8 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+  /** Print storage-related logger timings and counts after each test file. */
+  storageStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +354,103 @@ function printLoggerStats(
       const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
       console.log(
         `             ${name} ${np}n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+}
+
+function isStorageLoggerName(name: string): boolean {
+  return name === "traverse" ||
+    name === "memory-provider" ||
+    name === "memory-v2-query" ||
+    name === "memory-v2-server" ||
+    name.startsWith("storage") ||
+    name === "extended-storage-transaction";
+}
+
+function printStorageStats(elapsedMs: number): void {
+  type StorageCountEntry = {
+    name: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
+  console.log(`  🗄 ${fmtMs(elapsedMs)} | Storage totals:`);
+
+  const timingBreakdown = getTimingStatsBreakdown();
+  const timingEntries: {
+    name: string;
+    n: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }[] = [];
+
+  for (const [loggerName, timings] of Object.entries(timingBreakdown)) {
+    if (!isStorageLoggerName(loggerName)) continue;
+    for (const [key, timing] of Object.entries(timings)) {
+      if (timing.count === 0) continue;
+      timingEntries.push({
+        name: `${loggerName}/${key}`,
+        n: timing.count,
+        p50: timing.p50,
+        p95: timing.p95,
+        max: timing.max,
+      });
+    }
+  }
+
+  if (timingEntries.length > 0) {
+    timingEntries.sort((a, b) => b.p95 - a.p95);
+    console.log(`           Timings (top 12 by p95):`);
+    for (const entry of timingEntries.slice(0, 12)) {
+      const name = entry.name.padEnd(35);
+      console.log(
+        `             ${name}  n=${String(entry.n).padStart(5)} p50=${
+          fmtMs(entry.p50).padStart(7)
+        } p95=${fmtMs(entry.p95).padStart(7)} max=${
+          fmtMs(entry.max).padStart(7)
+        }`,
+      );
+    }
+  }
+
+  const g = globalThis as unknown as GlobalWithLoggers;
+  const countEntries: StorageCountEntry[] = [];
+  if (g.commontools?.logger) {
+    for (const [name, logger] of Object.entries(g.commontools.logger)) {
+      if (!isStorageLoggerName(name)) continue;
+      const c = logger.counts;
+      if (c.total > 0) {
+        countEntries.push({
+          name,
+          d: c.debug,
+          i: c.info,
+          w: c.warn,
+          e: c.error,
+          total: c.total,
+        });
+      }
+    }
+  }
+
+  if (countEntries.length > 0) {
+    countEntries.sort((a, b) => b.total - a.total);
+    console.log(`           Counts (all storage loggers):`);
+    for (const entry of countEntries) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${entry.name.padEnd(35)} n=${
           String(entry.total).padStart(7)
         }${levels}`,
       );
@@ -968,6 +1067,9 @@ export async function runTestPattern(
     // Print action stats table (sorted by total time, like the shell debug UI)
     if (options.verbose) {
       printActionStatsTable(runtime);
+    }
+    if (options.storageStats) {
+      printStorageStats(performance.now() - startTime);
     }
 
     // Collect idempotency violations detected during normal execution

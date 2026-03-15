@@ -20,7 +20,7 @@ import * as Engine from "./engine.ts";
 
 type QueryDocKey = `${string}/${string}/${string}`;
 
-class EngineObjectManager implements ObjectStorageManager {
+export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
   #details = new Map<string, { seq: number; hash: Reference }>();
   #missing = new Set<string>();
@@ -70,23 +70,37 @@ class EngineObjectManager implements ObjectStorageManager {
   }
 }
 
+export interface QueryGraphReuseContext {
+  managers?: Map<string, EngineObjectManager>;
+  sharedMemos?: Map<string, ReturnType<typeof createSchemaMemo>>;
+}
+
 export const queryGraph = (
   space: string,
   engine: Engine.Engine,
   query: GraphQuery,
+  reuse?: QueryGraphReuseContext,
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
 } => {
   const branch = query.branch ?? "";
-  const manager = new EngineObjectManager(engine, branch);
+  let manager = reuse?.managers?.get(branch);
+  if (manager === undefined) {
+    manager = new EngineObjectManager(engine, branch);
+    reuse?.managers?.set(branch, manager);
+  }
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
     unknown
   >();
   const schemaTracker = new MapSet<QueryDocKey, SchemaPathSelector>(true);
   const cfc = new ContextualFlowControl();
-  const sharedMemo = createSchemaMemo();
+  let sharedMemo = reuse?.sharedMemos?.get(branch);
+  if (sharedMemo === undefined) {
+    sharedMemo = createSchemaMemo();
+    reuse?.sharedMemos?.set(branch, sharedMemo);
+  }
 
   for (const root of query.roots) {
     const selector: SchemaPathSelector = {

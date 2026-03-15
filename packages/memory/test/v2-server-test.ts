@@ -34,9 +34,10 @@ class CountingServer extends Server {
     space: string,
     query: Parameters<Server["evaluateGraphQuery"]>[1],
     engine?: Parameters<Server["evaluateGraphQuery"]>[2],
+    reuse?: Parameters<Server["evaluateGraphQuery"]>[3],
   ) {
     this.queryCount += 1;
-    return await super.evaluateGraphQuery(space, query, engine);
+    return await super.evaluateGraphQuery(space, query, engine, reuse);
   }
 }
 
@@ -426,6 +427,178 @@ Deno.test("memory v2 server coalesces subscription refresh after pending commits
     }],
   );
   assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server refreshes only subscriptions touched by changed docs", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-dirty-filter"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-dirty-filter";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  for (const id of ["of:doc:1", "of:doc:2"]) {
+    await connection.receive(JSON.stringify({
+      type: "graph.query",
+      requestId: `query-${id}`,
+      space,
+      sessionId,
+      query: {
+        subscribe: true,
+        roots: [{
+          id,
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }));
+    assertExists(
+      (assertResponse(shiftMessage(messages)).ok as any)?.subscriptionId,
+    );
+  }
+
+  assertEquals(server.queryCount, 2);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 1,
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+
+  assertEquals(server.queryCount, 2);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    update.result.entities.map((entity: any) => entity.id),
+    ["of:doc:1"],
+  );
+  assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server patches plain dirty docs without reevaluating the full query", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-direct-patch"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-direct-patch";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    },
+  }));
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 1);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 1,
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+
+  assertEquals(server.queryCount, 1);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.result.serverSeq, 1);
+  assertEquals(
+    update.result.entities.map((entity: any) => ({
+      id: entity.id,
+      seq: entity.seq,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      seq: 1,
+      document: {
+        value: {
+          count: 1,
+        },
+      },
+    }],
+  );
 
   await server.close();
 });

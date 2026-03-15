@@ -324,6 +324,17 @@ The server-side counterpart to the `"revert"` guarantee is:
 - Successful commits may be coalesced before subscription delivery, but the
   server must drain the currently pending successful commits for that
   space/branch before it re-runs subscription queries.
+- During that flush, the server should track the changed document IDs and skip
+  re-evaluating subscriptions whose roots and previously delivered entity set do
+  not intersect those dirty docs.
+- When multiple subscriptions in the same flush still need re-evaluation, the
+  server should reuse shared traversal caches (loaded documents, schema memo,
+  branch-local object manager state) across those query runs instead of opening
+  a fresh traversal context per subscription.
+- If a dirty document's link/source topology is unchanged, the server may patch
+  the changed entity snapshots directly into affected subscription results
+  rather than re-running the whole `graph.query`. If the topology changes, it
+  must fall back to full query re-evaluation.
 - `graph.query` subscription refreshes must reuse the shared traversal code
   path (`packages/runner/src/traverse.ts`), not a second implementation with
   slightly different reachability semantics.
