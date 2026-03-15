@@ -121,7 +121,8 @@
 - [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
 - [ ] Decide whether array-structural writes should stay on containing-array `replace` patches or graduate to a dedicated wire op such as `set-length` / richer `splice`, based on measured workload evidence rather than speculation.
 - [x] Add a short-lived server-side subscription and session resume cache so reconnecting clients can reuse unchanged subscribed query results without changing the `session.open` / `graph.query` contract.
-- [ ] Tune prepared-statement caching and blob I/O only after the cutover suite is green.
+- [x] Add prepared-statement caching to the hot v2 engine read/commit path so repeated SQLite `prepare(...)` calls are no longer part of normal commit-heavy workloads.
+- [ ] Continue tuning blob I/O once benchmark evidence shows it is still a meaningful outlier.
 - [ ] Revisit any future bulk-write shortcut only after benchmark evidence shows it clearly beats the existing `writeValueOrThrow()` compatibility path.
 
 ## Phase 3: Advanced Features After The Cutover
