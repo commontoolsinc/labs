@@ -238,6 +238,59 @@ const isJSONPatchValue = (
   );
 };
 
+const readPathValue = (
+  value: StorableDatum | undefined,
+  path: readonly string[],
+): StorableDatum | undefined => {
+  let current: unknown = value;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      if (segment === "length") {
+        current = current.length;
+        continue;
+      }
+      if (!isArrayIndexPropertyName(segment)) {
+        return undefined;
+      }
+      current = current[Number(segment)];
+      continue;
+    }
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current as StorableDatum | undefined;
+};
+
+const resolveArrayPatchPath = (
+  before: StorableDatum | undefined,
+  after: StorableDatum | undefined,
+  path: readonly string[],
+): readonly string[] | null => {
+  let deepestArrayPath: readonly string[] | null = null;
+
+  for (let index = 0; index < path.length; index += 1) {
+    const prefix = path.slice(0, index);
+    const beforeValue = readPathValue(before, prefix);
+    const afterValue = readPathValue(after, prefix);
+    if (Array.isArray(beforeValue) || Array.isArray(afterValue)) {
+      deepestArrayPath = prefix;
+    }
+  }
+
+  if (deepestArrayPath) {
+    return deepestArrayPath;
+  }
+
+  const firstArrayLikeSegment = path.findIndex((segment) =>
+    segment === "length" || isArrayIndexPropertyName(segment)
+  );
+  return firstArrayLikeSegment === -1
+    ? null
+    : path.slice(0, firstArrayLikeSegment);
+};
+
 class V2TransactionJournal implements ITransactionJournal {
   constructor(private readonly tx: V2StorageTransaction) {}
 
@@ -848,40 +901,61 @@ export class V2StorageTransaction implements IStorageTransaction {
       return null;
     }
 
+    const initialPayload = readPathValue(doc.initial.value, ["value"]);
+    const currentPayload = readPathValue(doc.current.value, ["value"]);
+
     const details = [...doc.writeDetails.values()];
     const relativePaths = details.map((detail) => detail.address.path.slice(1));
-    if (
-      relativePaths.some((path) =>
-        path.length === 0 ||
-        path.some((segment) => isArrayIndexPropertyName(segment))
-      )
-    ) {
+    if (relativePaths.some((path) => path.length === 0)) {
       return null;
     }
 
-    if (
-      !details.every((detail) =>
-        isJSONPatchValue(detail.value) && isJSONPatchValue(detail.previousValue)
-      )
-    ) {
-      return null;
+    const patchDetails = new Map<string, {
+      path: readonly string[];
+      value: JSONValue | undefined;
+      previousValue: JSONValue | undefined;
+    }>();
+    for (const detail of details) {
+      const relativePath = detail.address.path.slice(1);
+      const arrayPatchPath = resolveArrayPatchPath(
+        initialPayload,
+        currentPayload,
+        relativePath,
+      );
+      const patchPath = arrayPatchPath ?? relativePath;
+      const value = (arrayPatchPath
+        ? readPathValue(currentPayload, patchPath)
+        : detail.value) as JSONValue | undefined;
+      const previousValue = (arrayPatchPath
+        ? readPathValue(initialPayload, patchPath)
+        : detail.previousValue) as JSONValue | undefined;
+
+      if (
+        !isJSONPatchValue(value as StorableDatum | undefined) ||
+        !isJSONPatchValue(previousValue as StorableDatum | undefined)
+      ) {
+        return null;
+      }
+
+      patchDetails.set(patchPath.join("\0"), {
+        path: patchPath,
+        value,
+        previousValue,
+      });
     }
 
-    for (let index = 0; index < relativePaths.length; index += 1) {
-      for (let other = index + 1; other < relativePaths.length; other += 1) {
-        if (pathsOverlap(relativePaths[index]!, relativePaths[other]!)) {
+    const compactedPaths = [...patchDetails.values()].map((detail) =>
+      detail.path
+    );
+    for (let index = 0; index < compactedPaths.length; index += 1) {
+      for (let other = index + 1; other < compactedPaths.length; other += 1) {
+        if (pathsOverlap(compactedPaths[index]!, compactedPaths[other]!)) {
           return null;
         }
       }
     }
 
-    const jsonDetails = details.map((detail) => ({
-      path: detail.address.path.slice(1),
-      value: detail.value as JSONValue | undefined,
-      previousValue: detail.previousValue as JSONValue | undefined,
-    }));
-
-    const patches: PatchOp[] = jsonDetails.map((detail) => {
+    const patches: PatchOp[] = [...patchDetails.values()].map((detail) => {
       const path = encodePointer(detail.path);
       if (detail.value === undefined) {
         return { op: "remove", path };

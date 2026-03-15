@@ -909,8 +909,12 @@ The current branch now has a conservative direct-patch fast path for the
 v2-native commit draft hook:
 
 - Stable object-path writes can emit `patch` operations directly.
-- Today that includes `replace`, `add`, and `remove` on non-array JSON paths.
-- Array-index writes still fall back to full `set`.
+- Today that includes `replace`, `add`, and `remove` on stable object paths.
+- Array writes no longer need to fall all the way back to whole-document `set`.
+  When the v1-style diff layer reports array-structural writes through array
+  element paths or `length`, v2 normalizes them to a `replace` on the smallest
+  containing array path. That preserves path-level granularity such as `/items`
+  even before we add richer array-native wire ops.
 - Overlapping writes within the same transaction still fall back to full `set`.
 
 This means `Cell.set()` and path writes no longer always have to materialize a
@@ -927,6 +931,30 @@ unnecessary read dependencies. But not all patches are equal:
   document. `splice`, positional array edits, and today's `remove` behavior are
   in this class and should retain read dependencies until we add stronger
   semantics.
+
+### Array Length Writes
+
+The existing runner diff layer still models many array-structural changes in a
+v1-compatible way by emitting writes to `.../length`. The v2 patch layer MUST
+NOT forward those literally as JSON-Pointer paths such as `/items/length`,
+because the patch engine treats array indices positionally and `length` is not
+an index.
+
+Instead, until we add a dedicated array-structural wire op, the v2 transaction
+serializer should treat array `length` writes as a signal to patch the
+containing array value itself:
+
+- `items.set([...])` can become `replace /items`
+- `items.length = 3` can become `replace /items`
+- nested array edits should target the smallest containing array path that
+  preserves semantics
+
+This keeps write tracking and conflict reads path-aware at the array boundary
+without depending on v1's document-wide coarseness.
+
+If array-heavy workloads later show this to be a bottleneck, a dedicated
+operation such as `set-length` or a richer `splice` family is a good follow-up,
+but that is a protocol evolution, not a prerequisite for the current cutover.
 
 ### Native Commit Drafts May Carry Local-Only Materialized Values
 
