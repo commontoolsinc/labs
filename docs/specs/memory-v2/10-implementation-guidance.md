@@ -1356,6 +1356,11 @@ Important consequences:
   unless the caller first creates the document or writes the whole envelope.
 - The extended wrapper is the compatibility layer that provides parent
   creation for nested value writes.
+- Benchmarks or tests that write plain payloads at raw path `[]` are measuring
+  envelope-level storage behavior, not the user-facing `writeValueOrThrow()`
+  contract. If you want root-level no-op equality on the main runtime path,
+  compare extended writes against extended writes, or compare raw envelopes
+  against raw envelopes.
 - Scheduler-facing reactivity logs should strip the leading `"value"` segment
   before exposing paths to the rest of the runtime.
 
