@@ -377,8 +377,7 @@ export function validateAndTransform(
 
   // Reconstruct doc, path, schema from link and runtime
   const schema = link.schema;
-  let resolvedSchema = resolveSchema(schema);
-  let filteredSchema = filterAsCell(resolvedSchema);
+  const resolvedSchema = resolveSchema(schema);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
@@ -386,35 +385,30 @@ export function validateAndTransform(
   tx = tx ?? runtime.edit();
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
 
-  // Use schema from alias if provided and no explicit schema was set
-  if (filteredSchema === undefined && resolvedLink.schema) {
-    resolvedSchema = resolveSchema(resolvedLink.schema);
-    // Call resolveSchema to strip asCell/asStream here as well. It's still the
-    // initial `schema` that says whether this should be a cell, not the
-    // resolved schema.
-    filteredSchema = filterAsCell(resolvedSchema);
-  }
+  const resolvedLinkSchema = resolveSchema(resolvedLink.schema);
+  const effectiveSchema = resolvedSchema !== undefined
+    ? resolvedLinkSchema !== undefined
+      ? combineSchema(resolvedSchema, resolvedLinkSchema)
+      : resolvedSchema
+    : resolvedLinkSchema;
+  const filteredSchema = filterAsCell(effectiveSchema);
 
   // Unlike the original, we have kept the asCell markers in the schema
   link = {
     ...resolvedLink,
-    schema: resolvedSchema,
+    ...(effectiveSchema !== undefined && { schema: effectiveSchema }),
   };
 
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
   if (
-    (schema === undefined || !SchemaObjectTraverser.asCellOrStream(schema)) &&
+    (
+      effectiveSchema === undefined ||
+      !SchemaObjectTraverser.asCellOrStream(effectiveSchema)
+    ) &&
     filteredSchema === undefined
   ) {
     return createQueryResultProxy(runtime, tx, link);
   }
-
-  // Update our link to match the potentially merged schema
-  link.schema = filteredSchema !== undefined
-    ? schema != undefined
-      ? combineSchema(schema, filteredSchema)
-      : filteredSchema
-    : schema;
 
   // Now resolve further links until we get the actual value.
   // We'll use this for the value, and potentially merge the schema
@@ -428,7 +422,7 @@ export function validateAndTransform(
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
-  if (SchemaObjectTraverser.asCellOrStream(schema)) {
+  if (SchemaObjectTraverser.asCellOrStream(effectiveSchema)) {
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
@@ -440,8 +434,8 @@ export function validateAndTransform(
       // We leave the asCell/asStream in the schema, so that createObject
       // knows to create a cell
       const mergedSchema = (next.schema !== undefined)
-        ? combineSchema(schema!, next.schema)
-        : schema!;
+        ? combineSchema(effectiveSchema!, next.schema)
+        : effectiveSchema!;
       link = { ...next, schema: mergedSchema };
     }
     // If our ref has a schema, merge our schema flags into that schema
@@ -449,7 +443,7 @@ export function validateAndTransform(
     // link, but this one should be more accurate
     // Otherwise, we won't return a cell like we are supposed to.
     if (ref.schema !== undefined) {
-      link.schema = mergeSchemaFlags(schema!, ref.schema);
+      link.schema = mergeSchemaFlags(effectiveSchema!, ref.schema);
     }
     return objectCreator.createObject(link, undefined);
   }

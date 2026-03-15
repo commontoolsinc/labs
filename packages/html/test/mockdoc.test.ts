@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { MockDoc } from "../src/mock-doc.ts";
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 
 describe("MockDoc", () => {
   it("should render as innerHTML", () => {
@@ -26,5 +26,19 @@ describe("MockDoc", () => {
     );
     const root2 = mock.document.getElementById("root")!;
     assert(root2.innerHTML === "<span>hello</span><div>hi</div>");
+  });
+
+  it("should reflect textContent updates in innerHTML", () => {
+    const mock = new MockDoc(
+      `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+    );
+    const root = mock.document.getElementById("root")!;
+    const text = mock.document.createTextNode("0");
+
+    root.appendChild(text);
+    assertEquals(root.innerHTML, "0");
+
+    text.textContent = "1";
+    assertEquals(root.innerHTML, "1");
   });
 });

@@ -34,6 +34,7 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    await targetCell.pull();
     return resolveCellPath(targetCell, path ?? []);
   }
 
@@ -55,7 +56,11 @@ class PiecePropIo implements PieceCellIo {
       txCell.set(value);
     });
 
-    await manager.runtime.idle();
+    if (this.#type === "input") {
+      await manager.getResult(this.#cc.getCell()).pull();
+    } else {
+      await targetCell.pull();
+    }
     await manager.synced();
   }
 
@@ -173,8 +178,6 @@ async function execute(
   options?: { start?: boolean },
 ): Promise<void> {
   await manager.runWithPattern(pattern, pieceId, input, options);
-  await manager.runtime.idle();
-  await manager.synced();
 }
 
 export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {

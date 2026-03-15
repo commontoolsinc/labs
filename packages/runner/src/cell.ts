@@ -1727,8 +1727,13 @@ function subscribeToReferencedDocs<T>(
     // wants to stay updated.
     const extraTx = runtime.edit();
     const wrappedTx = createChildCellTransaction(tx, extraTx);
-
+    const schema = link.schema;
+    const needsTraversal = schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema);
     const newValue = validateAndTransform(runtime, wrappedTx, link);
+    if (needsTraversal && newValue !== undefined && newValue !== null) {
+      deepTraverse(newValue);
+    }
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should

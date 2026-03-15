@@ -3,6 +3,8 @@ import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
+const schedulerModes = ["default", "push", "pull"] as const;
+
 export const test = new Command()
   .name("test")
   .description("Run pattern tests (.test.tsx files).")
@@ -43,6 +45,20 @@ export const test = new Command()
     "--stats-threshold <ms:number>",
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
+  )
+  .option(
+    "--stats-include <prefixes:string>",
+    "Comma-separated timing categories to always print in verbose stats output (exact or prefix match).",
+  )
+  .option(
+    "--stats-action-limit <count:number>",
+    "Number of per-step scheduler action deltas to print in verbose mode.",
+    { default: 10 },
+  )
+  .option(
+    "--scheduler-mode <mode:string>",
+    "Scheduler mode for test runtimes: default, push, or pull.",
+    { default: "default" },
   )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
@@ -102,6 +118,21 @@ export const test = new Command()
 
     // Resolve root path if provided
     const root = options.root ? resolve(Deno.cwd(), options.root) : undefined;
+    const statsInclude = options.statsInclude
+      ? String(options.statsInclude)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+      : undefined;
+    const schedulerMode = schedulerModes.find((mode) =>
+      mode === options.schedulerMode
+    );
+    if (!schedulerMode) {
+      console.error(
+        "Error: --scheduler-mode must be one of: default, push, pull",
+      );
+      Deno.exit(1);
+    }
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
@@ -109,6 +140,9 @@ export const test = new Command()
       verbose: options.verbose,
       root,
       statsThreshold: options.statsThreshold,
+      statsInclude,
+      statsActionLimit: options.statsActionLimit,
+      schedulerMode,
     });
 
     // Exit with error code if any tests failed

@@ -5,6 +5,7 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -76,6 +77,13 @@ export function flatMap(
     ).withTx(tx).get();
 
     const opPattern = op.getRaw();
+    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const createRunInput = (element: Cell<any>, index: number) => ({
+      ...(argumentUsage.usesElement ? { element } : {}),
+      ...(argumentUsage.usesIndex ? { index } : {}),
+      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
+      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+    });
 
     if (resultWithLog.get() === undefined) {
       resultWithLog.set([]);
@@ -107,21 +115,16 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (existing.lastIndex !== i) {
+        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
             opPattern,
-            {
-              element: list[i],
-              index: i,
-              array: inputsCell.key("list"),
-              params: inputsCell.key("params"),
-            },
+            createRunInput(list[i], i),
             existing.resultCell,
             { doNotUpdateOnPatternChange: true },
           );
-          existing.lastIndex = i;
         }
+        existing.lastIndex = i;
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -132,12 +135,7 @@ export function flatMap(
         runtime.runner.run(
           tx,
           opPattern,
-          {
-            element: list[i],
-            index: i,
-            array: inputsCell.key("list"),
-            params: inputsCell.key("params"),
-          },
+          createRunInput(list[i], i),
           resultCell,
           { doNotUpdateOnPatternChange: true },
         );

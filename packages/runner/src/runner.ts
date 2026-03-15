@@ -55,6 +55,7 @@ import type {
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
+import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
@@ -1457,7 +1458,10 @@ export class Runner {
 
       let previouslyInvalidArgument = false;
 
-      const action: Action = (tx: IExtendedStorageTransaction) => {
+      const action: Action & {
+        ignoredSchedulingWrites?: NormalizedFullLink[];
+      } = (tx: IExtendedStorageTransaction) => {
+        action.ignoredSchedulingWrites = [];
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
           {
@@ -1498,9 +1502,16 @@ export class Runner {
         };
 
         try {
-          const argument = module.argumentSchema !== undefined
-            ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-            : inputsCell.getAsQueryResult([], tx);
+          logger.timeStart("action", "readInputs");
+          const argument = (() => {
+            try {
+              return module.argumentSchema !== undefined
+                ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+                : inputsCell.getAsQueryResult([], tx);
+            } finally {
+              logger.timeEnd("action", "readInputs");
+            }
+          })();
 
           // If we have a schema of false, we don't use our argument, so undefined is ok
           const isValidArgument = module.argumentSchema === false ||
@@ -1599,12 +1610,25 @@ export class Runner {
                   resultPatternAsString,
                 );
 
+                // Sub-pattern setup reads are child lifecycle bookkeeping, not
+                // semantic dependencies of the parent action. Keep the writes
+                // in the same transaction but suppress those reads from
+                // polluting the parent action's reactivity log.
+                const childSetupTx = new TransactionWrapper(tx, {
+                  nonReactive: true,
+                });
                 this.run(
-                  tx,
+                  childSetupTx,
                   resultPattern,
                   undefined,
                   resultCell,
                 );
+                const childProcessCell = resultCell.withTx(tx).getSourceCell();
+                if (childProcessCell) {
+                  action.ignoredSchedulingWrites?.push(
+                    childProcessCell.getAsNormalizedFullLink(),
+                  );
+                }
                 addCancel(() => this.stop(resultCell));
 
                 // CT-1316: If the TX commit fails (e.g. session cancel,
@@ -1674,30 +1698,35 @@ export class Runner {
       // - writes: so collectDirtyDependencies() can find this computation when
       //   an effect needs its outputs
       const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-        // Capture read dependencies - use the pre-computed reads list
-        // Note: We DON'T run fn(depTx) here because that would execute
-        // user code with side effects during dependency discovery
-        if (module.argumentSchema !== undefined) {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            inputs,
-            undefined,
-            depTx,
-          );
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        } else {
-          for (const read of reads) {
-            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+        logger.timeStart("action", "populateDependencies");
+        try {
+          // Capture read dependencies - use the pre-computed reads list
+          // Note: We DON'T run fn(depTx) here because that would execute
+          // user code with side effects during dependency discovery
+          if (module.argumentSchema !== undefined) {
+            const inputsCell = this.runtime.getImmutableCell(
+              processCell.space,
+              inputs,
+              undefined,
+              depTx,
+            );
+            inputsCell.asSchema(module.argumentSchema!).get({
+              traverseCells: true,
+            });
+          } else {
+            for (const read of reads) {
+              this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+            }
           }
-        }
-        // Capture write dependencies by marking outputs as potential writes
-        for (const output of writes) {
-          // Reading with markReadAsPotentialWrite registers this as a write dependency
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
-          });
+          // Capture write dependencies by marking outputs as potential writes
+          for (const output of writes) {
+            // Reading with markReadAsPotentialWrite registers this as a write dependency
+            this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+              meta: markReadAsPotentialWrite,
+            });
+          }
+        } finally {
+          logger.timeEnd("action", "populateDependencies");
         }
       };
 
@@ -1795,33 +1824,47 @@ export class Runner {
     });
     (action as Action & { src?: string }).src = rawName;
 
+    // Seed raw actions with their pattern/module/write metadata so pull-mode
+    // scheduling can discover pending computations before their first run.
+    Object.assign(action, {
+      reads: inputCells,
+      writes: outputCells,
+      module,
+      pattern,
+    });
+
     // Create populateDependencies callback.
     // If builtin provides custom reads, use that; otherwise read all inputs.
     // Always register output writes so collectDirtyDependencies() can find this
     // computation when an effect needs its outputs.
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      // Capture read dependencies - use custom if provided, otherwise read all inputs
-      if (builtinPopulateDependencies) {
-        if (typeof builtinPopulateDependencies === "function") {
-          builtinPopulateDependencies(depTx);
+      logger.timeStart("raw", "populateDependencies");
+      try {
+        // Capture read dependencies - use custom if provided, otherwise read all inputs
+        if (builtinPopulateDependencies) {
+          if (typeof builtinPopulateDependencies === "function") {
+            builtinPopulateDependencies(depTx);
+          } else {
+            // It's a ReactivityLog - reads are already captured, nothing to do
+            for (const read of builtinPopulateDependencies.reads) {
+              depTx.readOrThrow(read);
+            }
+          }
         } else {
-          // It's a ReactivityLog - reads are already captured, nothing to do
-          for (const read of builtinPopulateDependencies.reads) {
-            depTx.readOrThrow(read);
+          // Default: read all inputs
+          for (const input of inputCells) {
+            this.runtime.getCellFromLink(input, undefined, depTx)?.get();
           }
         }
-      } else {
-        // Default: read all inputs
-        for (const input of inputCells) {
-          this.runtime.getCellFromLink(input, undefined, depTx)?.get();
+        // Always capture write dependencies by marking outputs as potential writes
+        for (const output of outputCells) {
+          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+            meta: markReadAsPotentialWrite,
+          });
         }
-      }
-      // Always capture write dependencies by marking outputs as potential writes
-      for (const output of outputCells) {
-        // Reading with markReadAsPotentialWrite registers this as a write dependency
-        this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-          meta: markReadAsPotentialWrite,
-        });
+      } finally {
+        logger.timeEnd("raw", "populateDependencies");
       }
     };
 
@@ -1891,11 +1934,7 @@ export class Runner {
       sendToBindings = true;
     }
 
-    // Run the nested pattern without the $TYPE watcher to prevent infinite loops.
-    // Nested patterns don't need to watch for pattern changes - their parent manages lifecycle.
-    this.run(tx, patternImpl, inputs, resultCell, {
-      doNotUpdateOnPatternChange: true,
-    });
+    this.run(tx, patternImpl, inputs, resultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

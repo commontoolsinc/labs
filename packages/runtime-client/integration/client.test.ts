@@ -631,6 +631,80 @@ export default pattern<State>(({ value }) => {
       );
       cancel();
     });
+
+    it("dispatches click events through rendered page handlers", async () => {
+      const clickPattern = `/// <cts-enable />
+import { action, Default, NAME, pattern, UI, Writable } from "commontools";
+
+interface State {
+  value: Writable<Default<number, 0>>;
+}
+
+export default pattern<State>(({ value }) => {
+  const increment = action(() => {
+    value.set(value.get() + 1);
+  });
+
+  return {
+    [NAME]: "Click Test",
+    value,
+    [UI]: (
+      <div>
+        <button id="increment" onClick={increment}>Increment</button>
+        <span id="value">{value}</span>
+      </div>
+    ),
+  };
+});`;
+
+      const clickProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: clickPattern,
+        }],
+      };
+
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(clickProgram, {
+        run: true,
+      });
+      const valueCell = (page.cell() as any).key("value").asSchema({
+        type: "number",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, page.cell() as any, renderOptions);
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.length > 0),
+        { timeout: 5000 },
+      );
+      assertEquals(await valueCell.sync(), 0);
+
+      const button = root.getElementsByTagName("button")[0] as any;
+      assertExists(button);
+
+      button.dispatchEvent({ type: "click", target: button });
+
+      await waitFor(
+        async () => await valueCell.sync() === 1,
+        { timeout: 5000 },
+      );
+
+      await waitFor(
+        () => Promise.resolve(root.innerHTML.includes(">1</span>")),
+        { timeout: 5000 },
+      );
+
+      cancel();
+    });
   });
 });
 
