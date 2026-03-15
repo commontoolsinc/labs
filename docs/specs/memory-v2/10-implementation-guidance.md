@@ -1342,6 +1342,34 @@ Preferred shape:
 This keeps the runtime boundary stable while removing a large amount of
 accidental v1 structure from the v2 hot path.
 
+### What The Runtime Actually Uses
+
+Do not assume every legacy transaction surface is equally important. In the
+current codebase, the meaningful compatibility surface is much smaller:
+
+- scheduler dependency wiring mainly wants a `ReactivityLog`
+- conflict/read tracking wants `getReadActivities()`
+- write summaries and some debugging helpers want `getWriteDetails(space)`
+
+By contrast, the old `journal.novelty()` / `journal.history()` surface is now
+mostly a compatibility fallback for:
+
+- storage inspection helpers
+- transaction summaries
+- older tests that intentionally exercise the v1-shaped journal model
+
+That means a cleaner v2 refactor can safely prefer:
+
+1. direct `getReactivityLog()`
+2. direct `getReadActivities()`
+3. direct `getWriteDetails(space)`
+4. a thin adapter journal only when an older caller still demands it
+
+If a caller only needs a reactivity log, do not rebuild it by walking
+`journal.activity()` unless the direct hook is truly unavailable. Likewise, if a
+future v2-only caller wants a summary object, consider a direct summary/export
+hook instead of teaching it about v1 journal internals.
+
 ---
 
 ## 20. Raw vs Extended Addressing
