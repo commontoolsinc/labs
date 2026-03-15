@@ -1,6 +1,7 @@
 import type { JSONValue } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
+import { getLogger } from "@commontools/utils/logger";
 import {
   type Blob,
   type ClientMessage,
@@ -9,6 +10,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  isSourceLink,
   type LegacyServerMessage,
   MEMORY_V2_PROTOCOL,
   type Reference,
@@ -21,7 +23,12 @@ import {
   type V2Error,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
-import { queryGraph } from "./query.ts";
+import { queryGraph, type QueryGraphReuseContext } from "./query.ts";
+
+const logger = getLogger("memory-v2-server", {
+  enabled: true,
+  level: "warn",
+});
 
 type SessionState = {
   id: string;
@@ -259,28 +266,59 @@ class Connection {
   }
 
   async refresh(space: string): Promise<void> {
+    return await this.refreshMatching(space, undefined);
+  }
+
+  async refreshMatching(
+    space: string,
+    dirtyIds: ReadonlySet<string> | undefined,
+  ): Promise<void> {
     if (this.#closed) {
       return;
     }
-    for (const subscription of this.subscriptionsForSpace(space)) {
-      const state = await this.server.evaluateGraphQuery(
-        space,
-        subscription.query,
-      );
-      if (sameEntities(state.entities, subscription.entities)) {
-        continue;
-      }
-      subscription.entities = state.entities;
-      subscription.serverSeq = state.serverSeq;
-      this.send({
-        type: "graph.update",
-        subscriptionId: subscription.id,
-        space,
-        result: {
-          ...state,
+    logger.timeStart("refresh-space");
+    try {
+      const reuse: QueryGraphReuseContext = {
+        managers: new Map(),
+        sharedMemos: new Map(),
+      };
+      const directCache = new Map<string, EntitySnapshot>();
+      for (const subscription of this.subscriptionsForSpace(space)) {
+        if (
+          dirtyIds !== undefined &&
+          !subscriptionTouchesIds(subscription, dirtyIds)
+        ) {
+          continue;
+        }
+        const state = await this.server.patchSubscriptionEntities(
+          space,
+          subscription,
+          dirtyIds,
+          directCache,
+        ) ??
+          await this.server.evaluateGraphQuery(
+            space,
+            subscription.query,
+            undefined,
+            reuse,
+          );
+        if (sameEntities(state.entities, subscription.entities)) {
+          continue;
+        }
+        subscription.entities = state.entities;
+        subscription.serverSeq = state.serverSeq;
+        this.send({
+          type: "graph.update",
           subscriptionId: subscription.id,
-        },
-      });
+          space,
+          result: {
+            ...state,
+            subscriptionId: subscription.id,
+          },
+        });
+      }
+    } finally {
+      logger.timeEnd("refresh-space");
     }
   }
 
@@ -300,6 +338,7 @@ export class Server {
   #connections = new Set<Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   #dirtySpaces = new Set<string>();
+  #dirtyDocsBySpace = new Map<string, Set<string>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #store?: URL;
@@ -392,7 +431,10 @@ export class Server {
         authorization: message.authorization ?? {},
         commit: message.commit,
       });
-      this.markSpaceDirty(message.space);
+      this.markSpaceDirty(
+        message.space,
+        message.commit.operations.map((operation) => operation.id),
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -462,8 +504,63 @@ export class Server {
     space: string,
     query: GraphQuery,
     engine?: Engine.Engine,
+    reuse?: QueryGraphReuseContext,
   ) {
-    return queryGraph(space, engine ?? await this.openEngine(space), query);
+    logger.timeStart("graph-query");
+    try {
+      return queryGraph(
+        space,
+        engine ?? await this.openEngine(space),
+        query,
+        reuse,
+      );
+    } finally {
+      logger.timeEnd("graph-query");
+    }
+  }
+
+  async patchSubscriptionEntities(
+    space: string,
+    subscription: SubscriptionState,
+    dirtyIds: ReadonlySet<string> | undefined,
+    cache: Map<string, EntitySnapshot>,
+  ): Promise<GraphQueryResult | null> {
+    if (dirtyIds === undefined) {
+      return null;
+    }
+
+    const branch = subscription.query.branch ?? "";
+    const touchedIds = collectTouchedSubscriptionIds(subscription, dirtyIds);
+    if (touchedIds.length === 0) {
+      return null;
+    }
+
+    const previousById = new Map(
+      subscription.entities.map((entity) => [entity.id, entity]),
+    );
+    const nextById = new Map(previousById);
+    const engine = await this.openEngine(space);
+
+    for (const id of touchedIds) {
+      const previous = previousById.get(id);
+      const current = getOrLoadEntitySnapshot(cache, engine, id, branch);
+      if (documentTopologyChanged(previous?.document, current.document)) {
+        return null;
+      }
+
+      if (current.document === null && !queryHasRoot(subscription.query, id)) {
+        nextById.delete(id);
+        continue;
+      }
+      nextById.set(id, current);
+    }
+
+    return {
+      serverSeq: Engine.headSeq(engine, branch),
+      entities: [...nextById.values()].sort((left, right) =>
+        left.id.localeCompare(right.id)
+      ),
+    };
   }
 
   async putBlob(
@@ -487,12 +584,23 @@ export class Server {
     return Engine.getBlob(engine, hash as Reference);
   }
 
-  markSpaceDirty(space: string): void {
+  markSpaceDirty(space: string, dirtyIds?: Iterable<string>): void {
+    if (dirtyIds !== undefined) {
+      let ids = this.#dirtyDocsBySpace.get(space);
+      if (ids === undefined) {
+        ids = new Set();
+        this.#dirtyDocsBySpace.set(space, ids);
+      }
+      for (const id of dirtyIds) {
+        ids.add(id);
+      }
+    }
     this.#dirtySpaces.add(space);
     this.scheduleRefresh();
   }
 
   async flushSubscriptions(spaces?: Iterable<string>): Promise<void> {
+    logger.timeStart("schema-flush");
     if (this.#refreshTimer !== null) {
       clearTimeout(this.#refreshTimer);
       this.#refreshTimer = null;
@@ -513,7 +621,11 @@ export class Server {
         this.#refreshing = null;
       }
     });
-    await this.#refreshing;
+    try {
+      await this.#refreshing;
+    } finally {
+      logger.timeEnd("schema-flush");
+    }
   }
 
   private scheduleRefresh(): void {
@@ -540,8 +652,12 @@ export class Server {
       pending = undefined;
 
       for (const space of spaces) {
+        const dirtyIds = this.#dirtyDocsBySpace.get(space);
+        if (dirtyIds !== undefined) {
+          this.#dirtyDocsBySpace.delete(space);
+        }
         for (const connection of this.#connections) {
-          await connection.refresh(space);
+          await connection.refreshMatching(space, dirtyIds);
         }
       }
 
@@ -638,6 +754,121 @@ const sameEntities = (
       entity.hash === other.hash &&
       JSON.stringify(entity.document) === JSON.stringify(other.document);
   });
+};
+
+const subscriptionTouchesIds = (
+  subscription: SubscriptionState,
+  dirtyIds: ReadonlySet<string>,
+): boolean => {
+  for (const root of subscription.query.roots) {
+    if (dirtyIds.has(root.id)) {
+      return true;
+    }
+  }
+  for (const entity of subscription.entities) {
+    if (dirtyIds.has(entity.id)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const collectTouchedSubscriptionIds = (
+  subscription: SubscriptionState,
+  dirtyIds: ReadonlySet<string>,
+): string[] => {
+  const touched = new Set<string>();
+  for (const root of subscription.query.roots) {
+    if (dirtyIds.has(root.id)) {
+      touched.add(root.id);
+    }
+  }
+  for (const entity of subscription.entities) {
+    if (dirtyIds.has(entity.id)) {
+      touched.add(entity.id);
+    }
+  }
+  return [...touched];
+};
+
+const queryHasRoot = (query: GraphQuery, id: string): boolean =>
+  query.roots.some((root) => root.id === id);
+
+const cacheKeyForEntity = (branch: string, id: string): string =>
+  `${branch}\0${id}`;
+
+const getOrLoadEntitySnapshot = (
+  cache: Map<string, EntitySnapshot>,
+  engine: Engine.Engine,
+  id: string,
+  branch: string,
+): EntitySnapshot => {
+  const key = cacheKeyForEntity(branch, id);
+  const existing = cache.get(key);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const state = Engine.readState(engine, { id, branch });
+  const snapshot: EntitySnapshot = {
+    id,
+    seq: state?.seq ?? 0,
+    hash: state?.hash,
+    document: state?.document ?? null,
+  };
+  cache.set(key, snapshot);
+  return snapshot;
+};
+
+const documentTopologyChanged = (
+  previous: unknown,
+  current: unknown,
+): boolean => {
+  const left = collectTopologyRefs(previous);
+  const right = collectTopologyRefs(current);
+  if (left.length !== right.length) {
+    return true;
+  }
+  return left.some((entry, index) => entry !== right[index]);
+};
+
+const collectTopologyRefs = (document: unknown): string[] => {
+  if (document === null || document === undefined) {
+    return [];
+  }
+  const entries: string[] = [];
+  collectValueTopologyRefs(document, [], true, entries);
+  entries.sort();
+  return entries;
+};
+
+const collectValueTopologyRefs = (
+  value: unknown,
+  path: (string | number)[],
+  isDocumentRoot: boolean,
+  entries: string[],
+): void => {
+  if (isSourceLink(value)) {
+    entries.push(`${path.join(".")}=>${value["/"]}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectValueTopologyRefs(item, [...path, index], false, entries)
+    );
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (isDocumentRoot && isSourceLink(record.source)) {
+    entries.push(`source=>${record.source["/"]}`);
+  }
+  for (const [key, nested] of Object.entries(record)) {
+    collectValueTopologyRefs(nested, [...path, key], false, entries);
+  }
 };
 
 const queryCacheKey = (query: GraphQuery): string => JSON.stringify(query);

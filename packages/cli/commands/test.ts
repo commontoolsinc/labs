@@ -63,6 +63,10 @@ export const test = new Command()
     "Scheduler mode for test runtimes: default, push, or pull.",
     { default: "default" },
   )
+  .option(
+    "--storage-stats",
+    "Print storage-related logger timings and counts after each test file.",
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -146,6 +150,7 @@ export const test = new Command()
       statsInclude,
       statsActionLimit: options.statsActionLimit,
       schedulerMode,
+      storageStats: options.storageStats,
     });
 
     // Exit with error code if any tests failed

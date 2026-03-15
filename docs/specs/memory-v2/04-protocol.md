@@ -1147,6 +1147,13 @@ For subscription delivery, the ordering rule is:
   order to coalesce multiple commits, but it MUST first drain the currently
   pending commits for that space/branch and then run the subscription queries
   against the resulting latest state.
+- The server SHOULD carry dirty document IDs through that flush, skip
+  subscriptions whose roots/current entity set do not intersect those docs, and
+  reuse shared traversal caches across the remaining subscription queries.
+- If a touched document keeps the same link/source topology, the server MAY
+  patch the changed entity snapshots directly into affected subscription
+  results; if topology changes, it MUST fall back to full `graph.query`
+  re-evaluation.
 - For `graph.query` subscriptions, that refresh is a re-evaluation of the query
   using the shared traversal code, not a separate incremental algorithm with
   different semantics.

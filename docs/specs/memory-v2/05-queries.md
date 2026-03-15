@@ -484,6 +484,9 @@ The required ordering invariant is:
 1. The server first drains the currently pending successful commits for the
    space/branch.
 2. It then re-runs the affected subscriptions against that latest state.
+   Implementations should first filter subscriptions by dirty document
+   intersection and may patch plain, topology-stable entities directly before
+   falling back to full query re-evaluation.
 3. Only after that refresh does it emit subscription updates.
 
 If a new transaction fails with `ConflictError` while such a refresh is still
