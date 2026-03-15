@@ -177,6 +177,8 @@ const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
   return deepFreeze(isolateTransactionValue(value)) as T;
 };
 
+const EMPTY_META = Object.freeze({});
+
 const isPrefixPath = (
   prefix: readonly string[],
   path: readonly string[],
@@ -434,11 +436,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const branch = this.branch(address.space);
-    const { doc, meta } = this.document(branch, address);
-    const readMeta = {
-      ...(options?.meta ?? {}),
-      ...(typeof meta.seq === "number" ? { seq: meta.seq } : {}),
-    };
+    const { doc } = this.document(branch, address);
+    const readMeta = options?.meta ?? EMPTY_META;
 
     this.#activity.push({
       read: {
