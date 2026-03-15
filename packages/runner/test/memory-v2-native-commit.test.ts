@@ -197,7 +197,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
   }
 });
 
-Deno.test("memory v2 transactions keep array-path writes on full set drafts for now", async () => {
+Deno.test("memory v2 transactions emit array-path patch drafts for array element writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -227,10 +227,61 @@ Deno.test("memory v2 transactions keep array-path writes on full set drafts for 
     assert(commitResult.ok);
     assertEquals(drafts, [{
       operations: [{
-        op: "set",
+        op: "patch",
         id: "of:memory-v2-native-array",
         type,
         value: { value: { tags: ["zero", "two"] } },
+        patches: [{
+          op: "replace",
+          path: "/tags",
+          value: ["zero", "two"],
+        }],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 transactions emit array-path patch drafts for array length writes", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-native-array-length",
+      type,
+      path: [],
+    }, { value: { tags: ["one", "two"] } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const writeResult = tx.write({
+      space,
+      id: "of:memory-v2-native-array-length",
+      type,
+      path: ["value", "tags", "length"],
+    }, 1);
+    assert(writeResult.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-native-array-length",
+        type,
+        value: { value: { tags: ["one"] } },
+        patches: [{
+          op: "replace",
+          path: "/tags",
+          value: ["one"],
+        }],
       }],
     }]);
   } finally {
