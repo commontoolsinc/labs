@@ -843,6 +843,16 @@ the memory service, the space, the commit logic — is real code.
 Use `data:,memory` or equivalent in-memory URL for the SQLite database. Each
 space gets its own in-memory database (matching production behavior).
 
+### Prepared Statements Belong In The Engine
+
+The engine hot path should prepare its common SQL statements once per opened
+database and then reuse them. Repeated `database.prepare(...)` calls during
+normal reads, commit validation, or fact insertion are measurable overhead in
+commit-heavy workloads and obscure the real cost of the v2 design.
+
+This does not affect the on-disk format or wire format, but it is part of the
+expected production implementation once the cutover suite is green.
+
 ### External Commit Injection
 
 For testing multi-client scenarios, provide a test utility that can inject

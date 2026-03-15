@@ -381,6 +381,37 @@ export interface Engine {
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
+  statements: PreparedStatements;
+}
+
+type PreparedStatement = ReturnType<Database["prepare"]>;
+
+interface PreparedStatements {
+  insertAuthorization: PreparedStatement;
+  insertBlob: PreparedStatement;
+  insertCommit: PreparedStatement;
+  insertFact: PreparedStatement;
+  insertInvocation: PreparedStatement;
+  insertSnapshot: PreparedStatement;
+  insertValue: PreparedStatement;
+  selectAtSeq: PreparedStatement;
+  selectBlob: PreparedStatement;
+  selectBranchHeadSeq: PreparedStatement;
+  selectBranchStatus: PreparedStatement;
+  selectCommitFacts: PreparedStatement;
+  selectCurrent: PreparedStatement;
+  selectExistingCommit: PreparedStatement;
+  selectHead: PreparedStatement;
+  selectLatestBase: PreparedStatement;
+  selectLatestConflict: PreparedStatement;
+  selectLatestSnapshot: PreparedStatement;
+  selectNextSeq: PreparedStatement;
+  selectPatchCount: PreparedStatement;
+  selectPatches: PreparedStatement;
+  selectPendingResolution: PreparedStatement;
+  upsertHead: PreparedStatement;
+  updateBranchHead: PreparedStatement;
+  deleteOldSnapshots: PreparedStatement;
 }
 
 export class ConflictError extends Error {
@@ -501,6 +532,34 @@ type BlobRow = {
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
 
+const prepareStatements = (database: Database): PreparedStatements => ({
+  insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
+  insertBlob: database.prepare(INSERT_BLOB),
+  insertCommit: database.prepare(INSERT_COMMIT),
+  insertFact: database.prepare(INSERT_FACT),
+  insertInvocation: database.prepare(INSERT_INVOCATION),
+  insertSnapshot: database.prepare(INSERT_SNAPSHOT),
+  insertValue: database.prepare(INSERT_VALUE),
+  selectAtSeq: database.prepare(SELECT_AT_SEQ),
+  selectBlob: database.prepare(SELECT_BLOB),
+  selectBranchHeadSeq: database.prepare(SELECT_BRANCH_HEAD_SEQ),
+  selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
+  selectCommitFacts: database.prepare(SELECT_COMMIT_FACTS),
+  selectCurrent: database.prepare(SELECT_CURRENT),
+  selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
+  selectHead: database.prepare(SELECT_HEAD),
+  selectLatestBase: database.prepare(SELECT_LATEST_BASE),
+  selectLatestConflict: database.prepare(SELECT_LATEST_CONFLICT),
+  selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
+  selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
+  selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
+  selectPatches: database.prepare(SELECT_PATCHES),
+  selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
+  upsertHead: database.prepare(UPSERT_HEAD),
+  updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
+  deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
+});
+
 export const open = async (
   {
     url,
@@ -512,7 +571,13 @@ export const open = async (
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
   database.exec(INIT);
-  return { url, database, snapshotInterval, snapshotRetention };
+  return {
+    url,
+    database,
+    snapshotInterval,
+    snapshotRetention,
+    statements: prepareStatements(database),
+  };
 };
 
 export const close = (engine: Engine): void => {
@@ -531,8 +596,8 @@ export const readState = (
   { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
 ): EntityState | null => {
   const statement = seq === undefined
-    ? engine.database.prepare(SELECT_CURRENT)
-    : engine.database.prepare(SELECT_AT_SEQ);
+    ? engine.statements.selectCurrent
+    : engine.statements.selectAtSeq;
   const row =
     (seq === undefined
       ? statement.get({ branch, id })
@@ -575,7 +640,7 @@ export const headSeq = (
   engine: Engine,
   branch: BranchName = DEFAULT_BRANCH,
 ): number => {
-  const row = engine.database.prepare(SELECT_BRANCH_HEAD_SEQ).get({
+  const row = engine.statements.selectBranchHeadSeq.get({
     branch,
   }) as { head_seq: number } | undefined;
   return row?.head_seq ?? 0;
@@ -586,7 +651,7 @@ export const putBlob = (
   options: PutBlobOptions,
 ): Blob => {
   const hash = hashBlobBytes(options.value);
-  engine.database.prepare(INSERT_BLOB).run({
+  engine.statements.insertBlob.run({
     hash,
     data: options.value,
     content_type: options.contentType,
@@ -601,7 +666,7 @@ export const putBlob = (
 };
 
 export const getBlob = (engine: Engine, hash: Reference): Blob | null => {
-  const row = engine.database.prepare(SELECT_BLOB).get({
+  const row = engine.statements.selectBlob.get({
     hash,
   }) as BlobRow | undefined;
   if (!row) {
@@ -636,7 +701,7 @@ const applyCommitTransaction = (
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
 
-  const existing = engine.database.prepare(SELECT_EXISTING_COMMIT).get({
+  const existing = engine.statements.selectExistingCommit.get({
     session_id: sessionId,
     local_seq: commit.localSeq,
   }) as CommitRow | undefined;
@@ -652,18 +717,16 @@ const applyCommitTransaction = (
   validateConfirmedReads(engine, branch, commit);
   const resolvedPendingReads = resolvePendingReads(engine, sessionId, commit);
 
-  const seq = (
-    engine.database.prepare(SELECT_NEXT_SEQ).get() as { seq: number }
-  ).seq;
+  const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const hash = toReference(commit);
   const invocationRef = toReference(invocation);
   const authorizationRef = toReference(authorization);
 
-  engine.database.prepare(INSERT_AUTHORIZATION).run({
+  engine.statements.insertAuthorization.run({
     ref: authorizationRef,
     authorization: JSON.stringify(authorization),
   });
-  engine.database.prepare(INSERT_INVOCATION).run({
+  engine.statements.insertInvocation.run({
     ref: invocationRef,
     iss: invocation.iss,
     aud: invocation.aud ?? null,
@@ -671,7 +734,7 @@ const applyCommitTransaction = (
     sub: invocation.sub,
     invocation: JSON.stringify(invocation),
   });
-  engine.database.prepare(INSERT_COMMIT).run({
+  engine.statements.insertCommit.run({
     seq,
     hash,
     branch,
@@ -711,14 +774,14 @@ const applyCommitTransaction = (
     });
   }
 
-  engine.database.prepare(UPDATE_BRANCH_HEAD).run({ branch, seq });
+  engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, facts);
 
   return { seq, hash, branch, facts };
 };
 
 const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
-  const row = engine.database.prepare(SELECT_BRANCH_STATUS).get({
+  const row = engine.statements.selectBranchStatus.get({
     branch,
   }) as { status: string } | undefined;
   if (!row) {
@@ -737,7 +800,7 @@ const validateConfirmedReads = (
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureActiveBranch(engine, readBranch);
-    const conflicts = engine.database.prepare(SELECT_LATEST_CONFLICT).all({
+    const conflicts = engine.statements.selectLatestConflict.all({
       branch: readBranch,
       id: read.id,
       after_seq: read.seq,
@@ -849,7 +912,7 @@ const resolvePendingReads = (
     if (resolutions.has(read.localSeq)) {
       continue;
     }
-    const row = engine.database.prepare(SELECT_PENDING_RESOLUTION).get({
+    const row = engine.statements.selectPendingResolution.get({
       session_id: sessionId,
       local_seq: read.localSeq,
     }) as { hash: string; seq: number } | undefined;
@@ -872,7 +935,7 @@ const selectCommitFacts = (
   engine: Engine,
   commitSeq: number,
 ): AppliedFact[] => {
-  const rows = engine.database.prepare(SELECT_COMMIT_FACTS).all({
+  const rows = engine.statements.selectCommitFacts.all({
     commit_seq: commitSeq,
   }) as FactRow[];
   return rows.map((row) => ({
@@ -898,7 +961,7 @@ const resolveHead = (
     return heads.get(key) ?? null;
   }
 
-  const row = engine.database.prepare(SELECT_HEAD).get({
+  const row = engine.statements.selectHead.get({
     branch,
     id,
   }) as HeadRow | undefined;
@@ -929,7 +992,7 @@ const writeOperation = (
     case "set": {
       const value = normalizeEntityDocument(operation.value);
       const valueRef = toReference(value);
-      engine.database.prepare(INSERT_VALUE).run({
+      engine.statements.insertValue.run({
         hash: valueRef,
         data: JSON.stringify(value),
       });
@@ -941,7 +1004,7 @@ const writeOperation = (
         parent: parentRef,
       });
 
-      engine.database.prepare(INSERT_FACT).run({
+      engine.statements.insertFact.run({
         hash,
         id: operation.id,
         value_ref: valueRef,
@@ -951,7 +1014,7 @@ const writeOperation = (
         commit_seq: seq,
         fact_type: "set",
       });
-      engine.database.prepare(UPSERT_HEAD).run({
+      engine.statements.upsertHead.run({
         branch,
         id: operation.id,
         fact_hash: hash,
@@ -961,7 +1024,7 @@ const writeOperation = (
     }
     case "patch": {
       const valueRef = toReference(operation.patches);
-      engine.database.prepare(INSERT_VALUE).run({
+      engine.statements.insertValue.run({
         hash: valueRef,
         data: JSON.stringify(operation.patches),
       });
@@ -972,7 +1035,7 @@ const writeOperation = (
         ops: operation.patches,
         parent: parentRef,
       });
-      engine.database.prepare(INSERT_FACT).run({
+      engine.statements.insertFact.run({
         hash,
         id: operation.id,
         value_ref: valueRef,
@@ -982,7 +1045,7 @@ const writeOperation = (
         commit_seq: seq,
         fact_type: "patch",
       });
-      engine.database.prepare(UPSERT_HEAD).run({
+      engine.statements.upsertHead.run({
         branch,
         id: operation.id,
         fact_hash: hash,
@@ -996,7 +1059,7 @@ const writeOperation = (
         id: operation.id,
         parent: parentRef,
       });
-      engine.database.prepare(INSERT_FACT).run({
+      engine.statements.insertFact.run({
         hash,
         id: operation.id,
         value_ref: EMPTY_VALUE_REF,
@@ -1006,7 +1069,7 @@ const writeOperation = (
         commit_seq: seq,
         fact_type: "delete",
       });
-      engine.database.prepare(UPSERT_HEAD).run({
+      engine.statements.upsertHead.run({
         branch,
         id: operation.id,
         fact_hash: hash,
@@ -1031,12 +1094,12 @@ const reconstructPatchedDocument = (
   },
 ): EntityDocument => {
   const { id, branch, seq } = options;
-  const baseRow = engine.database.prepare(SELECT_LATEST_BASE).get({
+  const baseRow = engine.statements.selectLatestBase.get({
     branch,
     id,
     seq,
   }) as ReadRow | undefined;
-  const snapshotRow = engine.database.prepare(SELECT_LATEST_SNAPSHOT).get({
+  const snapshotRow = engine.statements.selectLatestSnapshot.get({
     branch,
     id,
     seq,
@@ -1058,7 +1121,7 @@ const reconstructPatchedDocument = (
     }
   }
 
-  const patches = engine.database.prepare(SELECT_PATCHES).all({
+  const patches = engine.statements.selectPatches.all({
     branch,
     id,
     base_seq: baseSeq,
@@ -1107,7 +1170,7 @@ const maybeMaterializeSnapshot = (
 
   const baseSeq = latestMaterializationSeq(engine, branch, id, state.seq);
   const patchCount = (
-    engine.database.prepare(SELECT_PATCH_COUNT).get({
+    engine.statements.selectPatchCount.get({
       branch,
       id,
       after_seq: baseSeq,
@@ -1120,11 +1183,11 @@ const maybeMaterializeSnapshot = (
   }
 
   const valueRef = toReference(state.document);
-  engine.database.prepare(INSERT_VALUE).run({
+  engine.statements.insertValue.run({
     hash: valueRef,
     data: JSON.stringify(state.document),
   });
-  engine.database.prepare(INSERT_SNAPSHOT).run({
+  engine.statements.insertSnapshot.run({
     id,
     seq: state.seq,
     value_ref: valueRef,
@@ -1142,7 +1205,7 @@ const compactSnapshots = (
     return;
   }
 
-  engine.database.prepare(DELETE_OLD_SNAPSHOTS).run({
+  engine.statements.deleteOldSnapshots.run({
     branch,
     id,
     retention: engine.snapshotRetention,
@@ -1155,12 +1218,12 @@ const latestMaterializationSeq = (
   id: EntityId,
   seq: number,
 ): number => {
-  const baseRow = engine.database.prepare(SELECT_LATEST_BASE).get({
+  const baseRow = engine.statements.selectLatestBase.get({
     branch,
     id,
     seq,
   }) as ReadRow | undefined;
-  const snapshotRow = engine.database.prepare(SELECT_LATEST_SNAPSHOT).get({
+  const snapshotRow = engine.statements.selectLatestSnapshot.get({
     branch,
     id,
     seq,

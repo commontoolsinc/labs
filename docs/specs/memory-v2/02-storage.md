@@ -65,9 +65,11 @@ For newly created databases (before any content is written):
 PRAGMA page_size = 32768;
 ```
 
-For high-throughput workloads, the storage layer may cache prepared statements
-for frequently-used queries (head lookup, fact insertion, snapshot lookup).
-Statement caching is an implementation optimization and is not specified here.
+For high-throughput workloads, the storage layer should cache prepared
+statements for frequently-used queries and writes (for example head lookup,
+commit lookup, fact insertion, snapshot lookup, and patch replay reads).
+This does not change the on-disk format, but it is an expected implementation
+technique for production-grade throughput.
 
 ---
 
