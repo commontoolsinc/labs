@@ -724,15 +724,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: ready.error };
     }
 
-    const validation = this.validate();
-    if (validation.error) {
-      this.#state = {
-        status: "done",
-        result: { error: validation.error },
-      };
-      return { error: validation.error };
-    }
-
     const writeSpace = this.#writeSpace;
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
@@ -746,6 +737,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
+    }
+
+    const validation = this.validate();
+    if (validation.error) {
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
+      return { error: validation.error };
     }
 
     const replica = this.storage.open(writeSpace).replica;

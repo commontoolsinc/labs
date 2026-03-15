@@ -98,3 +98,45 @@ Deno.test("memory v2 no-op commits do not reopen storage for an empty native com
     await storage.close();
   }
 });
+
+Deno.test("memory v2 no-op commits skip stale-read validation when there are no effective operations", async () => {
+  const signer = await Identity.fromPassphrase("memory-v2-noop-stale-read");
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+  const runtime = new Runtime({
+    storageManager: storage,
+    memoryVersion: "v2",
+    apiUrl: new URL(import.meta.url),
+  });
+  const space = signer.did();
+  const address = {
+    id: "bench:no-op-stale-read" as const,
+    type: "application/json" as const,
+    path: [] as string[],
+  };
+
+  try {
+    const seed = runtime.edit();
+    seed.writeValueOrThrow({ ...address, space }, { foo: "bar" });
+    assert((await seed.commit()).ok);
+
+    const staleNoop = runtime.edit();
+    assertEquals(
+      staleNoop.readValueOrThrow({ ...address, space, path: [] }),
+      { foo: "bar" },
+    );
+    staleNoop.writeValueOrThrow({ ...address, space }, { foo: "bar" });
+    assertEquals(Array.from(staleNoop.getWriteDetails?.(space) ?? []), []);
+
+    const concurrent = runtime.edit();
+    concurrent.writeValueOrThrow({ ...address, space }, { foo: "baz" });
+    assert((await concurrent.commit()).ok);
+
+    assert((await staleNoop.commit()).ok);
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});
