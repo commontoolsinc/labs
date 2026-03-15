@@ -25,6 +25,7 @@ interface Section {
     accent?: string;
     tasks: Task[];
 }
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const selectTask = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -49,13 +50,17 @@ const selectTask = handler(true as const satisfies __ctHelpers.JSONSchema, {
     },
     required: ["selectedTaskId", "hoveredSectionId", "sectionId", "taskId", "sectionIndex", "taskIndex"]
 } as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+// [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
+    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedTaskId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __ctHelpers.JSONSchema);
+    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const hoveredSectionId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __ctHelpers.JSONSchema);
+    // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
     const hasSections = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -131,6 +136,7 @@ export default pattern((state) => {
         } }, ({ state }) => state.sections.get().length > 0);
     return {
         [UI]: (<div>
+        {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}
         {ifElse({
             type: "boolean",
             asOpaque: true
@@ -159,6 +165,8 @@ export default pattern((state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
+            {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
+            {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
             {state.key("sections").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const section = __ct_pattern_input.key("element");
                 const sectionIndex = __ct_pattern_input.key("index");
@@ -167,6 +175,7 @@ export default pattern((state) => {
                 const hoveredSectionId = __ct_pattern_input.key("params", "hoveredSectionId");
                 return (<section>
                 <h2 style={{
+                    // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
                     color: __ctHelpers.ifElse({
                         anyOf: [{
                                 type: "undefined"
@@ -187,6 +196,7 @@ export default pattern((state) => {
                 }}>
                   {section.key("title")}
                 </h2>
+                {/* [TRANSFORM] ifElse: schema-injected authored ifElse(section.expanded, ..., ...) */}
                 {ifElse({
                     type: "boolean",
                     asOpaque: true
@@ -215,6 +225,8 @@ export default pattern((state) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
+                    {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
+                    {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
                     {section.key("tasks").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                         const task = __ct_pattern_input.key("element");
                         const taskIndex = __ct_pattern_input.key("index");
@@ -232,6 +244,7 @@ export default pattern((state) => {
                                 sectionIndex,
                                 taskIndex,
                             })}>
+                          {/* [TRANSFORM] ternary lowered: task.done ? <span>...</span> : ifElse(...) → ifElse(task.done, ..., ...) */}
                           {__ctHelpers.ifElse({
                                 type: "boolean",
                                 asOpaque: true
@@ -355,6 +368,9 @@ export default pattern((state) => {
                                     note: task.key("note")
                                 } }, ({ task }) => task.note !== "")), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
+                        {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
+                        {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
+                        {/* [TRANSFORM] ternary lowered: tagIndex===taskIndex ? `${section.title}:${tag}` : (showCompleted||!task.done ? tag : "") */}
                         {task.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                                 const tag = __ct_pattern_input.key("element");
                                 const tagIndex = __ct_pattern_input.key("index");
@@ -832,7 +848,11 @@ export default pattern((state) => {
                         tasks: {
                             length: section.tasks.length
                         }
-                    } }, ({ section }) => section.tasks.length > 0), <small>{section.title} collapsed</small>, <small>empty</small>)))}
+                    } }, ({ section }) => 
+                // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
+                //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
+                //   → derive() wrapping the ternary condition + inner ifElse for branches
+                section.tasks.length > 0), <small>{section.title} collapsed</small>, <small>empty</small>)))}
               </section>);
             }, {
                 type: "object",
@@ -990,7 +1010,10 @@ export default pattern((state) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 showCompleted: state.key("showCompleted")
-            } }, ({ state }) => <p>{__ctHelpers.ifElse({
+            } }, ({ state }) => 
+        // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
+        //   → derive() wrapping the <p> + inner ifElse for the ternary
+        <p>{__ctHelpers.ifElse({
             type: "boolean",
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, {
