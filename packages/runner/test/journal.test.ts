@@ -15,7 +15,9 @@ describe("Journal", () => {
   let journal: ReturnType<typeof Journal.open>;
 
   beforeEach(() => {
-    storage = StorageManager.emulate({ as: signer });
+    // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
+    // the memory-v2-* tests that exercise the document-envelope model directly.
+    storage = StorageManager.emulate({ as: signer, memoryVersion: "v1" });
     journal = Journal.open(storage);
   });
 

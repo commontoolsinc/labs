@@ -27,14 +27,16 @@ import {
   setJsonEncodingConfig,
 } from "@commontools/memory/json-encoding-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
-import type {
+import {
   ChangeGroup,
   CommitError,
+  DEFAULT_MEMORY_VERSION,
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  MemoryVersion,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -80,7 +82,7 @@ export type ErrorWithContext = Error & {
 };
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
-export type NavigateCallback = (target: Cell<any>) => void;
+export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
@@ -105,6 +107,7 @@ export interface ExperimentalOptions {
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
+  memoryVersion?: MemoryVersion;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
@@ -182,6 +185,7 @@ export class Runtime {
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
@@ -191,6 +195,17 @@ export class Runtime {
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
+    this.memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    const storageManagerMemoryVersion = options.storageManager.memoryVersion ??
+      DEFAULT_MEMORY_VERSION;
+
+    if (storageManagerMemoryVersion !== this.memoryVersion) {
+      throw new Error(
+        "Runtime memoryVersion does not match storage manager memoryVersion: " +
+          `${this.memoryVersion} !== ${storageManagerMemoryVersion}`,
+      );
+    }
+
     this.experimental = {
       richStorableValues: false,
       storableProtocol: false,
@@ -275,6 +290,7 @@ export class Runtime {
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
+        memoryVersion: this.memoryVersion,
         storageManager: !!this.storageManager,
         patternManager: !!this.patternManager,
         moduleRegistry: !!this.moduleRegistry,

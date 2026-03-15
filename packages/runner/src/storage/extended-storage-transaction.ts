@@ -12,21 +12,31 @@ import type {
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadActivity,
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  ITransactionWriteRequest,
   MemorySpace,
   ReaderError,
   ReadError,
   Result,
   StorageTransactionStatus,
+  TransactionReactivityLog,
+  TransactionWriteDetail,
   Unit,
   WriteError,
   WriterError,
 } from "./interface.ts";
 import { toThrowable } from "./interface.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionReadActivities,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
+import { reactivityLogFromActivities } from "./reactivity-log.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
@@ -51,6 +61,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   get journal(): ITransactionJournal {
     return this.tx.journal;
+  }
+
+  getReactivityLog(): TransactionReactivityLog {
+    return getDirectTransactionReactivityLog(this.tx) ??
+      reactivityLogFromActivities(this.tx.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return getTransactionReadActivities(this.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return getTransactionWriteDetails(this.tx, space);
   }
 
   status(): StorageTransactionStatus {
@@ -187,6 +212,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 
+  writeValuesOrThrow(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): void {
+    if (this.tx.writeBatch) {
+      const result = this.tx.writeBatch(
+        (function* () {
+          for (const write of writes) {
+            yield {
+              address: {
+                ...write.address,
+                path: ["value", ...write.address.path],
+              },
+              value: write.value,
+            };
+          }
+        })(),
+      );
+      if (result.error) {
+        throw toThrowable(result.error);
+      }
+      return;
+    }
+
+    for (const write of writes) {
+      this.writeValueOrThrow(write.address, write.value);
+    }
+  }
+
   abort(reason?: any): Result<any, InactiveTransactionError> {
     return this.tx.abort(reason);
   }
@@ -288,6 +341,23 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.journal;
   }
 
+  getReactivityLog(): TransactionReactivityLog {
+    return this.wrapped.getReactivityLog?.() ??
+      reactivityLogFromActivities(this.wrapped.journal.activity());
+  }
+
+  getReadActivities(): Iterable<IReadActivity> {
+    return this.wrapped.getReadActivities?.() ??
+      getTransactionReadActivities(this.wrapped.tx);
+  }
+
+  getWriteDetails(
+    space: MemorySpace,
+  ): Iterable<TransactionWriteDetail> {
+    return this.wrapped.getWriteDetails?.(space) ??
+      getTransactionWriteDetails(this.wrapped.tx, space);
+  }
+
   status(): StorageTransactionStatus {
     return this.wrapped.status();
   }
@@ -356,6 +426,17 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     value: StorableValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
+  }
+
+  writeValuesOrThrow(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): void {
+    return this.wrapped.writeValuesOrThrow?.(writes) ??
+      (() => {
+        for (const write of writes) {
+          this.wrapped.writeValueOrThrow(write.address, write.value);
+        }
+      })();
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {

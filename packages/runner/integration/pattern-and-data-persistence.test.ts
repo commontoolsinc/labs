@@ -14,7 +14,7 @@
  * and data are truly persisted and can be loaded fresh from storage.
  */
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Runtime, type RuntimeProgram } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -260,6 +260,12 @@ async function phase3ReactivityAndIsolation(
     resultCell3,
   );
 
+  const phase3Commit = await tx.commit();
+  assert(
+    phase3Commit.ok,
+    `Phase 3 setup commit failed: ${JSON.stringify(phase3Commit)}`,
+  );
+
   // Also load and start Phase 2's instance to verify isolation
   // NOTE: This sync is required - without it, Phase 2's pattern sees undefined inputs
   // because the input cell data isn't auto-loaded from storage.
@@ -269,8 +275,6 @@ async function phase3ReactivityAndIsolation(
   const resultCell2 = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_2);
   await ctx.runtime.start(resultCell2);
   console.log("Started Phase 2's instance for isolation check");
-
-  await tx.commit();
   await runResult3.pull();
   await resultCell2.pull();
 

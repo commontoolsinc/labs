@@ -789,7 +789,7 @@ export class PieceManager {
     if (start) {
       await this.runtime.runSynced(piece, pattern, inputs);
     } else {
-      this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
     await this.syncPattern(piece);
 
@@ -812,7 +812,7 @@ export class PieceManager {
       cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+    await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     await this.syncPattern(piece);
 
     if (llmRequestId) {

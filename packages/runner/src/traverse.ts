@@ -161,6 +161,8 @@ export function stableStringify(value: unknown): string {
   return result;
 }
 
+export const stableHash = stableStringify;
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.

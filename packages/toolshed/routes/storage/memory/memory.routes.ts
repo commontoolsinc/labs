@@ -361,3 +361,62 @@ export const subscribe = createRoute({
     },
   },
 });
+
+const BlobHash = z.string().min(1).describe("Content-addressed blob hash");
+
+export const putBlob = createRoute({
+  method: "put",
+  path: "/api/storage/memory/blob/{hash}",
+  tags,
+  request: {
+    params: z.object({
+      hash: BlobHash,
+    }),
+    query: z.object({
+      space: Space,
+    }),
+    body: {
+      content: {
+        "application/octet-stream": {
+          schema: z.string().openapi({
+            type: "string",
+            format: "binary",
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      description: "Blob already exists",
+    },
+    [HttpStatusCodes.CREATED]: {
+      description: "Blob stored",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      description: "Blob hash mismatch",
+    },
+  },
+});
+
+export const getBlob = createRoute({
+  method: "get",
+  path: "/api/storage/memory/blob/{hash}",
+  tags,
+  request: {
+    params: z.object({
+      hash: BlobHash,
+    }),
+    query: z.object({
+      space: Space,
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      description: "Blob bytes",
+    },
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Blob not found",
+    },
+  },
+});

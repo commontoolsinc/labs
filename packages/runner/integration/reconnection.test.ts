@@ -1,287 +1,108 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S deno run -A
 
-/**
- * Integration test for schema query reconnection
- * This test verifies that subscriptions are re-established after WebSocket reconnection
- */
-
+import { assertEquals } from "@std/assert";
+import app from "../../toolshed/app.ts";
 import { Identity } from "@commontools/identity";
-import { Replica, StorageManager } from "../src/storage/cache.ts";
-import type {
-  Changes,
-  MemorySpace,
-  Revision,
-  State,
-  StorableObject,
-  URI,
-} from "@commontools/memory/interface";
-import { env } from "@commontools/integration";
-import type { JSONSchema } from "@commontools/api";
-const { API_URL } = env;
+import { type JSONSchema, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
-const MEMORY_WS_URL = `${
-  API_URL.replace("http://", "ws://")
-}api/storage/memory`;
-const TEST_DOC_ID = "test-reconnection-counter";
+const waitFor = async (
+  predicate: () => boolean,
+  timeout = 5000,
+): Promise<void> => {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeout) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
 
-function send(
-  storageManager: StorageManager,
-  space: MemorySpace,
-  id: URI,
-  value: any,
-) {
-  const tx = storageManager.edit();
-  tx.write({ space, type: "application/json", id, path: ["value"] }, value);
-  return tx.commit();
-}
+const createRuntime = (identity: Identity, base: URL) =>
+  new Runtime({
+    apiUrl: base,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", base),
+      memoryVersion: "v2",
+    }),
+    memoryVersion: "v2",
+  });
 
-Deno.test({
-  name: "schema query reconnection test",
-  ignore: true,
-  fn: async () => {
-    console.log("Schema Query Reconnection Integration Test");
-    console.log(`Connecting to: ${MEMORY_WS_URL}`);
+Deno.test(
+  "memory v2 runtime re-establishes subscriptions after server restart",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `runner-memory-v2-reconnect-${Date.now()}`,
+    );
+    let server = Deno.serve({ port: 0 }, app.fetch);
+    const port = server.addr.port;
+    const base = new URL(`http://${server.addr.hostname}:${port}`);
+    const space = identity.did();
 
-    // Create test identity
-    const signer = await Identity.fromPassphrase("test operator");
-
-    // Create storage manager
-    const storageManager1 = StorageManager.open({
-      as: signer,
-      address: new URL(MEMORY_WS_URL),
-      id: "provider1-reconnect-test",
-    });
-
-    // Open provider
-    const provider1 = storageManager1.open(signer.did());
-    console.log(`Connected to memory server for space`, signer.did());
-
-    // Define test schema
-    const testSchema: JSONSchema = {
+    const counterSchema = {
       type: "object",
       properties: {
-        value: { type: "number" },
-        timestamp: { type: "string" },
+        count: { type: "number" },
       },
-      required: ["value"],
-    };
-    const testSelector = { path: [], schema: testSchema };
+      required: ["count"],
+    } as const satisfies JSONSchema;
 
-    interface UpdateValue extends StorableObject {
-      value: number;
-      timestamp: string;
-    }
-
-    // Track updates for each provider
-    let updateCount1 = 0;
-    const updates1: UpdateValue[] = [];
-    let updateCount3 = 0;
-    const updates3: UpdateValue[] = [];
-
-    // Create a third provider that stays connected (control)
-    const storageManager3 = StorageManager.open({
-      as: signer,
-      address: new URL(MEMORY_WS_URL),
-      id: "provider3-control-test",
-    });
-    const provider3 = storageManager3.open(signer.did());
-    console.log(`Provider3 (control) connected to memory server`);
-    const uri: URI = `of:${TEST_DOC_ID}`;
-    // Listen for updates on the test-reconnection-counter document
-    // Note: this is not the schema subscription, its just a client-side listener
-
-    const nextCallback1 = (value?: Revision<State>) => {
-      const changes: Changes = (value?.is as any).transaction.args.changes;
-      if (uri in changes) {
-        updateCount1++;
-        updates1.push((changes[uri] as any).is.value);
-        console.log(`Provider1 Update #${updateCount1}:`, changes[uri]);
-      }
-    };
-    const providerConnection1 = storageManager1.open(signer.did());
-    const replica1 = (providerConnection1 as any).provider.replica as Replica;
-    replica1.subscribe(
-      { id: signer.did(), type: "application/commit+json" },
-      nextCallback1,
-    );
-
-    const nextCallback3 = (value?: Revision<State>) => {
-      const changes: Changes = (value?.is as any).transaction.args.changes;
-      if (uri in changes) {
-        updateCount3++;
-        updates3.push((changes[uri] as any).is.value);
-        console.log(`Provider3 Update #${updateCount3}:`, changes[uri]);
-      }
-    };
-    const providerConnection3 = storageManager3.open(signer.did());
-    const replica3 = (providerConnection3 as any).provider.replica as Replica;
-    replica3.subscribe(
-      { id: signer.did(), type: "application/commit+json" },
-      nextCallback3,
-    );
-
-    // Establish server-side subscription with schema
-    console.log("Establishing subscriptions...");
-    await provider1.sync(uri, testSelector);
-    await provider3.sync(uri, testSelector);
-
-    // Send initial value to server
-    console.log("Sending initial value...");
-    await send(storageManager1, signer.did(), uri, {
-      value: 1,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Wait to give server time to send us back the update
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-
-    // Check if our listeners were called via the subscription
-    if (updateCount1 === 0 || updateCount3 === 0) {
-      console.error(
-        `FAILED: No initial update received. Provider1: ${updateCount1}, Provider3: ${updateCount3}`,
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const counterCell = runtime1.getCell(
+        space,
+        "runner-v2-reconnect-counter",
+        counterSchema,
+        tx,
       );
-      throw new Error(
-        `No initial update received. Provider1: ${updateCount1}, Provider3: ${updateCount3}`,
+      counterCell.set({ count: 1 });
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const subscriberRuntime = createRuntime(identity, base);
+      const subscriberCell = subscriberRuntime.getCell(
+        space,
+        "runner-v2-reconnect-counter",
+        counterSchema,
       );
-    }
+      await subscriberCell.sync();
+      await subscriberRuntime.storageManager.synced();
+      assertEquals(subscriberCell.get(), { count: 1 });
 
-    console.log("Initial updates received by both providers");
-
-    // Test reconnection behavior
-    console.log("\nTesting reconnection behavior...");
-
-    // Access the WebSocket connection -- it's private so we use any
-    const providerSocket = (provider1 as any).connection as
-      | WebSocket
-      | undefined;
-    console.log("WebSocket state:", providerSocket?.readyState);
-
-    // Force disconnect the WebSocket
-    console.log("Forcing WebSocket disconnection...");
-    if (providerSocket) {
-      providerSocket.close();
-      console.log("WebSocket closed");
-    } else {
-      console.error("No WebSocket connection found");
-      throw new Error("No WebSocket connection found");
-    }
-
-    // Monitor reconnection and updates
-    let testValue = 100; // Use values over 100 to show the value happens after reconnection
-    const preDisconnectCount1 = updateCount1;
-    const preDisconnectCount3 = updateCount3;
-
-    // Give it a moment to reconnect
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-
-    // Create a second storage manager and provider
-    const storageManager2 = StorageManager.open({
-      as: signer,
-      address: new URL(MEMORY_WS_URL),
-      id: "provider2-reconnect-test",
-    });
-
-    // Open provider
-    const provider2 = storageManager2.open(signer.did());
-    console.log(`Connected to memory server as second client`);
-
-    // Establish server-side subscription with schema
-    console.log("Establishing subscription as second client...");
-    await provider2.sync(uri, testSelector);
-
-    // Send test updates and check if subscription still works
-    console.log("Sending test updates after disconnection...");
-
-    // Create a promise that resolves/rejects when test completes
-    await new Promise<void>((resolve, reject) => {
-      let hasResolved = false;
-
-      const cleanup = () => {
-        if (!hasResolved) {
-          hasResolved = true;
-          clearInterval(intervalId);
-          clearTimeout(timeoutId);
-          storageManager1.close();
-          storageManager2.close();
-          storageManager3.close();
+      let sawReconnectUpdate = false;
+      subscriberCell.sink((value) => {
+        if (value?.count === 2) {
+          sawReconnectUpdate = true;
         }
-      };
+      });
 
-      const intervalId = setInterval(async () => {
-        if (hasResolved) return; // Don't continue if already resolved
+      await server.shutdown();
+      server = Deno.serve({ port }, app.fetch);
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-        try {
-          // Send an update as the second
-          const data = {
-            value: testValue++,
-            timestamp: new Date().toISOString(),
-          };
-          await send(storageManager2, signer.did(), uri, data);
-          console.log("sent", data);
+      const writerRuntime = createRuntime(identity, base);
+      const writerCell = writerRuntime.getCell(
+        space,
+        "runner-v2-reconnect-counter",
+        counterSchema,
+      );
+      await writerCell.sync();
+      tx = writerRuntime.edit();
+      writerCell.withTx(tx).set({ count: 2 });
+      await tx.commit();
+      await writerRuntime.storageManager.synced();
 
-          // Check if we've received updates with value >= 100 (post-reconnection)
-          const postReconnectUpdates1 = updates1.filter((u) => u.value >= 100);
-          const postReconnectUpdates3 = updates3.filter((u) => u.value >= 100);
+      await waitFor(() => sawReconnectUpdate);
+      assertEquals(subscriberCell.get(), { count: 2 });
 
-          console.log(
-            `Status - Provider1 post-reconnect updates: ${postReconnectUpdates1.length}, Provider3: ${postReconnectUpdates3.length}`,
-          );
-
-          if (
-            postReconnectUpdates1.length >= 3 &&
-            postReconnectUpdates3.length >= 3
-          ) {
-            console.log(
-              "SUCCESS: Both providers received updates after reconnection!",
-            );
-            console.log(
-              `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
-            );
-            console.log(
-              `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
-            );
-
-            cleanup();
-            resolve(); // Test passed
-          } else if (
-            postReconnectUpdates3.length >= 3 &&
-            postReconnectUpdates1.length === 0
-          ) {
-            console.log(
-              `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
-            );
-            console.log(
-              `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
-            );
-
-            cleanup();
-            reject(
-              new Error("Provider1 did not receive updates after reconnection"),
-            );
-          }
-        } catch (error) {
-          // If there's an error, fail the test instead of continuing
-          console.error(
-            "FATAL ERROR in interval:",
-            error instanceof Error ? error.message : String(error),
-            error instanceof Error ? error.stack : "",
-          );
-          cleanup();
-          reject(error instanceof Error ? error : new Error(String(error)));
-        }
-      }, 1000);
-
-      // Timeout after 30 seconds
-      const timeoutId = setTimeout(() => {
-        console.error("TIMEOUT: Test did not complete within 30 seconds");
-        console.log(
-          `Final status - Provider1: ${updateCount1} updates, Provider3: ${updateCount3} updates`,
-        );
-        cleanup();
-        reject(new Error("Test did not complete within 30 seconds"));
-      }, 30000);
-    });
+      await writerRuntime.dispose();
+      await subscriberRuntime.dispose();
+    } finally {
+      await server.shutdown();
+    }
   },
-  sanitizeResources: false,
-  sanitizeOps: false,
-});
+);

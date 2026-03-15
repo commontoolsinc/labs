@@ -32,7 +32,6 @@ import type {
   IStorageSubscription,
   MediaType,
   MemoryAddressPathComponent,
-  Metadata,
 } from "./storage/interface.ts";
 import {
   addressesToPathByEntity,
@@ -41,6 +40,15 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionWriteDetails,
+} from "./storage/transaction-inspection.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+  reactivityLogFromActivities,
+} from "./storage/reactivity-log.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -115,21 +123,7 @@ export type ReactivityLog = {
   potentialWrites?: IMemorySpaceAddress[];
 };
 
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
-
-export const ignoreReadForScheduling: Metadata = {
-  [ignoreReadForSchedulingMarker]: true,
-};
-
-export const markReadAsPotentialWrite: Metadata = {
-  [markReadAsPotentialWriteMarker]: true,
-};
+export { ignoreReadForScheduling, markReadAsPotentialWrite };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
@@ -444,21 +438,43 @@ export class Scheduler {
     log: ReactivityLog,
   ): Map<string, unknown> {
     const writes = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = this.makeAddressKey(write);
-      for (const att of tx.journal.novelty(write.space)) {
-        if (att.address.id === write.id) {
-          // Normalize: post-commit journals wrap values in {value: ...},
-          // pre-commit journals store raw values. Unwrap for consistency.
-          const raw = att.value;
+      let details = writeDetailsBySpace.get(write.space);
+      if (!details) {
+        details = new Map<string, unknown>();
+        for (const detail of getTransactionWriteDetails(tx, write.space)) {
+          const raw = detail.value;
           const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-          writes.set(key, value);
-          break;
+          details.set(this.makeAddressKey(detail.address), value);
         }
+        writeDetailsBySpace.set(write.space, details);
       }
+      writes.set(key, this.lookupComparableWriteValue(details, write));
       if (!writes.has(key)) writes.set(key, undefined);
     }
     return writes;
+  }
+
+  private lookupComparableWriteValue(
+    details: Map<string, unknown>,
+    write: IMemorySpaceAddress,
+  ): unknown {
+    const exactKey = this.makeAddressKey(write);
+    if (details.has(exactKey)) {
+      return details.get(exactKey);
+    }
+    if (write.type === "application/json") {
+      const valueKey = this.makeAddressKey({
+        ...write,
+        path: ["value", ...write.path],
+      });
+      if (details.has(valueKey)) {
+        return details.get(valueKey);
+      }
+    }
+    return undefined;
   }
 
   private runIdempotencyRecheck(
@@ -2409,18 +2425,25 @@ export class Scheduler {
 
     // Capture write values from the action's transaction journal
     const writeValues = new Map<string, unknown>();
+    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
     for (const write of log.writes) {
       const key = makeKey(write);
       try {
-        for (const att of tx.journal.novelty(write.space)) {
-          if (att.address.id === write.id) {
-            writeValues.set(key, att.value);
-            break;
+        let details = writeDetailsBySpace.get(write.space);
+        if (!details) {
+          details = new Map<string, unknown>();
+          for (const detail of getTransactionWriteDetails(tx, write.space)) {
+            const raw = detail.value;
+            const value = isRecord(raw) && "value" in raw ? raw.value : raw;
+            details.set(makeKey(detail.address), value);
           }
+          writeDetailsBySpace.set(write.space, details);
         }
-        if (!writeValues.has(key)) {
-          writeValues.set(key, undefined);
-        }
+        writeValues.set(
+          key,
+          this.lookupComparableWriteValue(details, write),
+        );
+        if (!writeValues.has(key)) writeValues.set(key, undefined);
       } catch {
         writeValues.set(key, "[write-error]");
       }
@@ -3402,39 +3425,11 @@ function topologicalSort(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
-  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
-  for (const activity of tx.journal.activity()) {
-    if ("read" in activity && activity.read) {
-      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
-      const address = {
-        space: activity.read.space,
-        id: activity.read.id,
-        type: activity.read.type,
-        path: activity.read.path.slice(1), // Remove the "value" prefix
-      };
-      if (activity.read.nonRecursive === true) {
-        log.shallowReads.push(address);
-      } else {
-        log.reads.push(address);
-      }
-      // If marked as potential write, also add to potentialWrites
-      if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
-        if (!log.potentialWrites) {
-          log.potentialWrites = [];
-        }
-        log.potentialWrites.push(address);
-      }
-    }
-    if ("write" in activity && activity.write) {
-      log.writes.push({
-        space: activity.write.space,
-        id: activity.write.id,
-        type: activity.write.type,
-        path: activity.write.path.slice(1),
-      });
-    }
+  const direct = getDirectTransactionReactivityLog(tx);
+  if (direct) {
+    return direct;
   }
-  return log;
+  return reactivityLogFromActivities(tx.journal.activity());
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {

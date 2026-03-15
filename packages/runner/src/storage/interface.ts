@@ -1,26 +1,29 @@
 import type { Immutable } from "@commontools/utils/types";
+import type { PatchOp } from "@commontools/memory/v2";
 import type { EntityId } from "../create-ref.ts";
-import type {
-  Assertion,
-  AuthorizationError as IAuthorizationError,
-  ConflictError as IConflictError,
-  ConnectionError as IConnectionError,
-  DID,
-  Fact,
-  Invariant as IClaim,
-  MemorySpace,
-  QueryError as IQueryError,
-  Result,
-  SchemaPathSelector,
-  Signer,
-  State,
-  StorableDatum,
-  StorableValue,
-  The as MediaType,
-  TransactionError,
-  Unit,
-  URI,
-  Variant,
+import {
+  type Assertion,
+  type AuthorizationError as IAuthorizationError,
+  type ConflictError as IConflictError,
+  type ConnectionError as IConnectionError,
+  DEFAULT_MEMORY_VERSION,
+  type DID,
+  type Fact,
+  type Invariant as IClaim,
+  type MemorySpace,
+  type MemoryVersion,
+  type QueryError as IQueryError,
+  type Result,
+  type SchemaPathSelector,
+  type Signer,
+  type State,
+  type StorableDatum,
+  type StorableValue,
+  type The as MediaType,
+  type TransactionError,
+  type Unit,
+  type URI,
+  type Variant,
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
@@ -32,6 +35,7 @@ export type {
   IClaim,
   MediaType,
   MemorySpace,
+  MemoryVersion,
   Result,
   SchemaPathSelector,
   Signer,
@@ -39,6 +43,7 @@ export type {
   Unit,
   URI,
 };
+export { DEFAULT_MEMORY_VERSION };
 
 export type ChangeGroup = unknown;
 
@@ -99,6 +104,7 @@ export type OptStorageValue<T extends StorableValue = StorableValue> =
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
+  readonly memoryVersion: MemoryVersion;
 
   /**
    * The signer used for authenticating storage operations.
@@ -214,7 +220,7 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
-export interface IStorageSubscriptionCapability {
+export interface IStorageNotificationCapability {
   /**
    * Subscribes to the storage manager's notifications.
    *
@@ -242,13 +248,13 @@ export interface IStorageSubscriptionCapability {
    * storage.subscribe(log(5));
    * ```
    */
-  subscribe(subscription: IStorageSubscription): void;
+  subscribe(subscription: IStorageNotification): void;
 }
 
 /**
  * Subscription that can be used to receive storage notifications.
  */
-export interface IStorageSubscription {
+export interface IStorageNotification {
   /**
    * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
@@ -260,6 +266,19 @@ export interface IStorageSubscription {
     notification: StorageNotification,
   ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
 }
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscriptionCapability
+  extends IStorageNotificationCapability {}
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscription extends IStorageNotification {}
 
 /**
  * Notification produced by the underlying storage. It is a variant type
@@ -379,6 +398,11 @@ export interface IResetNotification {
 export interface IMergedChanges extends Iterable<IMemoryChange> {
 }
 
+export interface ITransactionWriteRequest {
+  address: IMemorySpaceAddress;
+  value: StorableValue;
+}
+
 export interface IMemoryChange {
   /**
    * Memory address that was changed.
@@ -431,6 +455,30 @@ export interface IStorageTransaction {
    * Provides access to transaction operations and dependency tracking.
    */
   readonly journal: ITransactionJournal;
+
+  /**
+   * Optional lightweight dependency summary.
+   *
+   * V2 transactions can provide this directly instead of requiring callers to
+   * reconstruct it from journal activity.
+   */
+  getReactivityLog?(): TransactionReactivityLog;
+
+  /**
+   * Optional raw read observations recorded by this transaction.
+   *
+   * V2 transactions can provide these directly instead of requiring callers to
+   * scan journal activity.
+   */
+  getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional write details for the given space.
+   *
+   * V2 transactions can provide the current and previous values directly
+   * instead of materializing novelty/history attestations.
+   */
+  getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
    * Describes current status of the transaction. Returns a union type with
@@ -487,6 +535,14 @@ export interface IStorageTransaction {
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
+   * Optional batched write hook for transactions that can apply multiple path
+   * writes more efficiently than one-at-a-time.
+   */
+  writeBatch?(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError>;
+
+  /**
    * Creates a memory space reader for inside this transaction. Fails if
    * transaction is no longer in progress. Requesting a reader for the same
    * memory space will return same reader instance.
@@ -522,6 +578,12 @@ export interface IStorageTransaction {
    * calls.
    */
   commit(): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Optional native commit draft hook for storage backends that can consume a
+   * more direct representation than legacy fact archives.
+   */
+  getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -594,6 +656,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   writeValueOrThrow(
     address: IMemorySpaceAddress,
     value: StorableValue,
+  ): void;
+
+  /**
+   * Optional batched write helper that preserves the extended transaction's
+   * `["value", ...path]` addressing semantics.
+   */
+  writeValuesOrThrow?(
+    writes: Iterable<ITransactionWriteRequest>,
   ): void;
 }
 
@@ -835,6 +905,11 @@ export interface ISpaceReplica extends ISpace {
     transaction: ITransaction,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  commitNative?(
+    transaction: NativeStorageCommit,
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
 export type PushError =
@@ -868,6 +943,43 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
+}
+
+export interface TransactionReactivityLog {
+  reads: IMemorySpaceAddress[];
+  shallowReads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
+  potentialWrites?: IMemorySpaceAddress[];
+}
+
+export interface TransactionWriteDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<StorableDatum>;
+  previousValue?: Immutable<StorableDatum>;
+}
+
+export type NativeStorageCommitOperation =
+  | {
+    op: "set";
+    id: URI;
+    type: MediaType;
+    value: StorableDatum;
+  }
+  | {
+    op: "delete";
+    id: URI;
+    type: MediaType;
+  }
+  | {
+    op: "patch";
+    id: URI;
+    type: MediaType;
+    patches: PatchOp[];
+    value: StorableDatum;
+  };
+
+export interface NativeStorageCommit {
+  operations: readonly NativeStorageCommitOperation[];
 }
 
 export interface ITransaction {

@@ -8,10 +8,15 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { StorableValue } from "@commontools/memory/interface";
-import { isCell } from "../src/cell.ts";
+import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import { ID, JSONSchema, type Pattern } from "../src/builder/types.ts";
+import {
+  type Frame,
+  ID,
+  JSONSchema,
+  type Pattern,
+} from "../src/builder/types.ts";
 import { isPrimitiveCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -168,6 +173,47 @@ describe("Cell", () => {
     expect(result?.[0].length).toBe(4);
     // Both should reference the same array (sharing preserved)
     expect(result?.[0]).toBe(result?.[1]);
+  });
+
+  it("preserves identity when recursivelyAddIDIfNeeded has nothing to do", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const interests = ["coding", "reading"];
+    const value = {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      interests,
+      stable: { nested: true },
+    };
+
+    const result = recursivelyAddIDIfNeeded(value, frame);
+
+    expect(result).toBe(value);
+    expect(result.interests).toBe(interests);
+    expect(result.stable).toBe(value.stable);
+  });
+
+  it("only clones branches that need generated IDs", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const stable = { nested: true };
+    const value = {
+      stable,
+      list: [{ name: "Ada" }, "plain"],
+    };
+
+    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
+
+    expect(result).not.toBe(value);
+    expect(result.stable).toBe(stable);
+    expect(result.list).not.toBe(value.list);
+    expect(result.list[0]).not.toBe(value.list[0]);
+    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
+    expect(result.list[1]).toBe(value.list[1]);
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {

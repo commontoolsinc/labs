@@ -1,5 +1,8 @@
 import { fromString, refer } from "@commontools/memory/reference";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -24,7 +27,7 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, unclaimed } from "@commontools/memory/fact";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
@@ -41,9 +44,10 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type {
+import {
   Assert,
   Claim,
+  DEFAULT_MEMORY_VERSION,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -52,7 +56,10 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
+  MemoryVersion,
+  OptStorageValue,
   PullError,
+  PushError,
   Retract,
   StorageValue,
   URI,
@@ -66,6 +73,13 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import {
+  MEMORY_V2_PROTOCOL,
+  type SessionOpenResult,
+  type V2Error,
+} from "@commontools/memory/v2";
+import * as V2Storage from "./v2.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -128,6 +142,10 @@ const logger = getLogger("storage.cache", {
   level: "error",
   logCountEvery: 0, // Disable auto-logging of counts
 });
+
+const isExpectedSessionCancel = (error: unknown): boolean => {
+  return error instanceof Error && error.message === "session cancel";
+};
 
 // Module-level cache: data URI + schema hash + path + space → Promise
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
@@ -822,10 +840,12 @@ export class Replica {
       // the nursery/heap and sent out change information.
       const integratedPromise = query.promise.then(async (result) => {
         if (result.error) {
-          logger.error(
-            "query-error",
-            () => ["query failure", queryArgs, result.error],
-          );
+          if (!isExpectedSessionCancel(result.error)) {
+            logger.error(
+              "query-error",
+              () => ["query failure", queryArgs, result.error],
+            );
+          }
           // Surface auth errors prominently so they're not silently swallowed
           if ((result.error as any).name === "AuthorizationError") {
             console.error(
@@ -905,10 +925,12 @@ export class Replica {
     // Check for errors
     for (const result of results) {
       if ((result as any).error) {
-        logger.error(
-          "pull-error",
-          () => ["query failure", queryArgs, (result as any).error],
-        );
+        if (!isExpectedSessionCancel((result as any).error)) {
+          logger.error(
+            "pull-error",
+            () => ["query failure", queryArgs, (result as any).error],
+          );
+        }
         return { error: (result as any).error as PullError };
       }
     }
@@ -1440,6 +1462,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
+  memoryVersion?: MemoryVersion;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -1456,13 +1479,14 @@ export interface ConnectionOptions {
   address: URL;
   inspector?: Channel;
   spaceIdentity?: Signer;
+  memoryVersion?: MemoryVersion;
 }
 
 export interface ProviderConnectionOptions extends ConnectionOptions {
   provider: Provider;
 }
 
-class ProviderConnection implements IStorageProvider {
+export class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
   connectionCount = 0;
@@ -1472,10 +1496,16 @@ class ProviderConnection implements IStorageProvider {
   inspector?: Channel;
   provider: Provider;
   spaceIdentity?: Signer;
+  memoryVersion: MemoryVersion;
   reader: ReadableStreamDefaultReader<
     UCAN<ConsumerCommandInvocation<Protocol>>
   >;
   writer: WritableStreamDefaultWriter<ProviderCommand<Protocol>>;
+  #pendingSessionOpen:
+    | PromiseWithResolvers<SessionOpenResult>
+    | undefined;
+  #pendingSessionOpenId: string | undefined;
+  #sessionId: string | undefined;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -1484,13 +1514,20 @@ class ProviderConnection implements IStorageProvider {
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
-    { id, address, provider, inspector, spaceIdentity }:
-      ProviderConnectionOptions,
+    {
+      id,
+      address,
+      provider,
+      inspector,
+      spaceIdentity,
+      memoryVersion = DEFAULT_MEMORY_VERSION,
+    }: ProviderConnectionOptions,
   ) {
     this.address = address;
     this.provider = provider;
     this.handleEvent = this.handleEvent.bind(this);
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
@@ -1541,6 +1578,18 @@ class ProviderConnection implements IStorageProvider {
     });
     this.connection!.send(Codec.UCAN.toString(invocation));
   }
+  postSessionOpen() {
+    const id = `job:${crypto.randomUUID()}`;
+    this.#pendingSessionOpenId = id;
+    this.#pendingSessionOpen = Promise.withResolvers<SessionOpenResult>();
+    this.connection!.send(JSON.stringify({
+      cmd: "session.open",
+      id,
+      protocol: MEMORY_V2_PROTOCOL,
+      args: this.#sessionId === undefined ? {} : { sessionId: this.#sessionId },
+    }));
+    return this.#pendingSessionOpen.promise;
+  }
   setTimeout() {
     this.timeoutID = setTimeout(
       this.handleEvent,
@@ -1583,6 +1632,9 @@ class ProviderConnection implements IStorageProvider {
     return Codec.Receipt.fromString(source);
   }
   onReceive(data: string) {
+    if (this.resolveSessionOpen(data)) {
+      return;
+    }
     return this.writer.write(
       this.inspect({ receive: this.parse(data) }).receive,
     );
@@ -1595,6 +1647,25 @@ class ProviderConnection implements IStorageProvider {
     this.inspect({
       connect: { attempt: this.connectionCount },
     });
+
+    if (this.memoryVersion === "v2") {
+      try {
+        const { sessionId } = await this.postSessionOpen();
+        if (this.connection !== socket) {
+          return;
+        }
+        this.#sessionId = sessionId;
+      } catch (error) {
+        logger.error(
+          "connection-error",
+          () => ["Failed to negotiate memory/v2 session:", error],
+        );
+        if (this.connection === socket) {
+          socket.close();
+        }
+        return;
+      }
+    }
 
     // Only re-establish subscriptions if we previously had a successful
     // connection that we lost. Don't re-establish on first successful
@@ -1645,6 +1716,9 @@ class ProviderConnection implements IStorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
+      this.rejectSessionOpen(
+        new Error(`Disconnected while waiting on ${event.type}`),
+      );
       // Report disconnection to inspector
       switch (event.type) {
         case "error":
@@ -1689,6 +1763,60 @@ class ProviderConnection implements IStorageProvider {
       time: Date.now(),
     });
     return message;
+  }
+
+  resolveSessionOpen(data: string): boolean {
+    if (
+      this.memoryVersion !== "v2" || this.#pendingSessionOpen === undefined ||
+      this.#pendingSessionOpenId === undefined
+    ) {
+      return false;
+    }
+
+    let payload: {
+      the?: string;
+      of?: string;
+      is?: { ok?: SessionOpenResult; error?: V2Error };
+    };
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      this.rejectSessionOpen(
+        new Error("Invalid memory/v2 session.open response payload"),
+      );
+      return true;
+    }
+
+    if (
+      payload.the !== "task/return" || payload.of !== this.#pendingSessionOpenId
+    ) {
+      return false;
+    }
+
+    const pending = this.#pendingSessionOpen;
+    this.#pendingSessionOpen = undefined;
+    this.#pendingSessionOpenId = undefined;
+
+    if (payload.is?.error) {
+      pending.reject(new Error(payload.is.error.message));
+    } else if (payload.is?.ok) {
+      pending.resolve(payload.is.ok);
+    } else {
+      pending.reject(new Error("Malformed memory/v2 session.open response"));
+    }
+
+    return true;
+  }
+
+  rejectSessionOpen(error: Error) {
+    const pending = this.#pendingSessionOpen;
+    if (pending === undefined) {
+      return;
+    }
+
+    this.#pendingSessionOpen = undefined;
+    this.#pendingSessionOpenId = undefined;
+    pending.reject(error);
   }
 
   /**
@@ -1758,6 +1886,7 @@ export class Provider implements IStorageProvider {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
+  readonly memoryVersion: MemoryVersion;
 
   subscribers: Map<
     string,
@@ -1784,6 +1913,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
     spaceIdentity,
+    memoryVersion = DEFAULT_MEMORY_VERSION,
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
@@ -1791,6 +1921,7 @@ export class Provider implements IStorageProvider {
     this.spaces = new Map();
     this.subscription = subscription;
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
     this.workspace = this.mount(space);
   }
 
@@ -1800,6 +1931,7 @@ export class Provider implements IStorageProvider {
       provider: this,
       address: options.address,
       spaceIdentity: options.spaceIdentity,
+      memoryVersion: options.memoryVersion,
     });
   }
   get replica() {
@@ -1858,7 +1990,71 @@ export class Provider implements IStorageProvider {
       Promise.all(this.workspace.commitPromises),
     ]);
   }
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptStorageValue<T> {
+    const entity = this.workspace.get({ id: uri, type: this.the });
 
+    return entity?.is as OptStorageValue<T>;
+  }
+
+  // This is mostly just used by tests and tools, since the transactions will
+  // directly commit their results.
+  async send<T extends StorableValue = StorableValue>(
+    batch: { uri: URI; value: StorageValue<T> }[],
+  ): Promise<
+    Result<Unit, PushError>
+  > {
+    const { the, workspace } = this;
+    const LABEL_TYPE = "application/label+json" as const;
+
+    // Collect facts so that we can derive desired state and a corresponding
+    // transaction
+    const facts: Fact[] = [];
+    for (const { uri, value } of batch) {
+      const newValue = value.value !== undefined
+        ? storableFromNativeValue({ value: value.value, source: value.source })
+        : undefined;
+
+      const current = workspace.get({ id: uri, type: this.the });
+      if (!deepEqual(current?.is, newValue)) {
+        if (newValue !== undefined) {
+          facts.push(assert({
+            the,
+            of: uri,
+            is: newValue as StorableDatum,
+            // If fact has no `cause` it is unclaimed fact.
+            cause: current?.cause ? current : null,
+          }));
+        } else {
+          facts.push(retract(current as Consumer.Assertion));
+        }
+      }
+      if (this.memoryVersion === "v1" && value.labels !== undefined) {
+        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          if (value.labels !== undefined) {
+            facts.push(assert({
+              the: LABEL_TYPE,
+              of: uri,
+              is: value.labels as StorableDatum,
+              // If fact has no `cause` it is unclaimed fact.
+              cause: currentLabel?.cause ? currentLabel : null,
+            }));
+          } else {
+            facts.push(retract(currentLabel as Consumer.Assertion));
+          }
+        }
+      }
+    }
+    // If we don't have any writes, don't bother sending it.
+    if (facts.length > 0) {
+      const result = await this.workspace.commit({ facts, claims: [] });
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
+  }
   /**
    * Polls all spaces for changes.
    */
@@ -1947,19 +2143,39 @@ export interface Options {
    * (Temporary) Space identity.
    */
   spaceIdentity?: Signer;
+
+  /**
+   * Storage implementation selection during the v1/v2 cutover.
+   */
+  memoryVersion?: MemoryVersion;
 }
+
+export type V1StorageManagerOptions = Options & {
+  memoryVersion?: "v1";
+};
+
+export type V2StorageManagerOptions = Options & {
+  memoryVersion: "v2";
+};
 
 export class StorageManager implements IStorageManager {
   address: URL;
   as: Signer;
   id: string;
+  readonly memoryVersion: MemoryVersion;
   settings: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
 
-  static open(options: Options) {
+  static open(options: V1StorageManagerOptions): StorageManager;
+  static open(options: V2StorageManagerOptions): V2Storage.StorageManager;
+  static open(options: Options): StorageManager | V2Storage.StorageManager {
+    const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    if (memoryVersion === "v2") {
+      return V2Storage.StorageManager.open(options);
+    }
     if (options.address.protocol === "memory:") {
       throw new RangeError(
         "memory: protocol is not supported in browser runtime",
@@ -1974,6 +2190,7 @@ export class StorageManager implements IStorageManager {
       address,
       as,
       id = crypto.randomUUID(),
+      memoryVersion = DEFAULT_MEMORY_VERSION,
       settings = defaultSettings,
       spaceIdentity,
     }: Options,
@@ -1982,6 +2199,7 @@ export class StorageManager implements IStorageManager {
     this.settings = settings;
     this.as = as;
     this.id = id;
+    this.memoryVersion = memoryVersion;
     this.spaceIdentity = spaceIdentity;
   }
 
@@ -1990,7 +2208,7 @@ export class StorageManager implements IStorageManager {
    * creates a new web socket connection to `${this.address}?space=${space}`
    * in order to cluster connections for the space in the same group.
    */
-  open(space: MemorySpace) {
+  open(space: MemorySpace): IStorageProviderWithReplica {
     const provider = this.#providers.get(space);
     if (!provider) {
       const provider = this.connect(space);
@@ -1998,6 +2216,10 @@ export class StorageManager implements IStorageManager {
       return provider;
     }
     return provider;
+  }
+
+  openConnection(space: MemorySpace): ProviderConnection {
+    return this.open(space) as ProviderConnection;
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
@@ -2017,6 +2239,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
+      memoryVersion: this.memoryVersion,
       spaceIdentity: spaceIdentityForSpace,
     });
   }
@@ -2096,17 +2319,14 @@ export class StorageManager implements IStorageManager {
     if (!space) throw new Error("No space set");
 
     if (id.startsWith("data:")) {
-      return this.syncDataURICell(cell, space, id, schema);
+      return await this.syncDataURICell(cell, space, id, schema);
     }
 
     const storageProvider = this.open(space);
-
-    const selector = {
+    await storageProvider.sync(id as URI, {
       path: cell.path.map((p) => p.toString()),
       schema: schema ?? false,
-    };
-
-    await storageProvider.sync(id, selector);
+    });
     return cell;
   }
 

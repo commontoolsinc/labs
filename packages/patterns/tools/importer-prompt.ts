@@ -399,7 +399,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(Date.now()).for("importer auth clock");
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -413,8 +413,8 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshing = Writable.of(false).for("importer auth refreshing");
+    const refreshFailed = Writable.of(false).for("importer auth refresh failed");
 
     const scopesDisplay = computed(() => scopes.join(", "));
 

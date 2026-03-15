@@ -12,6 +12,7 @@ _deno.lock
 .bg-charm-service.pid
 .pr-desc.tmp
 dist/
+/.agents
 .agents/settings.local.json
 claude-research.key
 *.key

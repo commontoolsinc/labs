@@ -12,6 +12,8 @@ export type SchemaPathSelector = {
 };
 
 export type { JSONValue };
+export type MemoryVersion = "v1" | "v2";
+export const DEFAULT_MEMORY_VERSION: MemoryVersion = "v2";
 
 /**
  * A value that can be stored in the storage layer. This is similar to

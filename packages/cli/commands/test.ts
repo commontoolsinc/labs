@@ -44,6 +44,10 @@ export const test = new Command()
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
   )
+  .option(
+    "--storage-stats",
+    "Print storage-related logger timings and counts after each test file.",
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -109,6 +113,7 @@ export const test = new Command()
       verbose: options.verbose,
       root,
       statsThreshold: options.statsThreshold,
+      storageStats: options.storageStats,
     });
 
     // Exit with error code if any tests failed

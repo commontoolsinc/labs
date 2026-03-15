@@ -316,6 +316,9 @@ describe("Per-path reads - schema-selective sinks", () => {
     const summaryLabels: string[] = [];
 
     itemsView.sink((v) => {
+      if (!Array.isArray(v?.items)) {
+        return;
+      }
       itemsCounts.push(v.items.length);
     });
 
@@ -460,6 +463,9 @@ describe("Per-path reads - schema-selective sinks", () => {
     const contents: { item: { name: string }; index: number }[][] = [];
     const lengths: number[] = [];
     cell.key("items").sink((items) => {
+      if (!Array.isArray(items)) {
+        return;
+      }
       contents.push(items.map((item, index) => {
         return { item, index };
       }));

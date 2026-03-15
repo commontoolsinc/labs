@@ -258,6 +258,15 @@ export const write = (
     return { ok: source };
   }
 
+  if (
+    address.type === "application/json" &&
+    isDocumentEnvelope(source.value) &&
+    isRecord(result.ok) &&
+    Object.keys(result.ok).length === 0
+  ) {
+    return { ok: { ...source, value: undefined } };
+  }
+
   return { ok: { ...source, value: result.ok } };
 };
 
@@ -592,4 +601,12 @@ export const StateInconsistency = (source: {
       });
     },
   };
+};
+
+const isDocumentEnvelope = (value: StorableValue): value is StorableObject => {
+  return isRecord(value) &&
+    (
+      Object.hasOwn(value, "value") ||
+      Object.hasOwn(value, "source")
+    );
 };

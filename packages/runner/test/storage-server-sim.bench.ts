@@ -14,11 +14,14 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { Nursery, Replica } from "../src/storage/cache.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   largeStringA,
   manySmallObjectsA,
   medianComplexityA,
 } from "./bench-fixtures.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 
 const signer = await Identity.fromPassphrase("bench server sim");
 const space = signer.did();
@@ -28,15 +31,44 @@ const space = signer.did();
 // ============================================================================
 
 function setup() {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
 }
+
+const writeDocument = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+  value: StorableValue,
+) => {
+  tx.writeValueOrThrow({
+    space,
+    id: id as `test:${string}`,
+    type: "application/json",
+    path: [],
+  }, value);
+};
+
+const readDocument = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+) => {
+  tx.readValueOrThrow({
+    space,
+    id: id as `test:${string}`,
+    type: "application/json",
+    path: [],
+  });
+};
 
 // ============================================================================
 // Pre-cloned fixture versions for server simulation
@@ -103,26 +135,13 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 50; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:serversim-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringA,
-      );
+      writeDocument(tx, `test:serversim-off-${i}`, largeStringA);
     }
     await tx.commit();
 
     const tx2 = runtime.edit();
     for (let i = 0; i < 50; i++) {
-      tx2.read({
-        space,
-        id: `test:serversim-off-${i}`,
-        type: "application/json",
-        path: [],
-      });
+      readDocument(tx2, `test:serversim-off-${i}`);
     }
 
     b.start();
@@ -143,26 +162,13 @@ Deno.bench(
       const { runtime, storageManager, tx } = setup();
 
       for (let i = 0; i < 50; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:serversim-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          largeStringA,
-        );
+        writeDocument(tx, `test:serversim-on-${i}`, largeStringA);
       }
       await tx.commit();
 
       const tx2 = runtime.edit();
       for (let i = 0; i < 50; i++) {
-        tx2.read({
-          space,
-          id: `test:serversim-on-${i}`,
-          type: "application/json",
-          path: [],
-        });
+        readDocument(tx2, `test:serversim-on-${i}`);
       }
 
       b.start();
@@ -189,26 +195,13 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:serversim-med-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityA,
-      );
+      writeDocument(tx, `test:serversim-med-off-${i}`, medianComplexityA);
     }
     await tx.commit();
 
     const tx2 = runtime.edit();
     for (let i = 0; i < 100; i++) {
-      tx2.read({
-        space,
-        id: `test:serversim-med-off-${i}`,
-        type: "application/json",
-        path: [],
-      });
+      readDocument(tx2, `test:serversim-med-off-${i}`);
     }
 
     b.start();
@@ -229,26 +222,13 @@ Deno.bench(
       const { runtime, storageManager, tx } = setup();
 
       for (let i = 0; i < 100; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:serversim-med-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          medianComplexityA,
-        );
+        writeDocument(tx, `test:serversim-med-on-${i}`, medianComplexityA);
       }
       await tx.commit();
 
       const tx2 = runtime.edit();
       for (let i = 0; i < 100; i++) {
-        tx2.read({
-          space,
-          id: `test:serversim-med-on-${i}`,
-          type: "application/json",
-          path: [],
-        });
+        readDocument(tx2, `test:serversim-med-on-${i}`);
       }
 
       b.start();
@@ -275,26 +255,13 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 25; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:serversim-many-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        manySmallObjectsA,
-      );
+      writeDocument(tx, `test:serversim-many-off-${i}`, manySmallObjectsA);
     }
     await tx.commit();
 
     const tx2 = runtime.edit();
     for (let i = 0; i < 25; i++) {
-      tx2.read({
-        space,
-        id: `test:serversim-many-off-${i}`,
-        type: "application/json",
-        path: [],
-      });
+      readDocument(tx2, `test:serversim-many-off-${i}`);
     }
 
     b.start();
@@ -315,26 +282,13 @@ Deno.bench(
       const { runtime, storageManager, tx } = setup();
 
       for (let i = 0; i < 25; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:serversim-many-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          manySmallObjectsA,
-        );
+        writeDocument(tx, `test:serversim-many-on-${i}`, manySmallObjectsA);
       }
       await tx.commit();
 
       const tx2 = runtime.edit();
       for (let i = 0; i < 25; i++) {
-        tx2.read({
-          space,
-          id: `test:serversim-many-on-${i}`,
-          type: "application/json",
-          path: [],
-        });
+        readDocument(tx2, `test:serversim-many-on-${i}`);
       }
 
       b.start();
@@ -394,15 +348,7 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 50; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:nursery-evict-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        largeStringA,
-      );
+      writeDocument(tx, `test:nursery-evict-off-${i}`, largeStringA);
     }
 
     b.start();
@@ -422,15 +368,7 @@ Deno.bench(
     stubNurseryEvictWithCloning();
     try {
       for (let i = 0; i < 50; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:nursery-evict-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          largeStringA,
-        );
+        writeDocument(tx, `test:nursery-evict-on-${i}`, largeStringA);
       }
 
       b.start();
@@ -457,15 +395,7 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:nursery-evict-med-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        medianComplexityA,
-      );
+      writeDocument(tx, `test:nursery-evict-med-off-${i}`, medianComplexityA);
     }
 
     b.start();
@@ -485,15 +415,7 @@ Deno.bench(
     stubNurseryEvictWithCloning();
     try {
       for (let i = 0; i < 100; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:nursery-evict-med-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          medianComplexityA,
-        );
+        writeDocument(tx, `test:nursery-evict-med-on-${i}`, medianComplexityA);
       }
 
       b.start();
@@ -520,15 +442,7 @@ Deno.bench(
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 25; i++) {
-      tx.write(
-        {
-          space,
-          id: `test:nursery-evict-many-off-${i}`,
-          type: "application/json",
-          path: [],
-        },
-        manySmallObjectsA,
-      );
+      writeDocument(tx, `test:nursery-evict-many-off-${i}`, manySmallObjectsA);
     }
 
     b.start();
@@ -548,15 +462,7 @@ Deno.bench(
     stubNurseryEvictWithCloning();
     try {
       for (let i = 0; i < 25; i++) {
-        tx.write(
-          {
-            space,
-            id: `test:nursery-evict-many-on-${i}`,
-            type: "application/json",
-            path: [],
-          },
-          manySmallObjectsA,
-        );
+        writeDocument(tx, `test:nursery-evict-many-on-${i}`, manySmallObjectsA);
       }
 
       b.start();

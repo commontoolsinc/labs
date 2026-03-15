@@ -1,22 +1,30 @@
 import {
+  IStorageNotification,
+  IStorageNotificationCapability,
   IStorageSubscription,
   IStorageSubscriptionCapability,
   StorageNotification,
 } from "./interface.ts";
 
-export const create = () => new StorageSubscription();
+export const createStorageNotificationRelay = () =>
+  new StorageNotificationRelay();
+export const create = createStorageNotificationRelay;
 
 /**
  * Storage subscription that can be used by consumers to subscribe to storage
  * notifications and by storage to broadcast them to all subscribers.
  */
-class StorageSubscription
-  implements IStorageSubscriptionCapability, IStorageSubscription {
-  #subscribers: Set<IStorageSubscription>;
-  constructor(subscribers: Set<IStorageSubscription> = new Set()) {
+export class StorageNotificationRelay
+  implements
+    IStorageNotificationCapability,
+    IStorageSubscriptionCapability,
+    IStorageNotification,
+    IStorageSubscription {
+  #subscribers: Set<IStorageNotification>;
+  constructor(subscribers: Set<IStorageNotification> = new Set()) {
     this.#subscribers = subscribers;
   }
-  subscribe(subscription: IStorageSubscription): void {
+  subscribe(subscription: IStorageNotification): void {
     this.#subscribers.add(subscription);
   }
   next(notification: StorageNotification) {
@@ -32,3 +40,5 @@ class StorageSubscription
     return { done: false };
   }
 }
+
+export { StorageNotificationRelay as StorageSubscription };

@@ -4,15 +4,31 @@ import { assert, assertEquals } from "@std/assert";
 import { Runtime } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { URI } from "@commontools/memory/interface";
 import type { JSONSchema } from "@commontools/runner";
-import { env } from "@commontools/integration";
-const { API_URL } = env;
 
 const keyConfig: IdentityCreateConfig = {
   implementation: "noble",
 };
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
+
+// Archived v1 integration coverage. The live toolshed path is intentionally
+// hard-cut to v2, and the corresponding reactive/link traversal behavior is
+// covered by the dedicated memory-v2 reactivity suite.
+
+const createV1Runtime = (identity: Identity) => {
+  const storageManager = StorageManager.emulate({
+    as: identity,
+    memoryVersion: "v1",
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL("memory://"),
+    storageManager,
+    memoryVersion: "v1",
+  });
+  return { runtime, storageManager };
+};
 
 /**
  * Test: When a document changes to add a link to another document,
@@ -56,13 +72,7 @@ async function testNewLinkDiscovery() {
 
   // === SETUP PHASE ===
   // Create document B (the address) that will later be linked
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1 } = createV1Runtime(identity);
 
   let tx = runtime1.edit();
   const addressCell = runtime1.getCell(
@@ -91,13 +101,8 @@ async function testNewLinkDiscovery() {
 
   // === TEST PHASE ===
   // runtime2 subscribes to the person cell
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2, storageManager: storageManager2 } =
+    createV1Runtime(identity);
 
   const personCell2 = runtime2.getCell(space, "test-person-cell", personSchema);
   await personCell2.sync();
@@ -109,8 +114,8 @@ async function testNewLinkDiscovery() {
   assertEquals(initialValue?.address, undefined);
 
   // Check that address document is NOT in runtime2's heap yet
-  const provider2 = (runtime2.storageManager.open(space) as any).provider;
-  const addressKey = `of:${addressEntityId["/"]}`;
+  const provider2 = storageManager2.openConnection(space).provider;
+  const addressKey = `of:${addressEntityId["/"]}` as URI;
   const initialAddressInHeap = provider2.replica.heap.get({
     id: addressKey,
     type: "application/json",
@@ -133,13 +138,7 @@ async function testNewLinkDiscovery() {
   });
 
   // runtime3 modifies person to add link to address
-  const runtime3 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime3 } = createV1Runtime(identity);
 
   const personCell3 = runtime3.getCell(space, "test-person-cell", personSchema);
   await personCell3.sync();
@@ -220,13 +219,7 @@ async function testLinkedDocumentChanges() {
   } as const satisfies JSONSchema;
 
   // === SETUP PHASE ===
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1 } = createV1Runtime(identity);
 
   // Create address cell first
   let tx = runtime1.edit();
@@ -265,13 +258,7 @@ async function testLinkedDocumentChanges() {
   await runtime1.dispose();
 
   // === TEST PHASE ===
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2 } = createV1Runtime(identity);
 
   const personCell2 = runtime2.getCell(
     space,
@@ -298,13 +285,7 @@ async function testLinkedDocumentChanges() {
   });
 
   // runtime3 modifies the address
-  const runtime3 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime3 } = createV1Runtime(identity);
 
   const addressCell3 = runtime3.getCell(
     space,
@@ -383,13 +364,7 @@ async function testDeepLinkChain() {
   } as const satisfies JSONSchema;
 
   // === SETUP PHASE ===
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1 } = createV1Runtime(identity);
 
   // Create city cell (C)
   let tx = runtime1.edit();
@@ -439,13 +414,7 @@ async function testDeepLinkChain() {
   await runtime1.dispose();
 
   // === TEST PHASE ===
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2 } = createV1Runtime(identity);
 
   const personCell2 = runtime2.getCell(space, "deep-person-cell", personSchema);
   await personCell2.sync();
@@ -470,13 +439,7 @@ async function testDeepLinkChain() {
   });
 
   // runtime3 modifies the city (C)
-  const runtime3 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime3 } = createV1Runtime(identity);
 
   const cityCell3 = runtime3.getCell(space, "deep-city-cell", citySchema);
   await cityCell3.sync();
@@ -521,13 +484,7 @@ async function testDirectDocumentChanges() {
   } as const satisfies JSONSchema;
 
   // === SETUP PHASE ===
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime1 } = createV1Runtime(identity);
 
   let tx = runtime1.edit();
   const counterCell = runtime1.getCell(
@@ -542,13 +499,7 @@ async function testDirectDocumentChanges() {
   await runtime1.dispose();
 
   // === TEST PHASE ===
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime2 } = createV1Runtime(identity);
 
   const counterCell2 = runtime2.getCell(
     space,
@@ -569,13 +520,7 @@ async function testDirectDocumentChanges() {
   });
 
   // runtime3 modifies the counter
-  const runtime3 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      address: new URL("/api/storage/memory", API_URL),
-    }),
-  });
+  const { runtime: runtime3 } = createV1Runtime(identity);
 
   const counterCell3 = runtime3.getCell(
     space,
@@ -612,6 +557,7 @@ async function runTests() {
 
 Deno.test({
   name: "incremental schema query tests",
+  ignore: true,
   fn: async () => {
     let timeoutHandle: number;
     const timeoutPromise = new Promise((_, reject) => {
