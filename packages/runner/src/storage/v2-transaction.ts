@@ -16,7 +16,6 @@ import type {
   IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
-  IReadActivity,
   IReadOptions,
   IStorageManager,
   IStorageTransaction,
@@ -311,7 +310,6 @@ export class V2StorageTransaction implements IStorageTransaction {
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
   #activity: Activity[] = [];
-  #readActivities: IReadActivity[] = [];
   #writeSpace?: MemorySpace;
 
   constructor(private readonly storage: IStorageManager) {}
@@ -342,7 +340,13 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   getReadActivities() {
-    return this.#readActivities;
+    return (function* (activities: readonly Activity[]) {
+      for (const activity of activities) {
+        if ("read" in activity && activity.read) {
+          yield activity.read;
+        }
+      }
+    })(this.#activity);
   }
 
   getReactivityLog() {
@@ -446,15 +450,6 @@ export class V2StorageTransaction implements IStorageTransaction {
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
       },
     });
-    this.#readActivities.push({
-      space: address.space,
-      id: address.id,
-      type: address.type,
-      path: address.path,
-      meta: readMeta,
-      ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-    });
-
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
@@ -693,7 +688,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
-    const replica = this.storage.open(writeSpace).replica;
     const native = this.getNativeCommit(writeSpace);
     const operations = native?.operations ?? [];
     if (operations.length === 0) {
@@ -702,6 +696,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
+    const replica = this.storage.open(writeSpace).replica;
     const promise = replica.commitNative
       ? replica.commitNative(native!, this)
       : replica.commit(this.buildTransaction(writeSpace), this);

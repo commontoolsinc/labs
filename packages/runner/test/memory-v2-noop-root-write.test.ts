@@ -55,3 +55,46 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   await runtime.dispose();
   await storage.close();
 });
+
+Deno.test("memory v2 no-op commits do not reopen storage for an empty native commit", async () => {
+  const signer = await Identity.fromPassphrase("memory-v2-noop-commit-open");
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+  const runtime = new Runtime({
+    storageManager: storage,
+    memoryVersion: "v2",
+    apiUrl: new URL(import.meta.url),
+  });
+  const space = signer.did();
+  const address = {
+    id: "bench:no-op-commit-open" as const,
+    type: "application/json" as const,
+    path: [],
+  };
+
+  const seed = runtime.edit();
+  seed.writeValueOrThrow({ ...address, space }, { foo: "bar" });
+  assert((await seed.commit()).ok);
+
+  const tx = runtime.edit();
+  tx.writeValueOrThrow({ ...address, space }, { foo: "bar" });
+  assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), []);
+
+  const originalOpen = storage.open.bind(storage);
+  let openCalls = 0;
+  storage.open = ((requestedSpace) => {
+    openCalls += 1;
+    return originalOpen(requestedSpace);
+  }) as typeof storage.open;
+
+  try {
+    assert((await tx.commit()).ok);
+    assertEquals(openCalls, 0);
+  } finally {
+    storage.open = originalOpen;
+    await runtime.dispose();
+    await storage.close();
+  }
+});
