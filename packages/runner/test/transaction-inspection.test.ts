@@ -12,6 +12,7 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();
@@ -164,6 +165,35 @@ describe("transaction inspection", () => {
       assertEquals(extended.getReactivityLog?.(), expected);
       assertEquals(wrapped.getReactivityLog?.(), expected);
       assertEquals(txToReactivityLog(wrapped), expected);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("uses the native v2 read activity hook without journal replay", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const tx = storageManager.edit();
+      const id = "test:transaction-inspection-read-activities-v2" as const;
+      tx.read({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "count"],
+      }, { nonRecursive: true, meta: { source: "direct-hook" } });
+
+      assertEquals([...getTransactionReadActivities(tx)], [{
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "count"],
+        meta: { source: "direct-hook" },
+        nonRecursive: true,
+      }]);
     } finally {
       await storageManager.close();
     }
