@@ -25,6 +25,12 @@ import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
+const createBenchArrayItems = (length: number) =>
+  Array.from({ length }, (_, i) => ({
+    id: i,
+    value: `item-${i}`,
+  }));
+
 // Setup helper to create runtime and transaction
 function setup() {
   const storageManager = StorageManager.emulate({
@@ -604,6 +610,60 @@ Deno.bench({
           value: `item-${i}-${j}`,
         })),
       });
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+});
+
+// =============================================================================
+// ARRAY STRUCTURE BENCHMARKS
+// Test path-level array structural edits that were previously missing coverage
+// =============================================================================
+
+Deno.bench({
+  name: "Cell.set() - array: path replace truncation (100↔50 items)",
+  group: "array-structure",
+  baseline: true,
+  async fn() {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<any>(
+      space,
+      "bench-array-path-truncate",
+      undefined,
+      tx,
+    );
+
+    const full = createBenchArrayItems(100);
+    const truncated = full.slice(0, 50);
+    cell.set({ items: full });
+
+    for (let i = 0; i < 100; i++) {
+      cell.key("items").set(i % 2 === 0 ? truncated : full);
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+});
+
+Deno.bench({
+  name: "Cell.set() - array: length path write (100↔50 items)",
+  group: "array-structure",
+  async fn() {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<any>(
+      space,
+      "bench-array-length-path",
+      undefined,
+      tx,
+    );
+
+    cell.set({ items: createBenchArrayItems(100) });
+
+    for (let i = 0; i < 100; i++) {
+      cell.key("items").key("length").set(i % 2 === 0 ? 50 : 100);
     }
 
     await cleanup(runtime, storageManager, tx);
