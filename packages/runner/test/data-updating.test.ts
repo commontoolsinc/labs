@@ -1603,6 +1603,60 @@ describe("compactChangeSet", () => {
   });
 
   describe("batched applyChangeSet", () => {
+    const makeBatchChange = (
+      path: string[],
+      value: unknown,
+    ): ChangeSet[0] => ({
+      location: {
+        id: "test:batched-doc",
+        space: "did:test:space",
+        type: "application/json",
+        path,
+      },
+      value: value as any,
+    });
+
+    it("prefers the transaction batch hook when applying a change set", () => {
+      const batches: Array<Array<{ address: ChangeSet[0]["location"]; value: unknown }>> = [];
+      const txWithBatch = {
+        writeValueOrThrow() {
+          throw new Error("applyChangeSet should use writeValuesOrThrow");
+        },
+        writeValuesOrThrow(writes: Iterable<{
+          address: ChangeSet[0]["location"];
+          value: unknown;
+        }>) {
+          batches.push([...writes]);
+        },
+      } as unknown as IExtendedStorageTransaction;
+
+      applyChangeSet(txWithBatch, [
+        makeBatchChange(["profile", "name"], "Ada"),
+        makeBatchChange(["profile", "age"], 42),
+      ]);
+
+      expect(batches).toEqual([[
+        {
+          address: {
+            id: "test:batched-doc",
+            space: "did:test:space",
+            type: "application/json",
+            path: ["profile", "name"],
+          },
+          value: "Ada",
+        },
+        {
+          address: {
+            id: "test:batched-doc",
+            space: "did:test:space",
+            type: "application/json",
+            path: ["profile", "age"],
+          },
+          value: 42,
+        },
+      ]]);
+    });
+
     it("lets the v2 transaction batch hook materialize missing parents", async () => {
       const localStorageManager = StorageManager.emulate({ as: signer });
       const localRuntime = new Runtime({

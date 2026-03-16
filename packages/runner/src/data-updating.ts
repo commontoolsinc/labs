@@ -758,6 +758,15 @@ export function applyChangeSet(
   // CT-1123: Removed compactChangeSet - structural sharing makes redundant writes
   // cheap (O(path_depth) with noop detection), while compaction added O(N²) overhead.
   // Benchmarks showed 2.5-4.4x slowdown with compactChangeSet enabled.
+  if (tx.writeValuesOrThrow) {
+    tx.writeValuesOrThrow(
+      changes.map((change) => ({
+        address: change.location,
+        value: change.value,
+      })),
+    );
+    return;
+  }
   for (const change of changes) {
     tx.writeValueOrThrow(change.location, change.value);
   }
