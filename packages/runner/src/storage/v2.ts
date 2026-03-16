@@ -626,7 +626,9 @@ const normalizeSyncSelector = (
 const normalizeSyncEntries = (
   entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
 ): [{ id: URI; type: MIME }, SchemaPathSelector][] =>
-  entries.map(([address, selector]) => [address, normalizeSyncSelector(selector)]);
+  entries.map((
+    [address, selector],
+  ) => [address, normalizeSyncSelector(selector)]);
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
