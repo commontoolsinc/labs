@@ -1,4 +1,8 @@
 export { type CallKind, detectCallKind } from "./call-kind.ts";
+export {
+  branchHasNonHelperOpaqueReads,
+  findEnclosingConditionalBranch,
+} from "./conditional-branch-analysis.ts";
 export * from "./dataflow.ts";
 export {
   classifyReactiveContext,

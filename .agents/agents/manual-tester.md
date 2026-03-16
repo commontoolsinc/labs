@@ -114,7 +114,21 @@ agent-browser open {api-url}/{space-name}/{piece-id}
 Default to headless. Only use `--headed` if the orchestrator prompt explicitly
 says the run is interactive or a human is watching.
 
-Then test each acceptance criterion from the spec:
+**Immediately after the page loads**, check the browser console for errors:
+
+```bash
+agent-browser console --clear   # Clear stale entries
+agent-browser wait --load networkidle
+agent-browser console           # Check for runtime errors
+```
+
+If you see errors like "Reactive reference from outer scope cannot be accessed
+via closure" or any uncaught exceptions, **report them as HIGH severity** — the
+pattern may appear to render but will be non-functional. Do not proceed with
+interaction testing until console errors are resolved.
+
+Then test each acceptance criterion from the spec by **actually interacting with
+the UI** — clicking fields, typing text, toggling controls:
 
 ```bash
 # Get interactive elements
@@ -132,10 +146,26 @@ agent-browser screenshot
 
 # Check for expected text
 agent-browser get text @e3
+
+# Check console after interactions for errors
+agent-browser console
 ```
 
 **Key rules:**
 
+- **You must actually attempt every user interaction** — click fields, type into
+  inputs, toggle checkboxes, press buttons. Verifying via code review or
+  screenshot alone is NOT manual testing. If you cannot interact with an element,
+  that is a finding, not an infrastructure caveat.
+- **Check the console after every interaction** that doesn't produce the expected
+  result. Console errors explain why interactions fail silently.
+- **Never mark a criterion as PASS based on code review alone.** If you cannot
+  verify a criterion through actual interaction, mark it as UNTESTED with an
+  explanation. Only PASS means "I did it and it worked."
+- **Shadow DOM is not an excuse to skip interactions.** Use coordinate-based
+  clicks (`agent-browser click --point X,Y`), `agent-browser eval` to pierce
+  shadow roots, or snapshot with `--shadow` flag. If none of these work, report
+  the specific interaction as UNTESTED.
 - Always re-snapshot after any interaction that changes the page
 - Use `agent-browser wait --load networkidle` after actions that trigger server
   communication

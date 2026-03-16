@@ -2,8 +2,10 @@ import ts from "typescript";
 import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
+  branchHasNonHelperOpaqueReads,
   classifyReactiveContext,
   detectCallKind,
+  findEnclosingConditionalBranch,
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
@@ -247,6 +249,31 @@ function shouldTransformArrayMethod(
   if (
     contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
   ) {
+    // If the receiver will be auto-unwrapped when captured into a derive
+    // (i.e., it's NOT a Cell/Stream which survive unwrapping), and this .map()
+    // call sits inside a conditional branch that also contains other OpaqueRef
+    // reads, CapabilityLowering will later wrap the branch in a derive.
+    // Inside that derive, the receiver is auto-unwrapped to a plain array, so
+    // .mapWithPattern() would fail at runtime.  Skip the transform in that
+    // case — plain .map() is correct for unwrapped values.
+    //
+    // Note: after ComputedTransformer rewrites computed() → derive(), the
+    // checker sees the unwrapped return type, so receiverKind is typically
+    // "plain" rather than "opaque_autounwrapped".  We guard on NOT being
+    // celllike_requires_rewrite, since Cell/Stream are the only types that
+    // survive unwrapping inside derives.
+    if (receiverKind !== "celllike_requires_rewrite") {
+      const branch = findEnclosingConditionalBranch(
+        methodCall,
+        context.checker,
+      );
+      if (
+        branch &&
+        branchHasNonHelperOpaqueReads(branch, context, methodCall)
+      ) {
+        return false;
+      }
+    }
     return true;
   }
 
