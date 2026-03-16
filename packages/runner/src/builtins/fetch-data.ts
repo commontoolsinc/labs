@@ -42,7 +42,7 @@ const fetchDataInputSchema = toDeepFrozenSchema(
         },
       },
     },
-  } as const,
+  },
   true,
 );
 

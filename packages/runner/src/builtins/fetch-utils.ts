@@ -18,7 +18,7 @@ export const internalSchema = toDeepFrozenSchema(
     },
     default: {},
     required: ["requestId", "lastActivity", "inputHash"],
-  } as const,
+  },
   true,
 );
 

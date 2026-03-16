@@ -27,7 +27,7 @@ export const LLMContentSchema = toDeepFrozenSchema(
         },
       },
     ],
-  } as const,
+  },
   true,
 );
 
@@ -40,7 +40,7 @@ export const LLMMessageSchema = toDeepFrozenSchema(
       content: LLMContentSchema,
     },
     required: ["role", "content"],
-  } as const,
+  },
   true,
 );
 
@@ -86,7 +86,7 @@ export const LLMReducedToolSchema = toDeepFrozenSchema(
       description: { type: "string" },
       inputSchema: { type: "object" },
     },
-  } as const,
+  },
   true,
 );
 
@@ -138,7 +138,7 @@ export const GenerateTextParamsSchema = toDeepFrozenSchema(
         default: {},
       },
     },
-  } as const,
+  },
   true,
 );
 
@@ -163,7 +163,7 @@ export const GenerateObjectParamsSchema = toDeepFrozenSchema(
       tools: { type: "object", additionalProperties: LLMToolSchema },
     },
     required: ["schema"],
-  } as const,
+  },
   true,
 );
 

@@ -30,7 +30,7 @@ export const AuthSchema = toDeepFrozenSchema(
         },
       },
     },
-  } as const,
+  },
   true,
 );
 
@@ -63,7 +63,7 @@ export const OAuth2TokenSchema = toDeepFrozenSchema(
       },
     },
     required: ["accessToken", "tokenType"],
-  } as const,
+  },
   true,
 );
 
@@ -84,6 +84,6 @@ export const WebhookConfigSchema = toDeepFrozenSchema(
       },
     },
     required: ["url", "secret"],
-  } as const,
+  },
   true,
 );

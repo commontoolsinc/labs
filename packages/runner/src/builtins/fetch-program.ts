@@ -84,7 +84,7 @@ const cacheSchema = toDeepFrozenSchema(
         },
       },
     },
-  } as const,
+  },
   true,
 );
 

@@ -69,7 +69,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
       },
     },
     $ref: "#/$defs/vdomNode",
-  } as const,
+  },
   true,
 );
 
@@ -114,7 +114,7 @@ export const debugVDOMSchema = toDeepFrozenSchema(
       },
     },
     $ref: "#/$defs/vdomNode",
-  } as const,
+  },
   true,
 );
 
@@ -213,7 +213,7 @@ export const vnodeSchema = toDeepFrozenSchema(
         },
       },
     },
-  } as const,
+  },
   true,
 );
 
@@ -222,7 +222,7 @@ export const nameSchema = toDeepFrozenSchema(
     type: "object",
     properties: { [NAME]: { type: "string" } },
     required: [NAME],
-  } as const,
+  },
   true,
 );
 
@@ -233,7 +233,7 @@ export const uiSchema = toDeepFrozenSchema(
     type: "object",
     properties: { [UI]: rendererVDOMSchema },
     required: [UI],
-  } as const,
+  },
   true,
 );
 
@@ -246,7 +246,7 @@ export const pieceListSchema = toDeepFrozenSchema(
     type: "array",
     items: { type: "unknown", asCell: true },
     default: [],
-  } as const,
+  },
   true,
 );
 
@@ -259,7 +259,7 @@ export const pieceLineageSchema = toDeepFrozenSchema(
       timestamp: { type: "number" },
     },
     required: ["piece", "relation", "timestamp"],
-  } as const,
+  },
   true,
 );
 export type PieceLineage = Schema<typeof pieceLineageSchema>;
@@ -277,7 +277,7 @@ export const pieceSourceCellSchema = toDeepFrozenSchema(
       },
       llmRequestId: { type: "string" },
     },
-  } as const,
+  },
   true,
 );
 
@@ -290,27 +290,27 @@ export const processSchema = toDeepFrozenSchema(
       spell: { type: "object" },
     },
     required: [TYPE],
-  } as const,
+  },
   true,
 );
 
 // Primitive schemas for UI component cell bindings
 export const stringSchema = toDeepFrozenSchema(
-  { type: "string" } as const,
+  { type: "string" },
   true,
 );
 export const booleanSchema = toDeepFrozenSchema(
-  { type: "boolean" } as const,
+  { type: "boolean" },
   true,
 );
 export const numberSchema = toDeepFrozenSchema(
-  { type: "number" } as const,
+  { type: "number" },
   true,
 );
 export const stringArraySchema = toDeepFrozenSchema(
   {
     type: "array",
     items: { type: "string" },
-  } as const,
+  },
   true,
 );

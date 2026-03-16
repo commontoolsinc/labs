@@ -587,7 +587,7 @@ const internalSchema = toDeepFrozenSchema(
       lastActivity: { type: "number" },
     },
     required: ["requestId", "lastActivity"],
-  } as const,
+  },
   true,
 );
 
@@ -666,7 +666,7 @@ const READ_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path"],
     additionalProperties: false,
-  } as const,
+  },
   true,
 );
 
@@ -690,7 +690,7 @@ const INVOKE_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path"],
     additionalProperties: true,
-  } as const,
+  },
   true,
 );
 
@@ -710,7 +710,7 @@ const SCHEMA_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path"],
     additionalProperties: false,
-  } as const,
+  },
   true,
 );
 
@@ -734,7 +734,7 @@ const PIN_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path", "name"],
     additionalProperties: false,
-  } as const,
+  },
   true,
 );
 
@@ -754,7 +754,7 @@ const UNPIN_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path"],
     additionalProperties: false,
-  } as const,
+  },
   true,
 );
 
@@ -779,7 +779,7 @@ const UPDATE_ARGUMENT_INPUT_SCHEMA = toDeepFrozenSchema(
     },
     required: ["path", "updates"],
     additionalProperties: false,
-  } as const,
+  },
   true,
 );
 

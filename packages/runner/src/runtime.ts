@@ -147,7 +147,7 @@ export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
         asCell: true,
       },
     },
-  } as const,
+  },
   true,
 );
 

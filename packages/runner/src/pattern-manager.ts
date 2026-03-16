@@ -53,7 +53,7 @@ export const patternMetaSchema = toDeepFrozenSchema(
       },
     },
     required: ["id"],
-  } as const,
+  },
   true,
 );
 

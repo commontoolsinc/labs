@@ -24,7 +24,7 @@ const mentionableListSchema = toDeepFrozenSchema(
   {
     type: "array",
     items: { asCell: true },
-  } as const,
+  },
   true,
 );
 
@@ -519,7 +519,7 @@ const TARGET_SCHEMA = toDeepFrozenSchema(
       headless: { type: "boolean" },
     },
     required: ["query"],
-  } as const,
+  },
   true,
 );
 
