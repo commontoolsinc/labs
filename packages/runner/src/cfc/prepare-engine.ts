@@ -44,6 +44,10 @@ import {
 } from "./shared.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
+import {
+  type CfcTrustContext,
+  integritySatisfiesRequiredIntegrity,
+} from "./integrity-trust.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -54,6 +58,8 @@ export interface PrepareBoundaryCommitOptions {
     actualSchemaHash: string,
   ) => boolean;
   readonly implementationIdentity?: CfcImplementationIdentity;
+  readonly actingPrincipal?: string;
+  readonly trustContext?: CfcTrustContext;
 }
 
 function CfcPrepareSchemaUnavailableError(
@@ -624,20 +630,6 @@ function classificationSatisfiesMaxConfidentiality(
   return false;
 }
 
-function integritySatisfiesRequiredIntegrity(
-  actualIntegrity: readonly string[] | undefined,
-  requiredIntegrity: readonly string[],
-): boolean {
-  if (requiredIntegrity.length === 0) {
-    return true;
-  }
-  if (!actualIntegrity || actualIntegrity.length === 0) {
-    return false;
-  }
-  const actualSet = new Set(actualIntegrity);
-  return requiredIntegrity.every((atom) => actualSet.has(atom));
-}
-
 function isSameOrDescendantCanonicalPath(
   basePath: string,
   candidatePath: string,
@@ -652,6 +644,7 @@ function findRequiredIntegrityCoherenceViolation(
   labelsByPath: Record<string, Labels>,
   readPath: string,
   requiredIntegrity: readonly string[],
+  options: PrepareBoundaryCommitOptions,
 ): { path: string; actualIntegrity: readonly string[] } | undefined {
   const sortedEntries = Object.entries(labelsByPath).sort(([a], [b]) =>
     a.localeCompare(b)
@@ -662,7 +655,11 @@ function findRequiredIntegrityCoherenceViolation(
     }
     const actualIntegrity = label.integrity ?? [];
     if (
-      !integritySatisfiesRequiredIntegrity(actualIntegrity, requiredIntegrity)
+      !integritySatisfiesRequiredIntegrity(
+        actualIntegrity,
+        requiredIntegrity,
+        options,
+      )
     ) {
       return { path, actualIntegrity };
     }
@@ -673,6 +670,7 @@ function findRequiredIntegrityCoherenceViolation(
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
   canonical: CanonicalBoundaryActivity,
+  options: PrepareBoundaryCommitOptions = {},
 ): readonly ConsumedReadWithEffectiveLabel[] {
   const { consumedReads } = partitionConsumedBoundaryReads(canonical);
   const labelsByEntity = new Map<string, Record<string, Labels>>();
@@ -731,6 +729,7 @@ function verifyInputRequirementsForAttempt(
         labelsByPath,
         consumed.read.path,
         requiredIntegrity,
+        options,
       );
       if (coherenceViolation) {
         throw CfcRequiredIntegrityViolationError(
@@ -745,6 +744,7 @@ function verifyInputRequirementsForAttempt(
         !integritySatisfiesRequiredIntegrity(
           actualIntegrity,
           requiredIntegrity,
+          options,
         )
       ) {
         throw CfcRequiredIntegrityViolationError(
@@ -2241,7 +2241,11 @@ export async function prepareBoundaryCommit(
     );
   }
 
-  const consumedReadLabels = verifyInputRequirementsForAttempt(tx, canonical);
+  const consumedReadLabels = verifyInputRequirementsForAttempt(
+    tx,
+    canonical,
+    options,
+  );
   verifyOutputTransitionsForAttempt(
     tx,
     consumedReadLabels,

@@ -38,7 +38,8 @@ const requiredIntegritySchema = {
   },
 } as const satisfies JSONSchema;
 
-const conceptRequiredIntegrity = "https://commonfabric.org/cfc/concepts/verified-input";
+const conceptRequiredIntegrity =
+  "https://commonfabric.org/cfc/concepts/verified-input";
 
 const conceptRequiredIntegritySchema = {
   type: "number",
@@ -352,7 +353,7 @@ describe("CFC prepare input requirements", () => {
           concept: conceptRequiredIntegrity,
         }],
       },
-    } as any);
+    });
     const { error } = await tx.commit();
     expect(error).toBeUndefined();
   });
