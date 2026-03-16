@@ -16,16 +16,16 @@ interface MultiStepArgs {
 }
 
 interface StartSequenceEvent {
-  label?: unknown;
+  label?: string;
 }
 
 interface StepEvent {
-  amount?: unknown;
-  note?: unknown;
+  amount?: number;
+  note?: string;
 }
 
 interface CompleteEvent {
-  note?: unknown;
+  note?: string;
 }
 
 interface StepEntry {

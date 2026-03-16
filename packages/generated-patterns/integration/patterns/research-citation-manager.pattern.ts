@@ -13,13 +13,13 @@ import {
 type CitationStyle = "APA" | "MLA" | "Chicago";
 
 interface CitationInput {
-  id?: unknown;
-  title?: unknown;
-  authors?: unknown;
-  topic?: unknown;
-  year?: unknown;
-  style?: unknown;
-  summary?: unknown;
+  id?: string;
+  title?: string;
+  authors?: string[];
+  topic?: string;
+  year?: number;
+  style?: string;
+  summary?: string;
 }
 
 interface CitationRecord {
@@ -52,19 +52,19 @@ interface BibliographySnapshot {
 }
 
 interface AddCitationEvent {
-  id?: unknown;
-  title?: unknown;
-  authors?: unknown;
-  topic?: unknown;
-  year?: unknown;
-  style?: unknown;
-  summary?: unknown;
+  id?: string;
+  title?: string;
+  authors?: string[];
+  topic?: string;
+  year?: number;
+  style?: string;
+  summary?: string;
 }
 
 interface RetagCitationEvent {
-  id?: unknown;
-  topic?: unknown;
-  style?: unknown;
+  id?: string;
+  topic?: string;
+  style?: string;
 }
 
 const allowedStyles: readonly CitationStyle[] = [
@@ -316,7 +316,7 @@ const retagCitation = handler(
 
 const updateActiveStyle = handler(
   (
-    event: { style?: unknown } | string | undefined,
+    event: { style?: string } | string | undefined,
     context: { style: Cell<CitationStyle | string> },
   ) => {
     const requested = typeof event === "string"

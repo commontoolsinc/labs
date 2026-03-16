@@ -7,7 +7,7 @@ interface MarkdownPreviewArgs {
 }
 
 type UpdateContentEvent = {
-  text?: unknown;
+  text?: string;
 };
 
 const sanitizeContent = (value: unknown): string => {

@@ -24,12 +24,12 @@ interface TransitionRecord {
 }
 
 interface TransitionEvent {
-  note?: unknown;
+  note?: string;
 }
 
 interface TickEvent {
-  amount?: unknown;
-  note?: unknown;
+  amount?: number;
+  note?: string;
 }
 
 const STATE_SEQUENCE: readonly CounterState[] = [

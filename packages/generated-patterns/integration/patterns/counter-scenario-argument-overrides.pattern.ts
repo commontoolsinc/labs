@@ -15,15 +15,15 @@ interface ScenarioArgumentOverrideArgs {
 }
 
 interface IncrementEvent {
-  amount?: unknown;
+  amount?: number;
 }
 
 interface StepChangeEvent {
-  step?: unknown;
+  step?: number;
 }
 
 interface ApplyOverrideEvent {
-  note?: unknown;
+  note?: string;
 }
 
 interface SanitizedArguments {

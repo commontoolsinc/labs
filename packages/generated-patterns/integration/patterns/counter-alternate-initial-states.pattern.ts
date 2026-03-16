@@ -11,10 +11,10 @@ import {
 } from "commontools";
 
 interface AlternateInitialStateSeed {
-  id?: unknown;
-  label?: unknown;
-  value?: unknown;
-  step?: unknown;
+  id?: string;
+  label?: string;
+  value?: number;
+  step?: number;
 }
 
 interface AlternateInitialState {
@@ -40,12 +40,12 @@ interface AlternateInitialStatesArgs {
 }
 
 interface SelectInitialEvent {
-  id?: unknown;
-  reason?: unknown;
+  id?: string;
+  reason?: string;
 }
 
 interface IncrementEvent {
-  amount?: unknown;
+  amount?: number;
 }
 
 const defaultInitialStateSeeds = [

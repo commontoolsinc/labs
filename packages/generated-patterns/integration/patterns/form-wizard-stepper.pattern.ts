@@ -16,7 +16,7 @@ type StepStatus = "pending" | "active" | "complete";
 interface WizardFieldConfig {
   id?: string;
   label?: string;
-  required?: unknown;
+  required?: boolean;
 }
 
 interface WizardStepConfig {
@@ -84,9 +84,9 @@ interface FormWizardStepperArgs {
 }
 
 interface UpdateFieldEvent {
-  stepId?: unknown;
-  fieldId?: unknown;
-  value?: unknown;
+  stepId?: string;
+  fieldId?: string;
+  value?: string;
 }
 
 const sanitizeText = (value: unknown): string | null => {
