@@ -80,8 +80,8 @@ for common workflows:
 - `/fix-issue` - Fix a specific issue
 - `/oracle` - Investigate how things actually work
 
-Claude compatibility preserves the existing `/pattern-dev`, `/pattern-test`,
-and related skill names through `/.claude/skills/`.
+Claude compatibility preserves the existing `/pattern-dev`, `/pattern-test`, and
+related skill names through `/.claude/skills/`.
 
 ### Dependencies & Integrations
 

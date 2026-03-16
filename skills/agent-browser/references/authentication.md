@@ -2,7 +2,8 @@
 
 Login flows, session persistence, OAuth, 2FA, and authenticated browsing.
 
-**Related**: [session-management.md](session-management.md) for state persistence details, [SKILL.md](../SKILL.md) for quick start.
+**Related**: [session-management.md](session-management.md) for state
+persistence details, [SKILL.md](../SKILL.md) for quick start.
 
 ## Contents
 

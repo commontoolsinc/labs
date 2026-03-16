@@ -12,8 +12,8 @@ user-invocable: false
 
 # FUSE Hybrid Workflows
 
-**This workflow is evolving.** As we discover new dynamics, update this skill
-to capture them. Offer to do so when patterns emerge that aren't documented here.
+**This workflow is evolving.** As we discover new dynamics, update this skill to
+capture them. Offer to do so when patterns emerge that aren't documented here.
 
 ## What CT FUSE Does
 
@@ -182,11 +182,12 @@ cat /tmp/ct/dev-space/pieces/my-pattern/result.json | jq '.'
 
 ### Identity Mismatch
 
-The CLI identity key creates a *different space* than the browser. If you
-deploy with `claude.key` but browse with your browser identity, you'll see
-different spaces.
+The CLI identity key creates a _different space_ than the browser. If you deploy
+with `claude.key` but browse with your browser identity, you'll see different
+spaces.
 
 **Fix:** Use the browser's space name when mounting:
+
 ```bash
 # Find your browser space name from the URL or shell UI
 ls /tmp/ct/2026-03-09-ben/pieces/   # connects on demand
@@ -205,9 +206,9 @@ writes silently fail. Check the browser to confirm writes landed.
 
 ### FUSE-T Cache TTL
 
-Changes from the browser appear in the filesystem within ~1 second (FUSE-T
-NFS cache). Not instant. If you need to force a re-read, `cat` the `.json`
-file (not the exploded directory).
+Changes from the browser appear in the filesystem within ~1 second (FUSE-T NFS
+cache). Not instant. If you need to force a re-read, `cat` the `.json` file (not
+the exploded directory).
 
 ### Large Pieces
 
@@ -219,6 +220,7 @@ via the exploded directory: `cat result/title` instead of `cat result.json`.
 
 The FUSE daemon can crash if patterns throw uncaught errors during reactive
 updates. If the mount stops responding but the process is still running:
+
 ```bash
 pkill -f "packages/fuse/mod.ts"
 umount /tmp/ct 2>/dev/null

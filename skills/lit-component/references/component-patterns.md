@@ -1,6 +1,7 @@
 # Component Development Patterns
 
-This document covers standard patterns and conventions for developing Lit components in Common UI.
+This document covers standard patterns and conventions for developing Lit
+components in Common UI.
 
 ## Component Categories
 
@@ -13,6 +14,7 @@ Components that arrange other components without providing content themselves.
 **Examples:** `ct-vstack`, `ct-hstack`, `ct-screen`, `ct-autolayout`
 
 **Characteristics:**
+
 - Use flexbox or grid
 - Accept child elements via slots
 - Provide gap, alignment, and spacing controls
@@ -20,6 +22,7 @@ Components that arrange other components without providing content themselves.
 - Simple property-based configuration
 
 **Pattern:**
+
 ```typescript
 export class CTVStack extends BaseElement {
   static override properties = {
@@ -56,11 +59,13 @@ Components that display content with styling.
 **Examples:** `ct-label`, `ct-separator`, `ct-skeleton`
 
 **Characteristics:**
+
 - May consume theme
 - Provide visual feedback or decoration
 - Usually simple with few properties
 
 **Pattern:**
+
 ```typescript
 export class CTSeparator extends BaseElement {
   static override properties = {
@@ -77,7 +82,8 @@ export class CTSeparator extends BaseElement {
         class="separator ${this.orientation}"
         part="separator"
         role="${this.decorative ? "none" : "separator"}"
-      ></div>
+      >
+      </div>
     `;
   }
 }
@@ -90,12 +96,14 @@ Components that capture user input.
 **Examples:** `ct-button`, `ct-input`, `ct-checkbox`, `ct-textarea`
 
 **Characteristics:**
+
 - Consume theme for consistent styling
 - Emit custom events (use `this.emit()`)
 - May use `InputTimingController` for debouncing
 - Handle disabled states
 
 **Pattern:**
+
 ```typescript
 export class CTButton extends BaseElement {
   @consume({ context: themeContext, subscribe: true })
@@ -131,7 +139,7 @@ export class CTButton extends BaseElement {
       return;
     }
     // Emit custom event
-    this.emit("ct-click", { /* detail */ });
+    this.emit("ct-click", {/* detail */});
   }
 }
 ```
@@ -143,6 +151,7 @@ Components that deeply integrate with the runtime and Cell abstractions.
 **Examples:** `ct-render`, `ct-code-editor`, `ct-outliner`
 
 **Characteristics:**
+
 - Work with Cell properties
 - Manage subscriptions
 - Handle transactions for mutations
@@ -192,7 +201,9 @@ export class CTButton extends BaseElement {
   }
 
   override render() {
-    return html`<button><slot></slot></button>`;
+    return html`
+      <button><slot></slot></button>
+    `;
   }
 }
 
@@ -203,7 +214,7 @@ globalThis.customElements.define("ct-button", CTButton);
 
 ```typescript
 // index.ts
-import { CTButton, ButtonVariant } from "./ct-button.ts";
+import { ButtonVariant, CTButton } from "./ct-button.ts";
 
 if (!customElements.get("ct-button")) {
   customElements.define("ct-button", CTButton);
@@ -213,7 +224,8 @@ export { CTButton };
 export type { ButtonVariant };
 ```
 
-Note: The conditional check prevents duplicate registration errors during hot module replacement.
+Note: The conditional check prevents duplicate registration errors during hot
+module replacement.
 
 ## Type Safety
 
@@ -222,7 +234,7 @@ Note: The conditional check prevents duplicate registration errors during hot mo
 Always export types separately:
 
 ```typescript
-export type { ButtonVariant, ButtonSize };
+export type { ButtonSize, ButtonVariant };
 ```
 
 ### Property Type Declarations
@@ -308,7 +320,9 @@ const classes = {
   disabled: this.disabled,
 };
 
-return html`<button class="${classMap(classes)}">...</button>`;
+return html`
+  <button class="${classMap(classes)}">...</button>
+`;
 ```
 
 ## Event Handling
@@ -328,6 +342,7 @@ protected emit<T = any>(
 Events are automatically `bubbles: true` and `composed: true`.
 
 **Pattern:**
+
 ```typescript
 private handleChange(newValue: string) {
   this.emit("ct-change", { value: newValue });
@@ -477,4 +492,5 @@ describe("CTButton", () => {
 });
 ```
 
-Run tests with: `deno task test` (NOT `deno test` - the task includes important flags)
+Run tests with: `deno task test` (NOT `deno test` - the task includes important
+flags)

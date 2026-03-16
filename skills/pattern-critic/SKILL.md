@@ -19,6 +19,7 @@ Then use the detailed references already maintained in the repo for:
 ## Quick Patterns
 
 ### Correct action() Usage (Default Choice)
+
 ```typescript
 // action() inside pattern body - closes over pattern variables
 export default pattern<MyInput, MyOutput>(({ items, title }) => {
@@ -43,13 +44,17 @@ export default pattern<MyInput, MyOutput>(({ items, title }) => {
 ```
 
 ### Correct handler() Usage (Only for Multi-Binding)
+
 ```typescript
 // handler() at module scope - will be bound with different items in .map()
-const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
+const deleteItem = handler<
+  void,
+  { item: Writable<Item>; items: Writable<Item[]> }
+>(
   (_, { item, items }) => {
     const list = items.get();
-    items.set(list.filter(i => i !== item));
-  }
+    items.set(list.filter((i) => i !== item));
+  },
 );
 
 export default pattern<MyInput, MyOutput>(({ items }) => ({
@@ -69,6 +74,7 @@ export default pattern<MyInput, MyOutput>(({ items }) => ({
 ```
 
 ### Correct Reactive [NAME]
+
 ```typescript
 export default pattern<Input>(({ deck }) => ({
   [NAME]: computed(() => `Study: ${deck.name}`),
@@ -77,17 +83,23 @@ export default pattern<Input>(({ deck }) => ({
 ```
 
 ### Correct Conditional Rendering
+
 ```typescript
 // Both are valid - ternaries auto-transform to ifElse()
-{showDetails ? <div>Details content</div> : null}
-{ifElse(showDetails, <div>Details content</div>, null)}
+{
+  showDetails ? <div>Details content</div> : null;
+}
+{
+  ifElse(showDetails, <div>Details content</div>, null);
+}
 ```
 
 ### Correct Style Syntax
+
 ```typescript
 <div style={{ display: "flex", gap: "1rem" }}>
   <ct-vstack style="flex: 1; padding: 1rem;">
     Content
   </ct-vstack>
-</div>
+</div>;
 ```

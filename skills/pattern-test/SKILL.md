@@ -14,4 +14,5 @@ Runtime notes:
 
 - Use the `ct` skill, or read `skills/ct/SKILL.md`, when you need CLI command
   details.
-- The detailed workflow reference remains `docs/common/workflows/pattern-testing.md`.
+- The detailed workflow reference remains
+  `docs/common/workflows/pattern-testing.md`.

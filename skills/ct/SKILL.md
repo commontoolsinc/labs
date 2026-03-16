@@ -9,7 +9,8 @@ description: Guide for using the ct (CommonTools) binary to interact with pieces
 
 # CT CLI
 
-The `ct` binary is the CLI for CommonTools. **Use `--help` for current commands:**
+The `ct` binary is the CLI for CommonTools. **Use `--help` for current
+commands:**
 
 ```bash
 deno task ct --help           # Top-level commands
@@ -20,6 +21,7 @@ deno task ct check --help     # Type checking
 ## Environment Setup
 
 **Identity key** (required for most operations):
+
 ```bash
 ls -la claude.key              # Check for existing
 
@@ -35,12 +37,14 @@ prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
 `deno run -A packages/cli/mod.ts` when redirecting output.
 
 **Environment variables** (avoid repeating flags):
+
 ```bash
 export CT_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
 export CT_IDENTITY=./claude.key
 ```
 
 **Experimental flags** (must be set on both servers AND CLI commands):
+
 ```bash
 # Pass experiment env vars to CLI commands:
 EXPERIMENTAL_CANONICAL_HASHING=true \
@@ -54,35 +58,36 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 ## Quick Command Reference
 
-| Operation | Command |
-|-----------|---------|
-| Type check | `deno task ct check pattern.tsx --no-run` |
-| Deploy new | `deno task ct piece new pattern.tsx -i key -a url -s space` |
-| Update existing | `deno task ct piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
-| Inspect state | `deno task ct piece inspect --piece ID ...` |
-| Get field | `deno task ct piece get --piece ID fieldPath ...` |
-| Set field | `echo '{"data":...}' \| deno task ct piece set --piece ID path ...` |
-| Call handler | `deno task ct piece call --piece ID handlerName ...` |
-| Trigger recompute | `deno task ct piece step --piece ID ...` |
-| List pieces | `deno task ct piece ls -i key -a url -s space` |
-| Visualize | `deno task ct piece map ...` |
+| Operation         | Command                                                                   |
+| ----------------- | ------------------------------------------------------------------------- |
+| Type check        | `deno task ct check pattern.tsx --no-run`                                 |
+| Deploy new        | `deno task ct piece new pattern.tsx -i key -a url -s space`               |
+| Update existing   | `deno task ct piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
+| Inspect state     | `deno task ct piece inspect --piece ID ...`                               |
+| Get field         | `deno task ct piece get --piece ID fieldPath ...`                         |
+| Set field         | `echo '{"data":...}' \| deno task ct piece set --piece ID path ...`       |
+| Call handler      | `deno task ct piece call --piece ID handlerName ...`                      |
+| Trigger recompute | `deno task ct piece step --piece ID ...`                                  |
+| List pieces       | `deno task ct piece ls -i key -a url -s space`                            |
+| Visualize         | `deno task ct piece map ...`                                              |
 
 ## Check Command Flags
 
 `deno task ct check` compiles and evaluates patterns. Key flags:
 
-| Flag | Purpose |
-|------|---------|
-| `--no-run` | Type check only, don't execute |
-| `--no-check` | Execute without type checking |
-| `--show-transformed` | Show the transformed TypeScript after compilation |
-| `--verbose-errors` | Show original TS errors alongside simplified hints |
-| `--pattern-json` | Print the evaluated pattern export as JSON |
-| `--output <path>` | Store compiled JS to a file |
-| `--main-export <name>` | Select non-default export (default: `"default"`) |
-| `--filename <name>` | Override filename for source maps |
+| Flag                   | Purpose                                            |
+| ---------------------- | -------------------------------------------------- |
+| `--no-run`             | Type check only, don't execute                     |
+| `--no-check`           | Execute without type checking                      |
+| `--show-transformed`   | Show the transformed TypeScript after compilation  |
+| `--verbose-errors`     | Show original TS errors alongside simplified hints |
+| `--pattern-json`       | Print the evaluated pattern export as JSON         |
+| `--output <path>`      | Store compiled JS to a file                        |
+| `--main-export <name>` | Select non-default export (default: `"default"`)   |
+| `--filename <name>`    | Override filename for source maps                  |
 
 Common usage:
+
 ```bash
 deno task ct check pattern.tsx              # Compile + execute (quiet on success)
 deno task ct check pattern.tsx --no-run     # Type check only (fast)
@@ -123,8 +128,8 @@ echo '{"name": "John"}' | deno task ct piece set ... user
 
 ## Gotcha: Always `step` After `set` or `call`
 
-Neither `piece set` nor `piece call` triggers recomputation automatically.
-You **must** run `piece step` after either one to get fresh computed values.
+Neither `piece set` nor `piece call` triggers recomputation automatically. You
+**must** run `piece step` after either one to get fresh computed values.
 
 ```bash
 # After setting data:
@@ -139,6 +144,7 @@ deno task ct piece inspect --piece ID ...
 ```
 
 **Handler testing workflow** (deploy → call → step → inspect):
+
 ```bash
 # 1. Deploy
 deno task ct piece new pattern.tsx -i key -a url -s space
@@ -151,20 +157,21 @@ deno task ct piece inspect --piece ID ...
 # 5. Repeat 2-4 for each handler
 ```
 
-See `docs/common/workflows/handlers-cli-testing.md` for the full workflow
-and `docs/development/debugging/cli-debugging.md` for debugging.
+See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and
+`docs/development/debugging/cli-debugging.md` for debugging.
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| Commands hang | Check Tailnet connection for `*.ts.net` URLs |
-| Permission denied | `chmod 600 claude.key` |
-| JSON parse error | Check nested quotes, no trailing commas |
+| Issue                        | Fix                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| Commands hang                | Check Tailnet connection for `*.ts.net` URLs                                 |
+| Permission denied            | `chmod 600 claude.key`                                                       |
+| JSON parse error             | Check nested quotes, no trailing commas                                      |
 | Local servers not responding | `./scripts/check-local-dev.sh` then `./scripts/restart-local-dev.sh --force` |
 
 ## References
 
-- `packages/patterns/system/default-app.tsx` - System pieces (allCharms list lives here)
+- `packages/patterns/system/default-app.tsx` - System pieces (allCharms list
+  lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
 - `docs/development/debugging/cli-debugging.md` - CLI debugging

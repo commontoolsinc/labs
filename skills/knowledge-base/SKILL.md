@@ -10,7 +10,8 @@ description: Shared foundation for Oracle & Corrector agents. Establishes the so
 Read these docs to orient yourself:
 
 1. **`docs/glossary.md`** - Terminology (Cell, Piece, Space, Spell, etc.)
-2. **`docs/specs/pattern-construction/overview.md`** - Authoritative system design
+2. **`docs/specs/pattern-construction/overview.md`** - Authoritative system
+   design
 3. **`AGENTS.md`** - Documentation reading list and codebase guidelines
 
 ## Source Hierarchy
@@ -18,19 +19,24 @@ Read these docs to orient yourself:
 When sources conflict, this is the authoritative order:
 
 ### 1. Specs (Highest Authority)
+
 `docs/specs/` - Technical specifications with unambiguous intent
 
 When specs contradict other docs, **specs win**.
 
 ### 2. Working Code
+
 Tests and patterns that demonstrate actual behavior:
+
 - `packages/patterns/` - Pattern examples showing what works
 - `**/test/**` - Test files proving expected behavior
 
 These show reality, not aspirations.
 
 ### 3. Runtime Code
+
 Core system implementation:
+
 - `packages/runner/` - Execution engine
 - `packages/runner/src/builder/` - Compilation
 - `packages/memory/` - Storage layer
@@ -38,13 +44,16 @@ Core system implementation:
 Code is always right about what it does.
 
 ### 4. Plain Text Docs (Lowest Authority)
+
 `docs/common/` - Guides, tutorials, learning materials
 
-Good for learning, but may contain outdated or speculative information. Validate against code when precision matters.
+Good for learning, but may contain outdated or speculative information. Validate
+against code when precision matters.
 
 ## The Rule
 
-**Concrete beats abstract. Specifications beat speculation. Code beats comments. Tests beat documentation.**
+**Concrete beats abstract. Specifications beat speculation. Code beats comments.
+Tests beat documentation.**
 
 ## When Sources Conflict
 

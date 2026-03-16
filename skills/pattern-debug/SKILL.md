@@ -10,6 +10,7 @@ Use the `ct` skill, or read `skills/ct/SKILL.md`, if debugging deployment or
 piece issues.
 
 ## Read First
+
 - `docs/development/debugging/workflow.md` - 5-step debugging process
 - `docs/development/debugging/README.md` - Error reference matrix
 
@@ -40,20 +41,26 @@ piece issues.
 ## Common Issues
 
 **Handler defined inside pattern body:**
+
 - Move handler() to module scope
 - Only bind it inside pattern: `onClick={myHandler({ state })}`
 
 **Type errors with Writable/Default:**
+
 - Check if field needs write access → use Writable<>
 - Check if field could be undefined → use Default<T, value>
 
 **Action not triggering:**
+
 - Ensure Output type includes action as Stream<void>
 - Use .send() not .get() to trigger
 
 **computed() wrapping JSX — conditional rendering broken:**
-- Inside `computed()` body, ternaries are plain JS (Writable objects always truthy)
-- Cell bindings (`$value`, `$checked`) inside `derive()` may get positionally mis-resolved
+
+- Inside `computed()` body, ternaries are plain JS (Writable objects always
+  truthy)
+- Cell bindings (`$value`, `$checked`) inside `derive()` may get positionally
+  mis-resolved
 - Fix: use bare JSX ternaries, hoist `computed()` for data only
 - See `docs/common/concepts/computed/computed.md`
 
@@ -91,26 +98,27 @@ agent-browser eval "JSON.stringify(commontools.getLoggerFlagsBreakdown())"
 
 ```javascript
 // Read cell values
-await commontools.readCell()
-await commontools.readArgumentCell({ path: ["items"] })
+await commontools.readCell();
+await commontools.readArgumentCell({ path: ["items"] });
 
 // Watch values change during interaction
-const cancel = commontools.subscribeToCell()
+const cancel = commontools.subscribeToCell();
 // ... interact ... then cancel()
 
 // VDOM tree
-await commontools.vdom.dump()
-commontools.vdom.stats()
+await commontools.vdom.dump();
+commontools.vdom.stats();
 
 // Logger counts and timing
-commontools.getLoggerCountsBreakdown()
-commontools.getTimingStatsBreakdown()
+commontools.getLoggerCountsBreakdown();
+commontools.getTimingStatsBreakdown();
 
 // Non-idempotent detection
-await commontools.detectNonIdempotent()
+await commontools.detectNonIdempotent();
 ```
 
 ## Done When
+
 - Root cause identified
 - Error fixed
 - Tests pass again

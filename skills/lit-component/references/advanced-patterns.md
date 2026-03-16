@@ -1,14 +1,17 @@
 # Advanced Component Patterns
 
-This document explores advanced patterns revealed by complex components like `ct-theme`, `ct-code-editor`, and `ct-outliner`.
+This document explores advanced patterns revealed by complex components like
+`ct-theme`, `ct-code-editor`, and `ct-outliner`.
 
 ## Architectural Principles
 
 ### 1. Context Provision Pattern (`ct-theme`)
 
-**Philosophy:** Components should receive configuration from their environment, not just properties. Theme is ambient context that flows down the tree.
+**Philosophy:** Components should receive configuration from their environment,
+not just properties. Theme is ambient context that flows down the tree.
 
-**Key Insight:** Use `display: contents` to be invisible in layout while providing context.
+**Key Insight:** Use `display: contents` to be invisible in layout while
+providing context.
 
 ```typescript
 import { provide } from "@lit/context";
@@ -54,21 +57,28 @@ export class CTThemeProvider extends BaseElement {
 ```
 
 **Pattern Lessons:**
-1. **Context providers are invisible:** Use `display: contents` to not affect layout
-2. **Merge partial with defaults:** Support both full and pattern-style partial themes
+
+1. **Context providers are invisible:** Use `display: contents` to not affect
+   layout
+2. **Merge partial with defaults:** Support both full and pattern-style partial
+   themes
 3. **Subscribe to Cell properties:** Theme values can be reactive Cells
 4. **Apply to self:** Set CSS variables on the provider element so they cascade
 5. **Clean up subscriptions:** Always unsubscribe in `disconnectedCallback()`
 
-**When to use:** Any time you need to provide ambient configuration (theme, locale, services) to a subtree.
+**When to use:** Any time you need to provide ambient configuration (theme,
+locale, services) to a subtree.
 
 ---
 
 ### 2. Third-Party Integration Pattern (`ct-code-editor`)
 
-**Philosophy:** Complex third-party libraries (CodeMirror, Monaco, etc.) require careful lifecycle management and bidirectional synchronization with Lit properties.
+**Philosophy:** Complex third-party libraries (CodeMirror, Monaco, etc.) require
+careful lifecycle management and bidirectional synchronization with Lit
+properties.
 
 **Key Insights:**
+
 - Initialize in `firstUpdated()`, not `connectedCallback()` or constructor
 - Use Compartments for reconfigurable extensions
 - Synchronize bidirectionally: Lit props → library AND library → Lit/Cells
@@ -142,7 +152,7 @@ export class CTCodeEditor extends BaseElement {
     if (changedProperties.has("readonly") && this._editorView) {
       this._editorView.dispatch({
         effects: this._readonly.reconfigure(
-          EditorState.readOnly.of(this.readonly)
+          EditorState.readOnly.of(this.readonly),
         ),
       });
     }
@@ -154,7 +164,11 @@ export class CTCodeEditor extends BaseElement {
       const currentValue = this._editorView.state.doc.toString();
       if (newValue !== currentValue) {
         this._editorView.dispatch({
-          changes: { from: 0, to: this._editorView.state.doc.length, insert: newValue },
+          changes: {
+            from: 0,
+            to: this._editorView.state.doc.length,
+            insert: newValue,
+          },
         });
       }
     }
@@ -173,24 +187,32 @@ export class CTCodeEditor extends BaseElement {
 ```
 
 **Pattern Lessons:**
+
 1. **Deferred initialization:** Wait for `firstUpdated()` to ensure DOM is ready
-2. **Compartments for reconfiguration:** Use library-specific patterns for dynamic updates
-3. **Bidirectional sync:** Editor changes flow to Cells, Cell changes flow to editor
-4. **Prevent circular updates:** Check if values actually changed before updating
-5. **Controller abstraction:** Use reactive controllers for common patterns (CellController, InputTimingController)
+2. **Compartments for reconfiguration:** Use library-specific patterns for
+   dynamic updates
+3. **Bidirectional sync:** Editor changes flow to Cells, Cell changes flow to
+   editor
+4. **Prevent circular updates:** Check if values actually changed before
+   updating
+5. **Controller abstraction:** Use reactive controllers for common patterns
+   (CellController, InputTimingController)
 6. **Explicit cleanup:** Destroy library instances and clear subscriptions
 
-**When to use:** Integrating any third-party library (Monaco, Quill, ProseMirror, D3, etc.) that manages its own DOM and state.
+**When to use:** Integrating any third-party library (Monaco, Quill,
+ProseMirror, D3, etc.) that manages its own DOM and state.
 
 ---
 
 ### 3. Reactive Controller Pattern
 
-**Philosophy:** Extract reusable component behaviors into reactive controllers rather than mixins or base classes.
+**Philosophy:** Extract reusable component behaviors into reactive controllers
+rather than mixins or base classes.
 
 **Common Controllers in Common UI:**
 
 #### InputTimingController
+
 Manages input debouncing/throttling/blur strategies:
 
 ```typescript
@@ -208,6 +230,7 @@ private handleInput(event: Event) {
 ```
 
 #### CellController (String/Array)
+
 Manages Cell<T> ↔ value synchronization with timing:
 
 ```typescript
@@ -229,6 +252,7 @@ this._cellController.setValue(newValue);
 ```
 
 #### MentionController
+
 Manages @-mention autocomplete with Cell<MentionableArray>:
 
 ```typescript
@@ -244,21 +268,28 @@ this.mentionController.setup({
 ```
 
 **Pattern Lessons:**
+
 1. **Controllers own cleanup:** Implement `hostDisconnected()` for cleanup
 2. **Controllers don't render:** They manage state and side effects only
-3. **Configuration over inheritance:** Prefer configuring controllers over extending base classes
-4. **Share controllers across component types:** Same timing logic for input/textarea/editor
+3. **Configuration over inheritance:** Prefer configuring controllers over
+   extending base classes
+4. **Share controllers across component types:** Same timing logic for
+   input/textarea/editor
 
 **When to create a controller:**
+
 - Behavior is reused across multiple components
-- Behavior has complex lifecycle management (subscriptions, timers, external resources)
+- Behavior has complex lifecycle management (subscriptions, timers, external
+  resources)
 - Behavior is independent of rendering
 
 ---
 
 ### 4. Path-Based Operations Pattern (`ct-outliner`)
 
-**Philosophy:** For tree structures, use paths (arrays of indices) instead of direct references to enable operations that work with both immutable state and Cells.
+**Philosophy:** For tree structures, use paths (arrays of indices) instead of
+direct references to enable operations that work with both immutable state and
+Cells.
 
 **Key Insight:** Paths are stable references that survive tree mutations.
 
@@ -315,19 +346,27 @@ class TreeOperations {
 ```
 
 **Pattern Lessons:**
-1. **Paths over references:** Paths remain valid after mutations, references don't
-2. **Separate read and write paths:** `getNodeByPath` for reads, `getNodeCellByPath` for mutations
-3. **Path utilities:** Create helper functions for common path operations (parent, siblings, depth)
-4. **Diff-based updates:** Calculate diffs between tree versions to minimize DOM updates
-5. **Event context includes paths:** Keyboard events include current node path for operations
 
-**When to use:** Any hierarchical structure (trees, outlines, nested lists) that supports editing.
+1. **Paths over references:** Paths remain valid after mutations, references
+   don't
+2. **Separate read and write paths:** `getNodeByPath` for reads,
+   `getNodeCellByPath` for mutations
+3. **Path utilities:** Create helper functions for common path operations
+   (parent, siblings, depth)
+4. **Diff-based updates:** Calculate diffs between tree versions to minimize DOM
+   updates
+5. **Event context includes paths:** Keyboard events include current node path
+   for operations
+
+**When to use:** Any hierarchical structure (trees, outlines, nested lists) that
+supports editing.
 
 ---
 
 ### 5. Diff-Based Rendering Pattern (`ct-outliner`)
 
-**Philosophy:** For complex nested structures, calculate minimal diffs to update only what changed rather than re-rendering everything.
+**Philosophy:** For complex nested structures, calculate minimal diffs to update
+only what changed rather than re-rendering everything.
 
 ```typescript
 class TreeDiffCalculator {
@@ -342,7 +381,7 @@ class TreeDiffCalculator {
     oldNode: Node,
     newNode: Node,
     path: NodePath,
-    operations: Operation[]
+    operations: Operation[],
   ): void {
     // Check if node body changed
     if (oldNode.body !== newNode.body) {
@@ -354,7 +393,7 @@ class TreeDiffCalculator {
       oldNode.children || [],
       newNode.children || [],
       path,
-      operations
+      operations,
     );
   }
 }
@@ -380,6 +419,7 @@ class PathDiffApplier {
 ```
 
 **Pattern Lessons:**
+
 1. **Two-phase updates:** Calculate diff, then apply operations
 2. **Path-based operations:** All operations reference paths for stability
 3. **Minimal updates:** Only touch changed nodes, not entire tree
@@ -387,6 +427,7 @@ class PathDiffApplier {
 5. **Transaction boundaries:** Apply entire diff in single transaction
 
 **When to use:**
+
 - Large nested structures where full re-render is expensive
 - Preserving DOM state (focus, selection, scroll position) is important
 - Structure changes frequently in response to user input
@@ -395,7 +436,8 @@ class PathDiffApplier {
 
 ### 6. Progressive Enhancement Pattern
 
-**Philosophy:** Components should work with plain values but enhance when given Cells for reactivity.
+**Philosophy:** Components should work with plain values but enhance when given
+Cells for reactivity.
 
 ```typescript
 @property({ attribute: false })
@@ -433,6 +475,7 @@ override updated(changedProperties: Map<string, any>) {
 ```
 
 **Pattern Lessons:**
+
 1. **Type unions:** `value: Cell<T> | T` for flexibility
 2. **Runtime checks:** Use `isCell()` to determine behavior
 3. **Unified interface:** Provide `getValue()`/`setValue()` that work with both
@@ -447,7 +490,10 @@ Components fall on a spectrum of integration depth:
 
 1. **Pure presentation:** Layout, visual components (no runtime integration)
 2. **Themed inputs:** Consume theme, emit events (shallow integration)
-3. **Cell-aware:** Support Cell properties, manage subscriptions (medium integration)
-4. **Runtime-integrated:** Deep Cell manipulation, pattern execution, backlink resolution (deep integration)
+3. **Cell-aware:** Support Cell properties, manage subscriptions (medium
+   integration)
+4. **Runtime-integrated:** Deep Cell manipulation, pattern execution, backlink
+   resolution (deep integration)
 
-Choose the simplest pattern that meets requirements. Don't add Cell support just because you can.
+Choose the simplest pattern that meets requirements. Don't add Cell support just
+because you can.

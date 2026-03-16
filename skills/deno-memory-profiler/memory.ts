@@ -146,10 +146,9 @@ async function cmdUsage(client: CDPClient, args: string[]) {
     totalSize: number;
   };
 
-  const usagePercent =
-    result.totalSize > 0
-      ? Math.round((result.usedSize / result.totalSize) * 10000) / 100
-      : 0;
+  const usagePercent = result.totalSize > 0
+    ? Math.round((result.usedSize / result.totalSize) * 10000) / 100
+    : 0;
 
   console.log(
     JSON.stringify(
@@ -242,7 +241,8 @@ async function cmdSample(client: CDPClient, args: string[]) {
 
   function walk(node: SamplingNode) {
     if (node.selfSize > 0) {
-      const key = `${node.callFrame.functionName}:${node.callFrame.url}:${node.callFrame.lineNumber}:${node.callFrame.columnNumber}`;
+      const key =
+        `${node.callFrame.functionName}:${node.callFrame.url}:${node.callFrame.lineNumber}:${node.callFrame.columnNumber}`;
       const existing = sites.get(key);
       if (existing) {
         existing.selfSize += node.selfSize;
@@ -317,7 +317,10 @@ function parseSnapshotSummary(data: HeapSnapshotData) {
   const nameIdx = nodeFields.indexOf("name");
   const selfSizeIdx = nodeFields.indexOf("self_size");
 
-  const constructors = new Map<string, { count: number; totalShallowSize: number }>();
+  const constructors = new Map<
+    string,
+    { count: number; totalShallowSize: number }
+  >();
   let totalSize = 0;
   const nodeCount = data.nodes.length / nodeFieldCount;
 
@@ -328,7 +331,9 @@ function parseSnapshotSummary(data: HeapSnapshotData) {
     totalSize += selfSize;
 
     // Group by constructor name for object nodes
-    if (nodeType === "object" || nodeType === "closure" || nodeType === "regexp") {
+    if (
+      nodeType === "object" || nodeType === "closure" || nodeType === "regexp"
+    ) {
       const name = data.strings[nameStrIdx] || "(unknown)";
       const entry = constructors.get(name);
       if (entry) {
@@ -389,7 +394,9 @@ function parseSnapshotSummary(data: HeapSnapshotData) {
     duplicateStrings,
     // For diff: full constructor map
     _constructorMap: Object.fromEntries(
-      constructorList.map((c) => [c.name, { count: c.count, totalShallowSize: c.totalShallowSize }]),
+      constructorList.map((
+        c,
+      ) => [c.name, { count: c.count, totalShallowSize: c.totalShallowSize }]),
     ),
   };
 }
@@ -410,7 +417,11 @@ async function takeSnapshot(client: CDPClient): Promise<HeapSnapshotData> {
   await new Promise((r) => setTimeout(r, 200));
 
   const raw = chunks.join("");
-  console.error(`Snapshot received (${(raw.length / 1024 / 1024).toFixed(1)} MB). Parsing...`);
+  console.error(
+    `Snapshot received (${
+      (raw.length / 1024 / 1024).toFixed(1)
+    } MB). Parsing...`,
+  );
 
   return JSON.parse(raw) as HeapSnapshotData;
 }
@@ -498,10 +509,9 @@ async function cmdDiff(client: CDPClient, args: string[], port: number) {
 
     // Total heap growth
     const heapGrowth = summary.totalSize - baseline.totalSize;
-    const heapGrowthPercent =
-      baseline.totalSize > 0
-        ? Math.round((heapGrowth / baseline.totalSize) * 10000) / 100
-        : 0;
+    const heapGrowthPercent = baseline.totalSize > 0
+      ? Math.round((heapGrowth / baseline.totalSize) * 10000) / 100
+      : 0;
 
     // New constructors
     const newConstructors: ConstructorStats[] = [];

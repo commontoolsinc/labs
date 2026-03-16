@@ -1,10 +1,13 @@
 # Cell Integration Patterns
 
-This document covers patterns for integrating Common Tools runtime Cell abstractions with Lit components.
+This document covers patterns for integrating Common Tools runtime Cell
+abstractions with Lit components.
 
 ## What are Cells?
 
-Cells are reactive data containers from the Common Tools runtime (`@commontools/runner`). They provide:
+Cells are reactive data containers from the Common Tools runtime
+(`@commontools/runner`). They provide:
+
 - Reactive updates via subscriptions
 - Transactional mutations
 - Path-based access to nested data
@@ -13,11 +16,13 @@ Cells are reactive data containers from the Common Tools runtime (`@commontools/
 ## When to Use Cell Integration
 
 Use Cell integration when:
+
 - The component needs to render reactive data from the runtime
 - The component allows users to edit data that should sync back to the runtime
 - The component is part of a pattern UI that manipulates piece state
 
 Do NOT use Cell integration for:
+
 - Simple presentational components
 - Components that work with plain JavaScript values
 - Layout components
@@ -38,7 +43,8 @@ export class MyComponent extends BaseElement {
 }
 ```
 
-Note: `attribute: false` prevents Lit from trying to serialize Cells as attributes.
+Note: `attribute: false` prevents Lit from trying to serialize Cells as
+attributes.
 
 ### Subscribing to Cell Changes
 
@@ -150,7 +156,9 @@ mutateCell(listCell, (cell) => {
 
 // Remove item by filter
 mutateCell(listCell, (cell) => {
-  const filtered = cell.get().filter((_, i) => !cell.key(i).equals(itemToRemove));
+  const filtered = cell.get().filter((_, i) =>
+    !cell.key(i).equals(itemToRemove)
+  );
   cell.set(filtered);
 });
 
@@ -205,10 +213,13 @@ The `ct-render` component handles rendering cells with `[UI]` properties:
 import { UI } from "@commontools/api";
 
 // In render()
-return html`<ct-render .cell=${myCharmCell}></ct-render>`;
+return html`
+  <ct-render .cell="${myCharmCell}"></ct-render>
+`;
 ```
 
 The component automatically:
+
 - Extracts UI subcells
 - Loads patterns if needed
 - Handles cleanup
@@ -278,7 +289,9 @@ repeat(items, (item, index) => `${index}-${item.title}`, ...)
 
 ## Real-World Examples
 
-See these components for complete examples demonstrating Cell integration patterns:
+See these components for complete examples demonstrating Cell integration
+patterns:
+
 - `ct-outliner` - Path-based operations, diff-based rendering with Cells
 - `ct-code-editor` - Bidirectional sync between Cell values and CodeMirror state
 - `ct-render` - Pattern loading and UI extraction with Cell subscriptions
