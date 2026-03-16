@@ -16,6 +16,9 @@
  *   - lift()
  *   - handler()
  *   - JSX expressions (handled by OpaqueRefJSXTransformer)
+ * - Local values created by computed()/derive() inside the current
+ *   computed()/derive() callback remain reactive and cannot be used as plain
+ *   values until a nested computed()/derive() consumes them.
  *
  * - Function creation is NOT allowed in pattern context (must be at module scope)
  * - lift() and handler() must be defined at module scope, not inside patterns
@@ -27,6 +30,8 @@
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
  * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
+ * - Local computed()/derive() aliases used as plain values in the same
+ *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
@@ -39,6 +44,13 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import {
+  collectLocalOpaqueRootSymbols,
+  isOpaqueSourceExpression,
+  isTopmostMemberAccess,
+} from "./opaque-roots.ts";
+
+const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -62,6 +74,13 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for reactive operations in standalone functions
         if (isStandaloneFunctionDefinition(node)) {
           this.validateStandaloneFunction(node, context, checker);
+        }
+
+        if (
+          (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+          this.isComputedLikeCallback(node, checker)
+        ) {
+          this.validateLocalReactiveAliasUsage(node, context);
         }
       }
 
@@ -238,6 +257,135 @@ export class PatternContextValidationTransformer extends Transformer {
     return result;
   }
 
+  private validateLocalReactiveAliasUsage(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+  ): void {
+    const localOpaqueRootSymbols = collectLocalOpaqueRootSymbols(
+      func.body,
+      context,
+    );
+    if (localOpaqueRootSymbols.size === 0) {
+      return;
+    }
+
+    const diagnosticsSeen = new Set<number>();
+
+    const findProblematicUse = (
+      expression: ts.Expression,
+    ): ts.Expression | undefined => {
+      let culprit: ts.Expression | undefined;
+
+      const visit = (node: ts.Node): void => {
+        if (culprit) return;
+        if (node !== expression && ts.isFunctionLike(node)) return;
+
+        if (
+          ts.isCallExpression(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        if (
+          (ts.isPropertyAccessExpression(node) ||
+            ts.isElementAccessExpression(node)) &&
+          isTopmostMemberAccess(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        if (
+          ts.isIdentifier(node) &&
+          !this.isMemberAccessBase(node) &&
+          isOpaqueSourceExpression(
+            node,
+            EMPTY_OPAQUE_ROOTS,
+            localOpaqueRootSymbols,
+            context,
+          )
+        ) {
+          culprit = node;
+          return;
+        }
+
+        ts.forEachChild(node, visit);
+      };
+
+      visit(expression);
+      return culprit;
+    };
+
+    const report = (culprit: ts.Expression): void => {
+      const key = culprit.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(key)) return;
+      diagnosticsSeen.add(key);
+
+      context.reportDiagnostic({
+        severity: "error",
+        type: "compute-context:local-reactive-use",
+        message: `Reactive value '${culprit.getText()}' is created in this ` +
+          `computed()/derive() callback and cannot be used as a plain value ` +
+          `here. Move this use into a nested computed(() => ...) or ` +
+          `derive(() => ...) callback.`,
+        node: culprit,
+      });
+    };
+
+    const checkExpression = (expression: ts.Expression | undefined): void => {
+      if (!expression) return;
+      const culprit = findProblematicUse(expression);
+      if (culprit) {
+        report(culprit);
+      }
+    };
+
+    const visitBody = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isIfStatement(node)) {
+        checkExpression(node.expression);
+      } else if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+        checkExpression(node.expression);
+      } else if (ts.isForStatement(node)) {
+        checkExpression(node.condition);
+      } else if (ts.isSwitchStatement(node)) {
+        checkExpression(node.expression);
+      } else if (this.isComputationExpression(node)) {
+        checkExpression(node as ts.Expression);
+      }
+
+      ts.forEachChild(node, visitBody);
+    };
+
+    visitBody(func.body);
+  }
+
+  private isMemberAccessBase(node: ts.Identifier): boolean {
+    const parent = node.parent;
+    return !!parent &&
+      (
+        (ts.isPropertyAccessExpression(parent) ||
+          ts.isElementAccessExpression(parent)) &&
+        parent.expression === node
+      );
+  }
+
   /**
    * Validates that functions are not created directly in pattern context.
    * Functions inside safe wrappers (computed, action, derive, lift, handler)
@@ -313,6 +461,21 @@ export class PatternContextValidationTransformer extends Transformer {
     }
 
     return false;
+  }
+
+  private isComputedLikeCallback(
+    node: ts.ArrowFunction | ts.FunctionExpression,
+    checker: ts.TypeChecker,
+  ): boolean {
+    const parent = node.parent;
+    if (!parent || !ts.isCallExpression(parent)) return false;
+    if (!parent.arguments.includes(node)) return false;
+
+    const callKind = detectCallKind(parent, checker);
+    if (!callKind) return false;
+
+    return callKind.kind === "derive" ||
+      (callKind.kind === "builder" && callKind.builderName === "computed");
   }
 
   /**

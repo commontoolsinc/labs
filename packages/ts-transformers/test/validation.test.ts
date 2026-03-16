@@ -478,6 +478,104 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   );
 });
 
+Deno.test("Computed/derive local reactive alias validation", async (t) => {
+  await t.step(
+    "errors on truthiness checks of locally created computed results",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern(() => {
+        const outer = computed(() => {
+          const foo = computed(() => true);
+          if (foo) {
+            return 1;
+          }
+          return 0;
+        });
+
+        return outer;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+    },
+  );
+
+  await t.step(
+    "errors on arithmetic using a locally created computed result",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern(() => {
+        const outer = computed(() => {
+          const foo = computed(() => 21);
+          return foo * 2;
+        });
+
+        return outer;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+    },
+  );
+
+  await t.step(
+    "allows nested computed callbacks to use locally created computed results",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern(() => {
+        const outer = computed(() => {
+          const foo = computed(() => 21);
+          const doubled = computed(() => foo * 2);
+          return doubled;
+        });
+
+        return outer;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows later computed callbacks to use outer computed results",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern(() => {
+        const foo = computed(() => 21);
+        const outer = computed(() => foo * 2);
+
+        return outer;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+});
+
 Deno.test("Diagnostic output format", async (t) => {
   await t.step("includes source location information", async () => {
     const source = `

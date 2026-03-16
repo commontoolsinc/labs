@@ -16,7 +16,6 @@ import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
-  getKnownComputedKeyExpression,
   isCommonToolsKeyExpression,
 } from "../utils/reactive-keys.ts";
 import {
@@ -31,6 +30,14 @@ import {
   createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "./opaque-ref/helpers.ts";
+import {
+  addBindingTargetSymbols,
+  collectLocalOpaqueRootSymbols,
+  getOpaqueAccessInfo,
+  isOpaqueRootInfo,
+  isOpaqueSourceExpression,
+  isTopmostMemberAccess,
+} from "./opaque-roots.ts";
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
@@ -57,94 +64,6 @@ function isSelfPathSegment(
     (
       isCommonToolsKeyExpression(segment, context, "SELF")
     );
-}
-
-function getAccessInfo(
-  expr: ts.Expression,
-  context: TransformationContext,
-): {
-  root?: string;
-  rootIdentifier?: ts.Identifier;
-  path: PathSegment[];
-  dynamic: boolean;
-} {
-  const path: PathSegment[] = [];
-  let current: ts.Expression = expr;
-  let dynamic = false;
-
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isPartiallyEmittedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-
-    if (ts.isPropertyAccessExpression(current)) {
-      path.unshift(current.name.text);
-      current = current.expression;
-      continue;
-    }
-
-    if (ts.isElementAccessExpression(current)) {
-      const arg = current.argumentExpression;
-      if (
-        arg &&
-        (ts.isStringLiteral(arg) ||
-          ts.isNumericLiteral(arg) ||
-          ts.isNoSubstitutionTemplateLiteral(arg))
-      ) {
-        path.unshift(arg.text);
-      } else if (arg) {
-        const knownKeyExpression = getKnownComputedKeyExpression(arg, context);
-        if (knownKeyExpression) {
-          path.unshift(knownKeyExpression);
-        } else {
-          dynamic = true;
-        }
-      } else {
-        dynamic = true;
-      }
-      current = current.expression;
-      continue;
-    }
-
-    break;
-  }
-
-  if (ts.isIdentifier(current)) {
-    return { root: current.text, rootIdentifier: current, path, dynamic };
-  }
-
-  return { path, dynamic };
-}
-
-function isTopmostMemberAccess(node: ts.Node): boolean {
-  const parent = node.parent;
-  if (!parent) return true;
-  return !(
-    (ts.isPropertyAccessExpression(parent) ||
-      ts.isElementAccessExpression(parent)) &&
-    parent.expression === node
-  );
 }
 
 function registerReplacementType(
@@ -229,96 +148,6 @@ function reportComputationError(
     message,
     node,
   });
-}
-
-function isOpaqueOriginCall(
-  expression: ts.CallExpression,
-  context: TransformationContext,
-): boolean {
-  const kind = detectCallKind(expression, context.checker);
-  if (!kind) return false;
-
-  switch (kind.kind) {
-    case "builder":
-    case "cell-factory":
-    case "cell-for":
-    case "derive":
-    case "wish":
-    case "generate-object":
-    case "pattern-tool":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isOpaqueSourceExpression(
-  expression: ts.Expression,
-  opaqueRoots: ReadonlySet<string>,
-  opaqueRootSymbols: ReadonlySet<ts.Symbol>,
-  context: TransformationContext,
-): boolean {
-  const current = unwrapExpression(expression);
-  const info = getAccessInfo(current, context);
-  if (isOpaqueRootInfo(info, opaqueRoots, opaqueRootSymbols, context)) {
-    return true;
-  }
-
-  if (ts.isCallExpression(current)) {
-    if (isOpaqueOriginCall(current, context)) {
-      return true;
-    }
-
-    if (ts.isPropertyAccessExpression(current.expression)) {
-      const methodName = current.expression.name.text;
-      if (methodName === "key" || methodName === "get") {
-        return isOpaqueSourceExpression(
-          current.expression.expression,
-          opaqueRoots,
-          opaqueRootSymbols,
-          context,
-        );
-      }
-    }
-  }
-
-  return false;
-}
-
-function isOpaqueRootInfo(
-  info: ReturnType<typeof getAccessInfo>,
-  opaqueRoots: ReadonlySet<string>,
-  opaqueRootSymbols: ReadonlySet<ts.Symbol>,
-  context: TransformationContext,
-): boolean {
-  const rootIdentifier = info.rootIdentifier;
-  if (rootIdentifier) {
-    const symbol = context.checker.getSymbolAtLocation(rootIdentifier);
-    if (symbol) {
-      if (opaqueRootSymbols.has(symbol)) return true;
-    }
-  }
-
-  return !!info.root && opaqueRoots.has(info.root);
-}
-
-function addBindingTargetSymbols(
-  name: ts.BindingName,
-  bucket: Set<ts.Symbol>,
-  checker: ts.TypeChecker,
-): void {
-  if (ts.isIdentifier(name)) {
-    const symbol = checker.getSymbolAtLocation(name);
-    if (symbol) {
-      bucket.add(symbol);
-    }
-    return;
-  }
-
-  for (const element of name.elements) {
-    if (ts.isOmittedExpression(element)) continue;
-    addBindingTargetSymbols(element.name, bucket, checker);
-  }
 }
 
 function reportOptionalError(
@@ -418,7 +247,7 @@ function rewritePatternBody(
           ts.isElementAccessExpression(node)) &&
         isTopmostMemberAccess(node)
       ) {
-        const info = getAccessInfo(node, context);
+        const info = getOpaqueAccessInfo(node, context);
         if (
           info.dynamic &&
           isOpaqueRootInfo(
@@ -560,7 +389,7 @@ function rewritePatternBody(
         ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
-      const info = getAccessInfo(visited, context);
+      const info = getOpaqueAccessInfo(visited, context);
       if (
         !info.root ||
         !isOpaqueRootInfo(
@@ -667,7 +496,7 @@ function rewritePatternBody(
 
     if (ts.isCallExpression(visited)) {
       if (visited.questionDotToken) {
-        const info = getAccessInfo(visited.expression, context);
+        const info = getOpaqueAccessInfo(visited.expression, context);
         if (
           isOpaqueRootInfo(
             info,
@@ -692,7 +521,7 @@ function rewritePatternBody(
       ) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
-          const info = getAccessInfo(firstArg, context);
+          const info = getOpaqueAccessInfo(firstArg, context);
           if (
             isOpaqueRootInfo(
               info,
@@ -718,7 +547,7 @@ function rewritePatternBody(
       ) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
-          const info = getAccessInfo(firstArg, context);
+          const info = getOpaqueAccessInfo(firstArg, context);
           if (
             isOpaqueRootInfo(
               info,
@@ -738,7 +567,7 @@ function rewritePatternBody(
     }
 
     if (ts.isSpreadElement(visited) || ts.isSpreadAssignment(visited)) {
-      const info = getAccessInfo(visited.expression, context);
+      const info = getOpaqueAccessInfo(visited.expression, context);
       if (
         isOpaqueRootInfo(
           info,
@@ -756,7 +585,7 @@ function rewritePatternBody(
     }
 
     if (ts.isForInStatement(visited)) {
-      const info = getAccessInfo(visited.expression, context);
+      const info = getOpaqueAccessInfo(visited.expression, context);
       if (
         isOpaqueRootInfo(
           info,
@@ -837,26 +666,10 @@ function rewriteDeriveCallbackBodies(
     // by rewritePatternBody's own setBindingOpaqueState as it walks declarations.
     // We walk the full AST (stopping at nested function boundaries) so
     // declarations inside if/else/loops are also discovered.
-    const localOpaqueRootSymbols = new Set<ts.Symbol>();
-    const scanForOpaqueDecls = (node: ts.Node): void => {
-      if (ts.isFunctionLike(node)) return; // don't cross function boundaries
-      if (
-        ts.isVariableDeclaration(node) &&
-        node.initializer &&
-        ts.isIdentifier(node.name) &&
-        isOpaqueSourceExpression(
-          node.initializer,
-          new Set(),
-          localOpaqueRootSymbols,
-          context,
-        )
-      ) {
-        const sym = context.checker.getSymbolAtLocation(node.name);
-        if (sym) localOpaqueRootSymbols.add(sym);
-      }
-      ts.forEachChild(node, scanForOpaqueDecls);
-    };
-    scanForOpaqueDecls(processedBody);
+    const localOpaqueRootSymbols = collectLocalOpaqueRootSymbols(
+      processedBody,
+      context,
+    );
 
     // Rewrite property accesses on local OpaqueRef variables.
     // Pass empty name set — rewritePatternBody will populate activeOpaqueRoots
