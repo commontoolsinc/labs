@@ -102,10 +102,12 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
-    return navigateTo(Note({
-      title: "New Note",
-      content: "",
-    }));
+    return navigateTo(
+      Note({
+        title: "New Note",
+        content: "",
+      }),
+    );
   },
 );
 
