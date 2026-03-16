@@ -37,10 +37,13 @@ const selectItem = handler<
 });
 
 export default pattern<SidebarInput, SidebarOutput>(
-  // NOTE: categories prop is intentionally unused. Sidebar items are hardcoded
-  // because passing dynamic items as sub-pattern props makes `id` a reactive
-  // cell, which breaks handler bindings (selected.set(id) sets a cell ref, not
-  // the string value).
+  // NOTE: categories prop is currently unused; sidebar items are hardcoded.
+  // The intended fix is to map over categories/items with inline arrow-function
+  // onClick handlers (e.g. `() => selected.set(item.id)`) so that `item.id`
+  // is dereferenced at event time rather than captured as a cell ref by the CTS
+  // transformer. The blocker is that nested .map() where the inner array is a
+  // property of the outer map element (cat.items) is not supported by the CTS
+  // transformer today.
   ({ selected, categories: _categories }) => {
     const current = computed(() => selected.get());
 
