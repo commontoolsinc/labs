@@ -205,7 +205,7 @@ export class PieceManager {
   async add(newPieces: Cell<unknown>[]): Promise<void> {
     const defaultPattern = await timePiecePhase(
       "add.getDefaultPattern",
-      () => this.getDefaultPattern(),
+      () => this.getDefaultPattern(false),
     );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");

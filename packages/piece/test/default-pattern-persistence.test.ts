@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commontools/identity";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
@@ -10,6 +11,41 @@ import { pieceId, PieceManager } from "../src/manager.ts";
 const signer = await Identity.fromPassphrase(
   "test default pattern persistence",
 );
+
+const defaultPatternProgram: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { handler, pattern } from 'commontools';",
+        "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
+        "  ({ piece }, { allPieces }) => {",
+        "    allPieces.push(piece);",
+        "  },",
+        "  { proxy: true },",
+        ");",
+        "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
+        "  allPieces,",
+        "  addPiece: addPiece({ allPieces }),",
+        "}));",
+      ].join("\n"),
+    },
+  ],
+};
+
+const persistedPieceProgram: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commontools';",
+        "export default pattern<{ value: number }>(({ value }) => ({ value }));",
+      ].join("\n"),
+    },
+  ],
+};
 
 describe("PieceManager default pattern persistence", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -80,5 +116,62 @@ describe("PieceManager default pattern persistence", () => {
     const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(Boolean);
 
     expect(ids).toContain(pieceId(persistedPiece));
+  });
+
+  it("adds a persisted piece from a fresh runtime", async () => {
+    const compiledDefaultPattern = await runtime.patternManager.compilePattern(
+      defaultPatternProgram,
+    );
+    const defaultPatternPiece = await manager.runPersistent(
+      compiledDefaultPattern,
+      { allPieces: [] },
+      "default-pattern-persistence-fresh",
+    );
+    await manager.linkDefaultPattern(defaultPatternPiece);
+    await manager.runtime.idle();
+    await manager.synced();
+
+    const compiledPiecePattern = await runtime.patternManager.compilePattern(
+      persistedPieceProgram,
+    );
+    const persistedPiece = await manager.runPersistent(
+      compiledPiecePattern,
+      { value: 2 },
+      "persisted-piece-fresh",
+    );
+    await manager.runtime.idle();
+    await manager.synced();
+
+    const session = await createSession({
+      identity: signer,
+      spaceName: manager.getSpaceName()!,
+    });
+    const freshRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const freshManager = new PieceManager(session, freshRuntime);
+
+    try {
+      await freshManager.synced();
+      const freshPiece = freshRuntime.getCellFromEntityId(
+        freshManager.getSpace(),
+        { "/": pieceId(persistedPiece)! },
+      );
+
+      await freshManager.add([freshPiece]);
+      await freshManager.stopPiece(defaultPatternPiece);
+
+      const piecesCell = await freshManager.getPieces();
+      const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
+        Boolean,
+      );
+
+      expect(ids.filter((id) => id === pieceId(persistedPiece))).toHaveLength(
+        1,
+      );
+    } finally {
+      await freshRuntime.dispose();
+    }
   });
 });
