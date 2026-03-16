@@ -289,6 +289,106 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
   }
 });
 
+Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous values for same-document writes", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-batched-patch",
+      type,
+      path: [],
+    }, { value: { profile: { name: "Ada", title: "Dr" } } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const batchResult = tx.writeBatch?.([
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-patch",
+          type,
+          path: ["value", "profile", "name"],
+        },
+        value: "Grace",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-patch",
+          type,
+          path: ["value", "profile", "title"],
+        },
+        value: "Prof",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-patch",
+          type,
+          path: ["value", "profile", "title"],
+        },
+        value: "Professor",
+      },
+    ]);
+    assert(batchResult?.ok);
+    assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), [
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-patch",
+          type,
+          path: ["value", "profile", "name"],
+        },
+        value: "Grace",
+        previousValue: "Ada",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-patch",
+          type,
+          path: ["value", "profile", "title"],
+        },
+        value: "Professor",
+        previousValue: "Dr",
+      },
+    ]);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-batched-patch",
+        type,
+        value: {
+          value: { profile: { name: "Grace", title: "Professor" } },
+        },
+        patches: [
+          {
+            op: "replace",
+            path: "/profile/name",
+            value: "Grace",
+          },
+          {
+            op: "replace",
+            path: "/profile/title",
+            value: "Professor",
+          },
+        ],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions emit array-path patch drafts for array length writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
@@ -327,6 +427,66 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array length 
           op: "replace",
           path: "/tags",
           value: ["one"],
+        }],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 writeBatch collapses array element and length writes to the containing array patch", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-batched-array-length",
+      type,
+      path: [],
+    }, { value: { tags: ["one", "two"] } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const batchResult = tx.writeBatch?.([
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-array-length",
+          type,
+          path: ["value", "tags", "0"],
+        },
+        value: "zero",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-batched-array-length",
+          type,
+          path: ["value", "tags", "length"],
+        },
+        value: 1,
+      },
+    ]);
+    assert(batchResult?.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-batched-array-length",
+        type,
+        value: { value: { tags: ["zero"] } },
+        patches: [{
+          op: "replace",
+          path: "/tags",
+          value: ["zero"],
         }],
       }],
     }]);

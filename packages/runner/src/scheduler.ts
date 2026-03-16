@@ -45,6 +45,7 @@ import {
   getTransactionWriteDetails,
 } from "./storage/transaction-inspection.ts";
 import {
+  allowMutableTransactionRead,
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
   reactivityLogFromActivities,
@@ -150,7 +151,11 @@ function filterIgnoredAddresses(
     !ignoredWrites.some((link) => addressMatchesLinkPrefix(address, link))
   );
 }
-export { ignoreReadForScheduling, markReadAsPotentialWrite };
+export {
+  allowMutableTransactionRead,
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+};
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;

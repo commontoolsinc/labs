@@ -25,6 +25,7 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
+  ITypeMismatchError,
   MediaType,
   MemorySpace,
   NativeStorageCommit,
@@ -45,6 +46,7 @@ import {
   claim,
   load as loadInline,
   read as readAttestation,
+  TypeMismatchError,
   write as writeAttestation,
 } from "./transaction/attestation.ts";
 import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
@@ -53,7 +55,10 @@ import {
   TransactionCompleteError,
   WriteIsolationError,
 } from "./transaction.ts";
-import { reactivityLogFromActivities } from "./reactivity-log.ts";
+import {
+  isMutableTransactionReadAllowed,
+  reactivityLogFromActivities,
+} from "./reactivity-log.ts";
 
 type RootAttestation = IAttestation;
 
@@ -128,6 +133,14 @@ const isolateTransactionValue = <T>(
     );
   }
   return copy as T;
+};
+
+const sparseArrayCopy = <T>(array: T[]): T[] => {
+  const copy = new Array<T>(array.length);
+  array.forEach((value, index) => {
+    copy[index] = value;
+  });
+  return copy;
 };
 
 const createMissingContainer = (
@@ -265,6 +278,238 @@ const readPathValue = (
     current = current[segment];
   }
   return current as StorableDatum | undefined;
+};
+
+const isContainerValue = (
+  value: StorableDatum | undefined,
+): value is Record<string, StorableDatum> | StorableDatum[] =>
+  Array.isArray(value) || isRecord(value);
+
+const getValueTypeName = (value: StorableDatum | undefined): string => {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
+};
+
+const isDocumentEnvelopeValue = (
+  value: StorableDatum | undefined,
+): value is Record<string, StorableDatum> =>
+  isRecord(value) &&
+  (
+    Object.hasOwn(value, "value") ||
+    Object.hasOwn(value, "source")
+  );
+
+const collapseEmptyDocumentEnvelope = (
+  currentRoot: StorableDatum | undefined,
+  nextRoot: StorableDatum | undefined,
+  type: MediaType,
+): StorableDatum | undefined => {
+  if (
+    type === "application/json" &&
+    isDocumentEnvelopeValue(currentRoot) &&
+    isRecord(nextRoot) &&
+    Object.keys(nextRoot).length === 0
+  ) {
+    return undefined;
+  }
+  return nextRoot;
+};
+
+type MutableWriteResult = {
+  root: StorableDatum | undefined;
+  previousValue: StorableDatum | undefined;
+  changed: boolean;
+};
+
+const applyMutablePathWrite = (
+  currentRoot: StorableDatum | undefined,
+  address: IMemoryAddress,
+  value: StorableDatum | undefined,
+): Result<MutableWriteResult, ITypeMismatchError> => {
+  const sourceRoot = currentRoot;
+  if (address.path.length === 0) {
+    return {
+      ok: {
+        root: value,
+        previousValue: currentRoot,
+        changed: !deepEqual(currentRoot, value),
+      },
+    };
+  }
+
+  if (currentRoot === undefined) {
+    if (value === undefined) {
+      return {
+        ok: {
+          root: currentRoot,
+          previousValue: undefined,
+          changed: false,
+        },
+      };
+    }
+    currentRoot = createMissingContainer(address.path[0]!);
+  } else if (!isContainerValue(currentRoot)) {
+    return {
+      error: TypeMismatchError(
+        { ...address, path: address.path.slice(0, 1) },
+        getValueTypeName(currentRoot),
+        "write",
+      ),
+    };
+  }
+
+  const root = currentRoot;
+  let current = root as Record<string, StorableDatum> | StorableDatum[];
+  let parent: Record<string, StorableDatum> | StorableDatum[] | undefined;
+  let parentKey: string | number | undefined;
+
+  for (let index = 0; index < address.path.length; index += 1) {
+    const key = address.path[index]!;
+    const isLast = index === address.path.length - 1;
+
+    if (Array.isArray(current)) {
+      if (key === "length") {
+        if (!isLast) {
+          return {
+            error: TypeMismatchError(
+              { ...address, path: address.path.slice(0, index + 1) },
+              "number",
+              "write",
+            ),
+          };
+        }
+        const previousValue = current.length;
+        const changed = !deepEqual(previousValue, value);
+        if (changed) {
+          const nextLength = value as number;
+          const replacement = nextLength < current.length || nextLength < 0 ||
+              !Number.isFinite(nextLength)
+            ? current.slice(0, nextLength)
+            : (() => {
+              const copy = sparseArrayCopy(current);
+              copy.length = nextLength;
+              return copy;
+            })();
+          if (parent === undefined) {
+            return {
+              ok: {
+                root: collapseEmptyDocumentEnvelope(
+                  sourceRoot,
+                  replacement,
+                  address.type,
+                ),
+                previousValue,
+                changed: true,
+              },
+            };
+          }
+          if (Array.isArray(parent)) {
+            parent[parentKey as number] = replacement;
+          } else {
+            parent[parentKey as string] = replacement;
+          }
+        }
+        return {
+          ok: {
+            root,
+            previousValue,
+            changed,
+          },
+        };
+      }
+
+      if (!isArrayIndexPropertyName(key)) {
+        return {
+          error: TypeMismatchError(
+            { ...address, path: address.path.slice(0, index + 1) },
+            "array",
+            "write",
+          ),
+        };
+      }
+
+      const slot = Number(key);
+      if (isLast) {
+        const previousValue = current[slot];
+        if (deepEqual(previousValue, value)) {
+          return { ok: { root, previousValue, changed: false } };
+        }
+        if (value === undefined) {
+          delete current[slot];
+        } else {
+          current[slot] = value;
+        }
+        return {
+          ok: {
+            root: collapseEmptyDocumentEnvelope(sourceRoot, root, address.type),
+            previousValue,
+            changed: true,
+          },
+        };
+      }
+
+      parent = current;
+      parentKey = slot;
+      let next = current[slot];
+      if (next === undefined) {
+        next = createMissingContainer(address.path[index + 1]!);
+        current[slot] = next;
+      } else if (!isContainerValue(next)) {
+        return {
+          error: TypeMismatchError(
+            { ...address, path: address.path.slice(0, index + 1) },
+            getValueTypeName(next),
+            "write",
+          ),
+        };
+      }
+      current = next as Record<string, StorableDatum> | StorableDatum[];
+      continue;
+    }
+
+    if (isLast) {
+      const previousValue = current[key];
+      if (deepEqual(previousValue, value)) {
+        return { ok: { root, previousValue, changed: false } };
+      }
+      if (value === undefined) {
+        delete current[key];
+      } else {
+        current[key] = value;
+      }
+      return {
+        ok: {
+          root: collapseEmptyDocumentEnvelope(sourceRoot, root, address.type),
+          previousValue,
+          changed: true,
+        },
+      };
+    }
+
+    parent = current;
+    parentKey = key;
+    let next = current[key];
+    if (next === undefined) {
+      next = createMissingContainer(address.path[index + 1]!);
+      current[key] = next;
+    } else if (!isContainerValue(next)) {
+      return {
+        error: TypeMismatchError(
+          { ...address, path: address.path.slice(0, index + 1) },
+          getValueTypeName(next),
+          "write",
+        ),
+      };
+    }
+    current = next as Record<string, StorableDatum> | StorableDatum[];
+  }
+
+  return { ok: { root, previousValue: undefined, changed: false } };
 };
 
 const resolveArrayPatchPath = (
@@ -538,6 +783,20 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const cacheKey = encodePointer(memoryAddress.path);
+    if (isMutableTransactionReadAllowed(readMeta)) {
+      if (
+        !address.id.startsWith("data:") &&
+        !doc.validated
+      ) {
+        doc.validated = true;
+      }
+      return {
+        ok: {
+          address: memoryAddress,
+          value: readPathValue(doc.current.value, memoryAddress.path),
+        },
+      };
+    }
     if (doc.frozenReads.has(cacheKey)) {
       return {
         ok: {
@@ -582,21 +841,41 @@ export class V2StorageTransaction implements IStorageTransaction {
   writeBatch(
     writes: Iterable<ITransactionWriteRequest>,
   ): Result<Unit, WriterError | WriteError> {
-    for (const { address, value } of writes) {
+    let run: ITransactionWriteRequest[] = [];
+    let runKey: string | undefined;
+
+    const flushRun = (): Result<Unit, WriterError | WriteError> => {
+      if (run.length === 0) {
+        return { ok: {} };
+      }
+      const [{ address }] = run;
       const { error } = this.writer(address.space);
       if (error) {
         return { error };
       }
-      const result = this.writeWithinSpaceCreatingParents(
-        address.space,
-        address,
-        value,
-      );
-      if (result.error) {
-        return { error: result.error };
+      const result = this.writeBatchRun(address.space, run);
+      run = [];
+      runKey = undefined;
+      return result;
+    };
+
+    for (const write of writes) {
+      const key =
+        `${write.address.space}|${write.address.id}|${write.address.type}`;
+      if (runKey === undefined || key === runKey) {
+        run.push(write);
+        runKey = key;
+        continue;
       }
+      const flushed = flushRun();
+      if (flushed.error) {
+        return flushed;
+      }
+      run.push(write);
+      runKey = key;
     }
-    return { ok: {} };
+
+    return flushRun();
   }
 
   writeWithinSpace(
@@ -755,6 +1034,119 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     return { ok: next };
   }
+
+  private writeBatchRun(
+    space: MemorySpace,
+    writes: readonly ITransactionWriteRequest[],
+  ): Result<Unit, WriteError> {
+    if (
+      writes.length <= 1 ||
+      writes.some(({ address }) => address.id.startsWith("data:"))
+    ) {
+      for (const { address, value } of writes) {
+        const result = this.writeWithinSpaceCreatingParents(
+          space,
+          address,
+          value,
+        );
+        if (result.error) {
+          return { error: result.error };
+        }
+      }
+      return { ok: {} };
+    }
+
+    const branch = this.branch(space);
+    const { doc } = this.document(branch, writes[0]!.address);
+    const originalRoot = doc.current.value;
+    let nextRoot = originalRoot;
+    let hasMutableRoot = false;
+    let changed = false;
+
+    for (const { address, value } of writes) {
+      const isolatedValue = value === undefined
+        ? undefined
+        : isolateTransactionValue(value) as StorableDatum;
+      const previousValue = readPathValue(nextRoot, address.path);
+      if (deepEqual(previousValue, isolatedValue)) {
+        continue;
+      }
+      if (
+        !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
+      ) {
+        nextRoot = isolateTransactionValue(nextRoot) as StorableDatum;
+        hasMutableRoot = true;
+      }
+      const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
+      if (result.error) {
+        if (changed) {
+          doc.current = {
+            ...doc.current,
+            value: nextRoot,
+          };
+          doc.frozenReads.clear();
+        }
+        return { error: result.error.from(space) };
+      }
+      nextRoot = result.ok.root;
+      if (!result.ok.changed) {
+        continue;
+      }
+      changed = true;
+      this.recordWriteActivity(
+        space,
+        address,
+        isolatedValue,
+        result.ok.previousValue ?? previousValue,
+        doc,
+      );
+      if (address.path.length === 0 || !hasMutableRoot) {
+        hasMutableRoot = true;
+      }
+    }
+
+    if (!changed) {
+      return { ok: {} };
+    }
+
+    doc.current = {
+      ...doc.current,
+      value: nextRoot,
+    };
+    doc.frozenReads.clear();
+    return { ok: {} };
+  }
+
+  private recordWriteActivity(
+    space: MemorySpace,
+    address: IMemoryAddress,
+    value: StorableDatum | undefined,
+    previousValue: StorableDatum | undefined,
+    doc: DocumentEntry,
+  ): void {
+    const writeActivity = {
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path,
+    };
+    this.#writeActivities.push(writeActivity);
+    this.#activityOrder.push(-this.#writeActivities.length);
+
+    const key = encodePointer(address.path);
+    const existing = doc.writeDetails.get(key);
+    if (existing) {
+      existing.value = value;
+      return;
+    }
+
+    doc.writeDetails.set(key, {
+      address: writeActivity,
+      value,
+      previousValue,
+    });
+  }
+
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
     const ready = this.editable();
     if (ready.error) {

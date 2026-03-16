@@ -13,6 +13,10 @@ const markReadAsPotentialWriteMarker: unique symbol = Symbol(
   "markReadAsPotentialWriteMarker",
 );
 
+const allowMutableTransactionReadMarker: unique symbol = Symbol(
+  "allowMutableTransactionReadMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -21,12 +25,20 @@ export const markReadAsPotentialWrite: Metadata = {
   [markReadAsPotentialWriteMarker]: true,
 };
 
+export const allowMutableTransactionRead: Metadata = {
+  [allowMutableTransactionReadMarker]: true,
+};
+
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
 
 export function isReadMarkedAsPotentialWrite(meta?: Metadata): boolean {
   return meta?.[markReadAsPotentialWriteMarker] === true;
+}
+
+export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
+  return meta?.[allowMutableTransactionReadMarker] === true;
 }
 
 export function reactivityLogFromActivities(

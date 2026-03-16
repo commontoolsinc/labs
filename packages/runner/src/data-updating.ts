@@ -29,7 +29,10 @@ import type {
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
-import { markReadAsPotentialWrite } from "./scheduler.ts";
+import {
+  allowMutableTransactionRead,
+  markReadAsPotentialWrite,
+} from "./scheduler.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -64,7 +67,11 @@ export function diffAndUpdate(
 ): boolean {
   const readOptions: IReadOptions = {
     ...options,
-    meta: { ...options?.meta, ...markReadAsPotentialWrite },
+    meta: {
+      ...options?.meta,
+      ...markReadAsPotentialWrite,
+      ...allowMutableTransactionRead,
+    },
   };
   const changes = normalizeAndDiff(
     runtime,
