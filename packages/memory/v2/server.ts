@@ -2,6 +2,7 @@ import type { JSONValue } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { isPrimitiveCellLink } from "../../runner/src/link-types.ts";
 import {
   type Blob,
   type ClientMessage,
@@ -850,6 +851,10 @@ const collectValueTopologyRefs = (
 ): void => {
   if (isSourceLink(value)) {
     entries.push(`${path.join(".")}=>${value["/"]}`);
+    return;
+  }
+  if (isPrimitiveCellLink(value)) {
+    entries.push(`${path.join(".")}=>${JSON.stringify(value)}`);
     return;
   }
   if (Array.isArray(value)) {
