@@ -226,6 +226,129 @@ Deno.test("memory v2 server graph queries follow source lineage from source-only
   await server.close();
 });
 
+Deno.test("memory v2 server does not reevaluate plain source-lineage queries for sigil-only changes", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-plain-source-sigil"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-plain-source-sigil";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:process:1",
+        value: {
+          value: {
+            "$TYPE": "pattern:1",
+          },
+        },
+      }, {
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: {
+            city: "San Francisco",
+          },
+        },
+      }, {
+        op: "set",
+        id: "of:piece:1",
+        value: {
+          source: { "/": "process:1" },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: "of:piece:1",
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    },
+  }));
+
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+  server.queryCount = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:piece:1",
+        value: {
+          source: { "/": "process:1" },
+          value: {
+            friend: {
+              "/": {
+                "link@1": {
+                  id: "of:target:1",
+                  path: [],
+                  space,
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+  await tick();
+
+  assertEquals(server.queryCount, 0);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    update.result.entities.map((entity: any) => entity.id),
+    ["of:piece:1", "of:process:1"],
+  );
+
+  await server.close();
+});
+
 Deno.test("memory v2 server pushes graph query subscription updates", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-server-subscribe"),

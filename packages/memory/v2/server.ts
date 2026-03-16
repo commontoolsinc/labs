@@ -2,7 +2,10 @@ import type { JSONValue } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import { getLogger } from "@commontools/utils/logger";
-import { isPrimitiveCellLink } from "../../runner/src/link-types.ts";
+import {
+  isPrimitiveCellLink,
+  isSigilWriteRedirectLink,
+} from "../../runner/src/link-types.ts";
 import {
   type Blob,
   type ClientMessage,
@@ -578,12 +581,14 @@ export class Server {
     cache: Map<string, EntitySnapshot>,
   ): Promise<GraphQueryResult | null> {
     if (dirtyIds === undefined) {
+      logger.debug("subscription-refresh/patch-skip/no-dirty-ids");
       return null;
     }
 
     const branch = subscription.query.branch ?? "";
     const touchedIds = collectTouchedSubscriptionIds(subscription, dirtyIds);
     if (touchedIds.length === 0) {
+      logger.debug("subscription-refresh/patch-skip/no-touched-ids");
       return null;
     }
 
@@ -596,8 +601,40 @@ export class Server {
     for (const id of touchedIds) {
       const previous = previousById.get(id);
       const current = getOrLoadEntitySnapshot(cache, engine, id, branch);
-      if (documentTopologyChanged(previous?.document, current.document)) {
+      const topologyChange = documentTopologyChangeReason(
+        previous?.document,
+        current.document,
+      );
+      if (topologyChange !== null) {
+        if (
+          topologyChange === "sigil" &&
+          queryIgnoresSigilTopology(subscription.query) &&
+          !documentHasRootSigilRedirect(previous?.document) &&
+          !documentHasRootSigilRedirect(current.document)
+        ) {
+          logger.debug("subscription-refresh/patch-skip/topology-change/ignored");
+          logger.debug(
+            `subscription-refresh/patch-skip/topology-change/ignored/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+        } else {
+        logger.debug("subscription-refresh/patch-skip/topology-change");
+        logger.debug(
+          `subscription-refresh/patch-skip/topology-change/${topologyChange}`,
+        );
+        logger.debug(
+          `subscription-refresh/patch-skip/topology-change-shape/${
+            graphQueryShapeKey(subscription.query)
+          }`,
+        );
+        logger.debug(
+          `subscription-refresh/patch-skip/topology-change-shape/${
+            topologyChange
+          }/${graphQueryShapeKey(subscription.query)}`,
+        );
         return null;
+        }
       }
 
       if (current.document === null && !queryHasRoot(subscription.query, id)) {
@@ -845,6 +882,17 @@ const collectTouchedSubscriptionIds = (
 const queryHasRoot = (query: GraphQuery, id: string): boolean =>
   query.roots.some((root) => root.id === id);
 
+const queryIgnoresSigilTopology = (query: GraphQuery): boolean =>
+  query.roots.every((root) => root.selector.schema === false);
+
+const documentHasRootSigilRedirect = (document: unknown): boolean => {
+  if (document === null || typeof document !== "object") {
+    return false;
+  }
+  const value = (document as { value?: unknown }).value;
+  return isSigilWriteRedirectLink(value);
+};
+
 const cacheKeyForEntity = (branch: string, id: string): string =>
   `${branch}\0${id}`;
 
@@ -871,40 +919,53 @@ const getOrLoadEntitySnapshot = (
   return snapshot;
 };
 
-const documentTopologyChanged = (
+const documentTopologyChangeReason = (
   previous: unknown,
   current: unknown,
-): boolean => {
+): "source" | "sigil" | null => {
   const left = collectTopologyRefs(previous);
   const right = collectTopologyRefs(current);
-  if (left.length !== right.length) {
-    return true;
+  if (
+    left.source.length !== right.source.length ||
+    left.source.some((entry, index) => entry !== right.source[index])
+  ) {
+    return "source";
   }
-  return left.some((entry, index) => entry !== right[index]);
+  if (
+    left.sigil.length !== right.sigil.length ||
+    left.sigil.some((entry, index) => entry !== right.sigil[index])
+  ) {
+    return "sigil";
+  }
+  return null;
 };
 
-const collectTopologyRefs = (document: unknown): string[] => {
+const collectTopologyRefs = (
+  document: unknown,
+): { source: string[]; sigil: string[] } => {
   if (document === null || document === undefined) {
-    return [];
+    return { source: [], sigil: [] };
   }
-  const entries: string[] = [];
-  collectValueTopologyRefs(document, [], true, entries);
-  entries.sort();
-  return entries;
+  const source: string[] = [];
+  const sigil: string[] = [];
+  collectValueTopologyRefs(document, [], true, { source, sigil });
+  source.sort();
+  sigil.sort();
+  return { source, sigil };
 };
 
 const collectValueTopologyRefs = (
   value: unknown,
   path: (string | number)[],
   isDocumentRoot: boolean,
-  entries: string[],
+  entries: { source: string[]; sigil: string[] },
 ): void => {
   if (isSourceLink(value)) {
-    entries.push(`${path.join(".")}=>${value["/"]}`);
+    entries.source.push(`${path.join(".")}=>${value["/"]}`);
     return;
   }
   if (isPrimitiveCellLink(value)) {
-    entries.push(`${path.join(".")}=>${JSON.stringify(value)}`);
+    entries.sigil.push(`${path.join(".")}=>${JSON.stringify(value)}`);
     return;
   }
   if (Array.isArray(value)) {
@@ -919,7 +980,7 @@ const collectValueTopologyRefs = (
 
   const record = value as Record<string, unknown>;
   if (isDocumentRoot && isSourceLink(record.source)) {
-    entries.push(`source=>${record.source["/"]}`);
+    entries.source.push(`source=>${record.source["/"]}`);
   }
   for (const [key, nested] of Object.entries(record)) {
     collectValueTopologyRefs(nested, [...path, key], false, entries);
