@@ -1,4 +1,5 @@
-import type { JSONSchema, Pattern } from "../builder/types.ts";
+import type { Pattern } from "../builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 
 import type { Cell } from "../cell.ts";
 import type { Action } from "../scheduler.ts";
@@ -63,14 +64,16 @@ export function filter(
     }
     const resultWithLog = result.withTx(tx);
     const { list, op } = inputsCell.asSchema(
-      {
-        type: "object",
-        properties: {
-          list: { type: "array", items: { asCell: true, type: "unknown" } },
-          op: { asCell: true },
+      toDeepFrozenSchema(
+        {
+          type: "object",
+          properties: {
+            list: { type: "array", items: { asCell: true, type: "unknown" } },
+            op: { asCell: true },
+          },
+          required: ["op"],
         },
-        required: ["op"],
-      } as const satisfies JSONSchema,
+      ),
     ).withTx(tx).get();
 
     const opPattern = op.getRaw();

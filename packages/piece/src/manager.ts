@@ -17,6 +17,7 @@ import {
   TYPE,
   URI,
 } from "@commontools/runner";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { type Session } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
 import { ensureNotRenderThread } from "@commontools/utils/env";
@@ -223,10 +224,12 @@ export class PieceManager {
     // Our request for the piece list will walk the schema tree, and that will
     // take us into classified data of pieces. If that happens, we still want
     // this bit to work, so we elevate this request.
-    const privilegedSchema = {
-      ...pieceListSchema,
-      ifc: { classification: [Classification.Secret] },
-    } as const satisfies JSONSchema;
+    const privilegedSchema = toDeepFrozenSchema(
+      {
+        ...pieceListSchema,
+        ifc: { classification: [Classification.Secret] },
+      },
+    );
     return cell.asSchema(privilegedSchema).sync();
   }
 

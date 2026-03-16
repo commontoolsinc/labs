@@ -1,4 +1,5 @@
 import { BuiltInLLMDialogState } from "@commontools/api";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { createNodeFactory, lift } from "./module.ts";
 import { pattern } from "./pattern.ts";
 import { isPattern } from "./types.ts";
@@ -308,16 +309,18 @@ export function wish<T = unknown>(
   return createNodeFactory({
     type: "ref",
     implementation: "wish",
-    argumentSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        path: { type: "array", items: { type: "string" } },
-        schema: { type: "object" },
-        context: { type: "object", additionalProperties: { asCell: true } },
-        scope: { type: "array", items: { type: "string" } },
+    argumentSchema: toDeepFrozenSchema(
+      {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          path: { type: "array", items: { type: "string" } },
+          schema: { type: "object" },
+          context: { type: "object", additionalProperties: { asCell: true } },
+          scope: { type: "array", items: { type: "string" } },
+        },
       },
-    } as const satisfies JSONSchema,
+    ),
     resultSchema,
   })(param);
 }

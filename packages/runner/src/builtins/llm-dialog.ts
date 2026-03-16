@@ -985,10 +985,12 @@ function buildToolCatalog(
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell.asSchema(
-      {
-        type: "object",
-        additionalProperties: LLMToolSchema,
-      } as const as JSONSchema,
+      toDeepFrozenSchema(
+        {
+          type: "object",
+          additionalProperties: LLMToolSchema,
+        },
+      ),
     ),
   );
   const llmTools: ToolCatalog["llmTools"] = {};

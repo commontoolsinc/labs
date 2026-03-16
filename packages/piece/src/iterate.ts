@@ -1,4 +1,5 @@
 import { isObject, Mutable } from "@commontools/utils/types";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   type Cell,
   createJsonSchema,
@@ -253,17 +254,19 @@ export function scrub(data: unknown): unknown {
       const value = data.asSchema().get();
       if (isObject(value)) {
         // Generate a new schema for all properties except $UI and $NAME and streams
-        const scrubbed = {
-          type: "object",
-          properties: Object.fromEntries(
-            Object.keys(value).filter(([key, value]) =>
-              !key.startsWith("$") && !isStream(value)
-            ).map(
-              (key) => [key, {}],
+        const scrubbed = toDeepFrozenSchema(
+          {
+            type: "object",
+            properties: Object.fromEntries(
+              Object.keys(value).filter(([key, value]) =>
+                !key.startsWith("$") && !isStream(value)
+              ).map(
+                (key) => [key, {}],
+              ),
             ),
-          ),
-          additionalProperties: false,
-        } as const satisfies JSONSchema;
+            additionalProperties: false,
+          },
+        );
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema
         return Object.keys(scrubbed).length > 0
