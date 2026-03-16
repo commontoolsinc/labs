@@ -14,23 +14,23 @@ Deno.test("toDeepFrozenSchema - boolean false is returned as-is", () => {
 });
 
 Deno.test("toDeepFrozenSchema - canShare=true freezes input in place", () => {
+  const originalProperties = {
+    name: { type: "string" } as JSONSchemaObj,
+  };
   const schema: JSONSchemaObj = {
     type: "object",
-    properties: {
-      name: { type: "string" },
-    },
+    properties: originalProperties,
   };
 
   const result = toDeepFrozenSchema(schema, true);
 
-  // Should be the same reference.
+  // Top-level should be the same reference — frozen in place.
   assertEquals(result === schema, true);
-
-  // Should be frozen at the top level.
   assertEquals(Object.isFrozen(schema), true);
 
-  // Nested objects should also be frozen.
+  // Property values are replaced with frozen clones (not the originals).
   assertEquals(Object.isFrozen(schema.properties), true);
+  assertEquals(schema.properties !== originalProperties, true);
   assertEquals(Object.isFrozen(schema.properties!.name), true);
 });
 
