@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
+import { deepFreeze } from "../deep-freeze.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
 
 Deno.test("toDeepFrozenSchema - boolean true is returned as-is", () => {
@@ -170,3 +171,102 @@ Deno.test("toDeepFrozenSchema - enum values are frozen", () => {
   const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
   assertEquals(Object.isFrozen(result.enum), true);
 });
+
+// ---------------------------------------------------------------------------
+// New behavior tests (per Dan's rewrite)
+// ---------------------------------------------------------------------------
+
+Deno.test(
+  "toDeepFrozenSchema - already-deep-frozen returns same reference (canShare=true)",
+  () => {
+    const schema: JSONSchemaObj = deepFreeze({
+      type: "object",
+      properties: { name: { type: "string" } },
+    });
+
+    const result = toDeepFrozenSchema(schema, true);
+    assertEquals(result === schema, true);
+  },
+);
+
+Deno.test(
+  "toDeepFrozenSchema - already-deep-frozen returns same reference (canShare=false)",
+  () => {
+    const schema: JSONSchemaObj = deepFreeze({
+      type: "object",
+      properties: { age: { type: "number" } },
+    });
+
+    const result = toDeepFrozenSchema(schema, false);
+    assertEquals(result === schema, true);
+  },
+);
+
+Deno.test(
+  "toDeepFrozenSchema - frozen but not deep-frozen schema is shallow-cloned even with canShare=true",
+  () => {
+    const inner = { type: "string" } as JSONSchemaObj;
+    const schema: JSONSchemaObj = Object.freeze({
+      type: "object",
+      properties: Object.freeze({ name: inner }),
+    } as JSONSchemaObj);
+    // schema is frozen, but inner is not — so not deep-frozen.
+
+    const result = toDeepFrozenSchema(schema, true);
+
+    // Must be a different reference (shallow-cloned) since original is
+    // frozen and can't be mutated.
+    assertEquals(result !== schema, true);
+
+    // Result must be deeply frozen.
+    assertEquals(Object.isFrozen(result), true);
+    const obj = result as JSONSchemaObj;
+    assertEquals(Object.isFrozen(obj.properties), true);
+  },
+);
+
+Deno.test(
+  "toDeepFrozenSchema - per-property: already-deep-frozen top-level values are reused",
+  () => {
+    // The per-property optimization works on the schema's own top-level
+    // fields (e.g., "type", "properties", "required"). An already-deep-frozen
+    // field value is kept as-is; an unfrozen one is structuredClone'd.
+    const frozenProperties = deepFreeze({
+      name: { type: "string" },
+    } as Record<string, JSONSchemaObj>);
+    const unfrozenRequired = ["name"];
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: frozenProperties,
+      required: unfrozenRequired,
+    };
+
+    const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
+
+    // The already-deep-frozen "properties" value should be the same reference.
+    assertEquals(result.properties === frozenProperties, true);
+
+    // The unfrozen "required" should be a different reference (cloned).
+    assertEquals(result.required !== unfrozenRequired, true);
+
+    // Both should be deeply frozen in the result.
+    assertEquals(Object.isFrozen(result.properties), true);
+    assertEquals(Object.isFrozen(result.required), true);
+  },
+);
+
+Deno.test(
+  "toDeepFrozenSchema - canShare=false does not freeze original property values",
+  () => {
+    const innerProp = { type: "string" } as JSONSchemaObj;
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { x: innerProp },
+    };
+
+    toDeepFrozenSchema(schema, false);
+
+    // Original property value should not be frozen.
+    assertEquals(Object.isFrozen(innerProp), false);
+  },
+);
