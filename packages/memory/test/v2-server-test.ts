@@ -677,10 +677,13 @@ Deno.test("memory v2 server batches identical graph updates across subscriptions
   await tick();
 
   const update = assertUpdate(shiftMessage(messages));
-  assertEquals(update.subscriptionIds?.sort(), [
-    firstSubscriptionId,
-    secondSubscriptionId,
-  ].sort());
+  assertEquals(
+    update.subscriptionIds?.sort(),
+    [
+      firstSubscriptionId,
+      secondSubscriptionId,
+    ].sort(),
+  );
   assertEquals(update.result.entities.map((entity: any) => entity.id), [
     "of:doc:1",
   ]);
