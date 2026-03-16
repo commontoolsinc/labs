@@ -1,4 +1,8 @@
 import { Identity } from "@commontools/identity";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+} from "@commontools/memory/storable-value";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { IAttestation } from "../src/storage/interface.ts";
 import { V2StorageTransaction } from "../src/storage/v2-transaction.ts";
@@ -143,6 +147,44 @@ Deno.bench(
       }
     } finally {
       await storage.close();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v1 storage tx rich warm root read x10000",
+  async () => {
+    setStorableValueConfig({ richStorableValues: true });
+    const storage = await seedV1Storage();
+    try {
+      const tx = createStorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.read({ space, id, type, path: ["value"] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.read({ space, id, type, path: ["value"] });
+      }
+    } finally {
+      await storage.close();
+      resetStorableValueConfig();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v2 transaction rich warm root read x10000",
+  async () => {
+    setStorableValueConfig({ richStorableValues: true });
+    const storage = await seedV2Storage();
+    try {
+      const tx = new V2StorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.read({ space, id, type, path: ["value"] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.read({ space, id, type, path: ["value"] });
+      }
+    } finally {
+      await storage.close();
+      resetStorableValueConfig();
     }
   },
 );

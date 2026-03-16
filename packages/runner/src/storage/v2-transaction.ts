@@ -367,6 +367,12 @@ export class V2StorageTransaction implements IStorageTransaction {
   #branches = new Map<MemorySpace, SpaceBranch>();
   #activity: Activity[] = [];
   #writeSpace?: MemorySpace;
+  #lastDocument?: {
+    branch: SpaceBranch;
+    id: URI;
+    type: MediaType;
+    doc: DocumentEntry;
+  };
 
   constructor(private readonly storage: IStorageManager) {}
 
@@ -492,6 +498,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const branch = this.branch(address.space);
     const { doc } = this.document(branch, address);
     const readMeta = options?.meta ?? EMPTY_META;
+    const { space: _, ...memoryAddress } = address;
 
     this.#activity.push({
       read: {
@@ -506,8 +513,30 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
+    if (!getExperimentalStorableConfig().richStorableValues) {
+      const result = readAttestation(doc.current, memoryAddress);
+      if (
+        !address.id.startsWith("data:") &&
+        !doc.validated
+      ) {
+        doc.validated = true;
+      }
+      if (result.error) {
+        return { error: result.error.from(address.space) };
+      }
+      return result;
+    }
 
-    const { space: _, ...memoryAddress } = address;
+    const cacheKey = encodePointer(memoryAddress.path);
+    if (doc.frozenReads.has(cacheKey)) {
+      return {
+        ok: {
+          address: memoryAddress,
+          value: doc.frozenReads.get(cacheKey),
+        },
+      };
+    }
+
     const result = readAttestation(doc.current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
@@ -517,19 +546,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     if (result.error) {
       return { error: result.error.from(address.space) };
-    }
-    if (!getExperimentalStorableConfig().richStorableValues) {
-      return result;
-    }
-
-    const cacheKey = encodePointer(memoryAddress.path);
-    if (doc.frozenReads.has(cacheKey)) {
-      return {
-        ok: {
-          ...result.ok,
-          value: doc.frozenReads.get(cacheKey),
-        },
-      };
     }
 
     const frozenValue = freezeReadValue(result.ok.value);
@@ -800,6 +816,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type">,
   ): { doc: DocumentEntry; meta: { seq?: number } } {
+    if (
+      this.#lastDocument?.branch === branch &&
+      this.#lastDocument.id === address.id &&
+      this.#lastDocument.type === address.type
+    ) {
+      return {
+        doc: this.#lastDocument.doc,
+        meta: {
+          ...(typeof this.#lastDocument.doc.seq === "number"
+            ? { seq: this.#lastDocument.doc.seq }
+            : {}),
+        },
+      };
+    }
+
     const key = this.docKey(address);
     let doc = branch.docs.get(key);
     if (!doc) {
@@ -815,6 +846,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
       branch.docs.set(key, doc);
     }
+    this.#lastDocument = {
+      branch,
+      id: address.id,
+      type: address.type,
+      doc,
+    };
     return {
       doc,
       meta: { ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}) },
