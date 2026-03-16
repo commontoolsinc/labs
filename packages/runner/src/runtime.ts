@@ -354,6 +354,13 @@ export class Runtime {
    * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
+    // Abort any pending (not-yet-started) queued jobs so they don't start
+    // after storage is torn down.
+    for (const queue of this.queues.values()) {
+      queue.abortPending();
+    }
+    this.queues.clear();
+
     // Stop all running docs
     this.runner.stopAll();
 

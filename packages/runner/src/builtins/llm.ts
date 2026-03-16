@@ -418,6 +418,9 @@ export function llm(
             getCurrentRun: getRunForCancellation,
             thisRun,
             onComplete: async (llmResult) => {
+              // Skip if a newer request has already superseded this one.
+              if (hash !== previousCallHash) return;
+
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {

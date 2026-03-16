@@ -22,7 +22,12 @@ export class AsyncSemaphoreQueue {
   #failed: number = 0;
 
   constructor(config: QueueConfig) {
-    this.#maxConcurrency = config.maxConcurrency;
+    this.#maxConcurrency = Math.max(
+      1,
+      Number.isFinite(config.maxConcurrency)
+        ? Math.floor(config.maxConcurrency)
+        : 1,
+    );
   }
 
   enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -41,9 +46,30 @@ export class AsyncSemaphoreQueue {
     };
   }
 
+  get maxConcurrency(): number {
+    return this.#maxConcurrency;
+  }
+
   setMaxConcurrency(n: number): void {
-    this.#maxConcurrency = n;
+    this.#maxConcurrency = Math.max(
+      1,
+      Number.isFinite(n) ? Math.floor(n) : 1,
+    );
     this.#drain();
+  }
+
+  /**
+   * Reject all pending (not-yet-started) queue items immediately.
+   * In-flight (active) items continue running to completion.
+   */
+  abortPending(reason?: unknown): void {
+    const pending = this.#queue.splice(0);
+    for (const item of pending) {
+      this.#failed++;
+      item.resolvers.reject(
+        reason ?? new DOMException("Queue aborted", "AbortError"),
+      );
+    }
   }
 
   #drain(): void {

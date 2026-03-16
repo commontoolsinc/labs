@@ -385,6 +385,10 @@ describe("generateText with queue", () => {
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("response");
+
+    // Verify configureQueue actually applied the concurrency limit.
+    const queue = runtime.getOrCreateQueue("pre-configured");
+    expect(queue.maxConcurrency).toBe(5);
   });
 });
 
