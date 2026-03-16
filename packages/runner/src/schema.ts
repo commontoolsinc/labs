@@ -491,6 +491,7 @@ export function validateAndTransform(
 
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<StorableDatum>> {
+  readonly allowMergedAnyOfObjectTraversal = true;
   constructor(
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
@@ -598,22 +599,24 @@ class TransformObjectCreator
           string,
           JSONSchema,
         ][];
+        const valueObj = value as Record<string, any>;
         for (const [propName, propSchema] of propertyEntries) {
-          if (isObject(propSchema) && propSchema.default !== undefined) {
-            const valueObj = value as Record<string, any>;
-            if (valueObj[propName] === undefined) {
-              valueObj[propName] = processDefaultValue(
-                this.runtime,
-                this.tx,
-                {
-                  ...link,
-                  path: [...link.path, propName],
-                  schema: propSchema,
-                },
-                undefined,
-                this.synced,
-              );
-            }
+          if (
+            isObject(propSchema) &&
+            propSchema.default !== undefined &&
+            valueObj[propName] === undefined
+          ) {
+            valueObj[propName] = processDefaultValue(
+              this.runtime,
+              this.tx,
+              {
+                ...link,
+                path: [...link.path, propName],
+                schema: propSchema,
+              },
+              undefined,
+              this.synced,
+            );
           }
         }
       }

@@ -15,6 +15,42 @@ const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
 };
 
+function schemaAtPathCacheToken(schema: JSONSchema): string {
+  if (schema === true) return "t";
+  if (schema === false) return "f";
+  if (
+    isObject(schema) &&
+    Object.keys(schema).length === 1 &&
+    typeof schema.$comment === "string"
+  ) {
+    return `$comment:${schema.$comment}`;
+  }
+  return JSON.stringify(schema);
+}
+
+function schemaAtPathCacheKey(
+  path: readonly string[],
+  extraClassifications: Set<string> | undefined,
+  defaultEmptyProperties: JSONSchema,
+  defaultMissingProperty: JSONSchema,
+): string {
+  const pathKey = path.join("\u001f");
+  const extraKey = extraClassifications === undefined
+    ? ""
+    : [...extraClassifications].sort().join("\u001f");
+  // Keep the common case cheap: most hot-path callers use the default behavior.
+  if (
+    extraKey === "" &&
+    defaultEmptyProperties === true &&
+    defaultMissingProperty === true
+  ) {
+    return pathKey;
+  }
+  return `${pathKey}|${extraKey}|${
+    schemaAtPathCacheToken(defaultEmptyProperties)
+  }|${schemaAtPathCacheToken(defaultMissingProperty)}`;
+}
+
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
 // up to implementation.
@@ -164,6 +200,7 @@ class KahnTopologicalSort {
 // These preferences are likely per user/space combination.
 export class ContextualFlowControl {
   private reachable: Map<string, Set<string>>;
+  private schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
   constructor(
     private lattice: Map<string, string[]> = classificationLattice,
   ) {
@@ -616,12 +653,37 @@ export class ContextualFlowControl {
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
-    // Take defs from schema if available
-    const defs = isObject(schema) && schema.$defs ? schema.$defs : undefined;
+    if (isObject(schema)) {
+      const cacheKey = schemaAtPathCacheKey(
+        path,
+        extraClassifications,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+      let cache = this.schemaAtPathCache.get(schema);
+      if (cache === undefined) {
+        cache = new Map();
+        this.schemaAtPathCache.set(schema, cache);
+      } else {
+        const cached = cache.get(cacheKey);
+        if (cached !== undefined) return cached;
+      }
+      const defs = schema.$defs;
+      const result = this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        extraClassifications,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+      cache.set(cacheKey, result);
+      return result;
+    }
     return this.schemaAtPathInternal(
       schema,
       path,
-      defs,
+      undefined,
       extraClassifications,
       defaultEmptyProperties,
       defaultMissingProperty,
@@ -640,11 +702,8 @@ export class ContextualFlowControl {
       ? new Set<string>(extraClassifications)
       : new Set<string>();
     let cursor = schema;
-    for (
-      const [index, part] of path.map((value, index) =>
-        [index, value] as [number, string]
-      )
-    ) {
+    for (let index = 0; index < path.length; index++) {
+      const part = path[index];
       // If the cursor is a $ref, get the target location
       if (isObject(cursor) && "$ref" in cursor) {
         // Follow the reference
@@ -660,7 +719,7 @@ export class ContextualFlowControl {
       }
       if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
-        const subSchemaStrings: string[] = [];
+        const subSchemaStrings = new Set<string>();
         const options = (cursor.anyOf && cursor.oneOf)
           ? [...cursor.anyOf, ...cursor.oneOf]
           : cursor.anyOf ?? cursor.oneOf ?? [];
@@ -684,11 +743,11 @@ export class ContextualFlowControl {
             break;
           } else {
             const subSchemaString = JSON.stringify(subSchema);
-            if (subSchemaStrings.includes(subSchemaString)) {
+            if (subSchemaStrings.has(subSchemaString)) {
               continue;
             }
             subSchemas.push(subSchema as JSONSchema);
-            subSchemaStrings.push(subSchemaString);
+            subSchemaStrings.add(subSchemaString);
           }
         }
         // Only update cursor from subSchemas if the isTrueSchema branch

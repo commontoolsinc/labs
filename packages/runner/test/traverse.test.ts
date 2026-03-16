@@ -2097,6 +2097,54 @@ for (const canonicalHashing of [false, true]) {
         // string and null branches should be fast-rejected
         expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
       });
+
+      it("does not overmatch merged branches with distinct required keys", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:doc-required-anyof" as URI;
+        const docEntity = docUri as Entity;
+
+        const docValue = {};
+
+        const docRevision: Revision<State> = {
+          the: type,
+          of: docEntity,
+          is: { value: docValue },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        };
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+        const schema = {
+          anyOf: [
+            {
+              type: "object",
+              properties: { left: { type: "string" } },
+              required: ["left"],
+            },
+            {
+              type: "object",
+              properties: { right: { type: "string" } },
+              required: ["right"],
+            },
+          ],
+        } as JSONSchema;
+
+        const traverser = getTraverser(store, { path: ["value"], schema });
+
+        const { error } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: docValue,
+        });
+
+        expect(error).toBeDefined();
+        expect(traverser.anyOfFastRejects).toBe(2);
+      });
     });
 
     describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {

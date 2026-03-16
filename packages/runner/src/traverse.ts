@@ -119,6 +119,15 @@ const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
 const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
+const _logicalBranchOrderCache = new WeakMap<object, JSONSchema[]>();
+
+const mergeableAnyOfObjectSchemaKeys = new Set([
+  "$defs",
+  "additionalProperties",
+  "properties",
+  "required",
+  "type",
+]);
 
 function internSet(
   cache: Map<string, JSONSchema>,
@@ -127,6 +136,24 @@ function internSet(
 ) {
   if (cache.size >= INTERN_CACHE_MAX) cache.clear();
   cache.set(key, value);
+}
+
+function prioritizeNonCellLogicalBranches(
+  options: readonly JSONSchema[],
+): JSONSchema[] {
+  const cached = _logicalBranchOrderCache.get(options);
+  if (cached !== undefined) return cached;
+
+  const prioritized = options.filter((option) =>
+    !SchemaObjectTraverser.asCellOrStream(option)
+  );
+  for (const option of options) {
+    if (SchemaObjectTraverser.asCellOrStream(option)) {
+      prioritized.push(option);
+    }
+  }
+  _logicalBranchOrderCache.set(options, prioritized);
+  return prioritized;
 }
 
 export function stableStringify(value: unknown): string {
@@ -467,6 +494,7 @@ export interface ObjectStorageManager {
 // I think this callback system is a bit of a kludge, but it lets me
 // use the core traversal together with different object types for the runner.
 export interface IObjectCreator<T> {
+  readonly allowMergedAnyOfObjectTraversal?: boolean;
   // When we have multiple matches, we may need to do something special to
   // combine them (for example, merging properties)
   mergeMatches(
@@ -505,6 +533,7 @@ export interface IObjectCreator<T> {
  * queries. We don't need to do anything special here.
  */
 class StandardObjectCreator implements IObjectCreator<StorableDatum> {
+  readonly allowMergedAnyOfObjectTraversal = false;
   mergeMatches(
     matches: StorableDatum[],
     _schema?: JSONSchema,
@@ -2022,19 +2051,13 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
         const { anyOf, ...restSchema } = resolved;
-        // Consider items without asCell or asStream first, since if we aren't
-        // traversing cells, we consider them a match.
-        const sortedAnyOf = [
-          ...anyOf.filter((option) =>
-            !SchemaObjectTraverser.asCellOrStream(option)
-          ),
-          ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
-        ];
-
-        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
-        // sees the full merged constraints (type/required from restSchema too).
         const matches: Immutable<StorableValue>[] = [];
-        for (const optionSchema of sortedAnyOf) {
+        const traversableBranches: Array<{
+          mergedSchema: JSONSchema;
+          optionSchema: JSONSchema;
+          useMergedObjectTraversal: boolean;
+        }> = [];
+        for (const optionSchema of prioritizeNonCellLogicalBranches(anyOf)) {
           this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
@@ -2044,18 +2067,107 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             this.anyOfFastRejects++;
             continue;
           }
-          // TODO(@ubik2): do i need to merge the link schema?
-          const { ok: val, error } = this.traverseWithSchema(
-            doc,
+          traversableBranches.push({
             mergedSchema,
-            link,
+            optionSchema,
+            useMergedObjectTraversal: isMergeableAnyOfObjectSchema(
+              mergedSchema,
+            ),
+          });
+        }
+
+        if (
+          this.objectCreator.allowMergedAnyOfObjectTraversal === true &&
+          traversableBranches.length > 1
+        ) {
+          const mergeableBranches = traversableBranches.filter((branch) =>
+            branch.useMergedObjectTraversal
           );
-          if (error === undefined) {
-            // We may just have a cell match, so the first match is what we
-            // will return, but in this case, we still want to evaluate with
-            // all the schema options, so we know to include all the potential
-            // docs needed.
-            matches.push(val);
+          if (mergeableBranches.length > 1) {
+            const mergedObjectSchema = mergeAnyOfBranchSchemas(
+              mergeableBranches.map((branch) => branch.optionSchema),
+              restSchema,
+            );
+            if (mergedObjectSchema !== null) {
+              const { ok: val, error } = this.traverseWithSchema(
+                doc,
+                mergedObjectSchema,
+                link,
+              );
+              if (error === undefined) {
+                matches.push(val);
+                this.anyOfPropertyMerges += mergeableBranches.length;
+                const mergedOptions = new Set(
+                  mergeableBranches.map((branch) => branch.optionSchema),
+                );
+                for (const branch of traversableBranches) {
+                  if (mergedOptions.has(branch.optionSchema)) {
+                    continue;
+                  }
+                  const { ok: branchVal, error: branchError } = this
+                    .traverseWithSchema(
+                      doc,
+                      branch.mergedSchema,
+                      link,
+                    );
+                  if (branchError === undefined) {
+                    matches.push(branchVal);
+                  }
+                }
+              } else {
+                for (const branch of traversableBranches) {
+                  // TODO(@ubik2): do i need to merge the link schema?
+                  const { ok: branchVal, error: branchError } = this
+                    .traverseWithSchema(
+                      doc,
+                      branch.mergedSchema,
+                      link,
+                    );
+                  if (branchError === undefined) {
+                    matches.push(branchVal);
+                  }
+                }
+              }
+            } else {
+              for (const branch of traversableBranches) {
+                // TODO(@ubik2): do i need to merge the link schema?
+                const { ok: branchVal, error: branchError } = this
+                  .traverseWithSchema(
+                    doc,
+                    branch.mergedSchema,
+                    link,
+                  );
+                if (branchError === undefined) {
+                  matches.push(branchVal);
+                }
+              }
+            }
+          } else {
+            for (const branch of traversableBranches) {
+              // TODO(@ubik2): do i need to merge the link schema?
+              const { ok: branchVal, error: branchError } = this
+                .traverseWithSchema(
+                  doc,
+                  branch.mergedSchema,
+                  link,
+                );
+              if (branchError === undefined) {
+                matches.push(branchVal);
+              }
+            }
+          }
+        } else {
+          for (const branch of traversableBranches) {
+            // TODO(@ubik2): do i need to merge the link schema?
+            const { ok: branchVal, error: branchError } = this
+              .traverseWithSchema(
+                doc,
+                branch.mergedSchema,
+                link,
+              );
+            if (branchError === undefined) {
+              matches.push(branchVal);
+            }
           }
         }
         const merged = this.objectCreator.mergeMatches(
@@ -2071,24 +2183,16 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           () => [
             "No matching anyOf",
             doc,
-            sortedAnyOf,
+            anyOf,
             this.getDebugValue(doc),
           ],
         );
         return { error: new Error("No matching anyOf") };
       } else if (resolved.oneOf) {
         const { oneOf, ...restSchema } = resolved;
-        // Consider items without asCell or asStream first, since if we aren't
-        // traversing cells, we consider them a match.
-        const sortedOneOf = [
-          ...oneOf.filter((option) =>
-            !SchemaObjectTraverser.asCellOrStream(option)
-          ),
-          ...oneOf.filter(SchemaObjectTraverser.asCellOrStream),
-        ];
         let matchCount = 0;
         let match: Immutable<StorableValue> | undefined = undefined;
-        for (const optionSchema of sortedOneOf) {
+        for (const optionSchema of prioritizeNonCellLogicalBranches(oneOf)) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
@@ -2113,7 +2217,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             () => [
               "No matching oneOf",
               doc,
-              sortedOneOf,
+              oneOf,
               this.getDebugValue(doc),
             ],
           );
@@ -2124,7 +2228,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           () => [
             "Multiple matching oneOf",
             doc,
-            sortedOneOf,
+            oneOf,
             this.getDebugValue(doc),
           ],
         );
@@ -2226,7 +2330,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         return { error: new Error("Invalid type") };
       }
 
-      const newValue: Immutable<StorableValue>[] = [];
+      const newValue = new Array<Immutable<StorableValue>>(doc.value.length);
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(
         doc.address,
@@ -2241,14 +2345,15 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       if (valid === TypeValidity.Unknown) {
         return { ok: this.objectCreator.createObject(newLink, undefined) };
       }
-      const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
-      if (!Array.isArray(entries)) {
+      const validEntries = this.traverseArrayWithSchema(
+        doc,
+        schemaObj,
+        newValue,
+        newLink,
+      );
+      if (!validEntries) {
         return { error: new Error("Invalid array") };
       }
-      entries.forEach((item, i) => {
-        newValue[i] = item;
-      });
-      newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
@@ -2273,12 +2378,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         if (valid === TypeValidity.Unknown) {
           return { ok: this.objectCreator.createObject(newLink, undefined) };
         }
-        const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
-        if (entries === undefined || entries === null) {
+        const validEntries = this.traverseObjectWithSchema(
+          doc,
+          schemaObj,
+          newValue,
+          newLink,
+        );
+        if (!validEntries) {
           return { error: new Error("Invalid object") };
-        }
-        for (const [k, v] of Object.entries(entries)) {
-          newValue[k] = v;
         }
         // TODO(@ubik2): We should be able to remove this cast when we make
         // our return types more correct (we can hold cells/functions).
@@ -2441,11 +2548,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   private traverseArrayWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
+    arrayObj: Immutable<StorableValue>[],
     _link?: NormalizedFullLink,
-  ): Immutable<StorableValue>[] | undefined {
+  ): boolean {
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<StorableDatum>[];
-    const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
 
     // We use `every` here so if our input is a sparse array, so is our output.
     const valid = docArray.every((item, index) => {
@@ -2598,7 +2705,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       }
       return true;
     });
-    return valid ? arrayObj : undefined;
+    return valid;
   }
 
   /**
@@ -2622,10 +2729,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   private traverseObjectWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
+    filteredObj: Record<string, Immutable<StorableValue>>,
     _link?: NormalizedFullLink,
-  ): Record<string, Immutable<StorableValue>> | undefined {
+  ): boolean {
     this.traverseObjectCalls++;
-    const filteredObj: Record<string, Immutable<StorableValue>> = {};
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
@@ -2744,12 +2851,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
               "with schema",
               schema,
             ]);
-            return undefined;
+            return false;
           }
         }
       }
     }
-    return filteredObj;
+    return true;
   }
 
   // This just has a schema, since the doc.address.path should match the
@@ -3002,6 +3109,21 @@ export function canBranchMatch(
   }
 
   return true;
+}
+
+function isMergeableAnyOfObjectSchema(
+  schema: JSONSchema,
+): schema is JSONSchemaObj {
+  if (!isObject(schema) || SchemaObjectTraverser.asCellOrStream(schema)) {
+    return false;
+  }
+  if (schema.type !== undefined) {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    if (!types.includes("object")) return false;
+  }
+  return Object.keys(schema).every((key) =>
+    mergeableAnyOfObjectSchemaKeys.has(key)
+  );
 }
 
 /** Map JS typeof to JSON Schema type string, or null if unknown */
