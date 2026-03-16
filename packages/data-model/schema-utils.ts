@@ -19,40 +19,45 @@ import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
  * Boolean schemas (`true` / `false`) are primitives and therefore already
  * immutable — they are returned as-is regardless of `canShare`.
  */
-export function toDeepFrozenSchema(
-  schema: JSONSchema,
+export function toDeepFrozenSchema<T extends JSONSchema>(
+  schema: T,
   canShare: boolean = false,
-): JSONSchema {
+): T {
   // Booleans are primitives — already immutable.
   if (typeof schema === "boolean") {
     return schema;
   }
 
-  if (Object.isFrozen(schema)) {
-    // `schema` is already frozen...
-    if (isDeepFrozen(schema)) {
+  // After the boolean check, `schema` is necessarily a `JSONSchemaObj`. We use
+  // a local `obj` variable so TypeScript can track the object-only type through
+  // the spread and freeze operations, then cast back to `T` on return.
+  let obj = schema as Exclude<T, boolean>;
+
+  if (Object.isFrozen(obj)) {
+    // `obj` is already frozen...
+    if (isDeepFrozen(obj)) {
       // ...and is in fact already deep-frozen, so we can return it directly.
-      return schema;
+      return obj as T;
     } else {
       // ...but it's not deep-frozen, so we have to shallow-clone and modify
       // (even if `canShare === true`).
-      schema = { ...schema };
+      obj = { ...obj };
     }
   } else if (!canShare) {
-    // `schema` is not frozen but also can't be modified; shallow-clone it.
-    schema = { ...schema };
+    // `obj` is not frozen but also can't be modified; shallow-clone it.
+    obj = { ...obj };
   }
 
-  // At this point, we have a mutable `schema` which is allowed to be mutated
+  // At this point, we have a mutable `obj` which is allowed to be mutated
   // and is to become the frozen return value. TODO(danfuzz):
   // `structuredClone()` will no longer be appropriate to use once the schema
   // system grows to support the full rich-data model.
-  const schemaRecord = schema as Record<string, unknown>;
-  for (const [key, value] of Object.entries(schemaRecord)) {
-    schemaRecord[key] = isDeepFrozen(value)
+  const record = obj as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) {
+    record[key] = isDeepFrozen(value)
       ? value
       : deepFreeze(structuredClone(value));
   }
 
-  return Object.freeze(schema);
+  return Object.freeze(obj) as T;
 }
