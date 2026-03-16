@@ -51,6 +51,7 @@ type SubscriptionState = {
   query: GraphQuery;
   entities: EntitySnapshot[];
   serverSeq: number;
+  trackedIds: ReadonlySet<string>;
 };
 
 type CachedSubscription = {
@@ -174,6 +175,7 @@ type Send = (message: ServerMessage) => void;
 
 class Connection {
   #subscriptions = new Map<string, SubscriptionState>();
+  #subscriptionsByTrackedId = new Map<string, Set<string>>();
   #ready = false;
   #closed = false;
 
@@ -242,19 +244,23 @@ class Connection {
         const response = await this.server.graphQuery(parsed);
         this.send(response);
         if (response.ok?.subscriptionId) {
-          this.#subscriptions.set(response.ok.subscriptionId, {
+          this.trackSubscription({
             id: response.ok.subscriptionId,
             space: parsed.space,
             sessionId: parsed.sessionId,
             query: parsed.query,
             entities: response.ok.entities,
             serverSeq: response.ok.serverSeq,
+            trackedIds: trackedIdsForSubscription(
+              parsed.query,
+              response.ok.entities,
+            ),
           });
         }
         return;
       }
       case "graph.unsubscribe": {
-        this.#subscriptions.delete(parsed.subscriptionId);
+        this.untrackSubscription(parsed.subscriptionId);
         this.send({
           type: "response",
           requestId: parsed.requestId,
@@ -269,6 +275,26 @@ class Connection {
     return [...this.#subscriptions.values()].filter((subscription) =>
       subscription.space === space
     );
+  }
+
+  subscriptionsForDirtyIds(
+    space: string,
+    dirtyIds: ReadonlySet<string>,
+  ): readonly SubscriptionState[] {
+    const matches = new Map<string, SubscriptionState>();
+    for (const dirtyId of dirtyIds) {
+      const tracked = this.#subscriptionsByTrackedId.get(dirtyId);
+      if (tracked === undefined) {
+        continue;
+      }
+      for (const subscriptionId of tracked) {
+        const subscription = this.#subscriptions.get(subscriptionId);
+        if (subscription !== undefined && subscription.space === space) {
+          matches.set(subscriptionId, subscription);
+        }
+      }
+    }
+    return [...matches.values()];
   }
 
   async refresh(space: string): Promise<void> {
@@ -294,7 +320,10 @@ class Connection {
         result: GraphQueryResult;
         subscriptionIds: string[];
       }>();
-      for (const subscription of this.subscriptionsForSpace(space)) {
+      const subscriptions = dirtyIds === undefined
+        ? this.subscriptionsForSpace(space)
+        : this.subscriptionsForDirtyIds(space, dirtyIds);
+      for (const subscription of subscriptions) {
         logger.debug("subscription-refresh/considered");
         if (
           dirtyIds !== undefined &&
@@ -350,6 +379,7 @@ class Connection {
         }
         subscription.entities = state.entities;
         subscription.serverSeq = state.serverSeq;
+        this.retrackSubscription(subscription);
         const result = {
           ...state,
           subscriptionId: subscription.id,
@@ -385,8 +415,55 @@ class Connection {
     }
     this.#closed = true;
     this.server.cacheSubscriptions(this.#subscriptions.values());
-    this.#subscriptions.clear();
+    for (const subscriptionId of [...this.#subscriptions.keys()]) {
+      this.untrackSubscription(subscriptionId);
+    }
     this.server.disconnect(this);
+  }
+
+  private trackSubscription(subscription: SubscriptionState): void {
+    this.#subscriptions.set(subscription.id, subscription);
+    for (const trackedId of subscription.trackedIds) {
+      let subscriptions = this.#subscriptionsByTrackedId.get(trackedId);
+      if (subscriptions === undefined) {
+        subscriptions = new Set();
+        this.#subscriptionsByTrackedId.set(trackedId, subscriptions);
+      }
+      subscriptions.add(subscription.id);
+    }
+  }
+
+  private retrackSubscription(subscription: SubscriptionState): void {
+    const nextTrackedIds = trackedIdsForSubscription(
+      subscription.query,
+      subscription.entities,
+    );
+    if (setEquals(subscription.trackedIds, nextTrackedIds)) {
+      return;
+    }
+    this.untrackSubscription(subscription.id);
+    this.trackSubscription({
+      ...subscription,
+      trackedIds: nextTrackedIds,
+    });
+  }
+
+  private untrackSubscription(subscriptionId: string): void {
+    const subscription = this.#subscriptions.get(subscriptionId);
+    if (subscription === undefined) {
+      return;
+    }
+    this.#subscriptions.delete(subscriptionId);
+    for (const trackedId of subscription.trackedIds) {
+      const subscriptions = this.#subscriptionsByTrackedId.get(trackedId);
+      if (subscriptions === undefined) {
+        continue;
+      }
+      subscriptions.delete(subscriptionId);
+      if (subscriptions.size === 0) {
+        this.#subscriptionsByTrackedId.delete(trackedId);
+      }
+    }
   }
 }
 
@@ -611,10 +688,17 @@ export class Server {
     for (const id of touchedIds) {
       const previous = previousById.get(id);
       const current = getOrLoadEntitySnapshot(cache, engine, id, branch);
-      const topologyChange = documentTopologyChangeReason(
-        previous?.document,
-        current.document,
-      );
+      const topologyChange = queryHasRoot(subscription.query, id)
+        ? documentTopologyChangeReasonForRootQuery(
+          subscription.query,
+          id,
+          previous?.document,
+          current.document,
+        )
+        : documentTopologyChangeReason(
+          previous?.document,
+          current.document,
+        );
       if (topologyChange !== null) {
         if (topologyChange === "source" && sourcePatched !== null) {
           logger.debug("subscription-refresh/direct-patch/topology-source");
@@ -865,6 +949,35 @@ const sameEntities = (
   });
 };
 
+const setEquals = (
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const trackedIdsForSubscription = (
+  query: GraphQuery,
+  entities: readonly EntitySnapshot[],
+): ReadonlySet<string> => {
+  const ids = new Set<string>();
+  for (const root of query.roots) {
+    ids.add(root.id);
+  }
+  for (const entity of entities) {
+    ids.add(entity.id);
+  }
+  return ids;
+};
+
 const subscriptionTouchesIds = (
   subscription: SubscriptionState,
   dirtyIds: ReadonlySet<string>,
@@ -1051,6 +1164,35 @@ const documentTopologyChangeReason = (
   return null;
 };
 
+const documentTopologyChangeReasonForRootQuery = (
+  query: GraphQuery,
+  id: string,
+  previous: unknown,
+  current: unknown,
+): "source" | "sigil" | null => {
+  const rootSelectors = query.roots
+    .filter((root) => root.id === id)
+    .map((root) => root.selector);
+  if (rootSelectors.length === 0) {
+    return documentTopologyChangeReason(previous, current);
+  }
+  const left = collectRootScopedTopologyRefs(previous, rootSelectors);
+  const right = collectRootScopedTopologyRefs(current, rootSelectors);
+  if (
+    left.source.length !== right.source.length ||
+    left.source.some((entry, index) => entry !== right.source[index])
+  ) {
+    return "source";
+  }
+  if (
+    left.sigil.length !== right.sigil.length ||
+    left.sigil.some((entry, index) => entry !== right.sigil[index])
+  ) {
+    return "sigil";
+  }
+  return null;
+};
+
 const collectTopologyRefs = (
   document: unknown,
 ): { source: string[]; sigil: string[] } => {
@@ -1063,6 +1205,164 @@ const collectTopologyRefs = (
   source.sort();
   sigil.sort();
   return { source, sigil };
+};
+
+const collectRootScopedTopologyRefs = (
+  document: unknown,
+  selectors: ReadonlyArray<{
+    path: readonly string[];
+    schema?: unknown;
+  }>,
+): { source: string[]; sigil: string[] } => {
+  if (document === null || document === undefined || !isRecord(document)) {
+    return { source: [], sigil: [] };
+  }
+
+  const source = new Set<string>();
+  const sigil = new Set<string>();
+
+  if (isSourceLink(document.source)) {
+    source.add(`source=>${document.source["/"]}`);
+  }
+
+  const value = document.value;
+  if (isRecord(value) && isPrimitiveCellLink(value.spell)) {
+    sigil.add(`value.spell=>${JSON.stringify(value.spell)}`);
+  }
+
+  for (const selector of selectors) {
+    const selected = getValueAtPath(value, selector.path);
+    if (selected === undefined) {
+      continue;
+    }
+    collectSchemaScopedValueTopologyRefs(
+      selected,
+      ["value", ...selector.path],
+      selector.schema,
+      { source, sigil },
+    );
+  }
+
+  return {
+    source: [...source].sort(),
+    sigil: [...sigil].sort(),
+  };
+};
+
+const getValueAtPath = (
+  value: unknown,
+  path: readonly string[],
+): unknown => {
+  let current = value;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index)) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+};
+
+const collectSchemaScopedValueTopologyRefs = (
+  value: unknown,
+  path: readonly (string | number)[],
+  schema: unknown,
+  entries: { source: Set<string>; sigil: Set<string> },
+): void => {
+  if (isSourceLink(value)) {
+    entries.source.add(`${path.join(".")}=>${value["/"]}`);
+    return;
+  }
+  if (isPrimitiveCellLink(value)) {
+    entries.sigil.add(`${path.join(".")}=>${JSON.stringify(value)}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    const itemSchema = isRecord(schema) ? schema.items : undefined;
+    value.forEach((item, index) => {
+      const nextSchema = Array.isArray(itemSchema)
+        ? itemSchema[index]
+        : itemSchema;
+      collectSchemaScopedValueTopologyRefs(
+        item,
+        [...path, index],
+        nextSchema ?? true,
+        entries,
+      );
+    });
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (!isRecord(schema)) {
+    if (schema === false) {
+      return;
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      collectSchemaScopedValueTopologyRefs(
+        nested,
+        [...path, key],
+        true,
+        entries,
+      );
+    }
+    return;
+  }
+
+  if (
+    Array.isArray(schema.anyOf) ||
+    Array.isArray(schema.oneOf) ||
+    Array.isArray(schema.allOf)
+  ) {
+    for (const [key, nested] of Object.entries(value)) {
+      collectSchemaScopedValueTopologyRefs(
+        nested,
+        [...path, key],
+        true,
+        entries,
+      );
+    }
+    return;
+  }
+
+  const properties = isRecord(schema.properties)
+    ? schema.properties
+    : undefined;
+  const additionalProperties = schema.additionalProperties;
+  for (const [key, nested] of Object.entries(value)) {
+    const nextSchema = properties?.[key];
+    if (nextSchema !== undefined) {
+      collectSchemaScopedValueTopologyRefs(
+        nested,
+        [...path, key],
+        nextSchema,
+        entries,
+      );
+      continue;
+    }
+    if (properties !== undefined && additionalProperties === undefined) {
+      continue;
+    }
+    if (additionalProperties === false) {
+      continue;
+    }
+    collectSchemaScopedValueTopologyRefs(
+      nested,
+      [...path, key],
+      additionalProperties ?? true,
+      entries,
+    );
+  }
 };
 
 const collectValueTopologyRefs = (

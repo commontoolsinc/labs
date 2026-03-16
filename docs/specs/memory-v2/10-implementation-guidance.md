@@ -90,6 +90,22 @@ from `@commontools/runner/traverse` via `packages/memory/space-schema.ts`. This
 is intentional and must be preserved — it ensures query results are identical on
 both sides.
 
+For subscription refresh, do **not** treat "topology changed anywhere in the
+document" as the invalidation rule for schema-bearing root queries. That is too
+coarse and causes unnecessary full `graph.query` reevaluations. For root docs:
+
+- always consider the top-level `source` sibling
+- always consider the root pattern link (`value.spell` / equivalent root pattern
+  topology)
+- otherwise scope sigil/topology comparison to the selector path being watched
+- when the selector has an object/array schema, scope further to the
+  schema-covered branches (`properties`, `additionalProperties`, `items`)
+
+This still must remain conservative for shapes whose selected value can change
+the included entity set. In particular, do not assume `asCell` / `asStream`
+selector paths are safe to skip: those queries can still change linked-entity
+membership and may require full reevaluation.
+
 ---
 
 ## 2. Naming and Interface Changes

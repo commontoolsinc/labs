@@ -1076,6 +1076,290 @@ Deno.test("memory v2 server reevaluates identical topology-changing subscription
   await server.close();
 });
 
+Deno.test("memory v2 server does not reevaluate path-scoped schema queries for unrelated sigil changes", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-path-scoped-sigil"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-path-scoped-sigil";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: { name: "Target 1" },
+        },
+      }, {
+        op: "set",
+        id: "of:target:2",
+        value: {
+          value: { name: "Target 2" },
+        },
+      }, {
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            argument: {
+              element: {
+                label: "Hello",
+              },
+            },
+            internal: {
+              helper: {
+                "/": {
+                  "link@1": {
+                    id: "of:target:1",
+                    path: [],
+                    space,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: ["argument", "element"],
+          schema: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+            },
+          },
+        },
+      }],
+    },
+  }));
+
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+  server.queryCount = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            argument: {
+              element: {
+                label: "Hello",
+              },
+            },
+            internal: {
+              helper: {
+                "/": {
+                  "link@1": {
+                    id: "of:target:2",
+                    path: [],
+                    space,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+  await tick();
+
+  assertEquals(server.queryCount, 0);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.result.entities.map((entity: any) => entity.id), [
+    "of:doc:1",
+  ]);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server does not reevaluate root schema queries for sigil changes outside the schema shape", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-root-schema-sigil"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-root-schema-sigil";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: { name: "Target 1" },
+        },
+      }, {
+        op: "set",
+        id: "of:target:2",
+        value: {
+          value: { name: "Target 2" },
+        },
+      }, {
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            title: "Hello",
+            internal: {
+              helper: {
+                "/": {
+                  "link@1": {
+                    id: "of:target:1",
+                    path: [],
+                    space,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+          },
+        },
+      }],
+    },
+  }));
+
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+  server.queryCount = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            title: "Hello",
+            internal: {
+              helper: {
+                "/": {
+                  "link@1": {
+                    id: "of:target:2",
+                    path: [],
+                    space,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+  await tick();
+
+  assertEquals(server.queryCount, 0);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.result.entities.map((entity: any) => entity.id), [
+    "of:doc:1",
+  ]);
+
+  await server.close();
+});
+
 Deno.test("memory v2 server reevaluates queries when a root doc gains a sigil link", async () => {
   const server = new CountingServer({
     store: new URL("memory://memory-v2-server-sigil-topology"),
@@ -1197,6 +1481,187 @@ Deno.test("memory v2 server reevaluates queries when a root doc gains a sigil li
   assertEquals(
     update.result.entities.map((entity: any) => entity.id),
     ["of:root:1", "of:target:1"],
+  );
+
+  await server.close();
+});
+
+Deno.test("memory v2 server continues refreshing subscriptions after a reevaluation adds a linked entity", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-linked-entity-refresh"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-linked-entity-refresh";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: {
+            city: "San Francisco",
+          },
+        },
+      }, {
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            name: "Alice",
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              friend: {
+                type: "object",
+                properties: {
+                  city: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-link",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            name: "Alice",
+            friend: {
+              "/": {
+                "link@1": {
+                  id: "of:target:1",
+                  path: [],
+                  space,
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-link");
+
+  await tick();
+  await tick();
+
+  const firstUpdate = assertUpdate(shiftMessage(messages));
+  assertEquals(firstUpdate.result.entities.map((entity: any) => entity.id), [
+    "of:doc:1",
+    "of:target:1",
+  ]);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-target",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: {
+            city: "Los Angeles",
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-target");
+
+  await tick();
+
+  const secondUpdate = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    secondUpdate.result.entities.map((entity: any) => ({
+      id: entity.id,
+      document: entity.document,
+    })),
+    [{
+      id: "of:doc:1",
+      document: {
+        value: {
+          name: "Alice",
+          friend: {
+            "/": {
+              "link@1": {
+                id: "of:target:1",
+                path: [],
+                space,
+              },
+            },
+          },
+        },
+      },
+    }, {
+      id: "of:target:1",
+      document: {
+        value: {
+          city: "Los Angeles",
+        },
+      },
+    }],
   );
 
   await server.close();
