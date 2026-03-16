@@ -38,12 +38,9 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: true
                 }
             },
@@ -58,12 +55,9 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: true
                 }
             },
@@ -85,14 +79,11 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: true
                 }
             },

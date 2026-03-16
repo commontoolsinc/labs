@@ -456,6 +456,11 @@ export function analyzeFunctionCapabilities(
       return empty;
     }
 
+    // Track .get() CallExpression nodes whose result was resolved with a more
+    // specific path (e.g. notes.get().length → ["length"]).  When the
+    // READER_METHODS handler encounters these, it skips the blanket [] read.
+    const resolvedGetCalls = new Set<ts.Node>();
+
     const resolveFromAccess = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
@@ -476,6 +481,43 @@ export function analyzeFunctionCapabilities(
       const current = unwrapExpression(expression);
       const byAccess = resolveFromAccess(current);
       if (byAccess) return byAccess;
+
+      // Handle property/element access on resolved call expressions.
+      // e.g. notes.get().length → resolve notes.get() then append "length"
+      if (
+        ts.isPropertyAccessExpression(current) ||
+        ts.isElementAccessExpression(current)
+      ) {
+        const innerExpr = current.expression;
+        const innerRef = resolveSourceRef(innerExpr);
+        if (innerRef) {
+          // Mark the inner .get() call so the READER_METHODS handler skips it.
+          if (ts.isCallExpression(innerExpr)) {
+            resolvedGetCalls.add(innerExpr);
+          }
+          if (ts.isPropertyAccessExpression(current)) {
+            return {
+              root: innerRef.root,
+              path: [...innerRef.path, current.name.text],
+              dynamic: innerRef.dynamic,
+            };
+          }
+          if (
+            ts.isElementAccessExpression(current) &&
+            isLiteralElement(current.argumentExpression)
+          ) {
+            return {
+              root: innerRef.root,
+              path: [
+                ...innerRef.path,
+                getLiteralElementText(current.argumentExpression),
+              ],
+              dynamic: innerRef.dynamic,
+            };
+          }
+          return { ...innerRef, dynamic: true };
+        }
+      }
 
       if (
         ts.isCallExpression(current) &&
@@ -879,7 +921,12 @@ export function analyzeFunctionCapabilities(
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
             } else if (READER_METHODS.has(methodName)) {
-              trackReadRef(receiver);
+              // If the .get() result was already resolved with a more specific
+              // path by the member-access handler (e.g. notes.get().length →
+              // ["notes", "length"]), skip the blanket read.
+              if (!resolvedGetCalls.has(node)) {
+                trackReadRef(receiver);
+              }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
               trackReadRef(receiver);

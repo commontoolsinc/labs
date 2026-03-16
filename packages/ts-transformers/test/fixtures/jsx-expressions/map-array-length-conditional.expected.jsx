@@ -32,7 +32,7 @@ export default pattern((_state) => {
                 list: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: true
                 }

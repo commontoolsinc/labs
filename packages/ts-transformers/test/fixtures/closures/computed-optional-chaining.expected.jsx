@@ -30,16 +30,6 @@ export default pattern(() => {
                 asCell: true
             },
             config: {
-                anyOf: [{
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        }
-                    }, {
-                        type: "null"
-                    }],
                 asCell: true
             }
         },

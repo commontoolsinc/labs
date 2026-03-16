@@ -34,7 +34,7 @@ export default pattern(() => {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: true
                 }

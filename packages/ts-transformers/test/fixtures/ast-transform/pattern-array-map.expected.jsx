@@ -29,7 +29,7 @@ export default pattern((__ct_pattern_input) => {
     derive({
         type: "array",
         items: {
-            type: "string"
+            type: "unknown"
         }
     } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);

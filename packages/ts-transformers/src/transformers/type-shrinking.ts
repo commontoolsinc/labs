@@ -131,6 +131,9 @@ function buildShrunkTypeNodeFromType(
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
   // breaks runtime schema matching for downstream derives/lifts.
+  // However, when only array-intrinsic properties like `length` are accessed
+  // (no item-level access), shrink the item type to `unknown` to avoid
+  // fetching full item schemas unnecessarily.
   const typeChecker = checker as ts.TypeChecker & {
     isArrayType?: (type: ts.Type) => boolean;
     isTupleType?: (type: ts.Type) => boolean;
@@ -139,6 +142,27 @@ function buildShrunkTypeNodeFromType(
     typeChecker.isTupleType?.(type) ||
     !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   if (isArrayLike) {
+    // Properties that don't require item-level data.
+    const NON_ITEM_PROPS = new Set([
+      "length",
+      // Cell/reactive method names that leak through capability analysis
+      // when parent pointers are absent on synthetic AST nodes.
+      "get",
+      "set",
+      "key",
+      "update",
+    ]);
+    const allNonItem = normalized.every(
+      (path) =>
+        path.length === 1 && path[0] !== undefined &&
+        NON_ITEM_PROPS.has(path[0]),
+    );
+    if (allNonItem) {
+      // No item access — emit unknown[] to avoid fetching item schemas.
+      return factory.createArrayTypeNode(
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+      );
+    }
     return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
   }
@@ -273,7 +297,70 @@ function buildShrunkTypeNodeFromTypeNode(
   }
 
   if (normalized.some((path) => path.length === 0)) {
+    // For Cell-like types, an empty path typically comes from `.get()` being
+    // tracked as a full read.  If there are also longer paths (e.g. from
+    // `.get().length`), try shrinking the inner type using those paths.
+    if (
+      ts.isTypeReferenceNode(node) &&
+      isCellLikeTypeNode(node) &&
+      node.typeArguments &&
+      node.typeArguments.length > 0
+    ) {
+      const nonEmptyPaths = normalized.filter((path) => path.length > 0);
+      if (nonEmptyPaths.length > 0) {
+        const [inner, ...rest] = node.typeArguments;
+        if (inner) {
+          const shrunkInner = buildShrunkTypeNodeFromTypeNode(
+            inner,
+            nonEmptyPaths,
+            factory,
+            checker,
+          );
+          if (shrunkInner && shrunkInner !== inner) {
+            return factory.updateTypeReferenceNode(
+              node,
+              node.typeName,
+              factory.createNodeArray([shrunkInner, ...rest]),
+            );
+          }
+        }
+      }
+    }
     return node;
+  }
+
+  // Shrink array types: when only array-intrinsic properties (e.g. `length`)
+  // are accessed, replace the item type with `unknown` to avoid fetching full
+  // item schemas.  The result stays array-shaped for runtime schema matching.
+  // Handles both `Item[]` (ArrayTypeNode) and `Array<Item>` (TypeReferenceNode).
+  {
+    const isArray = ts.isArrayTypeNode(node) ||
+      (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
+        node.typeName.text === "Array");
+    if (isArray) {
+      // Properties that don't require item-level data.
+      const NON_ITEM_PROPS = new Set([
+        "length",
+        // Cell/reactive method names that leak through capability analysis
+        // when parent pointers are absent on synthetic AST nodes.
+        "get",
+        "set",
+        "key",
+        "update",
+      ]);
+      const allNonItem = normalized.every(
+        (path) =>
+          path.length === 1 && path[0] !== undefined &&
+          NON_ITEM_PROPS.has(path[0]),
+      );
+      if (allNonItem) {
+        return factory.createArrayTypeNode(
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+        );
+      }
+      // Item access or other paths — keep full array type.
+      return node;
+    }
   }
 
   // Shrink object type literals by filtering to only the accessed members.

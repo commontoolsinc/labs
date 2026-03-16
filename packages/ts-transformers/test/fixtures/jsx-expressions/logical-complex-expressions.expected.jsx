@@ -40,7 +40,7 @@ export default pattern((_state) => {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: true
                 },
@@ -82,7 +82,7 @@ export default pattern((_state) => {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: true
                 }

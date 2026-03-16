@@ -30,7 +30,7 @@ export default pattern((__ct_pattern_input) => {
     const count = derive({
         type: "array",
         items: {
-            type: "string"
+            type: "unknown"
         }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
