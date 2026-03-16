@@ -2,7 +2,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { resolveProgram, TARGET } from "@commontools/js-compiler/typescript";
 import { computeInputHash } from "./fetch-utils.ts";
@@ -30,60 +30,63 @@ interface FetchCacheEntry {
 // Full schema for cache structure to ensure proper validation when reading back
 // from storage. Without this, nested arrays may have undefined elements due to
 // incomplete schema-based transformation.
-const cacheSchema = {
-  type: "object",
-  default: {},
-  additionalProperties: {
+const cacheSchema = toDeepFrozenSchema(
+  {
     type: "object",
-    properties: {
-      inputHash: { type: "string" },
-      state: {
-        anyOf: [
-          { type: "object", properties: { type: { const: "idle" } } },
-          {
-            type: "object",
-            properties: {
-              type: { const: "fetching" },
-              requestId: { type: "string" },
-              startTime: { type: "number" },
-            },
-          },
-          {
-            type: "object",
-            properties: {
-              type: { const: "success" },
-              data: {
-                type: "object",
-                properties: {
-                  files: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        name: { type: "string" },
-                        contents: { type: "string" },
-                      },
-                      required: ["name", "contents"],
-                    },
-                  },
-                  main: { type: "string" },
-                },
-                required: ["files", "main"],
+    default: {},
+    additionalProperties: {
+      type: "object",
+      properties: {
+        inputHash: { type: "string" },
+        state: {
+          anyOf: [
+            { type: "object", properties: { type: { const: "idle" } } },
+            {
+              type: "object",
+              properties: {
+                type: { const: "fetching" },
+                requestId: { type: "string" },
+                startTime: { type: "number" },
               },
             },
-          },
-          {
-            type: "object",
-            properties: {
-              type: { const: "error" },
-              message: { type: "string" },
+            {
+              type: "object",
+              properties: {
+                type: { const: "success" },
+                data: {
+                  type: "object",
+                  properties: {
+                    files: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          name: { type: "string" },
+                          contents: { type: "string" },
+                        },
+                        required: ["name", "contents"],
+                      },
+                    },
+                    main: { type: "string" },
+                  },
+                  required: ["files", "main"],
+                },
+              },
             },
-          },
-        ],
+            {
+              type: "object",
+              properties: {
+                type: { const: "error" },
+                message: { type: "string" },
+              },
+            },
+          ],
+        },
       },
     },
-  },
-} as const satisfies JSONSchema;
+  } as const,
+  true,
+);
 
 /**
  * Fetch and resolve a program from a URL.

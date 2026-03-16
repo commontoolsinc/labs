@@ -49,6 +49,7 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -127,25 +128,28 @@ export interface RuntimeOptions {
  * reachable object from these pieces.
  * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
  */
-export const spaceCellSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    defaultPattern: {
-      type: "object",
-      properties: {
-        spaces: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { name: { type: "string" }, did: { type: "string" } },
+export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      defaultPattern: {
+        type: "object",
+        properties: {
+          spaces: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" }, did: { type: "string" } },
+            },
           },
+          defaultAppUrl: { type: "string" },
         },
-        defaultAppUrl: { type: "string" },
+        asCell: true,
       },
-      asCell: true,
     },
-  },
-} as JSONSchema;
+  } as const,
+  true,
+);
 
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;

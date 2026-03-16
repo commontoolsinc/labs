@@ -1,11 +1,11 @@
 import { getLogger } from "@commontools/utils/logger";
 import {
-  JSONSchema,
   Module,
   Pattern,
   Schema,
   unsafe_originalPattern,
 } from "./builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { Cell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
@@ -22,37 +22,40 @@ const logger = getLogger("pattern-manager");
  */
 const MAX_PATTERN_CACHE_SIZE = 100;
 
-export const patternMetaSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    // @deprecated Represents a pattern with a single source file
-    src: { type: "string" },
-    spec: { type: "string" },
-    parents: { type: "array", items: { type: "string" } },
-    patternName: { type: "string" },
-    program: {
-      type: "object",
-      properties: {
-        main: { type: "string" },
-        mainExport: { type: "string" },
-        files: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              contents: { type: "string" },
+export const patternMetaSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      // @deprecated Represents a pattern with a single source file
+      src: { type: "string" },
+      spec: { type: "string" },
+      parents: { type: "array", items: { type: "string" } },
+      patternName: { type: "string" },
+      program: {
+        type: "object",
+        properties: {
+          main: { type: "string" },
+          mainExport: { type: "string" },
+          files: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                contents: { type: "string" },
+              },
+              required: ["name", "contents"],
             },
-            required: ["name", "contents"],
           },
         },
+        required: ["main", "files"],
       },
-      required: ["main", "files"],
     },
-  },
-  required: ["id"],
-} as const satisfies JSONSchema;
+    required: ["id"],
+  } as const,
+  true,
+);
 
 export type PatternMeta = Schema<typeof patternMetaSchema>;
 

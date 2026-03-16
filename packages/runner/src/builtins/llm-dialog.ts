@@ -15,6 +15,7 @@ import type {
   JSONSchema,
 } from "commontools";
 import type { Schema } from "@commontools/api/schema";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
@@ -543,46 +544,52 @@ function traverseAndCellify(
   return value;
 }
 
-const resultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: {},
-    addMessage: { ...LLMMessageSchema, asStream: true },
-    cancelGeneration: { asStream: true },
-    pinCell: {
-      type: "object",
-      properties: {
-        path: { type: "string" },
-        name: { type: "string" },
-      },
-      required: ["path", "name"],
-      asStream: true,
-    },
-    unpinAllCells: { asStream: true },
-    flattenedTools: { type: "object", default: {} },
-    pinnedCells: {
-      type: "array",
-      items: {
+const resultSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      pending: { type: "boolean", default: false },
+      result: {},
+      addMessage: { ...LLMMessageSchema, asStream: true },
+      cancelGeneration: { asStream: true },
+      pinCell: {
         type: "object",
         properties: {
           path: { type: "string" },
           name: { type: "string" },
         },
+        required: ["path", "name"],
+        asStream: true,
+      },
+      unpinAllCells: { asStream: true },
+      flattenedTools: { type: "object", default: {} },
+      pinnedCells: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+          },
+        },
       },
     },
-  },
-  required: ["pending", "addMessage", "cancelGeneration"],
-} as const satisfies JSONSchema;
+    required: ["pending", "addMessage", "cancelGeneration"],
+  } as const,
+  true,
+);
 
-const internalSchema = {
-  type: "object",
-  properties: {
-    requestId: { type: "string" },
-    lastActivity: { type: "number" },
-  },
-  required: ["requestId", "lastActivity"],
-} as const satisfies JSONSchema;
+const internalSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      requestId: { type: "string" },
+      lastActivity: { type: "number" },
+    },
+    required: ["requestId", "lastActivity"],
+  } as const,
+  true,
+);
 
 type LegacyToolEntry = {
   name: string;
@@ -643,120 +650,138 @@ const UNPIN_TOOL_NAME = "unpin";
 const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
-const READ_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const READ_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link to the cell to read. Format: { "@link": "/of:bafyabc123/path" }.',
       },
-      required: ["@link"],
-      description:
-        'Link to the cell to read. Format: { "@link": "/of:bafyabc123/path" }.',
     },
-  },
-  required: ["path"],
-  additionalProperties: false,
-};
+    required: ["path"],
+    additionalProperties: false,
+  } as const,
+  true,
+);
 
-const INVOKE_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const INVOKE_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link to the handler or pattern to invoke. Format: { "@link": "/of:bafyabc123/doThing" }.',
       },
-      required: ["@link"],
-      description:
-        'Link to the handler or pattern to invoke. Format: { "@link": "/of:bafyabc123/doThing" }.',
+      args: {
+        type: "object",
+        description: "Arguments passed to the handler or pattern.",
+      },
     },
-    args: {
-      type: "object",
-      description: "Arguments passed to the handler or pattern.",
-    },
-  },
-  required: ["path"],
-  additionalProperties: true,
-};
+    required: ["path"],
+    additionalProperties: true,
+  } as const,
+  true,
+);
 
-const SCHEMA_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const SCHEMA_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link to the cell to inspect. Format: { "@link": "/of:bafyabc123" }.',
       },
-      required: ["@link"],
-      description:
-        'Link to the cell to inspect. Format: { "@link": "/of:bafyabc123" }.',
     },
-  },
-  required: ["path"],
-  additionalProperties: false,
-};
+    required: ["path"],
+    additionalProperties: false,
+  } as const,
+  true,
+);
 
-const PIN_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const PIN_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link to pin for easy reference. Format: { "@link": "/of:bafyabc123" }.',
       },
-      required: ["@link"],
-      description:
-        'Link to pin for easy reference. Format: { "@link": "/of:bafyabc123" }.',
+      name: {
+        type: "string",
+        description: "Human-readable name for this pinned cell.",
+      },
     },
-    name: {
-      type: "string",
-      description: "Human-readable name for this pinned cell.",
-    },
-  },
-  required: ["path", "name"],
-  additionalProperties: false,
-};
+    required: ["path", "name"],
+    additionalProperties: false,
+  } as const,
+  true,
+);
 
-const UNPIN_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const UNPIN_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link of the pinned cell to remove. Format: { "@link": "/of:bafyabc123" }.',
       },
-      required: ["@link"],
-      description:
-        'Link of the pinned cell to remove. Format: { "@link": "/of:bafyabc123" }.',
     },
-  },
-  required: ["path"],
-  additionalProperties: false,
-};
+    required: ["path"],
+    additionalProperties: false,
+  } as const,
+  true,
+);
 
-const UPDATE_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
+const UPDATE_ARGUMENT_INPUT_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "object",
+        properties: {
+          "@link": { type: "string" },
+        },
+        required: ["@link"],
+        description:
+          'Link to the pattern instance to update. Format: { "@link": "/of:bafyabc123" }.',
       },
-      required: ["@link"],
-      description:
-        'Link to the pattern instance to update. Format: { "@link": "/of:bafyabc123" }.',
+      updates: {
+        type: "object",
+        description:
+          "Field updates to apply to the pattern's arguments. Keys are field paths (e.g., 'query' or 'config.theme'), values are new values.",
+      },
     },
-    updates: {
-      type: "object",
-      description:
-        "Field updates to apply to the pattern's arguments. Keys are field paths (e.g., 'query' or 'config.theme'), values are new values.",
-    },
-  },
-  required: ["path", "updates"],
-  additionalProperties: false,
-};
+    required: ["path", "updates"],
+    additionalProperties: false,
+  } as const,
+  true,
+);
 
 /**
  * Represents a pinned cell in the conversation.
@@ -2155,7 +2180,7 @@ export function llmDialog(
       {
         type: "object",
         additionalProperties: LLMReducedToolSchema,
-      } as const satisfies JSONSchema,
+      } as const,
     ).withTx(tx);
     const flattened = flattenTools(toolsCell);
 

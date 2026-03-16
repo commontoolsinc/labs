@@ -3,20 +3,24 @@ import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
+import type { Schema } from "../builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 
 export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 
-export const internalSchema = {
-  type: "object",
-  properties: {
-    requestId: { type: "string", default: "" },
-    lastActivity: { type: "number", default: 0 },
-    inputHash: { type: "string", default: "" },
-  },
-  default: {},
-  required: ["requestId", "lastActivity", "inputHash"],
-} as const satisfies JSONSchema;
+export const internalSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      requestId: { type: "string", default: "" },
+      lastActivity: { type: "number", default: 0 },
+      inputHash: { type: "string", default: "" },
+    },
+    default: {},
+    required: ["requestId", "lastActivity", "inputHash"],
+  } as const,
+  true,
+);
 
 /**
  * Computes a hash of inputs for comparison.

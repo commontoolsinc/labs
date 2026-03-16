@@ -3,7 +3,8 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
+import type { Schema } from "../builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   computeInputHashFromValue,
   internalSchema,
@@ -23,24 +24,27 @@ type FetchDataInputs = {
  * which is `any`) lets cell.asSchema(schema).get() materialize nested
  * properties like options.headers as plain objects instead of proxies.
  */
-const fetchDataInputSchema = {
-  type: "object",
-  properties: {
-    url: { type: "string" },
-    mode: { type: "string" },
-    options: {
-      type: "object",
-      properties: {
-        body: {},
-        method: { type: "string" },
-        headers: {
-          type: "object",
-          additionalProperties: { type: "string" },
+const fetchDataInputSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+      mode: { type: "string" },
+      options: {
+        type: "object",
+        properties: {
+          body: {},
+          method: { type: "string" },
+          headers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+          },
         },
       },
     },
-  },
-} as const satisfies JSONSchema;
+  } as const,
+  true,
+);
 
 function snapshotFetchDataInputs(
   cell: Cell<FetchDataInputs>,

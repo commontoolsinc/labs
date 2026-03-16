@@ -11,7 +11,8 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type JSONSchema, NAME, type Pattern, UI } from "../builder/types.ts";
+import { NAME, type Pattern, UI } from "../builder/types.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { getPatternEnvironment } from "../env.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
@@ -19,10 +20,13 @@ const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
 
 // Schema for mentionable array - items are cell references (asCell: true)
 // Don't restrict properties so .get() returns full cell data
-const mentionableListSchema = {
-  type: "array",
-  items: { asCell: true },
-} as const satisfies JSONSchema;
+const mentionableListSchema = toDeepFrozenSchema(
+  {
+    type: "array",
+    items: { asCell: true },
+  } as const,
+  true,
+);
 
 class WishError extends Error {
   constructor(message: string) {
@@ -504,17 +508,20 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("ct-cell-link", { $cell: cell });
 }
 
-const TARGET_SCHEMA = {
-  type: "object",
-  properties: {
-    query: { type: "string" },
-    path: { type: "array", items: { type: "string" } },
-    context: { type: "object", additionalProperties: { asCell: true } },
-    scope: { type: "array", items: { type: "string" } },
-    headless: { type: "boolean" },
-  },
-  required: ["query"],
-} as const satisfies JSONSchema;
+const TARGET_SCHEMA = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      query: { type: "string" },
+      path: { type: "array", items: { type: "string" } },
+      context: { type: "object", additionalProperties: { asCell: true } },
+      scope: { type: "array", items: { type: "string" } },
+      headless: { type: "boolean" },
+    },
+    required: ["query"],
+  } as const,
+  true,
+);
 
 export function wish(
   inputsCell: Cell<[unknown, unknown]>,

@@ -4,183 +4,157 @@
  * /!\ interfaces and utilities.
  */
 
-import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
+import { NAME, type Schema, TYPE, UI } from "./shared.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 
-export const rendererVDOMSchema = {
-  $id: "https://commonfabric.org/schemas/vdom.json",
-  $defs: {
-    vdomRenderNode: {
-      anyOf: [
-        { $ref: "#/$defs/vdomNode" },
-        { type: "string" },
-        { type: "number" },
-        { type: "boolean" },
-        { type: "null" },
-        { type: "undefined" },
-        {
-          type: "array",
-          items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
-        },
-      ],
-    },
-    vdomNode: {
-      type: "object",
-      properties: {
-        type: { type: "string" },
-        name: { type: "string" },
-        props: {
-          type: "object",
-          properties: {
-            style: { anyOf: [{ type: "object" }, { type: "string" }] },
+export const rendererVDOMSchema = toDeepFrozenSchema(
+  {
+    $id: "https://commonfabric.org/schemas/vdom.json",
+    $defs: {
+      vdomRenderNode: {
+        anyOf: [
+          { $ref: "#/$defs/vdomNode" },
+          { type: "string" },
+          { type: "number" },
+          { type: "boolean" },
+          { type: "null" },
+          { type: "undefined" },
+          {
+            type: "array",
+            items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
           },
-          additionalProperties: {
-            anyOf: [{
-              type: "string",
-            }, {
-              type: "number",
-            }, {
-              type: "boolean",
-            }, {
-              type: "null",
-            }, {
-              type: "undefined",
-            }, {
-              type: "object",
-              properties: {}, // stop query from descending
-            }, {
-              type: "array",
-              items: { type: "null" }, // stop query from descending
-            }, {
-              asStream: true,
-              type: "unknown",
-            }],
+        ],
+      },
+      vdomNode: {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          name: { type: "string" },
+          props: {
+            type: "object",
+            properties: {
+              style: { anyOf: [{ type: "object" }, { type: "string" }] },
+            },
+            additionalProperties: {
+              anyOf: [{
+                type: "string",
+              }, {
+                type: "number",
+              }, {
+                type: "boolean",
+              }, {
+                type: "null",
+              }, {
+                type: "undefined",
+              }, {
+                type: "object",
+                properties: {}, // stop query from descending
+              }, {
+                type: "array",
+                items: { type: "null" }, // stop query from descending
+              }, {
+                asStream: true,
+                type: "unknown",
+              }],
+            },
+            asCell: true,
           },
-          asCell: true,
+          children: {
+            type: "array",
+            items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
+            asCell: true,
+          },
+          [UI]: { $ref: "#/$defs/vdomNode" },
         },
-        children: {
-          type: "array",
-          items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
-          asCell: true,
-        },
-        [UI]: { $ref: "#/$defs/vdomNode" },
       },
     },
-  },
-  $ref: "#/$defs/vdomNode",
-} as const satisfies JSONSchema;
+    $ref: "#/$defs/vdomNode",
+  } as const,
+  true,
+);
 
 /**
  * Debug variant of rendererVDOMSchema.
  * Children expand inline (no asCell) so the full tree is readable in one .get().
  * Props keep asCell since prop values can be large and aren't needed for structural debugging.
  */
-export const debugVDOMSchema = {
-  $id: "https://commonfabric.org/schemas/vdom-debug.json",
-  $defs: {
-    vdomRenderNode: {
-      anyOf: [
-        { $ref: "#/$defs/vdomNode" },
-        { type: "string" },
-        { type: "number" },
-        { type: "boolean" },
-        { type: "null" },
-        { type: "undefined" },
-        {
-          type: "array",
-          items: { $ref: "#/$defs/vdomRenderNode" },
+export const debugVDOMSchema = toDeepFrozenSchema(
+  {
+    $id: "https://commonfabric.org/schemas/vdom-debug.json",
+    $defs: {
+      vdomRenderNode: {
+        anyOf: [
+          { $ref: "#/$defs/vdomNode" },
+          { type: "string" },
+          { type: "number" },
+          { type: "boolean" },
+          { type: "null" },
+          { type: "undefined" },
+          {
+            type: "array",
+            items: { $ref: "#/$defs/vdomRenderNode" },
+          },
+        ],
+      },
+      vdomNode: {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          name: { type: "string" },
+          props: {
+            type: "object",
+            additionalProperties: { asCell: true },
+          },
+          children: {
+            type: "array",
+            items: { $ref: "#/$defs/vdomRenderNode" },
+          },
+          [UI]: { $ref: "#/$defs/vdomNode" },
         },
-      ],
-    },
-    vdomNode: {
-      type: "object",
-      properties: {
-        type: { type: "string" },
-        name: { type: "string" },
-        props: {
-          type: "object",
-          additionalProperties: { asCell: true },
-        },
-        children: {
-          type: "array",
-          items: { $ref: "#/$defs/vdomRenderNode" },
-        },
-        [UI]: { $ref: "#/$defs/vdomNode" },
       },
     },
-  },
-  $ref: "#/$defs/vdomNode",
-} as const satisfies JSONSchema;
+    $ref: "#/$defs/vdomNode",
+  } as const,
+  true,
+);
 
-export const vnodeSchema = {
-  $id: "https://commonfabric.org/schemas/vnode.json",
-  $ref: "#/$defs/VNode",
-  $defs: {
-    UIRenderable: {
-      type: "object",
-      properties: {
-        $UI: {
-          $ref: "#/$defs/VNode",
-        },
-      },
-      required: ["$UI"],
-    },
-    VNode: {
-      type: "object",
-      properties: {
-        type: {
-          type: "string",
-          "enum": ["vnode"],
-        },
-        name: {
-          type: "string",
-        },
-        props: {
-          $ref: "#/$defs/Props",
-        },
-        children: {
-          $ref: "#/$defs/RenderNode",
-        },
-        $UI: {
-          $ref: "#/$defs/VNode",
-        },
-      },
-      required: ["type", "name", "props"],
-    },
-    RenderNode: {
-      anyOf: [{
-        type: "string",
-      }, {
-        type: "number",
-      }, {
-        type: "boolean",
-      }, {
-        $ref: "#/$defs/VNode",
-      }, {
+export const vnodeSchema = toDeepFrozenSchema(
+  {
+    $id: "https://commonfabric.org/schemas/vnode.json",
+    $ref: "#/$defs/VNode",
+    $defs: {
+      UIRenderable: {
         type: "object",
-        properties: {},
-      }, {
-        $ref: "#/$defs/UIRenderable",
-        asOpaque: true,
-      }, {
-        type: "object",
-        properties: {},
-      }, {
-        type: "array",
-        items: {
-          $ref: "#/$defs/RenderNode",
+        properties: {
+          $UI: {
+            $ref: "#/$defs/VNode",
+          },
         },
-      }, {
-        type: "null",
-      }, {
-        type: "undefined",
-      }],
-    },
-    Props: {
-      type: "object",
-      properties: {
-        style: { anyOf: [{ type: "object" }, { type: "string" }] },
+        required: ["$UI"],
       },
-      additionalProperties: {
+      VNode: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            "enum": ["vnode"],
+          },
+          name: {
+            type: "string",
+          },
+          props: {
+            $ref: "#/$defs/Props",
+          },
+          children: {
+            $ref: "#/$defs/RenderNode",
+          },
+          $UI: {
+            $ref: "#/$defs/VNode",
+          },
+        },
+        required: ["type", "name", "props"],
+      },
+      RenderNode: {
         anyOf: [{
           type: "string",
         }, {
@@ -188,89 +162,155 @@ export const vnodeSchema = {
         }, {
           type: "boolean",
         }, {
+          $ref: "#/$defs/VNode",
+        }, {
           type: "object",
-          properties: {}, // stop query from descending
+          properties: {},
+        }, {
+          $ref: "#/$defs/UIRenderable",
+          asOpaque: true,
+        }, {
+          type: "object",
+          properties: {},
         }, {
           type: "array",
-          items: { type: "null" }, // stop query from descending
-        }, {
-          asCell: true,
-        }, {
-          asStream: true,
+          items: {
+            $ref: "#/$defs/RenderNode",
+          },
         }, {
           type: "null",
         }, {
           type: "undefined",
         }],
       },
+      Props: {
+        type: "object",
+        properties: {
+          style: { anyOf: [{ type: "object" }, { type: "string" }] },
+        },
+        additionalProperties: {
+          anyOf: [{
+            type: "string",
+          }, {
+            type: "number",
+          }, {
+            type: "boolean",
+          }, {
+            type: "object",
+            properties: {}, // stop query from descending
+          }, {
+            type: "array",
+            items: { type: "null" }, // stop query from descending
+          }, {
+            asCell: true,
+          }, {
+            asStream: true,
+          }, {
+            type: "null",
+          }, {
+            type: "undefined",
+          }],
+        },
+      },
     },
-  },
-} as const satisfies JSONSchema;
+  } as const,
+  true,
+);
 
-export const nameSchema = {
-  type: "object",
-  properties: { [NAME]: { type: "string" } },
-  required: [NAME],
-} as const satisfies JSONSchema;
+export const nameSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: { [NAME]: { type: "string" } },
+    required: [NAME],
+  } as const,
+  true,
+);
 
 export type NameSchema = Schema<typeof nameSchema>;
 
-export const uiSchema = {
-  type: "object",
-  properties: { [UI]: rendererVDOMSchema },
-  required: [UI],
-} as const satisfies JSONSchema;
+export const uiSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: { [UI]: rendererVDOMSchema },
+    required: [UI],
+  } as const,
+  true,
+);
 
 export type UISchema = Schema<typeof uiSchema>;
 
 // We specify type unknown for the items, since we don't want to recursively
 // load them
-export const pieceListSchema = {
-  type: "array",
-  items: { type: "unknown", asCell: true },
-  default: [],
-} as const satisfies JSONSchema;
+export const pieceListSchema = toDeepFrozenSchema(
+  {
+    type: "array",
+    items: { type: "unknown", asCell: true },
+    default: [],
+  } as const,
+  true,
+);
 
-export const pieceLineageSchema = {
-  type: "object",
-  properties: {
-    piece: { type: "object", properties: {}, asCell: true },
-    relation: { type: "string" },
-    timestamp: { type: "number" },
-  },
-  required: ["piece", "relation", "timestamp"],
-} as const satisfies JSONSchema;
+export const pieceLineageSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      piece: { type: "object", properties: {}, asCell: true },
+      relation: { type: "string" },
+      timestamp: { type: "number" },
+    },
+    required: ["piece", "relation", "timestamp"],
+  } as const,
+  true,
+);
 export type PieceLineage = Schema<typeof pieceLineageSchema>;
 
-export const pieceSourceCellSchema = {
-  type: "object",
-  properties: {
-    [TYPE]: { type: "string" },
-    spell: { type: "object" },
-    lineage: {
-      type: "array",
-      items: pieceLineageSchema,
-      default: [],
+export const pieceSourceCellSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      [TYPE]: { type: "string" },
+      spell: { type: "object" },
+      lineage: {
+        type: "array",
+        items: pieceLineageSchema,
+        default: [],
+      },
+      llmRequestId: { type: "string" },
     },
-    llmRequestId: { type: "string" },
-  },
-} as const satisfies JSONSchema;
+  } as const,
+  true,
+);
 
-export const processSchema = {
-  type: "object",
-  properties: {
-    argument: { type: "object" },
-    [TYPE]: { type: "string" },
-    spell: { type: "object" },
-  },
-  required: [TYPE],
-} as const satisfies JSONSchema;
+export const processSchema = toDeepFrozenSchema(
+  {
+    type: "object",
+    properties: {
+      argument: { type: "object" },
+      [TYPE]: { type: "string" },
+      spell: { type: "object" },
+    },
+    required: [TYPE],
+  } as const,
+  true,
+);
 
 // Primitive schemas for UI component cell bindings
-export const stringSchema = { type: "string" } as const satisfies JSONSchema;
-export const booleanSchema = { type: "boolean" } as const satisfies JSONSchema;
-export const numberSchema = { type: "number" } as const satisfies JSONSchema;
-export const stringArraySchema = {
-  type: "array",
-  items: { type: "string" },
-} as const satisfies JSONSchema;
+export const stringSchema = toDeepFrozenSchema(
+  { type: "string" } as const,
+  true,
+);
+export const booleanSchema = toDeepFrozenSchema(
+  { type: "boolean" } as const,
+  true,
+);
+export const numberSchema = toDeepFrozenSchema(
+  { type: "number" } as const,
+  true,
+);
+export const stringArraySchema = toDeepFrozenSchema(
+  {
+    type: "array",
+    items: { type: "string" },
+  } as const,
+  true,
+);
