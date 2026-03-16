@@ -61,10 +61,14 @@ export class EmulatedStorageManager extends StorageManager {
     options: Options,
     serverFactory: () => MemoryV2Server.Server,
   ) {
-    let getServer: (() => MemoryV2Server.Server) | undefined;
-    super(options, new EmulatedSessionFactory(() => getServer!()));
+    const serverHolder: { get: () => MemoryV2Server.Server } = {
+      get: () => {
+        throw new Error("Emulated server requested before initialization");
+      },
+    };
+    super(options, new EmulatedSessionFactory(() => serverHolder.get()));
     this.#serverFactory = serverFactory;
-    getServer = () => this.server();
+    serverHolder.get = () => this.server();
   }
 
   override async close(): Promise<void> {
