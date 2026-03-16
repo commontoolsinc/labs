@@ -178,6 +178,29 @@ const p = pattern<Record<string, never>>(() => {
 );
 
 Deno.test(
+  "Capability-first: local generateText alias in JSX keeps ternary reactive",
+  async () => {
+    const source = `/// <cts-enable />
+import { generateText, h, pattern, UI } from "commontools";
+
+export default pattern(() => {
+  const text = generateText({ prompt: "hi" });
+  return {
+    [UI]: <div>{text.pending ? "Loading" : text.result}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "__ctHelpers.ifElse(");
+    assert(!output.includes('text.pending ? "Loading" : text.result'));
+  },
+);
+
+Deno.test(
   "Capability-first: transformed filter output alias inside computed regains mapWithPattern",
   async () => {
     const source = `/// <cts-enable />

@@ -1183,6 +1183,26 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       assertEquals(errors[0]!.type, "opaque-get:invalid-call");
     },
   );
+
+  await t.step(
+    "errors on .get() called on generateText result",
+    async () => {
+      const source = `/// <cts-enable />
+      import { generateText } from "commontools";
+
+      const text = generateText({ prompt: "hi" });
+      const value = text.get();
+
+      export default value;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {

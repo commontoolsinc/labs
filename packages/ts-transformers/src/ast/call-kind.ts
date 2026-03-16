@@ -100,11 +100,47 @@ export type CallKind =
   | { kind: "generate-object"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
+const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
+  "builder",
+  "cell-factory",
+  "cell-for",
+  "derive",
+  "generate-object",
+  "ifElse",
+  "unless",
+  "when",
+  "wish",
+]);
+
+const REACTIVE_ORIGIN_CALL_NAMES = new Set([
+  "compileAndRun",
+  "fetchData",
+  "fetchProgram",
+  "generateText",
+  "llm",
+  "llmDialog",
+  "navigateTo",
+  "streamData",
+]);
+
 export function detectCallKind(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): CallKind | undefined {
   return resolveExpressionKind(call.expression, checker, new Set());
+}
+
+export function isReactiveOriginCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const callKind = detectCallKind(call, checker);
+  if (callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind)) {
+    return true;
+  }
+
+  const calleeName = getDirectCalleeName(call.expression);
+  return calleeName !== undefined && REACTIVE_ORIGIN_CALL_NAMES.has(calleeName);
 }
 
 function resolveExpressionKind(
@@ -239,6 +275,17 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
   }
 
   return current;
+}
+
+function getDirectCalleeName(expression: ts.Expression): string | undefined {
+  const target = stripWrappers(expression);
+  if (ts.isIdentifier(target)) {
+    return target.text;
+  }
+  if (ts.isPropertyAccessExpression(target)) {
+    return target.name.text;
+  }
+  return undefined;
 }
 
 function resolveSymbolKind(

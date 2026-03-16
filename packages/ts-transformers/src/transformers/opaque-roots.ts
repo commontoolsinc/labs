@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind } from "../ast/mod.ts";
+import { detectCallKind, isReactiveOriginCall } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
@@ -100,21 +100,8 @@ export function isOpaqueOriginCall(
   expression: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  const kind = detectCallKind(expression, context.checker);
-  if (!kind) return false;
-
-  switch (kind.kind) {
-    case "builder":
-    case "cell-factory":
-    case "cell-for":
-    case "derive":
-    case "wish":
-    case "generate-object":
-    case "pattern-tool":
-      return true;
-    default:
-      return false;
-  }
+  return isReactiveOriginCall(expression, context.checker) ||
+    detectCallKind(expression, context.checker)?.kind === "pattern-tool";
 }
 
 export function isOpaqueRootInfo(

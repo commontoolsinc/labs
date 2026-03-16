@@ -7,6 +7,7 @@ import {
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
+  isReactiveOriginCall,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
 import {
@@ -143,18 +144,7 @@ function createsReactiveCollectionInPlace(
     return true;
   }
 
-  const callKind = detectCallKind(current, context.checker);
-  if (callKind?.kind === "derive" || callKind?.kind === "wish") {
-    return true;
-  }
-
-  return callKind?.kind === "builder" &&
-    (
-      callKind.builderName === "computed" ||
-      callKind.builderName === "lift" ||
-      callKind.builderName === "handler" ||
-      callKind.builderName === "action"
-    );
+  return isReactiveOriginCall(current, context.checker);
 }
 
 function isLocalReactiveRewrapAlias(
@@ -490,20 +480,7 @@ function isReactiveMapOrigin(
       return true;
     }
 
-    const kind = detectCallKind(current, context.checker);
-    if (kind?.kind === "derive") {
-      return true;
-    }
-    if (kind?.kind === "builder" && kind.builderName === "computed") {
-      return true;
-    }
-    // wish(), cell factories, and generateObject return reactive values
-    if (
-      kind?.kind === "wish" ||
-      kind?.kind === "cell-factory" ||
-      kind?.kind === "cell-for" ||
-      kind?.kind === "generate-object"
-    ) {
+    if (isReactiveOriginCall(current, context.checker)) {
       return true;
     }
 

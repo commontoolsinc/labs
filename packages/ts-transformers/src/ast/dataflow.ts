@@ -9,7 +9,7 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { detectCallKind } from "./call-kind.ts";
+import { detectCallKind, isReactiveOriginCall } from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
@@ -324,14 +324,6 @@ export function createDataFlowAnalyzer(
      *  (e.g. `const bar = computed(...)`, `const items = wish(...).result!`).
      *  Walks through NonNull, property access, and type assertions to find
      *  the underlying call expression. */
-    const REACTIVE_CALL_KINDS = new Set([
-      "builder",
-      "derive",
-      "wish",
-      "cell-factory",
-      "cell-for",
-      "generate-object",
-    ]);
     const isVariableFromReactiveCall = (
       symbol: ts.Symbol | undefined,
     ): boolean => {
@@ -375,11 +367,10 @@ export function createDataFlowAnalyzer(
           }
           break;
         }
-        if (ts.isCallExpression(current)) {
-          const callKind = detectCallKind(current, checker);
-          if (callKind && REACTIVE_CALL_KINDS.has(callKind.kind)) {
-            return true;
-          }
+        if (
+          ts.isCallExpression(current) && isReactiveOriginCall(current, checker)
+        ) {
+          return true;
         }
       }
       return false;

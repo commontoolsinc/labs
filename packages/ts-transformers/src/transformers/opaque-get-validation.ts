@@ -11,16 +11,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
-import { detectCallKind } from "../ast/call-kind.ts";
-
-const REACTIVE_CALL_KINDS = new Set([
-  "builder",
-  "derive",
-  "wish",
-  "cell-factory",
-  "cell-for",
-  "generate-object",
-]);
+import { isReactiveOriginCall } from "../ast/call-kind.ts";
 
 export class OpaqueGetValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -174,12 +165,7 @@ export class OpaqueGetValidationTransformer extends Transformer {
       }
       break;
     }
-    if (ts.isCallExpression(current)) {
-      const callKind = detectCallKind(current, checker);
-      if (callKind && REACTIVE_CALL_KINDS.has(callKind.kind)) {
-        return true;
-      }
-    }
-    return false;
+    return ts.isCallExpression(current) &&
+      isReactiveOriginCall(current, checker);
   }
 }
