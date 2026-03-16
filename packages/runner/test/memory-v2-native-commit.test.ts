@@ -243,6 +243,52 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array element
   }
 });
 
+Deno.test("memory v2 transactions preserve the original previousValue across repeated primitive path writes", async () => {
+  const { storage } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-primitive-rewrite",
+      type,
+      path: [],
+    }, { value: { count: 0 } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    const tx = storage.edit();
+    const firstWrite = tx.write({
+      space,
+      id: "of:memory-v2-primitive-rewrite",
+      type,
+      path: ["value", "count"],
+    }, 1);
+    assert(firstWrite.ok);
+    const secondWrite = tx.write({
+      space,
+      id: "of:memory-v2-primitive-rewrite",
+      type,
+      path: ["value", "count"],
+    }, 2);
+    assert(secondWrite.ok);
+
+    assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), [{
+      address: {
+        space,
+        id: "of:memory-v2-primitive-rewrite",
+        type,
+        path: ["value", "count"],
+      },
+      value: 2,
+      previousValue: 0,
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions emit array-path patch drafts for array length writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 

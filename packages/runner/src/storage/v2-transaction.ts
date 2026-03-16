@@ -60,13 +60,13 @@ type DocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
   seq?: number;
+  validated: boolean;
   writeDetails: Map<string, TransactionWriteDetail>;
 };
 
 type SpaceBranch = {
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
-  validations: Map<string, RootAttestation>;
   reader?: ITransactionReader;
   writer?: ITransactionWriter;
 };
@@ -510,9 +510,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     const result = readAttestation(doc.current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
-      !branch.validations.has(this.docKey(address))
+      !doc.validated
     ) {
-      branch.validations.set(this.docKey(address), doc.initial);
+      doc.validated = true;
     }
     if (result.error) {
       return { error: result.error.from(address.space) };
@@ -600,11 +600,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     });
 
     const key = JSON.stringify(address.path);
-    const existing = doc.writeDetails.get(key);
     doc.writeDetails.set(key, {
       address: { ...address, space },
       value: isolatedValue,
-      previousValue: existing?.previousValue ?? previous.ok?.value,
+      previousValue: doc.writeDetails.get(key)?.previousValue ??
+        previous.ok?.value,
     });
 
     return { ok: next };
@@ -775,7 +775,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       branch = {
         replica: this.storage.open(space).replica,
         docs: new Map(),
-        validations: new Map(),
       };
       this.#branches.set(space, branch);
     }
@@ -795,6 +794,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         initial: loaded,
         current: loaded,
         seq,
+        validated: false,
         writeDetails: new Map(),
       };
       branch.docs.set(key, doc);
@@ -847,8 +847,11 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private validate(): Result<Unit, IStorageTransactionInconsistent> {
     for (const branch of this.#branches.values()) {
-      for (const invariant of branch.validations.values()) {
-        const result = claim(invariant, branch.replica);
+      for (const doc of branch.docs.values()) {
+        if (!doc.validated) {
+          continue;
+        }
+        const result = claim(doc.initial, branch.replica);
         if (result.error) {
           return { error: result.error };
         }
