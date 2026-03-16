@@ -36,6 +36,7 @@ import type {
   StorageTransactionFailed,
   StorageTransactionRejected,
   StorageTransactionStatus,
+  TransactionReactivityLog,
   TransactionWriteDetail,
   Unit,
   URI,
@@ -45,6 +46,7 @@ import type {
 import {
   claim,
   load as loadInline,
+  NotFound,
   read as readAttestation,
   TypeMismatchError,
   write as writeAttestation,
@@ -57,7 +59,8 @@ import {
 } from "./transaction.ts";
 import {
   isMutableTransactionReadAllowed,
-  reactivityLogFromActivities,
+  isReadIgnoredForScheduling,
+  isReadMarkedAsPotentialWrite,
 } from "./reactivity-log.ts";
 
 type RootAttestation = IAttestation;
@@ -278,6 +281,74 @@ const readPathValue = (
     current = current[segment];
   }
   return current as StorableDatum | undefined;
+};
+
+type PathInspection =
+  | {
+    kind: "ok";
+    value: StorableDatum | undefined;
+  }
+  | {
+    kind: "notFound";
+    path: readonly string[];
+  }
+  | {
+    kind: "typeMismatch";
+    path: readonly string[];
+    actualType: string;
+  };
+
+const inspectPath = (
+  value: StorableDatum | undefined,
+  path: readonly string[],
+): PathInspection => {
+  if (path.length === 0) {
+    return { kind: "ok", value };
+  }
+
+  let current: unknown = value;
+  for (let index = 0; index < path.length; index += 1) {
+    const segment = path[index]!;
+
+    if (current === undefined) {
+      return {
+        kind: "notFound",
+        path: path.slice(0, index),
+      };
+    }
+
+    if (Array.isArray(current)) {
+      if (segment === "length") {
+        current = current.length;
+        continue;
+      }
+      if (!isArrayIndexPropertyName(segment)) {
+        return {
+          kind: "typeMismatch",
+          path: path.slice(0, index + 1),
+          actualType: "array",
+        };
+      }
+      current = current[Number(segment)];
+      continue;
+    }
+
+    if (isRecord(current)) {
+      current = current[segment];
+      continue;
+    }
+
+    return {
+      kind: "typeMismatch",
+      path: path.slice(0, index + 1),
+      actualType: getValueTypeName(current as StorableDatum | undefined),
+    };
+  }
+
+  return {
+    kind: "ok",
+    value: current as StorableDatum | undefined,
+  };
 };
 
 const isContainerValue = (
@@ -616,6 +687,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   #readActivities: IReadActivity[] = [];
   #writeActivities: IMemorySpaceAddress[] = [];
   #activityOrder: ActivityOrderEntry[] = [];
+  #reactivityLog: TransactionReactivityLog = {
+    reads: [],
+    shallowReads: [],
+    writes: [],
+  };
   #writeSpace?: MemorySpace;
   #lastDocument?: {
     branch: SpaceBranch;
@@ -667,7 +743,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   getReactivityLog() {
-    return reactivityLogFromActivities(this.activity());
+    return this.#reactivityLog;
   }
 
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
@@ -765,21 +841,56 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
     this.#readActivities.push(readActivity);
     this.#activityOrder.push(this.#readActivities.length);
+    if (!isReadIgnoredForScheduling(readMeta)) {
+      const logAddress = {
+        space: address.space,
+        id: address.id,
+        type: address.type,
+        path: address.path.slice(1),
+      };
+      if (options?.nonRecursive === true) {
+        this.#reactivityLog.shallowReads.push(logAddress);
+      } else {
+        this.#reactivityLog.reads.push(logAddress);
+      }
+      if (isReadMarkedAsPotentialWrite(readMeta)) {
+        this.#reactivityLog.potentialWrites ??= [];
+        this.#reactivityLog.potentialWrites.push(logAddress);
+      }
+    }
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
     if (!getExperimentalStorableConfig().richStorableValues) {
-      const result = readAttestation(doc.current, memoryAddress);
+      const inspected = inspectPath(doc.current.value, memoryAddress.path);
       if (
         !address.id.startsWith("data:") &&
         !doc.validated
       ) {
         doc.validated = true;
       }
-      if (result.error) {
-        return { error: result.error.from(address.space) };
+      if (inspected.kind === "notFound") {
+        return {
+          error: NotFound(doc.current, memoryAddress, inspected.path).from(
+            address.space,
+          ),
+        };
       }
-      return result;
+      if (inspected.kind === "typeMismatch") {
+        return {
+          error: TypeMismatchError(
+            { ...memoryAddress, path: inspected.path },
+            inspected.actualType,
+            "read",
+          ).from(address.space),
+        };
+      }
+      return {
+        ok: {
+          address: memoryAddress,
+          value: inspected.value,
+        },
+      };
     }
 
     const cacheKey = encodePointer(memoryAddress.path);
@@ -831,11 +942,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemorySpaceAddress,
     value?: StorableDatum,
   ): Result<IAttestation, WriterError | WriteError> {
-    const { error } = this.writer(address.space);
-    if (error) {
-      return { error };
+    const ready = this.prepareWriteSpace(address.space);
+    if (ready.error) {
+      return { error: ready.error };
     }
-    return this.writeWithinSpace(address.space, address, value);
+    return this.writeWithinBranch(ready.ok, address.space, address, value);
   }
 
   writeBatch(
@@ -849,11 +960,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         return { ok: {} };
       }
       const [{ address }] = run;
-      const { error } = this.writer(address.space);
-      if (error) {
-        return { error };
+      const ready = this.prepareWriteSpace(address.space);
+      if (ready.error) {
+        return { error: ready.error };
       }
-      const result = this.writeBatchRun(address.space, run);
+      const result = this.writeBatchRun(address.space, ready.ok, run);
       run = [];
       runKey = undefined;
       return result;
@@ -883,15 +994,23 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemoryAddress,
     value?: StorableDatum,
   ): Result<IAttestation, WriteError> {
+    return this.writeWithinBranch(this.branch(space), space, address, value);
+  }
+
+  private writeWithinBranch(
+    branch: SpaceBranch,
+    space: MemorySpace,
+    address: IMemoryAddress,
+    value?: StorableDatum,
+  ): Result<IAttestation, WriteError> {
     if (address.id.startsWith("data:")) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
 
-    const branch = this.branch(space);
     const { doc } = this.document(branch, address);
     const current = doc.current;
-    const previous = readAttestation(doc.current, address);
-    if (previous.ok && deepEqual(previous.ok.value, value)) {
+    const previous = inspectPath(doc.current.value, address.path);
+    if (previous.kind === "ok" && deepEqual(previous.value, value)) {
       return { ok: current };
     }
     const isolatedValue = value === undefined
@@ -917,6 +1036,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
     this.#writeActivities.push(writeActivity);
     this.#activityOrder.push(-this.#writeActivities.length);
+    this.#reactivityLog.writes.push({
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path.slice(1),
+    });
 
     const key = encodePointer(address.path);
     const existingDetail = doc.writeDetails.get(key);
@@ -926,7 +1051,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       doc.writeDetails.set(key, {
         address: writeActivity,
         value: isolatedValue,
-        previousValue: previous.ok?.value,
+        previousValue: previous.kind === "ok" ? previous.value : undefined,
       });
     }
 
@@ -1019,6 +1144,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
     this.#writeActivities.push(writeActivity);
     this.#activityOrder.push(-this.#writeActivities.length);
+    this.#reactivityLog.writes.push({
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path.slice(1),
+    });
 
     const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
@@ -1037,6 +1168,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private writeBatchRun(
     space: MemorySpace,
+    branch: SpaceBranch,
     writes: readonly ITransactionWriteRequest[],
   ): Result<Unit, WriteError> {
     if (
@@ -1056,7 +1188,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: {} };
     }
 
-    const branch = this.branch(space);
     const { doc } = this.document(branch, writes[0]!.address);
     const originalRoot = doc.current.value;
     let nextRoot = originalRoot;
@@ -1132,6 +1263,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
     this.#writeActivities.push(writeActivity);
     this.#activityOrder.push(-this.#writeActivities.length);
+    this.#reactivityLog.writes.push({
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path.slice(1),
+    });
 
     const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
@@ -1208,6 +1345,25 @@ export class V2StorageTransaction implements IStorageTransaction {
         ? this.#state.result.error
         : TransactionCompleteError(),
     };
+  }
+
+  private prepareWriteSpace(
+    space: MemorySpace,
+  ): Result<SpaceBranch, InactiveTransactionError | WriterError> {
+    const ready = this.editable();
+    if (ready.error) {
+      return { error: ready.error };
+    }
+    if (this.#writeSpace !== undefined && this.#writeSpace !== space) {
+      return {
+        error: WriteIsolationError({
+          open: this.#writeSpace,
+          requested: space,
+        }),
+      };
+    }
+    this.#writeSpace = space;
+    return { ok: this.branch(space) };
   }
 
   private branch(space: MemorySpace): SpaceBranch {
