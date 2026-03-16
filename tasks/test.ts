@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
 import * as path from "@std/path";
 import { decode, encode } from "@commonfabric/utils/encoding";
 

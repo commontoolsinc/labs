@@ -76,7 +76,10 @@ describe("transaction inspection", () => {
   });
 
   it("uses the native v2 transaction reactivity log hook", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
 
     try {
       const tx = storageManager.edit();
