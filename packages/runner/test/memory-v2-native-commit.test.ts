@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
 import type {
   NativeStorageCommit,
   Result,
@@ -308,6 +310,98 @@ Deno.test("memory v2 transactions drop same-tx add-then-remove paths from patch 
     });
     assertEquals(readResult.ok?.value, { profile: { name: "Grace" } });
   } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 transactions elide transient nested patches from composed handler drafts", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+  const runtimeErrors: Error[] = [];
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    memoryVersion: "v2",
+    errorHandlers: [(error) => runtimeErrors.push(error)],
+  });
+
+  const splitPath = (path: string): (string | number)[] =>
+    path.split(".")
+      .filter((segment) => segment.length > 0)
+      .map((segment) => {
+        const index = Number(segment);
+        return Number.isInteger(index) && index.toString() === segment
+          ? index
+          : segment;
+      });
+
+  try {
+    const modulePath = new URL(
+      "../../generated-patterns/integration/patterns/counter-nested-handler-composition.pattern.ts",
+      import.meta.url,
+    ).pathname;
+    const programResolver = new FileSystemProgramResolver(modulePath);
+    const program = await runtime.harness.resolve(programResolver);
+    program.mainExport = "counterWithNestedHandlerComposition";
+    const patternFactory = await runtime.patternManager.compilePattern(program);
+
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<any>(
+      space,
+      { scenario: "native-draft-nested-handler" },
+      patternFactory.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, patternFactory, {}, resultCell);
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+
+    const cancelSink = result.sink(() => {});
+    await runtime.idle();
+
+    const send = async (stream: string, payload: unknown) => {
+      const targetCell = splitPath(stream).reduce<any>(
+        (cell, segment) => cell.key(segment),
+        result,
+      );
+      const sendResult = await runtime.editWithRetry((tx) =>
+        targetCell.withTx(tx).send(payload)
+      );
+      assertEquals(sendResult.error, undefined);
+      await runtime.idle();
+    };
+
+    await send("pipeline.stage", {
+      amount: 2,
+      multiplier: 4,
+      tag: "stage-only",
+    });
+    await send("pipeline.commit", {});
+
+    drafts.length = 0;
+    await send("pipeline.process", {
+      amount: 3,
+      multiplier: 2,
+      tag: "composed",
+    });
+
+    const draftContainsTransientStagePatch = drafts.some((draft) =>
+      draft.operations.some((operation) =>
+        operation.op === "patch" &&
+        operation.patches.some((patch) =>
+          patch.path.startsWith("/internal/__#0/")
+        )
+      )
+    );
+    assertEquals(draftContainsTransientStagePatch, false);
+
+    const value = await result.key("value").pull();
+    assertEquals(value as unknown as number, 14);
+    assertEquals(runtimeErrors, []);
+
+    cancelSink();
+    await runtime.idle();
+  } finally {
+    await runtime.dispose();
     await storage.close();
   }
 });

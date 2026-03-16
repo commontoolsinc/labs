@@ -1545,12 +1545,14 @@ export class V2StorageTransaction implements IStorageTransaction {
         relativePath,
       );
       const patchPath = arrayPatchPath ?? relativePath;
-      const value = (arrayPatchPath
-        ? readPathValue(currentPayload, patchPath)
-        : detail.value) as JSONValue | undefined;
-      const previousValue = (arrayPatchPath
-        ? readPathValue(initialPayload, patchPath)
-        : detail.previousValue) as JSONValue | undefined;
+      const value = readPathValue(
+        currentPayload,
+        patchPath,
+      ) as JSONValue | undefined;
+      const previousValue = readPathValue(
+        initialPayload,
+        patchPath,
+      ) as JSONValue | undefined;
 
       if (
         !isJSONPatchValue(value as StorableDatum | undefined) ||
