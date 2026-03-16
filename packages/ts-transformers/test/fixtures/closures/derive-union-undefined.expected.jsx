@@ -29,7 +29,7 @@ export default pattern((config: Config) => {
                         type: ["number", "undefined"]
                     }
                 },
-                required: ["required"]
+                required: ["required", "unionUndefined"]
             }
         },
         required: ["value", "config"]

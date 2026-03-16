@@ -872,15 +872,23 @@ export function analyzeFunctionCapabilities(
             const ref = resolveSourceRef(node);
             if (ref) {
               trackReadRef(ref);
-              // If this resolution went through a .get() call (the ref has
-              // a longer path than a bare alias), record the alias name so
-              // the identifier handler can skip redundant blanket reads.
-              if (ref.path.length > 0) {
-                // Find the root identifier text from the expression chain
-                let rootExpr: ts.Expression =
-                  ts.isPropertyAccessExpression(node)
-                    ? node.expression
-                    : (node as ts.ElementAccessExpression).expression;
+              // If this resolution went through a .get() call, record the
+              // alias name so the identifier handler can skip redundant
+              // blanket reads.  Only suppress for actual .get() bases —
+              // ordinary member reads (e.g. state.foo) must not be tagged.
+              const innerExpr = node.expression;
+              if (
+                ts.isCallExpression(innerExpr) &&
+                resolvedGetCalls.has(innerExpr)
+              ) {
+                // Unwrap the .get() call to find the root identifier:
+                // notes.get() → notes.get (PropertyAccess) → notes (Identifier)
+                const calleeExpr = innerExpr.expression;
+                let rootExpr: ts.Expression = ts.isPropertyAccessExpression(
+                    calleeExpr,
+                  )
+                  ? calleeExpr.expression
+                  : calleeExpr;
                 while (ts.isPropertyAccessExpression(rootExpr)) {
                   rootExpr = rootExpr.expression;
                 }
