@@ -47,22 +47,25 @@ When `activeView` changes, the `computed` re-runs and returns a different sub-pa
 
 ## Approach 2: Update a Cell Pointer
 
-Instead of mapping a string to a view, hold a direct reference to the active cell and update it:
+Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<ct-render $cell={...} />` to display whatever cell is currently selected:
 
 ```tsx
 import { computed, equals, handler, pattern, UI, Writable } from "commontools";
+import ItemView from "./item-view.tsx";
 
-interface Item { title: string; description: string }
+// ItemView produces cells with [UI]; this type captures what we need for the list
+interface ItemCell { title: string; [UI]: unknown }
 
 export default pattern<{
-  items: Writable<Item[]>;
-  activeItem: Writable<Item | null>;
+  items: Writable<ItemCell[]>;
+  activeItem: Writable<ItemCell | null>;
 }>(({ items, activeItem }) => {
   const selectItem = handler<unknown, {
-    activeItem: Writable<Item | null>;
-    items: Writable<Item[]>;
+    activeItem: Writable<ItemCell | null>;
+    items: Writable<ItemCell[]>;
     index: number;
   }>((_, { activeItem, items, index }) => {
+    // Stores a reference to the cell itself — not a copy of its data
     activeItem.set(items.get()[index]);
   });
 
@@ -85,7 +88,8 @@ export default pattern<{
             {entry.item.title}
           </div>
         ))}
-        <div>{activeItem}</div>
+        {/* ct-render extracts and displays the active cell's [UI] */}
+        <ct-render $cell={activeItem} />
       </div>
     ),
     activeItem,
@@ -97,6 +101,8 @@ This is useful when:
 - Selecting from a dynamic list (you don't know the items at compile time)
 - Rendering anonymous cells — you just need to display whatever the pointer references
 - Embedding cells from other patterns or spaces
+
+**Key point:** The items stored in `activeItem` must be cells with `[UI]` (i.e., pattern instances), not plain data objects. Placing a plain data object in `activeItem` and using `<ct-render>` will render nothing. If you need to select plain data and display it, use Approach 1 (switch on a string) or render the data's fields directly in JSX.
 
 **Rendering anonymous cells:** Use `<ct-render $cell={piece} />` to render any cell's `[UI]`, even if you don't know its type. See `packages/patterns/system/piece-grid.tsx` for an example rendering a grid of arbitrary pieces.
 
