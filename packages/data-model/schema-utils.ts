@@ -9,7 +9,7 @@ import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
  * Return a deep-frozen copy of (or reference to) a JSONSchema.
  *
  * - When `canShare` is `true`, the input `schema` is allowed to be modified,
- *   including freezing it in place and returned directly. Use this when the
+ *   including freezing it in place and returning it directly. Use this when the
  *   caller owns the object referred to by `schema` and no other code will
  *   attempt to mutate it.
  *
