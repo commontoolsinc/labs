@@ -2225,6 +2225,34 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability-first: self-improving classifier suggestions map keeps branch captures",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/self-improving-classifier.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const mapStart = output.indexOf("{visibleSuggestions.mapWithPattern(");
+    assert(
+      mapStart >= 0,
+      "expected transformed visibleSuggestions.mapWithPattern callback",
+    );
+    const mapWindow = output.slice(mapStart, mapStart + 6000);
+
+    assertStringIncludes(
+      mapWindow,
+      'const rules = __ct_pattern_input.key("params", "rules");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const dismissedSuggestionIndices = __ct_pattern_input.key("params", "dismissedSuggestionIndices");',
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: shopping-list sorted ifElse branch does not wrap mapped results in derive",
   async () => {
     const source = await Deno.readTextFile(
@@ -2240,6 +2268,34 @@ Deno.test(
         'required: ["itemsWithAisles", "items", "correctionIndex", "correctionTitle", "hasConnectedStore"]',
       ),
       "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: shopping-list correction locations map keeps branch captures",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL("../../patterns/shopping-list.tsx", import.meta.url),
+    );
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const mapStart = output.indexOf("{validLocations.mapWithPattern(");
+    assert(
+      mapStart >= 0,
+      "expected transformed validLocations.mapWithPattern callback",
+    );
+    const mapWindow = output.slice(mapStart, mapStart + 4000);
+
+    assertStringIncludes(
+      mapWindow,
+      'const items = __ct_pattern_input.key("params", "items");',
+    );
+    assertStringIncludes(
+      mapWindow,
+      'const correctionIndex = __ct_pattern_input.key("params", "correctionIndex");',
     );
   },
 );

@@ -166,11 +166,16 @@ export function findPendingComputeWrapCandidate(
   expr: ts.Expression,
   analyze: AnalyzeFn,
   context: TransformationContext,
+  excludeSubtree?: ts.Node,
 ): ts.Expression | undefined {
   let pending: ts.Expression | undefined;
 
   const visit = (node: ts.Node): void => {
     if (pending) return;
+
+    if (excludeSubtree && node === excludeSubtree) {
+      return;
+    }
 
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
       // Nested callbacks establish their own rewrite boundaries.
