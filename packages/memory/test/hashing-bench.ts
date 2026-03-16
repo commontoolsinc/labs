@@ -17,7 +17,7 @@ import {
   setCanonicalHashConfig,
 } from "../reference.ts";
 import { canonicalHash } from "../canonical-hash.ts";
-import { deepFreeze } from "../deep-freeze.ts";
+import { deepFreeze } from "@commontools/data-model/deep-freeze";
 
 // ---------------------------------------------------------------------------
 // Pre-generated test data

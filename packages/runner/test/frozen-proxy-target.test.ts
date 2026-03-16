@@ -20,7 +20,7 @@ import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
-import { deepFreeze } from "@commontools/memory/deep-freeze";
+import { deepFreeze } from "@commontools/data-model/deep-freeze";
 
 const signer = await Identity.fromPassphrase("test frozen proxy");
 const space = signer.did();

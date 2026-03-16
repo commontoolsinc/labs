@@ -7,7 +7,7 @@ import {
   type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
-import { deepFreeze } from "./deep-freeze.ts";
+import { deepFreeze } from "@commontools/data-model/deep-freeze";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {

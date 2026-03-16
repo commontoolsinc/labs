@@ -4,6 +4,7 @@
     "./packages/background-charm-service",
     "./packages/piece",
     "./packages/cli",
+    "./packages/data-model",
     "./packages/deno-web-test",
     "./packages/felt",
     "./packages/generated-patterns",

@@ -10,7 +10,7 @@
  * Gated behind `ExperimentalOptions.canonicalHashing`.
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
-import { isDeepFrozen } from "./deep-freeze.ts";
+import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
 import { StorableContentId } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, type StorableInstance } from "./storable-protocol.ts";
