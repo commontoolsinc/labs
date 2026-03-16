@@ -336,17 +336,22 @@ function buildShrunkTypeNodeFromTypeNode(
   // type aliases that resolve to arrays (via the type checker).
   {
     let isArray = ts.isArrayTypeNode(node) ||
+      // readonly T[]  →  TypeOperator(readonly, ArrayTypeNode)
+      (ts.isTypeOperatorNode(node) &&
+        node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+        ts.isArrayTypeNode(node.type)) ||
       (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
-        node.typeName.text === "Array");
+        (node.typeName.text === "Array" ||
+          node.typeName.text === "ReadonlyArray"));
+    // Fall back to the checker for type aliases that resolve to arrays
+    // (but not tuples or numeric-indexed objects, which have different
+    // schema semantics).
     if (!isArray && checker && ts.isTypeReferenceNode(node)) {
       const resolvedType = checker.getTypeFromTypeNode(node);
       const tc = checker as ts.TypeChecker & {
         isArrayType?: (t: ts.Type) => boolean;
-        isTupleType?: (t: ts.Type) => boolean;
       };
-      isArray = !!tc.isArrayType?.(resolvedType) ||
-        !!tc.isTupleType?.(resolvedType) ||
-        !!checker.getIndexTypeOfType(resolvedType, ts.IndexKind.Number);
+      isArray = !!tc.isArrayType?.(resolvedType);
     }
     if (isArray) {
       // Properties that don't require item-level data.
