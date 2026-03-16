@@ -32,11 +32,11 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import { getDefaultMemoryVersion } from "./storage/interface.ts";
 import type {
   ChangeGroup,
   CommitError,
   DID,
-  getDefaultMemoryVersion,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -444,7 +444,7 @@ export class Runtime {
    * Any unawaited tx.commit() calls will be canceled when
    * storageManager.close() tears down storage sessions. Callers
    * should await all pending commits before calling dispose().
-  */
+   */
   async dispose(): Promise<void> {
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.

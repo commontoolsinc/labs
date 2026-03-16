@@ -2302,3 +2302,125 @@ Deno.test("memory v2 server flushes subscription refresh before returning confli
 
   await server.close();
 });
+
+Deno.test("memory v2 server targets conflict refreshes to the failed commit docs", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-conflict-targeted-refresh"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-conflict-targeted-refresh";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  const query = {
+    subscribe: true,
+    roots: [{
+      id: "of:doc:1",
+      selector: {
+        path: [],
+        schema: false,
+      },
+    }],
+  };
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query,
+  }));
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertExists((subscribed.ok as any)?.subscriptionId);
+  assertEquals(server.queryCount, 1);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: { version: 1 },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-2",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: { version: 3 },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-2");
+  await tick();
+  const priorUpdate = assertUpdate(shiftMessage(messages));
+  assertEquals(priorUpdate.result.serverSeq, 2);
+  assertEquals(server.queryCount, 1);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-3",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 3,
+      reads: {
+        confirmed: [{
+          id: "of:doc:1",
+          path: [],
+          seq: 1,
+        }],
+        pending: [],
+      },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: { version: 2 },
+        },
+      }],
+    },
+  }));
+
+  const rejected = assertResponse(shiftMessage(messages));
+  assertEquals(rejected.requestId, "tx-3");
+  assertEquals((rejected.error as any)?.name, "ConflictError");
+  assertEquals(messages.length, 0);
+  assertEquals(server.queryCount, 1);
+
+  await server.close();
+});

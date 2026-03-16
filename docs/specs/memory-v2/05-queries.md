@@ -494,6 +494,13 @@ pending, the server MUST run the pending subscription refresh before returning
 the conflict. This guarantees that, after the client receives a local revert,
 its subscribed state is fresh enough for an immediate retry.
 
+That conflict-triggered refresh SHOULD remain document-targeted. At minimum,
+the server should seed the reevaluation with the failed commit's touched
+document IDs: operation IDs plus the IDs named in confirmed and pending reads.
+If those targeted subscriptions still need full `graph.query` reevaluation,
+they may do so, but the server should not discard dirty-doc context and rerun
+unrelated subscriptions just because the commit failed.
+
 ### 5.4.6 Subscription State
 
 ```typescript

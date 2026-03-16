@@ -30,11 +30,34 @@ replace () {
   fi
 }
 
-if [ -n "$CF_CLI_INTEGRATION_USE_LOCAL" ]; then
- cf() {
-   deno task cf "$@"
+if [ -n "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ] || [ -n "${CT_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
+ ct_impl() {
+   deno task ct "$@"
+ }
+else
+ ct_impl() {
+   command ct "$@"
  }
 fi
+
+ct() {
+  if [ -z "$CT_CLI_INTEGRATION_TIMINGS" ]; then
+    ct_impl "$@"
+    return $?
+  fi
+
+  local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  ct_impl "$@"
+  local status=$?
+  local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  local elapsed_ms=$((end_ms - start_ms))
+  >&2 echo "[ct-timing] ${elapsed_ms}ms :: ct $*"
+  return $status
+}
+
+cf() {
+  ct "$@"
+}
 
 if [ -z "$API_URL" ]; then
   error "API_URL must be defined."

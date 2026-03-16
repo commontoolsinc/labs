@@ -68,6 +68,8 @@ const DOC_KEY_PATTERN = /([^/]+)\/([^/]+)\/(.+)/;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const SCHEMA_FLUSH_LOG_INTERVAL_MS = 60_000;
+const MEMORY_QUERY_STATS = typeof Deno !== "undefined" &&
+  Deno.env.get("CT_MEMORY_QUERY_STATS") === "1";
 
 /** Tracks schema flush statistics across all sessions. */
 const schemaFlushStats = {
@@ -316,6 +318,17 @@ class MemoryProviderSession<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
 > implements ProviderSession<MemoryProtocol>, Subscriber {
+  #queryStats = {
+    subscribeQueries: 0,
+    subscribeQueryMs: 0,
+    oneShotQueries: 0,
+    oneShotQueryMs: 0,
+    incrementalQueries: 0,
+    incrementalQueryMs: 0,
+    flushes: 0,
+    flushMs: 0,
+    flushedCommits: 0,
+  };
   readable: ReadableStream<ProviderCommand<MemoryProtocol>>;
   writable: WritableStream<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>;
   controller:
@@ -457,7 +470,40 @@ class MemoryProviderSession<
 
     return { ok: {} };
   }
+  private reportQueryStats(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    const {
+      subscribeQueries,
+      subscribeQueryMs,
+      oneShotQueries,
+      oneShotQueryMs,
+      incrementalQueries,
+      incrementalQueryMs,
+      flushes,
+      flushMs,
+      flushedCommits,
+    } = this.#queryStats;
+    if (
+      subscribeQueries === 0 && oneShotQueries === 0 &&
+      incrementalQueries === 0 && flushes === 0
+    ) {
+      return;
+    }
+    logger.warn(
+      "query-stats",
+      () => [
+        `subscribe=${subscribeQueries}/${subscribeQueryMs.toFixed(1)}ms`,
+        `oneShot=${oneShotQueries}/${oneShotQueryMs.toFixed(1)}ms`,
+        `incremental=${incrementalQueries}/${incrementalQueryMs.toFixed(1)}ms`,
+        `flushes=${flushes}/${flushMs.toFixed(1)}ms`,
+        `flushedCommits=${flushedCommits}`,
+      ],
+    );
+  }
   dispose() {
+    this.reportQueryStats();
     if (this.schemaFlushTimer !== null) {
       clearTimeout(this.schemaFlushTimer);
       this.schemaFlushTimer = null;
@@ -599,6 +645,8 @@ class MemoryProviderSession<
             );
           }
           const gqSubMs = gqSubElapsed ?? 0;
+          this.#queryStats.subscribeQueries++;
+          this.#queryStats.subscribeQueryMs += gqSubMs;
           logger.debug(
             "graph-query-subscribe-done",
             () => [
@@ -642,6 +690,8 @@ class MemoryProviderSession<
           );
         }
         const gqMs = gqElapsed ?? 0;
+        this.#queryStats.oneShotQueries++;
+        this.#queryStats.oneShotQueryMs += gqMs;
         logger.debug(
           "graph-query-done",
           () => [
@@ -1223,6 +1273,9 @@ class MemoryProviderSession<
     const flushMs = performance.now() - t0;
     const prevFlushMs = this.lastFlushMs;
     this.lastFlushMs = flushMs;
+    this.#queryStats.flushes++;
+    this.#queryStats.flushMs += flushMs;
+    this.#queryStats.flushedCommits += commitCount;
     schemaFlushStats.record(commitCount, isConflict, flushMs);
     if (commitCount > 1) {
       logger.warn(
@@ -1364,6 +1417,7 @@ class MemoryProviderSession<
     affectedDocs: Map<string, Set<SchemaPathSelector>>,
   ): { newFacts: Map<string, Revision<Fact>> } {
     logger.timeStart("graph-query", "incremental");
+    const t0 = performance.now();
     try {
       const newFacts = new Map<string, Revision<Fact>>();
       // Note: classification is not used here since we're processing across all subscriptions
@@ -1476,6 +1530,9 @@ class MemoryProviderSession<
       return { newFacts };
     } finally {
       logger.timeEnd("graph-query", "incremental");
+      const elapsed = performance.now() - t0;
+      this.#queryStats.incrementalQueries++;
+      this.#queryStats.incrementalQueryMs += elapsed;
     }
   }
 

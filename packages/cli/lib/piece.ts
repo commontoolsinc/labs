@@ -67,6 +67,24 @@ export interface ExecutedPieceCallable {
   resolved: ResolvedPieceCallable;
 }
 
+const CLI_TRACE_TIMINGS = Deno.env.get("CT_CLI_TRACE_TIMINGS") === "1";
+
+async function timeCliPhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (!CLI_TRACE_TIMINGS) {
+    return await run();
+  }
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(`[ct-phase] ${elapsed}ms :: ${label}`);
+  }
+}
+
 async function makeSession(config: SpaceConfig): Promise<Session> {
   const identity = await loadIdentity(config.identity);
   if (isDID(config.space)) {
@@ -78,71 +96,89 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 
 export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   setLLMUrl(config.apiUrl);
-  const session = await makeSession(config);
+  const session = await timeCliPhase(
+    "loadManager.makeSession",
+    () => makeSession(config),
+  );
   // Use a const ref object so we can assign later while keeping const binding
   const pieceManagerRef: { current?: PieceManager } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
-  const runtime = new Runtime({
-    apiUrl: new URL(config.apiUrl),
-    experimental: experimentalOptionsFromEnv(),
-    storageManager: StorageManager.open({
-      as: session.as,
-      address: new URL("/api/storage/memory", config.apiUrl),
-      spaceIdentity: session.spaceIdentity,
-    }),
-    errorHandlers: [
-      (error) => {
-        runtimeErrors.push({
-          message: error.message,
-          pieceId: error.pieceId,
-          patternId: error.patternId,
-          spellId: error.spellId,
-          space: error.space,
-          stackTrace: error.stack,
-        });
-      },
-    ],
-    navigateCallback: (target) => {
-      try {
-        const id = pieceId(target);
-        if (!id) {
-          console.error("navigateTo: target missing piece id");
-          return;
-        }
-        // Emit greppable line immediately so scripts can capture without waiting
-        console.log(`navigateTo new piece id ${id}`);
-        // Best-effort: ensure piece is present in list
-        runtime.storageManager.synced().then(async () => {
+  const runtime = await timeCliPhase(
+    "loadManager.runtime",
+    () =>
+      new Runtime({
+        apiUrl: new URL(config.apiUrl),
+        experimental: experimentalOptionsFromEnv(),
+        storageManager: StorageManager.open({
+          as: session.as,
+          address: new URL("/api/storage/memory", config.apiUrl),
+          spaceIdentity: session.spaceIdentity,
+        }),
+        errorHandlers: [
+          (error) => {
+            runtimeErrors.push({
+              message: error.message,
+              pieceId: error.pieceId,
+              patternId: error.patternId,
+              spellId: error.spellId,
+              space: error.space,
+              stackTrace: error.stack,
+            });
+          },
+        ],
+        navigateCallback: (target) => {
           try {
-            const mgr = pieceManagerRef.current!;
-            const piecesCell = await mgr.getPieces();
-            const list = piecesCell.get();
-            const exists = list.some((c) => pieceId(c) === id);
-            if (!exists) {
-              await mgr.add([target]);
+            const id = pieceId(target);
+            if (!id) {
+              console.error("navigateTo: target missing piece id");
+              return;
             }
+            // Emit greppable line immediately so scripts can capture without waiting
+            console.log(`navigateTo new piece id ${id}`);
+            // Best-effort: ensure piece is present in list
+            runtime.storageManager.synced().then(async () => {
+              try {
+                const mgr = pieceManagerRef.current!;
+                const piecesCell = await mgr.getPieces();
+                const list = piecesCell.get();
+                const exists = list.some((c) => pieceId(c) === id);
+                if (!exists) {
+                  await mgr.add([target]);
+                }
+              } catch (e) {
+                console.error("navigateTo add error:", e);
+              }
+            }).catch((_err) => {
+              // ignore; we already emitted the id
+            });
           } catch (e) {
-            console.error("navigateTo add error:", e);
+            console.error("navigateTo callback error:", e);
           }
-        }).catch((_err) => {
-          // ignore; we already emitted the id
-        });
-      } catch (e) {
-        console.error("navigateTo callback error:", e);
-      }
-    },
-  });
+        },
+      }),
+  );
   (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
     CF_RUNTIME_ERROR_LOG
   ] = runtimeErrors;
 
-  if (!(await runtime.healthCheck())) {
+  if (
+    !(await timeCliPhase(
+      "loadManager.healthCheck",
+      () => runtime.healthCheck(),
+    ))
+  ) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 
-  const pieceManager = new PieceManager(session, runtime);
+  const pieceManager = await timeCliPhase(
+    "loadManager.pieceManager",
+    () => new PieceManager(session, runtime),
+  );
   pieceManagerRef.current = pieceManager;
-  await awaitSyncWithTimeout(pieceManager.synced());
+  await timeCliPhase(
+    "loadManager.synced",
+    () => awaitSyncWithTimeout(pieceManager.synced()),
+  );
   return pieceManager;
 }
 
@@ -192,12 +228,18 @@ export async function newPiece(
   entry: EntryConfig,
   options?: { start?: boolean },
 ): Promise<string> {
-  const manager = await loadManager(config);
+  const manager = await timeCliPhase(
+    "newPiece.loadManager",
+    () => loadManager(config),
+  );
   const pieces = new PiecesController(manager);
 
   // Try to ensure default pattern, but don't fail the entire operation
   try {
-    await pieces.ensureDefaultPattern();
+    await timeCliPhase(
+      "newPiece.ensureDefaultPattern",
+      () => pieces.ensureDefaultPattern(),
+    );
   } catch (error) {
     console.warn(
       `Warning: Could not initialize default pattern: ${
@@ -210,11 +252,20 @@ export async function newPiece(
     // Continue anyway - user's pattern might not need defaultPattern
   }
 
-  const program = await getProgramFromFile(manager, entry);
-  const piece = await pieces.create(program, options);
+  const program = await timeCliPhase(
+    "newPiece.getProgramFromFile",
+    () => getProgramFromFile(manager, entry),
+  );
+  const piece = await timeCliPhase(
+    "newPiece.create",
+    () => pieces.create(program, options),
+  );
 
   // Explicitly add the piece to the space's allPieces list
-  await manager.add([piece.getCell()]);
+  await timeCliPhase(
+    "newPiece.addToDefaultPattern",
+    () => manager.add([piece.getCell()]),
+  );
 
   return piece.id;
 }
@@ -509,22 +560,11 @@ export async function linkPieces(
   targetPath: (string | number)[],
   options?: { start?: boolean; allowNonExisting?: boolean },
 ): Promise<void> {
-  const manager = await loadManager(config);
-
-  // Ensure default pattern exists (best effort)
-  let pieces: PiecesController;
-  try {
-    pieces = new PiecesController(manager);
-    await pieces.ensureDefaultPattern();
-  } catch (error) {
-    // Non-fatal, log and continue
-    console.warn(
-      `Warning: Could not ensure default pattern: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    pieces = new PiecesController(manager);
-  }
+  const manager = await timeCliPhase(
+    "linkPieces.loadManager",
+    () => loadManager(config),
+  );
+  const pieces = new PiecesController(manager);
 
   // Validate that source and target pieces/paths exist by reading them
   if (!options?.allowNonExisting) {
@@ -532,13 +572,19 @@ export async function linkPieces(
 
     // Check source piece exists by verifying it has a source/process cell
     // (i.e., was created via cf piece new, not just written to with cf piece set)
-    const sourcePiece = await pieces.get(sourcePieceId, false);
+    const sourcePiece = await timeCliPhase(
+      "linkPieces.getSourcePiece",
+      () => pieces.get(sourcePieceId, false),
+    );
     const sourceHasProcess =
       sourcePiece.getCell().getSourceCell() !== undefined;
     if (!sourceHasProcess) {
       errors.push(`Source piece ${sourcePieceId} does not exist`);
     } else if (sourcePath.length > 0) {
-      const sourceData = await sourcePiece.result.get();
+      const sourceData = await timeCliPhase(
+        "linkPieces.readSourceResult",
+        () => sourcePiece.result.get(),
+      );
       // Check source path resolves
       let current: any = sourceData;
       for (const segment of sourcePath) {
@@ -562,14 +608,20 @@ export async function linkPieces(
     }
 
     // Check target piece exists by verifying it has a source/process cell
-    const targetPiece = await pieces.get(targetPieceId, false);
+    const targetPiece = await timeCliPhase(
+      "linkPieces.getTargetPiece",
+      () => pieces.get(targetPieceId, false),
+    );
     const targetHasProcess =
       targetPiece.getCell().getSourceCell() !== undefined;
     if (!targetHasProcess) {
       errors.push(`Target piece ${targetPieceId} does not exist`);
     } else if (targetPath.length > 0) {
       // Check target path resolves on the input cell
-      const targetData = await targetPiece.input.get();
+      const targetData = await timeCliPhase(
+        "linkPieces.readTargetInput",
+        () => targetPiece.input.get(),
+      );
       let current: any = targetData;
       for (const segment of targetPath) {
         if (current == null || typeof current !== "object") {
@@ -599,12 +651,16 @@ export async function linkPieces(
     }
   }
 
-  await manager.link(
-    sourcePieceId,
-    sourcePath,
-    targetPieceId,
-    targetPath,
-    options,
+  await timeCliPhase(
+    "linkPieces.manager.link",
+    () =>
+      manager.link(
+        sourcePieceId,
+        sourcePath,
+        targetPieceId,
+        targetPath,
+        options,
+      ),
   );
 }
 
@@ -884,11 +940,34 @@ export async function callPieceHandler<T = any>(
   handlerName: string,
   args: T,
 ): Promise<void> {
-  const resolved = await resolvePieceCallable(config, handlerName);
+  const resolved = await timeCliPhase(
+    "callPieceHandler.resolve",
+    () => resolvePieceCallable(config, handlerName),
+  );
   if (resolved.callableKind !== "handler") {
     throw new Error(`Callable "${handlerName}" is not a handler`);
   }
-  await executeResolvedCallable(resolved, args);
+  await timeCliPhase(
+    "callPieceHandler.execute",
+    () => executeResolvedCallable(resolved, args),
+  );
+}
+
+export async function stepPiece(
+  config: PieceConfig,
+): Promise<void> {
+  const manager = await timeCliPhase(
+    "stepPiece.loadManager",
+    () => loadManager(config),
+  );
+  const pieces = new PiecesController(manager);
+  const piece = await timeCliPhase(
+    "stepPiece.getPiece",
+    () => pieces.get(config.piece, true),
+  );
+  await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
+  await timeCliPhase("stepPiece.manager.synced", () => manager.synced());
+  await timeCliPhase("stepPiece.stop", () => pieces.stop(config.piece));
 }
 
 /**

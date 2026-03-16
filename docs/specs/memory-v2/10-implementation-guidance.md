@@ -357,6 +357,12 @@ The server-side counterpart to the `"revert"` guarantee is:
 - If a transaction then fails with `ConflictError` while such a refresh is
   pending, the server must flush that subscription refresh before returning the
   conflict response.
+- That conflict-triggered flush should still stay targeted. Use the failed
+  commit's touched document IDs (at minimum the union of operation IDs,
+  confirmed-read IDs, and pending-read IDs) as the dirty-doc seed for the
+  refresh, rather than falling back to a full-space reevaluation with no dirty
+  context. This preserves the "fresh enough to retry after revert" invariant
+  without turning conflicts into unrelated full `graph.query` fan-out.
 
 That last rule is load-bearing. The client retries immediately after a local
 `"revert"`, so by the time the revert promise resolves, the subscribed state

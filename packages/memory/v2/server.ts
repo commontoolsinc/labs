@@ -10,6 +10,7 @@ import {
 import { parseLink } from "../../runner/src/link-utils.ts";
 import {
   type Blob,
+  type ClientCommit,
   type ClientMessage,
   type EntitySnapshot,
   type GraphQuery,
@@ -37,6 +38,16 @@ const logger = getLogger("memory-v2-server", {
 });
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
+const MEMORY_QUERY_STATS = typeof Deno !== "undefined" &&
+  Deno.env.get("CT_MEMORY_QUERY_STATS") === "1";
+
+const formatTopQueryShapes = (counts: ReadonlyMap<string, number>): string => {
+  const top = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([shape, count]) => `${shape}:${count}`);
+  return `[${top.join(", ")}]`;
+};
 
 type SessionState = {
   id: string;
@@ -180,6 +191,18 @@ class Connection {
   #subscriptionsByTrackedId = new Map<string, Set<string>>();
   #ready = false;
   #closed = false;
+  #queryStats = {
+    refreshCalls: 0,
+    subscriptionsConsidered: 0,
+    refreshQueries: 0,
+    refreshQueryMs: 0,
+    directPatchHits: 0,
+    sharedResultCacheHits: 0,
+    refreshQueryShapes: new Map<string, number>(),
+    directPatchShapes: new Map<string, number>(),
+    topologySkips: new Map<string, number>(),
+    patchNullReasons: new Map<string, number>(),
+  };
 
   constructor(private readonly server: Server, private readonly send: Send) {}
 
@@ -325,6 +348,9 @@ class Connection {
       const subscriptions = dirtyIds === undefined
         ? this.subscriptionsForSpace(space)
         : this.subscriptionsForDirtyIds(space, dirtyIds);
+      this.#queryStats.refreshCalls++;
+      this.#queryStats.subscriptionsConsidered += subscriptions.length;
+      this.server.recordRefreshCall(subscriptions.length);
       for (const subscription of subscriptions) {
         logger.debug("subscription-refresh/considered");
         if (
@@ -340,18 +366,34 @@ class Connection {
           dirtyIds,
           directCache,
         );
-        if (patched !== null) {
+        if (patched.result !== null) {
+          this.#queryStats.directPatchHits++;
+          const shape = graphQueryShapeKey(subscription.query);
+          this.#queryStats.directPatchShapes.set(
+            shape,
+            (this.#queryStats.directPatchShapes.get(shape) ?? 0) + 1,
+          );
+          this.server.recordDirectPatch();
           logger.debug("subscription-refresh/direct-patch");
           logger.debug(
             `subscription-refresh/direct-patch-shape/${
               graphQueryShapeKey(subscription.query)
             }`,
           );
+        } else {
+          const shape = graphQueryShapeKey(subscription.query);
+          const key = `${patched.nullReason}:${shape}`;
+          this.#queryStats.patchNullReasons.set(
+            key,
+            (this.#queryStats.patchNullReasons.get(key) ?? 0) + 1,
+          );
         }
-        const state = patched ?? await (async () => {
+        const state = patched.result ?? await (async () => {
           const key = queryCacheKey(subscription.query);
           const cached = queryResults.get(key);
           if (cached !== undefined) {
+            this.#queryStats.sharedResultCacheHits++;
+            this.server.recordRefreshReuseHit();
             logger.debug("subscription-refresh/full-query-cache-hit");
             logger.debug(
               `subscription-refresh/full-query-cache-hit-shape/${
@@ -366,12 +408,22 @@ class Connection {
               graphQueryShapeKey(subscription.query)
             }`,
           );
+          const t0 = performance.now();
           const evaluated = await this.server.evaluateGraphQuery(
             space,
             subscription.query,
             undefined,
             reuse,
           );
+          const elapsed = performance.now() - t0;
+          this.#queryStats.refreshQueries++;
+          this.#queryStats.refreshQueryMs += elapsed;
+          const shape = graphQueryShapeKey(subscription.query);
+          this.#queryStats.refreshQueryShapes.set(
+            shape,
+            (this.#queryStats.refreshQueryShapes.get(shape) ?? 0) + 1,
+          );
+          this.server.recordRefreshQuery(elapsed);
           queryResults.set(key, evaluated);
           return evaluated;
         })();
@@ -416,11 +468,41 @@ class Connection {
       return;
     }
     this.#closed = true;
+    this.reportQueryStats();
     this.server.cacheSubscriptions(this.#subscriptions.values());
     for (const subscriptionId of [...this.#subscriptions.keys()]) {
       this.untrackSubscription(subscriptionId);
     }
     this.server.disconnect(this);
+  }
+
+  private reportQueryStats(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    const stats = this.#queryStats;
+    if (
+      stats.refreshCalls === 0 && stats.refreshQueries === 0 &&
+      stats.directPatchHits === 0 && stats.sharedResultCacheHits === 0
+    ) {
+      return;
+    }
+    logger.warn(
+      "query-stats",
+      () => [
+        `refreshCalls=${stats.refreshCalls}`,
+        `subscriptions=${stats.subscriptionsConsidered}`,
+        `refreshQueries=${stats.refreshQueries}/${
+          stats.refreshQueryMs.toFixed(1)
+        }ms`,
+        `directPatch=${stats.directPatchHits}`,
+        `sharedResultCache=${stats.sharedResultCacheHits}`,
+        `fullShapes=${formatTopQueryShapes(stats.refreshQueryShapes)}`,
+        `patchShapes=${formatTopQueryShapes(stats.directPatchShapes)}`,
+        `topologySkips=${formatTopQueryShapes(stats.topologySkips)}`,
+        `patchNull=${formatTopQueryShapes(stats.patchNullReasons)}`,
+      ],
+    );
   }
 
   private trackSubscription(subscription: SubscriptionState): void {
@@ -478,6 +560,19 @@ export class Server {
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #store?: URL;
+  #queryStats = {
+    initialQueries: 0,
+    initialQueryMs: 0,
+    refreshQueries: 0,
+    refreshQueryMs: 0,
+    directPatchHits: 0,
+    refreshCalls: 0,
+    subscriptionsConsidered: 0,
+    sessionCacheHits: 0,
+    sharedResultCacheHits: 0,
+    topologySkips: new Map<string, number>(),
+    patchNullReasons: new Map<string, number>(),
+  };
 
   constructor(
     readonly options: {
@@ -505,6 +600,87 @@ export class Server {
     }
   }
 
+  recordInitialQuery(elapsedMs: number, usedSessionCache: boolean): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    if (usedSessionCache) {
+      this.#queryStats.sessionCacheHits++;
+      return;
+    }
+    this.#queryStats.initialQueries++;
+    this.#queryStats.initialQueryMs += elapsedMs;
+  }
+
+  recordRefreshQuery(elapsedMs: number): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    this.#queryStats.refreshQueries++;
+    this.#queryStats.refreshQueryMs += elapsedMs;
+  }
+
+  recordRefreshReuseHit(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    this.#queryStats.sharedResultCacheHits++;
+  }
+
+  recordDirectPatch(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    this.#queryStats.directPatchHits++;
+  }
+
+  recordRefreshCall(subscriptionCount: number): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    this.#queryStats.refreshCalls++;
+    this.#queryStats.subscriptionsConsidered += subscriptionCount;
+  }
+
+  recordPatchNullReason(reason: string, shape: string): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    const key = `${reason}:${shape}`;
+    this.#queryStats.patchNullReasons.set(
+      key,
+      (this.#queryStats.patchNullReasons.get(key) ?? 0) + 1,
+    );
+  }
+
+  private reportQueryStats(): void {
+    if (!MEMORY_QUERY_STATS) {
+      return;
+    }
+    const stats = this.#queryStats;
+    if (
+      stats.initialQueries === 0 && stats.refreshQueries === 0 &&
+      stats.directPatchHits === 0 && stats.refreshCalls === 0 &&
+      stats.sessionCacheHits === 0 && stats.sharedResultCacheHits === 0
+    ) {
+      return;
+    }
+    logger.warn(
+      "query-stats",
+      () => [
+        `initial=${stats.initialQueries}/${stats.initialQueryMs.toFixed(1)}ms`,
+        `refresh=${stats.refreshQueries}/${stats.refreshQueryMs.toFixed(1)}ms`,
+        `directPatch=${stats.directPatchHits}`,
+        `refreshCalls=${stats.refreshCalls}`,
+        `subscriptions=${stats.subscriptionsConsidered}`,
+        `sessionCache=${stats.sessionCacheHits}`,
+        `sharedResultCache=${stats.sharedResultCacheHits}`,
+        `topologySkips=${formatTopQueryShapes(stats.topologySkips)}`,
+        `patchNull=${formatTopQueryShapes(stats.patchNullReasons)}`,
+      ],
+    );
+  }
+
   cacheSubscriptions(subscriptions: Iterable<SubscriptionState>): void {
     const bySession = new Map<string, SubscriptionState[]>();
     for (const subscription of subscriptions) {
@@ -528,6 +704,7 @@ export class Server {
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     await this.#refreshing;
+    this.reportQueryStats();
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -579,6 +756,7 @@ export class Server {
       };
     } catch (error) {
       if (error instanceof Engine.ConflictError) {
+        this.stageConflictRefreshDirtyIds(message.space, message.commit);
         await this.flushSubscriptions([message.space]);
       }
       return respondTypedError<Engine.AppliedCommit>(
@@ -606,6 +784,7 @@ export class Server {
     try {
       const engine = await this.openEngine(message.space);
       const serverSeq = Engine.headSeq(engine);
+      const t0 = performance.now();
       const cached = message.query.subscribe === true
         ? this.#sessions.getCachedQuery(
           message.space,
@@ -616,6 +795,7 @@ export class Server {
         : null;
       const result = cached ??
         await this.evaluateGraphQuery(message.space, message.query, engine);
+      this.recordInitialQuery(performance.now() - t0, cached !== null);
       return {
         type: "response",
         requestId: message.requestId,
@@ -661,17 +841,30 @@ export class Server {
     subscription: SubscriptionState,
     dirtyIds: ReadonlySet<string> | undefined,
     cache: Map<string, EntitySnapshot>,
-  ): Promise<GraphQueryResult | null> {
+  ): Promise<
+    { result: GraphQueryResult; nullReason?: undefined } | {
+      result: null;
+      nullReason: string;
+    }
+  > {
     if (dirtyIds === undefined) {
+      this.recordPatchNullReason(
+        "no-dirty-ids",
+        graphQueryShapeKey(subscription.query),
+      );
       logger.debug("subscription-refresh/patch-skip/no-dirty-ids");
-      return null;
+      return { result: null, nullReason: "no-dirty-ids" };
     }
 
     const branch = subscription.query.branch ?? "";
     const touchedIds = collectTouchedSubscriptionIds(subscription, dirtyIds);
     if (touchedIds.length === 0) {
+      this.recordPatchNullReason(
+        "no-touched-ids",
+        graphQueryShapeKey(subscription.query),
+      );
       logger.debug("subscription-refresh/patch-skip/no-touched-ids");
-      return null;
+      return { result: null, nullReason: "no-touched-ids" };
     }
 
     const previousById = new Map(
@@ -710,7 +903,7 @@ export class Server {
               graphQueryShapeKey(subscription.query)
             }`,
           );
-          return sourcePatched;
+          return { result: sourcePatched };
         }
         if (
           topologyChange === "sigil" &&
@@ -727,6 +920,16 @@ export class Server {
             }`,
           );
         } else {
+          const shape = graphQueryShapeKey(subscription.query);
+          const key = `${topologyChange}:${shape}`;
+          this.#queryStats.topologySkips.set(
+            key,
+            (this.#queryStats.topologySkips.get(key) ?? 0) + 1,
+          );
+          this.recordPatchNullReason(
+            `topology-${topologyChange}`,
+            shape,
+          );
           logger.debug("subscription-refresh/patch-skip/topology-change");
           logger.debug(
             `subscription-refresh/patch-skip/topology-change/${topologyChange}`,
@@ -741,7 +944,10 @@ export class Server {
               graphQueryShapeKey(subscription.query)
             }`,
           );
-          return null;
+          return {
+            result: null,
+            nullReason: `topology-${topologyChange}`,
+          };
         }
       }
 
@@ -753,10 +959,12 @@ export class Server {
     }
 
     return {
-      serverSeq: Engine.headSeq(engine, branch),
-      entities: [...nextById.values()].sort((left, right) =>
-        left.id.localeCompare(right.id)
-      ),
+      result: {
+        serverSeq: Engine.headSeq(engine, branch),
+        entities: [...nextById.values()].sort((left, right) =>
+          left.id.localeCompare(right.id)
+        ),
+      },
     };
   }
 
@@ -796,6 +1004,24 @@ export class Server {
     this.scheduleRefresh();
   }
 
+  private stageConflictRefreshDirtyIds(
+    space: string,
+    commit: ClientCommit,
+  ): void {
+    const ids = collectCommitTrackedIds(commit);
+    if (ids.size === 0) {
+      return;
+    }
+    let dirty = this.#dirtyDocsBySpace.get(space);
+    if (dirty === undefined) {
+      dirty = new Set();
+      this.#dirtyDocsBySpace.set(space, dirty);
+    }
+    for (const id of ids) {
+      dirty.add(id);
+    }
+  }
+
   async flushSubscriptions(spaces?: Iterable<string>): Promise<void> {
     logger.timeStart("schema-flush");
     this.cancelScheduledRefresh();
@@ -826,11 +1052,14 @@ export class Server {
     if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
       return;
     }
-    this.#refreshTimer = setTimeout(() => {
-      this.#refreshTimer = null;
-      void this.flushSubscriptions();
-    }, this.options.subscriptionRefreshDelayMs ??
-      SUBSCRIPTION_REFRESH_DELAY_MS);
+    this.#refreshTimer = setTimeout(
+      () => {
+        this.#refreshTimer = null;
+        void this.flushSubscriptions();
+      },
+      this.options.subscriptionRefreshDelayMs ??
+        SUBSCRIPTION_REFRESH_DELAY_MS,
+    );
   }
 
   private cancelScheduledRefresh(): void {
@@ -943,6 +1172,20 @@ const toInvocationRecord = (message: TransactRequest) => {
       localSeq: message.commit.localSeq,
     },
   };
+};
+
+const collectCommitTrackedIds = (commit: ClientCommit): Set<string> => {
+  const ids = new Set<string>();
+  for (const operation of commit.operations) {
+    ids.add(operation.id);
+  }
+  for (const read of commit.reads.confirmed) {
+    ids.add(read.id);
+  }
+  for (const read of commit.reads.pending) {
+    ids.add(read.id);
+  }
+  return ids;
 };
 
 const sameEntities = (

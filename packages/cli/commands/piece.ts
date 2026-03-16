@@ -11,7 +11,6 @@ import {
   linkPieces,
   LinkValidationError,
   listPieces,
-  loadManager,
   MapFormat,
   newPiece,
   PieceConfig,
@@ -22,8 +21,8 @@ import {
   setHomePattern,
   setPiecePattern,
   SpaceConfig,
+  stepPiece,
 } from "../lib/piece.ts";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { renderPiece } from "../lib/piece-render.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
@@ -267,13 +266,7 @@ export const piece = new Command()
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
-    const manager = await loadManager(pieceConfig);
-    const pieces = new PiecesController(manager);
-    // Start in this transient runtime, wait, then stop and exit
-    const piece = await pieces.get(pieceConfig.piece, true);
-    await piece.getCell().pull();
-    await manager.synced();
-    await pieces.stop(pieceConfig.piece);
+    await stepPiece(pieceConfig);
     render(`Stepped piece ${pieceConfig.piece}`);
   })
   /* piece apply */

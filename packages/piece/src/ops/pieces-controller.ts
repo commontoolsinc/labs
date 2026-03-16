@@ -39,15 +39,19 @@ export class PiecesController<T = unknown> {
     cause: string | undefined = undefined,
   ): Promise<PieceController<U>> {
     this.disposeCheck();
+    const start = options.start ?? true;
     const pattern = await compileProgram(this.#manager, program);
     const piece = await this.#manager.runPersistent<U>(
       pattern,
       options.input,
       cause,
       undefined,
-      { start: options.start ?? true },
+      { start },
     );
-    await this.#manager.synced();
+    if (!start) {
+      await this.#manager.runtime.idle();
+      await this.#manager.synced();
+    }
     return new PieceController<U>(this.#manager, piece);
   }
 
@@ -251,7 +255,7 @@ export class PiecesController<T = unknown> {
     });
 
     // Fetch the final result
-    const finalPattern = await this.#manager.getDefaultPattern();
+    const finalPattern = await this.#manager.getDefaultPattern(false);
     if (!finalPattern) {
       throw new Error("Failed to create default pattern");
     }
@@ -356,7 +360,7 @@ export class PiecesController<T = unknown> {
 
     // After transaction commits, fetch the final result
     // (either we created it, or another process did)
-    const finalPattern = await this.#manager.getDefaultPattern();
+    const finalPattern = await this.#manager.getDefaultPattern(false);
     if (!finalPattern) {
       throw new Error("Failed to create or find default pattern");
     }
