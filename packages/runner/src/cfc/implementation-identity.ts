@@ -1,5 +1,5 @@
 import { canonicalHash } from "@commontools/memory/canonical-hash";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type { JSONSchema, Module, Pattern } from "../builder/types.ts";
 import { toHex } from "./shared.ts";
 
@@ -128,7 +128,7 @@ function normalizeModuleDescriptor(module: Module): unknown {
 }
 
 export function computeModuleCodeHash(module: Module): string {
-  const storable = toDeepStorableValue(normalizeModuleDescriptor(module));
+  const storable = storableFromNativeValue(normalizeModuleDescriptor(module));
   return toHex(canonicalHash(storable).hash);
 }
 

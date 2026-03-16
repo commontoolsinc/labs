@@ -1,5 +1,5 @@
 import { canonicalHash } from "@commontools/memory/canonical-hash";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type {
   Activity,
   ICfcReadAnnotations,
@@ -101,6 +101,6 @@ function normalizeActivity(
 export function computeCfcActivityDigest(
   activity: Iterable<Activity>,
 ): string {
-  const storable = toDeepStorableValue(normalizeActivity(activity));
+  const storable = storableFromNativeValue(normalizeActivity(activity));
   return toHex(canonicalHash(storable).hash);
 }

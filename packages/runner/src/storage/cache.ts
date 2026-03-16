@@ -53,7 +53,6 @@ import type {
   PullError,
   Retract,
   PushError,
-  Retract,
   StorageValue,
   URI,
 } from "./interface.ts";

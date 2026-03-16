@@ -2839,13 +2839,6 @@ export class Scheduler {
                   );
                 }
               }
-            }).catch((error) => {
-              logger.error(
-                "schedule-error",
-                "Event handler commit promise rejected:",
-                error,
-              );
-            });
             }
           }
         };

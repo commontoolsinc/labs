@@ -38,6 +38,15 @@ const requiredIntegritySchema = {
   },
 } as const satisfies JSONSchema;
 
+const conceptRequiredIntegrity = "https://commonfabric.org/cfc/concepts/verified-input";
+
+const conceptRequiredIntegritySchema = {
+  type: "number",
+  ifc: {
+    requiredIntegrity: [conceptRequiredIntegrity],
+  },
+} as const satisfies JSONSchema;
+
 const secretOutputSchema = {
   type: "number",
   ifc: {
@@ -298,6 +307,54 @@ describe("CFC prepare input requirements", () => {
     expect(
       (thrown as { requirement?: string } | undefined)?.requirement,
     ).toBe("requiredIntegrity");
+  });
+
+  it("allows concept-valued requiredIntegrity via acting principal trust closure", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-required-integrity-concept-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithClassification(
+      sourceId,
+      1,
+      "confidential",
+      ["runtime-attested-source"],
+    );
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-concept-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-concept-target",
+    );
+
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(conceptRequiredIntegritySchema).get() ?? 0,
+    );
+    targetCell.withTx(tx).set(value + 1);
+
+    await prepareCfcCommitIfNeeded(tx, {
+      actingPrincipal: signer.did(),
+      trustContext: {
+        delegations: [{
+          delegator: signer.did(),
+          verifier: "did:key:cfc-test-verifier",
+          scope: {
+            concepts: [conceptRequiredIntegrity],
+          },
+        }],
+        statements: [{
+          verifier: "did:key:cfc-test-verifier",
+          concrete: "runtime-attested-source",
+          concept: conceptRequiredIntegrity,
+        }],
+      },
+    } as any);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
   });
 
   it("allows object-level requiredIntegrity when descendant labels are coherent", async () => {

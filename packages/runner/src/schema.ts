@@ -520,8 +520,6 @@ export function validateAndTransform(
       },
     ),
   };
-    ),
-  };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
