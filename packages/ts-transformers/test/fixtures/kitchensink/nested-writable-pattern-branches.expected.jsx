@@ -266,28 +266,7 @@ export default pattern((state) => {
                                 type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, { task: {
                                     note: task.key("note")
-                                } }, ({ task }) => __ctHelpers.derive({
-                                type: "object",
-                                properties: {
-                                    task: {
-                                        type: "object",
-                                        properties: {
-                                            note: {
-                                                anyOf: [{
-                                                        type: "undefined"
-                                                    }, {
-                                                        type: ["string", "undefined"]
-                                                    }]
-                                            }
-                                        }
-                                    }
-                                },
-                                required: ["task"]
-                            } as const satisfies __ctHelpers.JSONSchema, {
-                                type: "boolean"
-                            } as const satisfies __ctHelpers.JSONSchema, { task: {
-                                    note: task.note
-                                } }, ({ task }) => task.note !== undefined)), __ctHelpers.derive({
+                                } }, ({ task }) => task.note !== undefined), __ctHelpers.derive({
                                 type: "object",
                                 properties: {
                                     task: {
@@ -341,23 +320,7 @@ export default pattern((state) => {
                                     } as const satisfies __ctHelpers.JSONSchema, {
                                         tagIndex: tagIndex,
                                         taskIndex: taskIndex
-                                    }, ({ tagIndex, taskIndex }) => __ctHelpers.derive({
-                                        type: "object",
-                                        properties: {
-                                            tagIndex: {
-                                                type: "number"
-                                            },
-                                            taskIndex: {
-                                                type: "number"
-                                            }
-                                        },
-                                        required: ["tagIndex", "taskIndex"]
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "boolean"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        tagIndex: tagIndex,
-                                        taskIndex: taskIndex
-                                    }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex)), __ctHelpers.derive({
+                                    }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), __ctHelpers.derive({
                                         type: "object",
                                         properties: {
                                             section: {
@@ -381,31 +344,7 @@ export default pattern((state) => {
                                             title: section.key("title")
                                         },
                                         tag: tag
-                                    }, ({ section, tag }) => __ctHelpers.derive({
-                                        type: "object",
-                                        properties: {
-                                            section: {
-                                                type: "object",
-                                                properties: {
-                                                    title: {
-                                                        type: "string"
-                                                    }
-                                                },
-                                                required: ["title"]
-                                            },
-                                            tag: {
-                                                type: "string"
-                                            }
-                                        },
-                                        required: ["section", "tag"]
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "string"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        section: {
-                                            title: section.title
-                                        },
-                                        tag: tag
-                                    }, ({ section, tag }) => `${section.title}:${tag}`)), __ctHelpers.derive({
+                                    }, ({ section, tag }) => `${section.title}:${tag}`), __ctHelpers.derive({
                                         type: "object",
                                         properties: {
                                             state: {
@@ -441,47 +380,8 @@ export default pattern((state) => {
                                             done: task.key("done")
                                         },
                                         tag: tag
-                                    }, ({ state, task, tag }) => __ctHelpers.ifElse({
-                                        type: "boolean"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "string"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "string"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "string"
-                                    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                                        type: "object",
-                                        properties: {
-                                            state: {
-                                                type: "object",
-                                                properties: {
-                                                    showCompleted: {
-                                                        type: "boolean"
-                                                    }
-                                                },
-                                                required: ["showCompleted"]
-                                            },
-                                            task: {
-                                                type: "object",
-                                                properties: {
-                                                    done: {
-                                                        type: "boolean"
-                                                    }
-                                                },
-                                                required: ["done"]
-                                            }
-                                        },
-                                        required: ["state", "task"]
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        type: "boolean"
-                                    } as const satisfies __ctHelpers.JSONSchema, {
-                                        state: {
-                                            showCompleted: state.showCompleted
-                                        },
-                                        task: {
-                                            done: task.done
-                                        }
-                                    }, ({ state, task }) => state.showCompleted || !task.done), tag, "")))}
+                                    }, ({ state, task, tag }) => state.showCompleted || !task.done
+                                        ? tag : ""))}
                           </span>);
                             }, {
                                 type: "object",
@@ -718,54 +618,13 @@ export default pattern((state) => {
                             length: section.key("tasks").length
                         },
                         title: section.key("title")
-                    } }, ({ section }) => __ctHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        section: {
-                            type: "object",
-                            properties: {
-                                tasks: {
-                                    type: "object",
-                                    properties: {
-                                        length: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["length"]
-                                }
-                            },
-                            required: ["tasks"]
-                        }
-                    },
-                    required: ["section"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { section: {
-                        tasks: {
-                            length: section.tasks.length
-                        }
                     } }, ({ section }) => 
                 // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
                 //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
-                //   → derive() wrapping the ternary condition + inner ifElse for branches
-                section.tasks.length > 0), <small>{section.title} collapsed</small>, <small>empty</small>)))}
+                //   → local ifElse(...) inside the JSX branch
+                section.tasks.length > 0
+                    ? <small>{section.title} collapsed</small>
+                    : <small>empty</small>))}
               </section>);
             }, {
                 type: "object",
@@ -882,45 +741,9 @@ export default pattern((state) => {
                 selectedTaskId: selectedTaskId,
                 hoveredSectionId: hoveredSectionId
             })}
-          </div>, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        showCompleted: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["showCompleted"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                showCompleted: state.key("showCompleted")
-            } }, ({ state }) => 
+          </div>, 
         // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
-        //   → derive() wrapping the <p> + inner ifElse for the ternary
+        //   → local ifElse(...) inside the <p> JSX expression
         <p>{__ctHelpers.ifElse({
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -929,7 +752,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["No completed sections", "No sections"]
-        } as const satisfies __ctHelpers.JSONSchema, state.showCompleted, "No completed sections", "No sections")}</p>))}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), "No completed sections", "No sections")}</p>)}
       </div>),
     };
 }, {

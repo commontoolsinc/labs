@@ -270,6 +270,8 @@ export function createComputedCallForExpression(
 
   const { factory, checker, sourceFile } = context;
 
+  context.markSyntheticComputeOwnedSubtree(expression);
+
   // Get result type for the computed call
   let resultTypeNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
@@ -296,6 +298,7 @@ export function createComputedCallForExpression(
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     expression,
   );
+  context.markAsSyntheticComputeCallback(arrowFunction);
 
   const computedCall = factory.createCallExpression(
     context.ctHelpers.getHelperExpr("computed"),

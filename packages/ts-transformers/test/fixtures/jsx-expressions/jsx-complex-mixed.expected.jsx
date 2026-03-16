@@ -276,40 +276,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
-            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const i = __ct_pattern_input.key("element");
-            return i.key("active");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
+            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({

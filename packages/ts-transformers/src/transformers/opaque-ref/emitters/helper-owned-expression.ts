@@ -9,6 +9,7 @@ import {
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
 import type { Emitter } from "../types.ts";
 
@@ -32,6 +33,13 @@ export function rewriteHelperOwnedExpression(
     analyze,
     rewriteChildren,
   } = params;
+
+  // JSX containers can rewrite their dynamic slots locally via OpaqueRefJSX.
+  // Wrapping the whole helper-owned branch here would force later passes to
+  // disagree about nested collection lowering.
+  if (isJsxLocalRewriteContainer(expression)) {
+    return rewriteChildren(expression) || expression;
+  }
 
   const analysis = analyze(expression);
   const relevantDataFlows = filterRelevantDataFlows(

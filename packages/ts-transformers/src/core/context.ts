@@ -121,6 +121,64 @@ export class TransformationContext {
    * Check if a node is an array method callback created by ClosureTransformer.
    */
   isArrayMethodCallback(node: ts.Node): boolean {
-    return this.options.mapCallbackRegistry?.has(node) ?? false;
+    if (this.options.mapCallbackRegistry?.has(node)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(node);
+    return !!(
+      original &&
+      original !== node &&
+      this.options.mapCallbackRegistry?.has(original)
+    );
+  }
+
+  /**
+   * Mark a synthetic callback introduced by a compute wrapper so later phases
+   * can classify its contents as compute-owned even when they originate from
+   * authored nodes with original parent chains in pattern context.
+   */
+  markAsSyntheticComputeCallback(node: ts.Node): void {
+    if (this.options.syntheticComputeCallbackRegistry) {
+      this.options.syntheticComputeCallbackRegistry.add(node);
+    }
+  }
+
+  /**
+   * Check if a node is a synthetic compute wrapper callback.
+   */
+  isSyntheticComputeCallback(node: ts.Node): boolean {
+    if (this.options.syntheticComputeCallbackRegistry?.has(node)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(node);
+    return !!(
+      original &&
+      original !== node &&
+      this.options.syntheticComputeCallbackRegistry?.has(original)
+    );
+  }
+
+  markSyntheticComputeOwnedSubtree(node: ts.Node): void {
+    const registry = this.options.syntheticComputeOwnedNodeRegistry;
+    if (!registry) return;
+
+    const visit = (current: ts.Node): void => {
+      registry.add(current);
+      ts.forEachChild(current, visit);
+    };
+
+    visit(node);
+  }
+
+  isSyntheticComputeOwnedNode(node: ts.Node): boolean {
+    if (this.options.syntheticComputeOwnedNodeRegistry?.has(node)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(node);
+    return !!(
+      original &&
+      original !== node &&
+      this.options.syntheticComputeOwnedNodeRegistry?.has(original)
+    );
   }
 }

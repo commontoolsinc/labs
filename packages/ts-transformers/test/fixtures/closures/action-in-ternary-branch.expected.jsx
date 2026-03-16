@@ -3,9 +3,8 @@ import * as __ctHelpers from "commontools";
  * Regression test: action() result used in same ternary branch as computed()
  *
  * When a ternary branch contains both a computed() value and an action() reference,
- * the action must be captured in the derive wrapper along with the computed value.
- * Previously, action() results were incorrectly classified as "function declarations"
- * and skipped by CaptureCollector.
+ * the nested computed expression should still lower locally in JSX without forcing
+ * the whole JSX branch through an extra derive wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commontools";
 interface Card {
@@ -16,10 +15,11 @@ interface Input {
     card: Card;
 }
 // FIXTURE: action-in-ternary-branch
-// Verifies: action() result used in a ternary branch alongside computed() is captured in the derive wrapper
+// Verifies: action() result used in a ternary branch alongside computed() keeps
+//   local JSX rewrites instead of forcing a whole-branch derive
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
-//   ternary with computed → ifElse(...) with inner derive() capturing { card, hasDescription, startEditing }
-// Context: Regression -- action results were previously skipped by CaptureCollector as "function declarations"
+//   nested hasDescription ternary → local ifElse(...) inside the JSX branch
+// Context: Regression coverage for JSX-local rewriting with action references in the same branch
 export default pattern((__ct_pattern_input) => {
     const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
@@ -81,59 +81,9 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                card: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string"
-                        },
-                        description: {
-                            type: "string"
-                        }
-                    },
-                    required: ["title", "description"]
-                },
-                hasDescription: {
-                    type: "boolean"
-                },
-                startEditing: {
-                    asStream: true
-                }
-            },
-            required: ["card", "hasDescription", "startEditing"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            card: {
-                title: card.key("title"),
-                description: card.key("description")
-            },
-            hasDescription: hasDescription,
-            startEditing: startEditing
-        }, ({ card, hasDescription, startEditing }) => (<div>
-            <span>{card.title}</span>
-            {/* Nested ternary with computed - triggers derive wrapper */}
+        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+            <span>{card.key("title")}</span>
+            {/* Nested ternary with computed - lowers locally inside JSX */}
             {__ctHelpers.ifElse({
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -152,10 +102,10 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
-            {/* Action in SAME branch - must be captured by the derive! */}
+        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
+            {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
             <ct-button onClick={startEditing}>Edit</ct-button>
-          </div>)))}
+          </div>)}
       </ct-card>),
         card,
     };

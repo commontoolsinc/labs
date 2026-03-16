@@ -115,7 +115,7 @@ export default pattern<{
                   </div>,
                   // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
                   //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
-                  //   → derive() wrapping the ternary condition + inner ifElse for branches
+                  //   → local ifElse(...) inside the JSX branch
                   section.tasks.length > 0
                     ? <small>{section.title} collapsed</small>
                     : <small>empty</small>,
@@ -124,7 +124,7 @@ export default pattern<{
             ))}
           </div>,
           // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
-          //   → derive() wrapping the <p> + inner ifElse for the ternary
+          //   → local ifElse(...) inside the <p> JSX expression
           <p>{state.showCompleted ? "No completed sections" : "No sections"}</p>,
         )}
       </div>

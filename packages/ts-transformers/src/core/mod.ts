@@ -17,6 +17,18 @@
  *   Readers: context.isArrayMethodCallback() (called by capability-lowering,
  *            reactive-context classifier)
  *
+ * syntheticComputeCallbackRegistry (WeakSet<ts.Node>)
+ *   Marks callbacks introduced by synthetic compute wrappers (e.g. JSX branch
+ *   wrapping) so later phases can treat reused authored nodes as compute-owned.
+ *   Writers: context.markAsSyntheticComputeCallback() (called by opaque-ref/helpers)
+ *   Readers: context.isSyntheticComputeCallback() (called by reactive-context classifier)
+ *
+ * syntheticComputeOwnedNodeRegistry (WeakSet<ts.Node>)
+ *   Marks authored subtrees that have been moved under a synthetic compute
+ *   wrapper so later phases can override stale source-context classification.
+ *   Writers: context.markSyntheticComputeOwnedSubtree() (called by opaque-ref/helpers)
+ *   Readers: context.isSyntheticComputeOwnedNode() (called by reactive-context classifier)
+ *
  * SchemaHints (WeakMap<ts.Node, SchemaHint>)
  *   Overrides default schema generation behavior (e.g., array items: false).
  *   Writers: capture analysis in schema-injection

@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import { classifyReactiveContext, detectCallKind } from "../../../ast/mod.ts";
 import type { TransformationContext } from "../../../core/mod.ts";
+import { unwrapExpression } from "../../../utils/expression.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import type { AnalyzeFn } from "../types.ts";
 
@@ -19,6 +20,13 @@ function isTransparentWrapContainer(node: ts.Expression): boolean {
     ts.isJsxFragment(node) ||
     ts.isJsxSelfClosingElement(node)
   );
+}
+
+export function isJsxLocalRewriteContainer(node: ts.Expression): boolean {
+  const current = unwrapExpression(node);
+  return ts.isJsxElement(current) ||
+    ts.isJsxFragment(current) ||
+    ts.isJsxSelfClosingElement(current);
 }
 
 function isHelperRewriteBoundary(

@@ -16,6 +16,7 @@ import {
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
 
 function processBranch(
@@ -24,6 +25,13 @@ function processBranch(
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
 ): ts.Expression {
+  // JSX containers can lower their dynamic slots independently, so the branch
+  // does not need a whole-expression compute wrapper just because one child JSX
+  // expression needs a local derive.
+  if (isJsxLocalRewriteContainer(expr)) {
+    return rewriteChildren(expr) || expr;
+  }
+
   // Branch wrapping needs a branch-local view of data flow, so we intentionally
   // re-analyze the authored branch here instead of reusing the outer
   // conditional's aggregate analysis. The important invariant is that the wrap
