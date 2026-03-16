@@ -20,6 +20,7 @@
     ]
   },
   "exports": {
-    "./deep-freeze": "./deep-freeze.ts"
+    "./deep-freeze": "./deep-freeze.ts",
+    "./schema-utils": "./schema-utils.ts"
   }
 }
