@@ -31,6 +31,12 @@ const setup = () => {
   return { runtime, storageManager };
 };
 
+const setupStorageManager = () =>
+  StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
+
 const cleanup = async (
   runtime: Runtime,
   storageManager: ReturnType<typeof StorageManager.emulate>,
@@ -46,6 +52,31 @@ const cleanup = async (
 Deno.bench("Immutable cell - create data URI only (100x)", () => {
   for (let index = 0; index < 100; index += 1) {
     createDataCellURI(makeData(index));
+  }
+});
+
+Deno.bench(
+  "Immutable cell - storage manager setup and cleanup only",
+  async () => {
+    const storageManager = setupStorageManager();
+    await storageManager.close();
+  },
+);
+
+Deno.bench("Immutable cell - runtime setup and cleanup only", async () => {
+  const { runtime, storageManager } = setup();
+  await cleanup(runtime, storageManager);
+});
+
+Deno.bench("Immutable cell - create empty tx and abort (100x)", async () => {
+  const { runtime, storageManager } = setup();
+  try {
+    for (let index = 0; index < 100; index += 1) {
+      const tx = runtime.edit();
+      tx.abort("bench");
+    }
+  } finally {
+    await cleanup(runtime, storageManager);
   }
 });
 

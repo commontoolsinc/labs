@@ -359,6 +359,9 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
+    if (this.#providers.size === 0) {
+      return;
+    }
     await this.synced();
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),

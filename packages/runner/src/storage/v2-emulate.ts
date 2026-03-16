@@ -11,11 +11,11 @@ import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 const DOCUMENT_MIME = "application/json" as const;
 
 class EmulatedSessionFactory implements SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.getServer()),
     });
     const session = await client.mount(space);
     return { client, session };
@@ -41,35 +41,37 @@ const toStoredDocument = (value: StorableDatum) => {
 };
 
 export class EmulatedStorageManager extends StorageManager {
-  #server: MemoryV2Server.Server;
+  #serverFactory: () => MemoryV2Server.Server;
+  #server?: MemoryV2Server.Server;
   #seedLocalSeq = 1;
 
   static emulate(
     options: Omit<Options, "address">,
   ): EmulatedStorageManager {
-    const server = new MemoryV2Server.Server();
     return new this(
       {
         ...options,
         address: new URL("memory://"),
       },
-      new EmulatedSessionFactory(server),
-      server,
+      () => new MemoryV2Server.Server(),
     );
   }
 
-  private constructor(
+  protected constructor(
     options: Options,
-    sessionFactory: SessionFactory,
-    server: MemoryV2Server.Server,
+    serverFactory: () => MemoryV2Server.Server,
   ) {
-    super(options, sessionFactory);
-    this.#server = server;
+    let getServer: (() => MemoryV2Server.Server) | undefined;
+    super(options, new EmulatedSessionFactory(() => getServer!()));
+    this.#serverFactory = serverFactory;
+    getServer = () => this.server();
   }
 
   override async close(): Promise<void> {
     await super.close();
-    await this.#server.close();
+    if (this.#server) {
+      await this.#server.close();
+    }
   }
 
   session() {
@@ -77,7 +79,7 @@ export class EmulatedStorageManager extends StorageManager {
       mount: (space: MemorySpace) => ({
         transact: async ({ changes }: { changes: unknown }) => {
           const client = await MemoryV2Client.connect({
-            transport: MemoryV2Client.loopback(this.#server),
+            transport: MemoryV2Client.loopback(this.server()),
           });
           try {
             const session = await client.mount(space);
@@ -109,5 +111,10 @@ export class EmulatedStorageManager extends StorageManager {
         },
       }),
     };
+  }
+
+  protected server(): MemoryV2Server.Server {
+    this.#server ??= this.#serverFactory();
+    return this.#server;
   }
 }
