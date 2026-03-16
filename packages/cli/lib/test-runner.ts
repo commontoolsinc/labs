@@ -26,6 +26,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { Engine, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
@@ -94,6 +95,8 @@ export interface TestRunnerOptions {
   verbose?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
+  /** Force the storage/runtime memory implementation used by the test harness. */
+  memoryVersion?: MemoryVersion;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
@@ -717,7 +720,10 @@ export async function runTestPattern(
   const { StorageManager } = await import(
     "@commonfabric/runner/storage/cache.deno"
   );
-  const storageManager = StorageManager.emulate({ as: identity });
+  const storageManager = StorageManager.emulate({
+    as: identity,
+    memoryVersion: options.memoryVersion,
+  });
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
@@ -725,6 +731,7 @@ export async function runTestPattern(
 
   const runtime = new Runtime({
     storageManager,
+    memoryVersion: options.memoryVersion,
     experimental: experimentalOptionsFromEnv(),
     apiUrl: new URL(import.meta.url),
     errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
