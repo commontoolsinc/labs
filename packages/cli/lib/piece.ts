@@ -148,7 +148,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
               } catch (e) {
                 console.error("navigateTo add error:", e);
               }
-            }).catch((_err) => {
+            }).catch((_err: unknown) => {
               // ignore; we already emitted the id
             });
           } catch (e) {
