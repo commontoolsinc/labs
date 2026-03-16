@@ -85,3 +85,9 @@ export default pattern(() => {
 - the test report explains what was covered and what was intentionally omitted
 - the pattern still compiles after any interface changes made to support
   testing
+
+## Done When
+
+- the test file exists alongside the pattern
+- the tests pass
+- the pattern is ready for the next dependent sub-pattern or release step

@@ -21,9 +21,11 @@ guidance, and a short priority list at the end.
 
 Check that these are not inside the pattern body:
 
-- `handler()` definitions that should be at module scope
-- immediately invoked `lift(...)`
-- helper functions that should live at module scope
+| Violation | Fix |
+|-----------|-----|
+| `handler()` defined inside pattern | Move to module scope, or use `action()` instead |
+| `lift()` immediately invoked (`lift(...)(args)`) | Use `computed()` or define lift at module scope |
+| helper functions defined inside pattern | Move to module scope |
 
 Allowed inside patterns:
 
@@ -34,38 +36,43 @@ Allowed inside patterns:
 
 ### 2. Reactivity
 
-Look for:
-
-- reactive values used directly where a computed wrapper is required
-- string interpolation over reactive values without `computed()`
-- `Writable.of(reactiveValue)`
-- `.get()` used on computed or lift results
-- inline `filter()` or `sort()` in JSX where the work should be precomputed
-- nested computed closures that capture unstable outer reactive state
-- `lift()` closing over reactive dependencies instead of taking parameters
-- composed pattern cells used in `ifElse` without a local computed bridge
+| Violation | Fix |
+|-----------|-----|
+| `[NAME]: someProp` | `[NAME]: computed(() => someProp)` |
+| `[NAME]: \`text ${someProp}\`` | `[NAME]: computed(() => \`text ${someProp}\`)` |
+| `Writable.of(reactiveValue)` | Initialize empty, set in handler or action |
+| `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
+| `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
+| `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
+| nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
+| `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
+| cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |
 
 ### 3. Conditional Rendering
 
-Look for event handlers or reactive gates placed inside `computed()` when the
-UI should instead use direct JSX conditionals.
+| Violation | Fix |
+|-----------|-----|
+| `onClick` or conditional UI inside `computed()` | Move the interactive element outside and use direct JSX conditionals |
+
+Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 
 ### 4. Type System and Data Shape
 
-Look for:
-
-- arrays without sensible defaults when undefined would be invalid
-- missing `Writable<>` wrappers on values that are later mutated
-- `Map` or `Set` used in serialized cell data
-- custom identity fields when `equals()` would be the intended mechanism
+| Violation | Fix |
+|-----------|-----|
+| array without `Default<T[], []>` where undefined would be invalid | Add a sensible default |
+| missing `Writable<>` wrapper on values later mutated | Add `Writable<T>` to the relevant type |
+| `Map` or `Set` in serialized cell data | Use plain objects or arrays |
+| custom identity field where `equals()` is intended | Use `equals()` instead of ad hoc identity |
 
 ### 5. Binding
 
-Check:
-
-- `$checked` and `$value` usage for reactive props
-- property-level binding instead of whole-object binding
-- correct event names such as `onct-send`, `onct-input`, and `onct-change`
+| Violation | Fix |
+|-----------|-----|
+| `checked={item.done}` | `$checked={item.done}` |
+| `value={title}` | `$value={title}` |
+| `$checked={item}` | `$checked={item.done}` |
+| wrong event name | Use `onct-send`, `onct-input`, or `onct-change` |
 
 ### 6. Style Syntax
 
@@ -73,39 +80,44 @@ HTML elements require object style syntax. Custom `ct-*` elements require
 string style syntax. Also check that custom component props use the correct
 camelCase names.
 
+| Violation | Fix |
+|-----------|-----|
+| string style on HTML | Convert to object syntax |
+| object style on `ct-*` | Convert to string syntax |
+| kebab-case props on `ct-*` | Use camelCase, for example `allowCustom` |
+
 ### 7. Handler Binding
 
-Look for:
-
-- state being bound where runtime event data should be used
-- handlers created repeatedly inside `.map()` when a shared handler plus
-  binding would be cleaner
+| Violation | Fix |
+|-----------|-----|
+| state bound where runtime event data should be used | Bind only stable state and let event data arrive at runtime |
+| handlers created repeatedly inside `.map()` | Create one shared handler and bind item-specific data |
 
 ### 8. Stream and Async Usage
 
-Look for:
-
-- nonexistent `Stream.of()`
-- `.subscribe()` assumptions on streams
-- `async/await` in handlers where reactive APIs are expected
-- `await generateText(...)` or `await generateObject(...)` where `.result`
-  should be used
+| Violation | Fix |
+|-----------|-----|
+| `Stream.of()` | It does not exist; the bound handler is the stream |
+| `.subscribe()` on a stream | Return the stream from the pattern instead |
+| `async/await` in handlers | Use reactive APIs such as `fetchData()` instead |
+| `await generateText(...)` | Use `.result` |
+| `await generateObject(...)` | Use `.result` |
 
 ### 9. LLM Integration
 
-Look for:
-
-- array schemas at the root of `generateObject`
-- missing `/// <cts-enable />`
-- prompts derived from agent-written cells that can cause loops
-- invalid model-name formats
+| Violation | Fix |
+|-----------|-----|
+| array schema at the root of `generateObject` | Wrap it in an object such as `{ items: T[] }` |
+| missing `/// <cts-enable />` | Add it at the top of the file |
+| prompt derived from agent-written cells | Split the source cells to avoid loops |
+| invalid model-name format | Use `vendor:model` |
 
 ### 10. Performance
 
-Look for:
-
-- handler creation per item inside loops
-- expensive computation embedded directly in render loops
+| Violation | Fix |
+|-----------|-----|
+| handler created per item inside a loop | Create a shared handler and bind per item |
+| expensive computation embedded directly in render loops | Pre-compute outside the loop |
 
 ### 11. Action vs Handler Choice
 
@@ -117,25 +129,43 @@ Fail when:
 - `handler()` is used with no multi-binding need
 - `action()` is created per item in a `.map()` and should be a shared handler
 
+| Violation | Fix |
+|-----------|-----|
+| `handler()` used with no multi-binding scenario | Convert to `action()` inside the pattern body |
+| `handler()` when all instantiations use the same data | Convert to `action()` |
+| `action()` inside `.map()` creating one action per item | Use `handler()` at module scope with binding |
+
+When to use `action()`:
+
+- the handler is specific to one pattern
+- it closes over pattern-scope variables
+- all instantiations use the same closed-over data
+
+When to use `handler()`:
+
+- different data must be bound per instantiation
+- the same handler implementation is reused in multiple places
+- you are binding per-item behavior in `.map()`
+
 ### 12. Design Review
 
-Check:
-
-- clear entity boundaries
-- actions that match user intent
-- unidirectional data flow
-- normalized state
-- self-documenting type and field names
-- appropriate granularity
+| Check | What to look for |
+|-------|------------------|
+| clear entity boundaries | each pattern represents one concept |
+| actions match user intent | handler names match what the user wants to do |
+| unidirectional data flow | parents own state, children receive props |
+| normalized state | no duplicate data, single source of truth |
+| self-documenting types | type names and field names are clear without comments |
+| appropriate granularity | neither too fine nor too coarse |
 
 ### 13. Regression Check
 
-When reviewing updates to existing patterns, verify:
-
-- tests still pass
-- type signatures are preserved or intentionally migrated
-- existing handlers still work
-- changes are scoped to the intended area
+| Check | What to verify |
+|-------|----------------|
+| tests still pass | existing tests run cleanly after the change |
+| type signatures preserved | or intentionally migrated with a clear reason |
+| handlers still work | existing functionality is not broken |
+| no unintended side effects | changes stay scoped to the intended area |
 
 ## Output Format
 

@@ -10,6 +10,25 @@ This is the agent-neutral reference for building Common Fabric patterns.
 - Iterate through `Sketch -> Run -> Verify -> Improve`.
 - Prefer validated docs and references over blindly copying an existing pattern.
 
+## Planning Scale
+
+Use enough planning for the task, but no more:
+
+- simple pattern:
+  - one file, types plus handlers plus UI together
+  - minimal clarification needed
+  - plan in a couple of sentences
+- medium pattern:
+  - maybe split schemas if types become hard to follow
+  - clarify data shape and key actions up front
+  - plan in a short list
+- complex pattern:
+  - identify entities, relationships, actions, and boundaries
+  - consider sub-patterns only when concepts are genuinely distinct
+  - plan with structure, but do not over-specify the end state
+
+Always start simple. Split only when it helps the next iteration.
+
 ## Pattern Structure
 
 Start with:
@@ -58,6 +77,18 @@ Use the runtime, not just static reasoning:
 
 Primary verification is still runtime behavior. Tests are for logic that is
 awkward, fragile, or expensive to verify by clicking.
+
+## Delegation and Review Rhythm
+
+If your runtime supports delegation, the most useful split is usually:
+
+- a code-writing role for implementation
+- a deploy/runtime-testing role
+- a critic/review role before release or first deploy
+
+Use delegation to reduce context mixing, not to overcomplicate small tasks.
+Simple patterns can stay in one session; larger or more failure-prone work
+benefits from role separation.
 
 ## action() vs handler()
 
@@ -199,6 +230,9 @@ The common operating rhythm is:
 Always review before first deploy when the change is larger than a trivial fix.
 The fast review step catches many convention and reactivity mistakes before
 they become runtime debugging sessions.
+
+At clear milestones, offer a commit or checkpoint so useful progress is not
+left ephemeral.
 
 ## Documentation Priorities
 
