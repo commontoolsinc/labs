@@ -44,12 +44,12 @@ describe("Memory v2 lazy session creation", () => {
   it("does not create a session for open or local transaction reads and writes", async () => {
     let sessionCreates = 0;
     const storage = new TestStorageManager({
-      async create(_space: MemorySpace) {
+      create(_space: MemorySpace) {
         sessionCreates += 1;
-        return {
+        return Promise.resolve({
           client: { close: async () => {} } as never,
           session: {} as never,
-        };
+        });
       },
     });
 
@@ -85,21 +85,24 @@ describe("Memory v2 lazy session creation", () => {
     let commits = 0;
     let closes = 0;
     const storage = new TestStorageManager({
-      async create(_space: MemorySpace) {
+      create(_space: MemorySpace) {
         sessionCreates += 1;
-        return {
+        return Promise.resolve({
           client: {
-            close: async () => {
+            close: () => {
               closes += 1;
+              return Promise.resolve();
             },
           } as never,
           session: {
-            transact: async (commit: { operations: { id: URI }[] }) => {
+            transact: (commit: { operations: { id: URI }[] }) => {
               commits += 1;
-              return appliedCommitFor(commit.operations.map((op) => op.id));
+              return Promise.resolve(
+                appliedCommitFor(commit.operations.map((op) => op.id)),
+              );
             },
           } as never,
-        };
+        });
       },
     });
 
