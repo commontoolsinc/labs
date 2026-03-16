@@ -51,7 +51,7 @@ const config: Config = {
       ),
       "$COMPILATION_CACHE_CLIENT": Deno.env.get(
         "COMPILATION_CACHE_CLIENT",
-      ),
+      ) ?? "true",
     },
     supported: {
       // Provide polyfills for `using` resource management
