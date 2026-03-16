@@ -23,6 +23,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
@@ -126,7 +127,7 @@ function internSet(
   value: JSONSchema,
 ) {
   if (cache.size >= INTERN_CACHE_MAX) cache.clear();
-  cache.set(key, value);
+  cache.set(key, toDeepFrozenSchema(value, true));
 }
 
 export function stableStringify(value: unknown): string {
@@ -3043,11 +3044,12 @@ export function mergeAnyOfBranchSchemas(
   if (cached !== undefined) return cached;
 
   const result = _mergeAnyOfBranchSchemasUncached(branches, outerSchema);
+  const frozen = result !== null ? toDeepFrozenSchema(result, true) : null;
   if (_mergeAnyOfBranchCache.size >= INTERN_CACHE_MAX) {
     _mergeAnyOfBranchCache.clear();
   }
-  _mergeAnyOfBranchCache.set(key, result);
-  return result;
+  _mergeAnyOfBranchCache.set(key, frozen);
+  return frozen;
 }
 
 function _mergeAnyOfBranchSchemasUncached(
