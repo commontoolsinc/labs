@@ -5,7 +5,7 @@
 ## Server Startup
 
 - Started local dev servers with port-offset=100
-- Labs directory: /Users/gideonwald/coding/common_tools_2/labs
+- Labs directory: /Users/gideonwald/coding/common-fabric-2/labs
 - Toolshed: http://localhost:8100 — READY (confirmed HTML response)
 - Shell: http://localhost:5273 — Not verified, not needed
 
