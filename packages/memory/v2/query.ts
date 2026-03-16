@@ -22,7 +22,11 @@ type QueryDocKey = `${string}/${string}/${string}`;
 
 export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
-  #details = new Map<string, { seq: number; hash: Reference }>();
+  #details = new Map<string, {
+    seq: number;
+    hash: Reference;
+    document: NonNullable<Engine.EntityState["document"]>;
+  }>();
   #missing = new Set<string>();
 
   constructor(
@@ -61,7 +65,11 @@ export class EngineObjectManager implements ObjectStorageManager {
       value: state.document as unknown as Immutable<StorableDatum>,
     };
     this.#attestations.set(key, attestation);
-    this.#details.set(key, { seq: state.seq, hash: state.hash });
+    this.#details.set(key, {
+      seq: state.seq,
+      hash: state.hash,
+      document: state.document,
+    });
     return attestation;
   }
 
@@ -131,15 +139,17 @@ export const queryGraph = (
     .filter((entry) => entry.type === "application/json")
     .map(({ id, type }) => {
       const detail = manager.detail({ id, type });
-      const state = Engine.readState(engine, {
-        id,
-        branch,
-      });
+      const state = detail === undefined
+        ? Engine.readState(engine, {
+          id,
+          branch,
+        })
+        : null;
       return {
         id,
         seq: detail?.seq ?? state?.seq ?? 0,
         hash: detail?.hash ?? state?.hash,
-        document: state?.document ?? null,
+        document: detail?.document ?? state?.document ?? null,
       } satisfies EntitySnapshot;
     })
     .sort((left, right) => left.id.localeCompare(right.id));

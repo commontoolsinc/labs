@@ -104,6 +104,8 @@ export interface TestRunnerOptions {
   schedulerMode?: "default" | "push" | "pull";
   /** Print storage-related logger timings and counts after each test file. */
   storageStats?: boolean;
+  /** Limit for storage timing/count tables when storageStats is enabled. */
+  storageStatsLimit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +425,7 @@ function isStorageLoggerName(name: string): boolean {
     name === "extended-storage-transaction";
 }
 
-function printStorageStats(elapsedMs: number): void {
+function printStorageStats(elapsedMs: number, limit = 16): void {
   type StorageCountEntry = {
     name: string;
     d: number;
@@ -470,8 +472,10 @@ function printStorageStats(elapsedMs: number): void {
 
   if (timingEntries.length > 0) {
     timingEntries.sort((a, b) => b.p95 - a.p95);
-    console.log(`           Timings (top 12 by p95):`);
-    for (const entry of timingEntries.slice(0, 12)) {
+    console.log(
+      `           Timings (top ${Math.min(limit, timingEntries.length)} by p95):`,
+    );
+    for (const entry of timingEntries.slice(0, limit)) {
       const name = entry.name.padEnd(35);
       console.log(
         `             ${name}  n=${String(entry.n).padStart(5)} p50=${
@@ -541,8 +545,10 @@ function printStorageStats(elapsedMs: number): void {
 
   if (keyEntries.length > 0) {
     keyEntries.sort((a, b) => b.total - a.total);
-    console.log(`           Count keys (top 16):`);
-    for (const entry of keyEntries.slice(0, 16)) {
+    console.log(
+      `           Count keys (top ${Math.min(limit, keyEntries.length)}):`,
+    );
+    for (const entry of keyEntries.slice(0, limit)) {
       const parts: string[] = [];
       if (entry.d > 0) parts.push(`d:${entry.d}`);
       if (entry.i > 0) parts.push(`i:${entry.i}`);
@@ -1184,7 +1190,10 @@ export async function runTestPattern(
       printActionStatsTable(runtime);
     }
     if (options.storageStats) {
-      printStorageStats(performance.now() - startTime);
+      printStorageStats(
+        performance.now() - startTime,
+        options.storageStatsLimit ?? 16,
+      );
     }
 
     // Collect idempotency violations detected during normal execution

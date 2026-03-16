@@ -67,6 +67,11 @@ export const test = new Command()
     "--storage-stats",
     "Print storage-related logger timings and counts after each test file.",
   )
+  .option(
+    "--storage-stats-limit <count:number>",
+    "Maximum number of storage timing/count entries to print with --storage-stats.",
+    { default: 16 },
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -151,6 +156,7 @@ export const test = new Command()
       statsActionLimit: options.statsActionLimit,
       schedulerMode,
       storageStats: options.storageStats,
+      storageStatsLimit: options.storageStatsLimit,
     });
 
     // Exit with error code if any tests failed
