@@ -54,7 +54,6 @@ export default pattern<CatalogInput, CatalogOutput>(({ selectedStory }) => {
                   { id: "message-input", label: "Message Input" },
                   { id: "calendar", label: "Calendar" },
                   { id: "radio", label: "Radio" },
-                  { id: "slider", label: "Slider" },
                   { id: "autocomplete", label: "Autocomplete" },
                   { id: "tags", label: "Tags" },
                   { id: "fab", label: "FAB" },

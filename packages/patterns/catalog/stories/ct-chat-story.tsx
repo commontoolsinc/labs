@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { handler, NAME, pattern, UI, type VNode, Writable } from "commontools";
 import { Controls, SwitchControl } from "../ui/controls.tsx";
 
 // deno-lint-ignore no-empty-interface
@@ -74,6 +74,19 @@ const sampleTools = [
   { name: "run_code", description: "Execute a code snippet" },
 ];
 
+const sendMessage = handler<
+  unknown,
+  { messages: Writable<typeof sampleMessages> }
+>((_event, { messages }) => {
+  const text = (_event as CustomEvent)?.detail?.text as string | undefined;
+  if (text?.trim()) {
+    messages.set([
+      ...messages.get(),
+      { role: "user", content: text.trim() },
+    ]);
+  }
+});
+
 export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
   const pending = Writable.of(false);
   const messages = Writable.of(sampleMessages);
@@ -126,6 +139,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
           <ct-prompt-input
             placeholder="Ask the assistant..."
             pending={pending}
+            onct-send={sendMessage({ messages })}
           />
         </div>
       </div>

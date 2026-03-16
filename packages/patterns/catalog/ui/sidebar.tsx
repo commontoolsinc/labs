@@ -21,7 +21,7 @@ interface SidebarCategory {
 
 interface SidebarInput {
   selected: Writable<string>;
-  categories: SidebarCategory[];
+  categories?: SidebarCategory[];
 }
 
 interface SidebarOutput {

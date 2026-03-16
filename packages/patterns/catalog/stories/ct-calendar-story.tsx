@@ -12,6 +12,7 @@ interface CalendarStoryOutput {
 }
 
 export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
+  const selectedDate = Writable.of("2026-03-13");
   const disabled = Writable.of(false);
   const minDate = Writable.of("");
   const maxDate = Writable.of("");
@@ -28,7 +29,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
           }}
         >
           <ct-calendar
-            value="2026-03-13"
+            $value={selectedDate}
             markedDates={[
               "2026-03-10",
               "2026-03-15",
@@ -47,7 +48,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
               textAlign: "center",
             }}
           >
-            Selected: 2026-03-13
+            Selected: {selectedDate}
           </div>
         </div>
       </div>
