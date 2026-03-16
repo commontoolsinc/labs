@@ -169,11 +169,11 @@ export function createAuthManager<T, R>(
     now: number;
     debugMode?: boolean;
   }, DerivedAuthState>(({
-      piece,
-      requiredScopes,
-      now,
-      debugMode,
-    }) => {
+    piece,
+    requiredScopes,
+    now,
+    debugMode,
+  }) => {
     const auth = piece?.auth ?? null;
     const currentEmail = auth?.user?.email ?? "";
     const requestedScopes = Array.isArray(requiredScopes) ? requiredScopes : [];
@@ -183,7 +183,9 @@ export function createAuthManager<T, R>(
     const tokenExpiresAt = typeof auth?.expiresAt === "number"
       ? auth.expiresAt
       : null;
-    const tokenTimeRemaining = tokenExpiresAt === null ? null : tokenExpiresAt - now;
+    const tokenTimeRemaining = tokenExpiresAt === null
+      ? null
+      : tokenExpiresAt - now;
 
     let tokenExpiryWarning: TokenExpiryWarning = "ok";
     if (tokenTimeRemaining !== null) {
@@ -347,8 +349,6 @@ export function createAuthManager<T, R>(
       const isReady = authState.isReady;
       const tokenExpiryWarning = authState.tokenExpiryWarning;
       const tokenExpiryDisplay = authState.tokenExpiryDisplay;
-      const isTokenExpired = authState.isTokenExpired;
-      const missingScopes = authState.missingScopes;
 
       // Refresh state
       const refreshStream = authState.refreshStream;
@@ -814,7 +814,11 @@ export function createAuthManager<T, R>(
       );
 
       // Compose fullUI via chained ifElse
-      const loginOrLoad = ifElse(authState.isNeedsLogin, needsLoginUI, loadingUI);
+      const loginOrLoad = ifElse(
+        authState.isNeedsLogin,
+        needsLoginUI,
+        loadingUI,
+      );
       const scopesOrPrev = ifElse(
         isMissingScopes,
         missingScopesUI,

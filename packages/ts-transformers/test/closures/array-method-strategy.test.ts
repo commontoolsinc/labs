@@ -20,7 +20,10 @@ function parseMapCall(source: string): {
 
   const visit = (node: ts.Node): void => {
     if (methodCall) return;
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression)
+    ) {
       methodCall = node;
       return;
     }

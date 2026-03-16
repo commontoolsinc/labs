@@ -22,7 +22,6 @@ import {
   pattern,
   SELF,
   str,
-  toSchema,
   UI,
   Writable,
 } from "commontools";
@@ -106,83 +105,81 @@ interface RecordOutput {
 
 // Inner lift: stores the initial pieces (receives pieces as input)
 const storeInitialPieces = lift<{
-    notesPiece: any;
-    notesSchema: any;
-    typePickerPiece: any;
-    typePickerSchema: any;
-    subPieces: Writable<SubPieceEntry[]>;
-    isInitialized: Writable<boolean>;
-  }>(({
-    notesPiece,
-    notesSchema,
-    typePickerPiece,
-    typePickerSchema,
-    subPieces,
-    isInitialized,
-  }) => {
-    if (!isInitialized.get()) {
-      subPieces.set([
-        { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
-        {
-          type: "type-picker",
-          pinned: false,
-          piece: typePickerPiece,
-          schema: typePickerSchema,
-        },
-      ]);
-      isInitialized.set(true);
-      return notesPiece; // Return notes piece as primary reference
-    }
-  },
-);
+  notesPiece: any;
+  notesSchema: any;
+  typePickerPiece: any;
+  typePickerSchema: any;
+  subPieces: Writable<SubPieceEntry[]>;
+  isInitialized: Writable<boolean>;
+}>(({
+  notesPiece,
+  notesSchema,
+  typePickerPiece,
+  typePickerSchema,
+  subPieces,
+  isInitialized,
+}) => {
+  if (!isInitialized.get()) {
+    subPieces.set([
+      { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
+      {
+        type: "type-picker",
+        pinned: false,
+        piece: typePickerPiece,
+        schema: typePickerSchema,
+      },
+    ]);
+    isInitialized.set(true);
+    return notesPiece; // Return notes piece as primary reference
+  }
+});
 
 // Outer lift: checks if empty, creates pieces, calls inner lift
 // TypePicker uses ContainerCoordinationContext protocol for parent access
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
 const initializeRecord = lift<{
-    currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
-    isInitialized: Writable<boolean>;
-    recordPatternJson: string; // Computed that returns Record JSON string
-  }>(({
-      currentPieces,
+  currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
+  subPieces: Writable<SubPieceEntry[]>;
+  trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+  isInitialized: Writable<boolean>;
+  recordPatternJson: string; // Computed that returns Record JSON string
+}>(({
+  currentPieces,
+  subPieces,
+  trashedSubPieces,
+  isInitialized,
+  recordPatternJson,
+}) => {
+  if ((currentPieces || []).length === 0) {
+    // Create Note as default module (rendered via ct-render variant="embedded")
+    // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
+    const notesPiece = Note({ linkPattern: recordPatternJson });
+
+    // Capture schema for dynamic discovery
+    const notesSchema = getResultSchema(notesPiece);
+
+    // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
+    // NOTE: Cells must be top-level, not nested in a context object!
+    // deno-lint-ignore no-explicit-any
+    const typePickerPiece = TypePickerModule({
+      entries: subPieces,
+      trashedEntries: trashedSubPieces,
+      linkPatternJson: recordPatternJson,
+    } as any);
+
+    // Capture schema for dynamic discovery
+    const typePickerSchema = getResultSchema(typePickerPiece);
+
+    return storeInitialPieces({
+      notesPiece,
+      notesSchema,
+      typePickerPiece,
+      typePickerSchema,
       subPieces,
-      trashedSubPieces,
       isInitialized,
-      recordPatternJson,
-    }) => {
-    if ((currentPieces || []).length === 0) {
-      // Create Note as default module (rendered via ct-render variant="embedded")
-      // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
-      const notesPiece = Note({ linkPattern: recordPatternJson });
-
-      // Capture schema for dynamic discovery
-      const notesSchema = getResultSchema(notesPiece);
-
-      // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
-      // NOTE: Cells must be top-level, not nested in a context object!
-      // deno-lint-ignore no-explicit-any
-      const typePickerPiece = TypePickerModule({
-        entries: subPieces,
-        trashedEntries: trashedSubPieces,
-        linkPatternJson: recordPatternJson,
-      } as any);
-
-      // Capture schema for dynamic discovery
-      const typePickerSchema = getResultSchema(typePickerPiece);
-
-      return storeInitialPieces({
-        notesPiece,
-        notesSchema,
-        typePickerPiece,
-        typePickerSchema,
-        subPieces,
-        isInitialized,
-      });
-    }
-  },
-);
+    });
+  }
+});
 
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(

@@ -8,8 +8,8 @@ import {
   isDeriveCall,
   isFunctionLikeExpression,
   isReactiveOriginCall,
-  registerSyntheticCallType,
   type ReactiveContextInfo,
+  registerSyntheticCallType,
 } from "../../ast/mod.ts";
 import {
   classifyReactiveReceiverKind,
@@ -222,8 +222,8 @@ export function assertValidSyntheticComputeOwnedArrayMethodContext(
     ? methodCall.expression.expression
     : undefined;
   const isSyntheticComputeOwned = context.isSyntheticComputeOwnedNode(
-      methodCall,
-    ) ||
+    methodCall,
+  ) ||
     (receiver ? context.isSyntheticComputeOwnedNode(receiver) : false);
 
   if (!isSyntheticComputeOwned) {
