@@ -5,6 +5,7 @@ import {
 } from "@commontools/memory/storable-value";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { IAttestation } from "../src/storage/interface.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { V2StorageTransaction } from "../src/storage/v2-transaction.ts";
 import { open as openChronicle } from "../src/storage/transaction/chronicle.ts";
 import { create as createStorageTransaction } from "../src/storage/transaction.ts";
@@ -156,6 +157,24 @@ Deno.bench(
 );
 
 Deno.bench(
+  "Storage tx internals - v1 extended tx warm root read x10000",
+  async () => {
+    const storage = await seedV1Storage();
+    try {
+      const baseTx = createStorageTransaction(storage);
+      const tx = new ExtendedStorageTransaction(baseTx);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.readValueOrThrow({ space, id, type, path: [] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.readValueOrThrow({ space, id, type, path: [] });
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
   "Storage tx internals - v2 transaction warm root read x10000",
   async () => {
     const storage = await seedV2Storage();
@@ -165,6 +184,24 @@ Deno.bench(
       tx.read({ space, id, type, path: ["value"] });
       for (let index = 0; index < 10_000; index += 1) {
         tx.read({ space, id, type, path: ["value"] });
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v2 extended tx warm root read x10000",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const baseTx = new V2StorageTransaction(storage);
+      const tx = new ExtendedStorageTransaction(baseTx);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.readValueOrThrow({ space, id, type, path: [] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.readValueOrThrow({ space, id, type, path: [] });
       }
     } finally {
       await storage.close();
@@ -276,6 +313,23 @@ Deno.bench(
 );
 
 Deno.bench(
+  "Storage tx internals - v1 extended tx sibling write x100",
+  async () => {
+    const storage = await seedV1Storage();
+    try {
+      const baseTx = createStorageTransaction(storage);
+      const tx = new ExtendedStorageTransaction(baseTx);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      for (let index = 0; index < 100; index += 1) {
+        tx.writeValueOrThrow({ space, id, type, path: ["count"] }, index);
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
   "Storage tx internals - v2 transaction sibling write x100",
   async () => {
     const storage = await seedV2Storage();
@@ -284,6 +338,23 @@ Deno.bench(
       tx.write({ space, id, type, path: [] }, seedDocument);
       for (let index = 0; index < 100; index += 1) {
         tx.write({ space, id, type, path: ["value", "count"] }, index);
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v2 extended tx sibling write x100",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const baseTx = new V2StorageTransaction(storage);
+      const tx = new ExtendedStorageTransaction(baseTx);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      for (let index = 0; index < 100; index += 1) {
+        tx.writeValueOrThrow({ space, id, type, path: ["count"] }, index);
       }
     } finally {
       await storage.close();

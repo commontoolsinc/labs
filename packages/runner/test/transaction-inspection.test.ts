@@ -12,7 +12,10 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
+import {
+  getTransactionReadActivities,
+  getTransactionWriteDetails,
+} from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();
@@ -254,6 +257,70 @@ describe("transaction inspection", () => {
           },
         },
       ]);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("preserves the original previousValue in native v2 write details", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const seed = storageManager.edit();
+      const id = "test:transaction-inspection-write-details-v2" as const;
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { count: 1 } });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "count"],
+      }, 2);
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "count"],
+      }, 3);
+
+      assertEquals([...getTransactionWriteDetails(tx, space)], [{
+        address: {
+          space,
+          id,
+          type: "application/json",
+          path: ["value", "count"],
+        },
+        value: 3,
+        previousValue: 1,
+      }]);
+
+      assertEquals([...tx.journal.novelty(space)], [{
+        address: {
+          id,
+          type: "application/json",
+          path: ["value", "count"],
+        },
+        value: 3,
+      }]);
+
+      assertEquals([...tx.journal.history(space)], [{
+        address: {
+          id,
+          type: "application/json",
+          path: ["value", "count"],
+        },
+        value: 1,
+      }]);
     } finally {
       await storageManager.close();
     }

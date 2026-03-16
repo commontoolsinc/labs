@@ -16,6 +16,7 @@ import type {
   IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
+  IReadActivity,
   IReadOptions,
   IStorageManager,
   IStorageTransaction,
@@ -71,6 +72,8 @@ type SpaceBranch = {
   reader?: ITransactionReader;
   writer?: ITransactionWriter;
 };
+
+type ActivityOrderEntry = number;
 
 type ReadyState = {
   status: "ready";
@@ -365,7 +368,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
-  #activity: Activity[] = [];
+  #readActivities: IReadActivity[] = [];
+  #writeActivities: IMemorySpaceAddress[] = [];
+  #activityOrder: ActivityOrderEntry[] = [];
   #writeSpace?: MemorySpace;
   #lastDocument?: {
     branch: SpaceBranch;
@@ -381,7 +386,18 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   activity(): Iterable<Activity> {
-    return this.#activity;
+    const reads = this.#readActivities;
+    const writes = this.#writeActivities;
+    const order = this.#activityOrder;
+    return (function* (): Iterable<Activity> {
+      for (const entry of order) {
+        if (entry > 0) {
+          yield { read: reads[entry - 1]! };
+          continue;
+        }
+        yield { write: writes[-entry - 1]! };
+      }
+    })();
   }
 
   status(): StorageTransactionStatus {
@@ -402,17 +418,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   getReadActivities() {
-    return (function* (activities: readonly Activity[]) {
-      for (const activity of activities) {
-        if ("read" in activity && activity.read) {
-          yield activity.read;
-        }
-      }
-    })(this.#activity);
+    return this.#readActivities;
   }
 
   getReactivityLog() {
-    return reactivityLogFromActivities(this.#activity);
+    return reactivityLogFromActivities(this.activity());
   }
 
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
@@ -500,16 +510,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     const readMeta = options?.meta ?? EMPTY_META;
     const { space: _, ...memoryAddress } = address;
 
-    this.#activity.push({
-      read: {
-        space: address.space,
-        id: address.id,
-        type: address.type,
-        path: address.path,
-        meta: readMeta,
-        ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-      },
-    });
+    const readActivity = {
+      space: address.space,
+      id: address.id,
+      type: address.type,
+      path: address.path,
+      meta: readMeta,
+      ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+    };
+    this.#readActivities.push(readActivity);
+    this.#activityOrder.push(this.#readActivities.length);
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
@@ -620,22 +630,26 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = next;
     doc.frozenReads.clear();
-    this.#activity.push({
-      write: {
-        space,
-        id: address.id,
-        type: address.type,
-        path: address.path,
-      },
-    });
+    const writeActivity = {
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path,
+    };
+    this.#writeActivities.push(writeActivity);
+    this.#activityOrder.push(-this.#writeActivities.length);
 
-    const key = JSON.stringify(address.path);
-    doc.writeDetails.set(key, {
-      address: { ...address, space },
-      value: isolatedValue,
-      previousValue: doc.writeDetails.get(key)?.previousValue ??
-        previous.ok?.value,
-    });
+    const key = encodePointer(address.path);
+    const existingDetail = doc.writeDetails.get(key);
+    if (existingDetail) {
+      existingDetail.value = isolatedValue;
+    } else {
+      doc.writeDetails.set(key, {
+        address: writeActivity,
+        value: isolatedValue,
+        previousValue: previous.ok?.value,
+      });
+    }
 
     return { ok: next };
   }
@@ -718,22 +732,26 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = next;
     doc.frozenReads.clear();
-    this.#activity.push({
-      write: {
-        space,
-        id: address.id,
-        type: address.type,
-        path: address.path,
-      },
-    });
+    const writeActivity = {
+      space,
+      id: address.id,
+      type: address.type,
+      path: address.path,
+    };
+    this.#writeActivities.push(writeActivity);
+    this.#activityOrder.push(-this.#writeActivities.length);
 
-    const key = JSON.stringify(address.path);
+    const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
-    doc.writeDetails.set(key, {
-      address: { ...address, space },
-      value: isolatedValue,
-      previousValue: existing?.previousValue,
-    });
+    if (existing) {
+      existing.value = isolatedValue;
+    } else {
+      doc.writeDetails.set(key, {
+        address: writeActivity,
+        value: isolatedValue,
+        previousValue: undefined,
+      });
+    }
 
     return { ok: next };
   }
