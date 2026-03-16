@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 interface State {
     text: string;
     searchTerm: string;
@@ -22,6 +22,12 @@ interface State {
     words: string[];
     separator: string;
 }
+// FIXTURE: method-chains
+// Verifies: chained method calls and array method chains in JSX are wrapped in derive()
+//   state.text.trim().toLowerCase()          → derive({text}, ...)
+//   state.items.filter(fn).map(fn)           → .filterWithPattern(...).mapWithPattern(...)
+//   state.prices.reduce(fn, 0)               → derive({prices, discount}, ...)
+// Context: Covers string chains, filter/map chains, reactive args, computed values, complex predicates
 export default pattern((state) => {
     return {
         [UI]: (<div>
@@ -465,40 +471,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.key("names"),
                 prefix: state.key("prefix")
-            } }, ({ state }) => state.key("names").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const n = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return n.startsWith(state.key("prefix"));
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                prefix: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["prefix"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                prefix: state.prefix
-            }
-        }).join(", "))}
+            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}

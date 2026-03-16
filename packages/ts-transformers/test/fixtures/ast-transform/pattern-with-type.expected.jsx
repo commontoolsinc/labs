@@ -42,8 +42,7 @@ export default pattern((input: MyInput) => {
     type: "object",
     properties: {
         result: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["result"]

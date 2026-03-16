@@ -54,8 +54,7 @@ export default pattern(() => {
             type: "number"
         }
     },
-    required: ["multiplier", "value"],
-    asOpaque: true
+    required: ["multiplier", "value"]
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

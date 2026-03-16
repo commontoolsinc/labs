@@ -40,8 +40,7 @@ export default pattern(() => {
     }, ({ a, b, c }) => (a.get() * b.get() + c.get()) / 2);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
+    type: "number"
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

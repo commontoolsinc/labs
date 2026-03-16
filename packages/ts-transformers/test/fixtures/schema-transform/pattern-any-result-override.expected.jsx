@@ -16,8 +16,7 @@ export const TypedFromAny = pattern((__ct_pattern_input) => {
         properties: {
             result: true,
             prompt: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             }
         },
         required: ["result", "prompt"]

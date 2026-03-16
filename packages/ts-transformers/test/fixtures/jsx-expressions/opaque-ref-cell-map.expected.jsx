@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, pattern, UI, } from "commontools";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
@@ -127,6 +127,12 @@ const goToCharm = handler({
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
+// FIXTURE: opaque-ref-cell-map
+// Verifies: a reactive factory result still rewrites JSX ifElse predicates after
+//           the forbidden OpaqueRef cast is removed
+//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., derive(...), <div>, <ul>)
+//   cellRef.map((charm, index) => <li>...) stays a plain array map when asserted as any[]
+// Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
     // cell to store array of charms we created
@@ -135,10 +141,9 @@ export default pattern(() => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema),
         storedCellRef: cell(),
-    });
-    // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
-    // Without this, TypeScript infers `any` and the closure transformer won't detect it
-    const typedCellRef = cellRef as OpaqueRef<any[]>;
+    }) as {
+        cellRef: any[];
+    };
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
@@ -155,8 +160,19 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, !typedCellRef?.length, <div>No charms created yet</div>, <ul>
-            {typedCellRef.map((charm: any, index: number) => (<li>
+        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                cellRef: {
+                    type: "array",
+                    items: true
+                }
+            },
+            required: ["cellRef"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
+            {cellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive({
                 type: "object",
@@ -207,7 +223,10 @@ export default pattern(() => {
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
-        cellRef: true
+        cellRef: {
+            type: "array",
+            items: true
+        }
     },
     required: ["$NAME", "$UI", "cellRef"],
     $defs: {

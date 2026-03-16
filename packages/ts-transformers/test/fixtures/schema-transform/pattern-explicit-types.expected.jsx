@@ -21,8 +21,7 @@ export default pattern((input) => {
                         type: "string"
                     }
                 },
-                required: ["foo"],
-                asOpaque: true
+                required: ["foo"]
             }
         },
         required: ["input"]
@@ -33,8 +32,7 @@ export default pattern((input) => {
                 type: "number"
             },
             foo: {
-                type: "string",
-                asOpaque: true
+                type: "string"
             }
         },
         required: ["bar", "foo"]

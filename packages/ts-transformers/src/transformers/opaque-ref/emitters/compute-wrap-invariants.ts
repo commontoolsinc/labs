@@ -192,13 +192,18 @@ export function findPendingComputeWrapCandidate(
       return;
     }
 
-    const nodeAnalysis = analyze(node);
-    if (!nodeAnalysis.containsOpaqueRef || !nodeAnalysis.requiresRewrite) {
-      ts.forEachChild(node, visit);
+    // Helper-owned calls (builder invocations, authored ifElse/when/unless,
+    // array-method boundaries, derive) own rewrite decisions for their
+    // subtrees even when the call expression itself does not need wrapping.
+    // Stop before descending so we do not leak pending-wrap candidates from
+    // captured arguments like `handler({ id: msg.id })` or `lift({ piece })`.
+    if (isHelperRewriteBoundary(node, context)) {
       return;
     }
 
-    if (isHelperRewriteBoundary(node, context)) {
+    const nodeAnalysis = analyze(node);
+    if (!nodeAnalysis.containsOpaqueRef || !nodeAnalysis.requiresRewrite) {
+      ts.forEachChild(node, visit);
       return;
     }
 

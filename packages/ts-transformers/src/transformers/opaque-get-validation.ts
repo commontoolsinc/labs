@@ -101,6 +101,11 @@ export class OpaqueGetValidationTransformer extends Transformer {
   /**
    * Check if an expression is reactive via structural analysis (not type-based).
    * This handles cases where OpaqueRef<T> = T and the type loses its brand.
+   *
+   * Important: this only infers reactivity from values produced by reactive
+   * calls, not from callback parameters to builder definitions. Builder
+   * callbacks keep their declared input semantics; only the values produced by
+   * invoking the resulting factories should be treated as structurally reactive.
    */
   private isReactiveExpression(
     expr: ts.Expression,
@@ -111,11 +116,6 @@ export class OpaqueGetValidationTransformer extends Transformer {
       if (!symbol) return false;
 
       for (const decl of symbol.declarations ?? []) {
-        // Check if it's a pattern callback parameter or destructured from one
-        if (this.isPatternParameter(decl)) {
-          return true;
-        }
-
         // Check if it's a variable initialized from a reactive call
         if (ts.isVariableDeclaration(decl) && decl.initializer) {
           if (this.isReactiveInitializer(decl.initializer, checker)) {
@@ -133,9 +133,6 @@ export class OpaqueGetValidationTransformer extends Transformer {
           ) {
             parent = parent.parent;
           }
-          if (this.isPatternParameter(parent)) {
-            return true;
-          }
           if (ts.isVariableDeclaration(parent) && parent.initializer) {
             if (this.isReactiveInitializer(parent.initializer, checker)) {
               return true;
@@ -150,34 +147,6 @@ export class OpaqueGetValidationTransformer extends Transformer {
       return this.isReactiveExpression(expr.expression, checker);
     }
 
-    return false;
-  }
-
-  /**
-   * Check if a node is a parameter of a pattern/builder callback.
-   */
-  private isPatternParameter(node: ts.Node): boolean {
-    if (!ts.isParameter(node)) return false;
-
-    const fn = node.parent;
-    if (!fn || (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn))) {
-      return false;
-    }
-
-    const call = fn.parent;
-    if (!call || !ts.isCallExpression(call)) return false;
-
-    const callee = call.expression;
-    if (ts.isIdentifier(callee)) {
-      return callee.text === "pattern" || callee.text === "handler" ||
-        callee.text === "lift" || callee.text === "computed" ||
-        callee.text === "render";
-    }
-    if (ts.isPropertyAccessExpression(callee)) {
-      const name = callee.name.text;
-      return name === "pattern" || name === "handler" ||
-        name === "lift" || name === "computed" || name === "render";
-    }
     return false;
   }
 

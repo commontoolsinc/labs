@@ -14,8 +14,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, {}, () => 42);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
+    type: "number"
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

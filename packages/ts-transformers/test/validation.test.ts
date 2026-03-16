@@ -1020,7 +1020,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
-    "errors on .get() called on pattern input without Writable",
+    "does not report opaque-get on plain pattern callback input",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, computed } from "commontools";
@@ -1034,8 +1034,11 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertEquals(
+        errors.some((error) => error.type === "opaque-get:invalid-call"),
+        false,
+        "Pattern callback parameters should keep their declared semantics",
+      );
     },
   );
 
@@ -1106,6 +1109,78 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
         0,
         "Direct access on computed result should be allowed",
       );
+    },
+  );
+
+  await t.step(
+    "does not report opaque-get on Cell lift callback input",
+    async () => {
+      const source = `/// <cts-enable />
+      import { lift, Cell } from "commontools";
+
+      const readCount = lift<{ count: Cell<number> }>(({ count }) => {
+        return count.get();
+      });
+
+      export default readCount;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.some((error) => error.type === "opaque-get:invalid-call"),
+        false,
+        "lift() callback inputs should keep their declared Cell semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "does not report opaque-get on Cell handler callback state",
+    async () => {
+      const source = `/// <cts-enable />
+      import { handler, Cell } from "commontools";
+
+      const increment = handler<unknown, { count: Cell<number> }>((
+        _,
+        { count },
+      ) => {
+        count.set(count.get() + 1);
+      });
+
+      export default increment;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.some((error) => error.type === "opaque-get:invalid-call"),
+        false,
+        "handler() callback state should keep declared Cell semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on .get() called on lifted factory result",
+    async () => {
+      const source = `/// <cts-enable />
+      import { lift } from "commontools";
+
+      const addOne = lift<{ count: number }>(({ count }) => count + 1);
+      const result = addOne({ count: 1 });
+      const value = result.get();
+
+      export default value;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
     },
   );
 });

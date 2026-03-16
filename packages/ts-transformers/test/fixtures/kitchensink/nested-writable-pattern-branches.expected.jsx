@@ -90,8 +90,7 @@ export default pattern((state) => {
         [UI]: (<div>
         {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}
         {ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
@@ -102,21 +101,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/UIRenderable",
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
+        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
             {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
             {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
             {state.key("sections").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -129,29 +114,20 @@ export default pattern((state) => {
                 <h2 style={{
                     // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
                     color: __ctHelpers.ifElse({
-                        anyOf: [{
-                                type: "undefined"
-                            }, {
-                                type: ["string", "undefined"],
-                                asOpaque: true
-                            }]
+                        type: ["string", "undefined"]
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: ["string", "undefined"],
-                        asOpaque: true
+                        type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: ["string", "undefined"],
-                        asOpaque: true
+                        type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
                 }}>
                   {section.key("title")}
                 </h2>
                 {/* [TRANSFORM] ifElse: schema-injected authored ifElse(section.expanded, ..., ...) */}
                 {ifElse({
-                    type: "boolean",
-                    asOpaque: true
+                    type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
@@ -162,21 +138,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true,
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
+                } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
                     {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
                     {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
                     {section.key("tasks").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -198,16 +160,40 @@ export default pattern((state) => {
                             })}>
                           {/* [TRANSFORM] ternary lowered: task.done ? <span>...</span> : ifElse(...) → ifElse(task.done, ..., ...) */}
                           {__ctHelpers.ifElse({
-                                type: "boolean",
-                                asOpaque: true
+                                type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, {
                                 anyOf: [{}, {
                                         type: "object",
                                         properties: {}
                                     }]
+                            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, {
+                                anyOf: [{}, {
+                                        type: "object",
+                                        properties: {}
+                                    }]
+                            } as const satisfies __ctHelpers.JSONSchema, task.key("done"), __ctHelpers.derive({
+                                type: "object",
+                                properties: {
+                                    task: {
+                                        type: "object",
+                                        properties: {
+                                            label: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["label"]
+                                    }
+                                },
+                                required: ["task"]
                             } as const satisfies __ctHelpers.JSONSchema, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true,
+                                anyOf: [{
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }, {
+                                        $ref: "#/$defs/UIRenderable"
+                                    }, {
+                                        type: "object",
+                                        properties: {}
+                                    }],
                                 $defs: {
                                     UIRenderable: {
                                         type: "object",
@@ -219,12 +205,9 @@ export default pattern((state) => {
                                         required: ["$UI"]
                                     }
                                 }
-                            } as const satisfies __ctHelpers.JSONSchema, {
-                                anyOf: [{}, {
-                                        type: "object",
-                                        properties: {}
-                                    }]
-                            } as const satisfies __ctHelpers.JSONSchema, task.key("done"), <span>{task.key("label")}</span>, ifElse({
+                            } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                    label: task.key("label")
+                                } }, ({ task }) => <span>{task.label}</span>), ifElse({
                                 type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, {
                                 anyOf: [{}, {
@@ -236,21 +219,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {}
                                     }]
-                            } as const satisfies __ctHelpers.JSONSchema, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true,
-                                $defs: {
-                                    UIRenderable: {
-                                        type: "object",
-                                        properties: {
-                                            $UI: {
-                                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                                            }
-                                        },
-                                        required: ["$UI"]
-                                    }
-                                }
-                            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+                            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
                                 type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, {
                                 type: "boolean"
@@ -263,12 +232,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             note: {
-                                                anyOf: [{
-                                                        type: "undefined"
-                                                    }, {
-                                                        type: ["string", "undefined"],
-                                                        asOpaque: true
-                                                    }]
+                                                type: ["string", "undefined"]
                                             }
                                         }
                                     }
@@ -285,12 +249,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             note: {
-                                                anyOf: [{
-                                                        type: "undefined"
-                                                    }, {
-                                                        type: ["string", "undefined"],
-                                                        asOpaque: true
-                                                    }]
+                                                type: ["string", "undefined"]
                                             }
                                         }
                                     }
@@ -307,8 +266,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             note: {
-                                                type: ["string", "undefined"],
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         }
                                     }
@@ -318,7 +276,79 @@ export default pattern((state) => {
                                 type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, { task: {
                                     note: task.key("note")
-                                } }, ({ task }) => task.note !== "")), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+                                } }, ({ task }) => task.note !== "")), __ctHelpers.derive({
+                                type: "object",
+                                properties: {
+                                    task: {
+                                        type: "object",
+                                        properties: {
+                                            label: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["label"]
+                                    }
+                                },
+                                required: ["task"]
+                            } as const satisfies __ctHelpers.JSONSchema, {
+                                anyOf: [{
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }, {
+                                        $ref: "#/$defs/UIRenderable"
+                                    }, {
+                                        type: "object",
+                                        properties: {}
+                                    }],
+                                $defs: {
+                                    UIRenderable: {
+                                        type: "object",
+                                        properties: {
+                                            $UI: {
+                                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                                            }
+                                        },
+                                        required: ["$UI"]
+                                    }
+                                }
+                            } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                    label: task.key("label")
+                                } }, ({ task }) => <strong>{task.label}</strong>), __ctHelpers.derive({
+                                type: "object",
+                                properties: {
+                                    task: {
+                                        type: "object",
+                                        properties: {
+                                            label: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["label"]
+                                    }
+                                },
+                                required: ["task"]
+                            } as const satisfies __ctHelpers.JSONSchema, {
+                                anyOf: [{
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }, {
+                                        $ref: "#/$defs/UIRenderable"
+                                    }, {
+                                        type: "object",
+                                        properties: {}
+                                    }],
+                                $defs: {
+                                    UIRenderable: {
+                                        type: "object",
+                                        properties: {
+                                            $UI: {
+                                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                                            }
+                                        },
+                                        required: ["$UI"]
+                                    }
+                                }
+                            } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                    label: task.key("label")
+                                } }, ({ task }) => <em>{task.label}</em>)))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -343,12 +373,10 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             tagIndex: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             },
                                             taskIndex: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             }
                                         },
                                         required: ["tagIndex", "taskIndex"]
@@ -361,12 +389,10 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             tagIndex: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             },
                                             taskIndex: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             }
                                         },
                                         required: ["tagIndex", "taskIndex"]
@@ -382,15 +408,13 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     title: {
-                                                        type: "string",
-                                                        asOpaque: true
+                                                        type: "string"
                                                     }
                                                 },
                                                 required: ["title"]
                                             },
                                             tag: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["section", "tag"]
@@ -408,15 +432,13 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     title: {
-                                                        type: "string",
-                                                        asOpaque: true
+                                                        type: "string"
                                                     }
                                                 },
                                                 required: ["title"]
                                             },
                                             tag: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["section", "tag"]
@@ -434,8 +456,7 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     showCompleted: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["showCompleted"]
@@ -444,15 +465,13 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     done: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["done"]
                                             },
                                             tag: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["state", "task", "tag"]
@@ -481,8 +500,7 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     showCompleted: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["showCompleted"]
@@ -491,8 +509,7 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     done: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["done"]
@@ -523,15 +540,13 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             taskIndex: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             },
                                             section: {
                                                 type: "object",
                                                 properties: {
                                                     title: {
-                                                        type: "string",
-                                                        asOpaque: true
+                                                        type: "string"
                                                     }
                                                 },
                                                 required: ["title"]
@@ -540,8 +555,7 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     showCompleted: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["showCompleted"]
@@ -550,8 +564,7 @@ export default pattern((state) => {
                                                 type: "object",
                                                 properties: {
                                                     done: {
-                                                        type: "boolean",
-                                                        asOpaque: true
+                                                        type: "boolean"
                                                     }
                                                 },
                                                 required: ["done"]
@@ -565,11 +578,10 @@ export default pattern((state) => {
                                 anyOf: [{
                                         $ref: "https://commonfabric.org/schemas/vnode.json"
                                     }, {
+                                        $ref: "#/$defs/UIRenderable"
+                                    }, {
                                         type: "object",
                                         properties: {}
-                                    }, {
-                                        $ref: "#/$defs/UIRenderable",
-                                        asOpaque: true
                                     }],
                                 $defs: {
                                     UIRenderable: {
@@ -619,26 +631,22 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             id: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             },
                                             title: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["id", "title"]
                                     },
                                     sectionIndex: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     state: {
                                         type: "object",
                                         properties: {
                                             showCompleted: {
-                                                type: "boolean",
-                                                asOpaque: true
+                                                type: "boolean"
                                             }
                                         },
                                         required: ["showCompleted"]
@@ -678,11 +686,10 @@ export default pattern((state) => {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
                                 type: "object",
                                 properties: {}
-                            }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
                             }],
                         $defs: {
                             UIRenderable: {
@@ -723,8 +730,7 @@ export default pattern((state) => {
                                     required: ["length"]
                                 },
                                 title: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["tasks", "title"]
@@ -735,11 +741,10 @@ export default pattern((state) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
                         }],
                     $defs: {
                         UIRenderable: {
@@ -804,7 +809,43 @@ export default pattern((state) => {
                 // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
                 //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
                 //   → derive() wrapping the ternary condition + inner ifElse for branches
-                section.tasks.length > 0), <small>{section.title} collapsed</small>, <small>empty</small>)))}
+                section.tasks.length > 0), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        section: {
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["title"]
+                        }
+                    },
+                    required: ["section"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, { section: {
+                        title: section.title
+                    } }, ({ section }) => <small>{section.title} collapsed</small>), <small>empty</small>)))}
               </section>);
             }, {
                 type: "object",
@@ -822,12 +863,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     globalAccent: {
-                                        type: "string",
-                                        asOpaque: true
+                                        type: "string"
                                     },
                                     showCompleted: {
-                                        type: "boolean",
-                                        asOpaque: true
+                                        type: "boolean"
                                     }
                                 },
                                 required: ["globalAccent", "showCompleted"]
@@ -899,11 +938,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
                     }],
                 $defs: {
                     UIRenderable: {
@@ -931,8 +969,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         showCompleted: {
-                            type: "boolean",
-                            asOpaque: true
+                            type: "boolean"
                         }
                     },
                     required: ["showCompleted"]
@@ -943,11 +980,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }],
             $defs: {
                 UIRenderable: {
@@ -966,8 +1002,7 @@ export default pattern((state) => {
         // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
         //   → derive() wrapping the <p> + inner ifElse for the ternary
         <p>{__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -1058,11 +1093,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }]
         },
         UIRenderable: {

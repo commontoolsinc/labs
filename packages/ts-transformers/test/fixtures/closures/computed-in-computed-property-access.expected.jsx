@@ -12,8 +12,7 @@ export default pattern(() => {
         type: "object",
         properties: {}
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number",
-        asOpaque: true
+        type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {}, () => {
         const foo = __ctHelpers.derive({
             type: "object",
@@ -31,8 +30,7 @@ export default pattern(() => {
     });
     return outer;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
+    type: "number"
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

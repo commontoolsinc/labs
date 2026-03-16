@@ -2302,6 +2302,94 @@ export default pattern<{ items: Item[]; limit: number }>(({ items, limit }) => (
 );
 
 Deno.test(
+  "Capability-first: authored ifElse condition factory call keeps captured property access inside factory boundary",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, lift, pattern, UI } from "commontools";
+
+const moduleHasSettings = lift(({ piece }: { piece: { settingsUI?: string } }) =>
+  !!piece?.settingsUI
+);
+
+interface Entry {
+  piece: { settingsUI?: string };
+}
+
+export default pattern<{ entries: Entry[] }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) =>
+        ifElse(
+          moduleHasSettings({ piece: entry.piece }),
+          <span>settings</span>,
+          null,
+        )
+      )}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "entries.mapWithPattern(");
+    assertStringIncludes(output, "moduleHasSettings({");
+    assertStringIncludes(output, 'piece: entry.key("piece")');
+  },
+);
+
+Deno.test(
+  "Capability-first: authored ifElse branch handler call keeps captured property access inside factory boundary",
+  async () => {
+    const source = `/// <cts-enable />
+import { handler, ifElse, pattern, UI, Writable } from "commontools";
+
+const selectMessage = handler<
+  unknown,
+  { selectedId: Writable<string>; msgId: string }
+>((_event, { selectedId, msgId }) => {
+  selectedId.set(msgId);
+});
+
+interface Message {
+  id: string;
+  type: "chat" | "system";
+}
+
+export default pattern<{ messages: Message[] }>(({ messages }) => {
+  const selectedId = Writable.of("");
+
+  return {
+    [UI]: (
+      <div>
+        {messages.map((msg) =>
+          ifElse(
+            msg.type === "system",
+            <span>{msg.id}</span>,
+            <button onClick={selectMessage({ selectedId, msgId: msg.id })}>
+              open
+            </button>,
+          )
+        )}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "messages.mapWithPattern(");
+    assertStringIncludes(output, "selectMessage({");
+    assertStringIncludes(output, 'msgId: msg.key("id")');
+  },
+);
+
+Deno.test(
   "Capability-first: derive object-literal input preserves property schemas",
   async () => {
     const source = `/// <cts-enable />

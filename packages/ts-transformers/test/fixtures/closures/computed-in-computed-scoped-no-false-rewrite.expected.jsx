@@ -13,12 +13,7 @@ export default pattern(() => {
         type: "object",
         properties: {}
     } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "number",
-                asOpaque: true
-            }]
+        type: ["number", "string"]
     } as const satisfies __ctHelpers.JSONSchema, {}, () => {
         const condition = 1 > 0;
         if (condition) {
@@ -40,13 +35,7 @@ export default pattern(() => {
     });
     return outer;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    anyOf: [{
-            type: "string"
-        }, {
-            type: "number",
-            asOpaque: true
-        }],
-    asOpaque: true
+    type: ["number", "string"]
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

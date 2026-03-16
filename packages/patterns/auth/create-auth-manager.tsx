@@ -20,6 +20,7 @@ import {
   Default,
   handler,
   ifElse,
+  lift,
   navigateTo,
   pattern,
   UI,
@@ -73,6 +74,38 @@ interface AuthPiece {
   selectedScopes?: Record<string, boolean>;
   userChip?: unknown;
   refreshToken?: unknown;
+}
+
+interface DerivedAuthState {
+  // deno-lint-ignore no-explicit-any
+  auth: any | null;
+  authInfo: AuthInfo;
+  currentEmail: string;
+  currentState: AuthState;
+  hasRequiredScopes: boolean;
+  isNeedsLogin: boolean;
+  isReady: boolean;
+  isReadyState: boolean;
+  isTokenExpired: boolean;
+  isTokenExpiredState: boolean;
+  missingScopes: string[];
+  missingScopesList: string;
+  piece: AuthPiece | null;
+  refreshStream: unknown;
+  scopesList: string;
+  showAvatar: boolean;
+  avatarUrl: string;
+  showExpiryInStatus: boolean;
+  statusBgColor: string;
+  statusDotColor: string;
+  statusText: string;
+  tokenExpiresAt: number | null;
+  tokenExpiryDisplay: string;
+  tokenExpiryWarning: TokenExpiryWarning;
+  tokenTimeRemaining: number | null;
+  expiryHintColor: string;
+  expiryHintWeight: string;
+  userChip: unknown;
 }
 
 // =============================================================================
@@ -130,6 +163,153 @@ export function createAuthManager<T, R>(
     if (enabled) console.log(`[${descriptor.displayName}Auth]`, ...args);
   }
 
+  const deriveAuthState = lift<{
+    piece?: AuthPiece | null;
+    requiredScopes?: string[];
+    now: number;
+    debugMode?: boolean;
+  }, DerivedAuthState>(({
+      piece,
+      requiredScopes,
+      now,
+      debugMode,
+    }) => {
+    const auth = piece?.auth ?? null;
+    const currentEmail = auth?.user?.email ?? "";
+    const requestedScopes = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const grantedScopes = Array.isArray(auth?.scope) ? auth.scope : [];
+    const hasToken = !!auth?.[descriptor.tokenField];
+    const hasEmail = currentEmail !== "";
+    const tokenExpiresAt = typeof auth?.expiresAt === "number"
+      ? auth.expiresAt
+      : null;
+    const tokenTimeRemaining = tokenExpiresAt === null ? null : tokenExpiresAt - now;
+
+    let tokenExpiryWarning: TokenExpiryWarning = "ok";
+    if (tokenTimeRemaining !== null) {
+      if (tokenTimeRemaining < 0) {
+        tokenExpiryWarning = "expired";
+      } else if (tokenTimeRemaining < TOKEN_EXPIRY_THRESHOLD_MS) {
+        tokenExpiryWarning = "warning";
+      }
+    }
+
+    const missingScopes = requestedScopes.filter((key) =>
+      !grantedScopes.includes(descriptor.scopes[key]?.scopeString ?? key)
+    );
+    const hasRequiredScopes = missingScopes.length === 0;
+    const isTokenExpired = tokenExpiresAt !== null && tokenExpiresAt < now;
+
+    let currentState: AuthState;
+    if (!auth) {
+      currentState = "loading";
+    } else if (!hasToken || !hasEmail) {
+      currentState = "needs-login";
+    } else if (!hasRequiredScopes) {
+      currentState = "missing-scopes";
+    } else if (isTokenExpired) {
+      currentState = "token-expired";
+    } else {
+      currentState = "ready";
+    }
+
+    const isReady = hasToken && hasEmail && !isTokenExpired &&
+      hasRequiredScopes;
+    const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
+    const statusDotColor = STATUS_COLORS[currentState] ?? STATUS_COLORS.loading;
+
+    let statusText = STATUS_MESSAGES[currentState];
+    if (currentState === "ready") {
+      statusText = `Signed in as ${currentEmail}`;
+    } else if (currentState === "missing-scopes") {
+      const names = missingScopes
+        .map((key) => descriptor.scopes[key]?.description ?? key)
+        .join(", ");
+      statusText = `Missing: ${names}`;
+    } else if (currentState === "needs-login") {
+      statusText = `Please sign in to your ${descriptor.displayName}`;
+    }
+
+    const scopesList = requestedScopes
+      .map((key) => descriptor.scopes[key]?.description ?? key)
+      .join(", ");
+    const missingScopesList = missingScopes
+      .map((key) => descriptor.scopes[key]?.description ?? key)
+      .join(", ");
+    const showAvatar = descriptor.hasAvatarSupport &&
+      currentState === "ready" &&
+      !!auth?.user?.picture;
+    const avatarUrl = (auth?.user?.picture ?? "") as string;
+    const showExpiryInStatus = currentState === "ready" &&
+      tokenExpiryDisplay !== "";
+    const expiryHintColor = tokenExpiryWarning === "warning"
+      ? "#b45309"
+      : "#666";
+    const expiryHintWeight = tokenExpiryWarning === "warning"
+      ? "500"
+      : "normal";
+    const statusBgColor = currentState !== "ready" ||
+        tokenExpiryWarning === "warning"
+      ? "#fef3c7"
+      : "#d1fae5";
+    const isNeedsLogin = currentState === "needs-login";
+    const isTokenExpiredState = currentState === "token-expired";
+    const isReadyState = currentState === "ready";
+
+    debugLog(debugMode === true, "state:", currentState);
+    debugLog(debugMode === true, "isReady:", isReady);
+    debugLog(debugMode === true, "missingScopes:", missingScopes);
+    debugLog(debugMode === true, "isTokenExpired:", isTokenExpired);
+
+    return {
+      auth,
+      authInfo: {
+        state: currentState,
+        auth,
+        authCell: auth,
+        email: currentEmail,
+        hasRequiredScopes,
+        grantedScopes,
+        missingScopes,
+        tokenExpiresAt,
+        isTokenExpired,
+        tokenTimeRemaining,
+        tokenExpiryWarning,
+        tokenExpiryDisplay,
+        statusDotColor,
+        statusText,
+        piece: piece ?? null,
+        userChip: piece?.userChip ?? null,
+      },
+      currentEmail,
+      currentState,
+      hasRequiredScopes,
+      isNeedsLogin,
+      isReady,
+      isReadyState,
+      isTokenExpired,
+      isTokenExpiredState,
+      missingScopes,
+      missingScopesList,
+      piece: piece ?? null,
+      refreshStream: piece?.refreshToken ?? null,
+      scopesList,
+      showAvatar,
+      avatarUrl,
+      showExpiryInStatus,
+      statusBgColor,
+      statusDotColor,
+      statusText,
+      tokenExpiresAt,
+      tokenExpiryDisplay,
+      tokenExpiryWarning,
+      tokenTimeRemaining,
+      expiryHintColor,
+      expiryHintWeight,
+      userChip: piece?.userChip ?? null,
+    };
+  });
+
   return pattern<AuthManagerInput, AuthManagerOutput>(
     ({ requiredScopes, accountType, debugMode }) => {
       // ======================================================================
@@ -149,86 +329,29 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const auth = wishResult.result!.auth;
-
-      // ======================================================================
-      // SMALL FOCUSED COMPUTEDS
-      // ======================================================================
-      const hasAuth = computed(() => !!auth);
-      const hasToken = computed(
-        () => !!auth?.[descriptor.tokenField],
-      );
-      const hasEmail = computed(() => !!auth?.user?.email);
-
       const now = Writable.of(Date.now());
       startReactiveClock(now);
 
-      const isTokenExpired = computed(() => {
-        const expiresAt = auth?.expiresAt ?? 0;
-        const value = expiresAt > 0 && expiresAt < now.get();
-        debugLog(debugMode as boolean, "isTokenExpired:", value);
-        return value;
-      });
-
-      const tokenTimeRemaining = computed((): number | null => {
-        const expiresAt = auth?.expiresAt ?? 0;
-        if (!expiresAt) return null;
-        return expiresAt - now.get();
-      });
-
-      const tokenExpiryWarning = computed((): TokenExpiryWarning => {
-        const tr = tokenTimeRemaining;
-        if (tr === null) return "ok";
-        if (tr < 0) return "expired";
-        if (tr < TOKEN_EXPIRY_THRESHOLD_MS) return "warning";
-        return "ok";
-      });
-
-      const tokenExpiryDisplay = computed(() =>
-        formatTimeRemaining(tokenTimeRemaining)
-      );
-
-      // Scope verification
-      const missingScopes = computed((): string[] => {
-        const granted: string[] = (auth?.scope ?? []) as string[];
-        const value = (requiredScopes as string[]).filter(
-          (key) =>
-            !granted.includes(
-              descriptor.scopes[key]?.scopeString ?? key,
-            ),
-        );
-        debugLog(debugMode as boolean, "missingScopes:", value);
-        return value;
-      });
-      const hasRequiredScopes = computed(
-        () => missingScopes.length === 0,
-      );
-
       // Picker UI - NOT inside computed (wishResult[UI] crashes reactive graph)
       const pickerUI = wishResult[UI];
-
-      // State machine
-      const currentState = computed((): AuthState => {
-        let value: AuthState;
-        if (!hasAuth) value = "loading";
-        else if (!hasToken || !hasEmail) value = "needs-login";
-        else if (!hasRequiredScopes) value = "missing-scopes";
-        else if (isTokenExpired) value = "token-expired";
-        else value = "ready";
-        debugLog(debugMode as boolean, "state:", value);
-        return value;
+      const authState = deriveAuthState({
+        piece: wishResult.result,
+        requiredScopes,
+        now,
+        debugMode,
       });
-
-      const isReady = computed(() => {
-        const value = hasToken && hasEmail && !isTokenExpired &&
-          hasRequiredScopes;
-        debugLog(debugMode as boolean, "isReady:", value);
-        return value;
-      });
-      const currentEmail = computed(() => auth?.user?.email ?? "");
+      const auth = authState.auth;
+      const authInfo = authState.authInfo;
+      const currentEmail = authState.currentEmail;
+      const currentState = authState.currentState;
+      const isReady = authState.isReady;
+      const tokenExpiryWarning = authState.tokenExpiryWarning;
+      const tokenExpiryDisplay = authState.tokenExpiryDisplay;
+      const isTokenExpired = authState.isTokenExpired;
+      const missingScopes = authState.missingScopes;
 
       // Refresh state
-      const refreshStream = wishResult.result!.refreshToken;
+      const refreshStream = authState.refreshStream;
       const refreshing = Writable.of(false);
       const isRefreshing = computed(() => refreshing.get());
       const refreshFailed = Writable.of(false);
@@ -237,51 +360,12 @@ export function createAuthManager<T, R>(
       // Reactive watcher: detect when a refresh succeeds
       computed(() => {
         if (!refreshing.get()) return;
-        const expiresAt = auth?.expiresAt ?? 0;
+        const expiresAt = authState.tokenExpiresAt ?? 0;
         if (expiresAt > now.get()) {
           refreshing.set(false);
           refreshFailed.set(false);
         }
       });
-
-      const statusDotColor = computed(
-        () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
-      );
-
-      const statusText = computed(() => {
-        const state = currentState as AuthState;
-        if (state === "ready") return `Signed in as ${currentEmail}`;
-        if (state === "missing-scopes") {
-          const names = (missingScopes as string[])
-            .map((k) => descriptor.scopes[k]?.description ?? k)
-            .join(", ");
-          return `Missing: ${names}`;
-        }
-        if (state === "needs-login") {
-          return `Please sign in to your ${descriptor.displayName}`;
-        }
-        return STATUS_MESSAGES[state];
-      });
-
-      // Assemble authInfo
-      const authInfo = computed((): AuthInfo => ({
-        state: currentState,
-        auth: auth ?? null,
-        authCell: auth,
-        email: currentEmail ?? "",
-        hasRequiredScopes,
-        grantedScopes: (auth?.scope ?? []) as string[],
-        missingScopes,
-        tokenExpiresAt: auth?.expiresAt ?? null,
-        isTokenExpired,
-        tokenTimeRemaining,
-        tokenExpiryWarning,
-        tokenExpiryDisplay: tokenExpiryDisplay ?? "",
-        statusDotColor: statusDotColor ?? STATUS_COLORS.loading,
-        statusText: statusText ?? "",
-        piece: wishResult.result ?? null,
-        userChip: wishResult.result?.userChip ?? null,
-      }));
 
       // ====================================================================
       // ACTIONS
@@ -319,27 +403,6 @@ export function createAuthManager<T, R>(
       // ====================================================================
       // UI COMPONENTS
       // ====================================================================
-      const statusBgColor = computed(() => {
-        if (currentState !== "ready") return "#fef3c7";
-        if (tokenExpiryWarning === "warning") return "#fef3c7";
-        return "#d1fae5";
-      });
-      const showAvatar = computed(
-        () =>
-          descriptor.hasAvatarSupport && currentState === "ready" &&
-          !!auth?.user?.picture,
-      );
-      const avatarUrl = computed(() => (auth?.user?.picture ?? "") as string);
-      const showExpiryInStatus = computed(
-        () => currentState === "ready" && !!tokenExpiryDisplay,
-      );
-      const expiryHintColor = computed(
-        () => (tokenExpiryWarning === "warning" ? "#b45309" : "#666"),
-      );
-      const expiryHintWeight = computed(
-        () => (tokenExpiryWarning === "warning" ? "500" : "normal"),
-      );
-
       // Status UI
       const statusUI = (
         <div
@@ -349,14 +412,14 @@ export function createAuthManager<T, R>(
             gap: "8px",
             padding: "8px 12px",
             borderRadius: "6px",
-            backgroundColor: statusBgColor,
+            backgroundColor: authState.statusBgColor,
             fontSize: "14px",
           }}
         >
           {ifElse(
-            showAvatar,
+            authState.showAvatar,
             <img
-              src={avatarUrl}
+              src={authState.avatarUrl}
               alt=""
               style={{ width: "20px", height: "20px", borderRadius: "50%" }}
             />,
@@ -368,20 +431,20 @@ export function createAuthManager<T, R>(
                 backgroundColor: ifElse(
                   computed(() => currentState === "ready"),
                   descriptor.brandColor,
-                  statusDotColor,
+                  authState.statusDotColor,
                 ),
               }}
             />,
           )}
-          <span>{statusText}</span>
+          <span>{authState.statusText}</span>
           {ifElse(
-            showExpiryInStatus,
+            authState.showExpiryInStatus,
             <span
               style={{
                 marginLeft: "4px",
                 fontSize: "12px",
-                color: expiryHintColor,
-                fontWeight: expiryHintWeight,
+                color: authState.expiryHintColor,
+                fontWeight: authState.expiryHintWeight,
               }}
             >
               • {tokenExpiryDisplay}
@@ -392,23 +455,7 @@ export function createAuthManager<T, R>(
       );
 
       // State boolean computeds for fullUI
-      const isNeedsLogin = computed(() => currentState === "needs-login");
       const isMissingScopes = computed(() => currentState === "missing-scopes");
-      const isTokenExpiredState = computed(
-        () => currentState === "token-expired",
-      );
-      const isReadyState = computed(() => currentState === "ready");
-
-      const scopesList = computed(() =>
-        (requiredScopes as string[])
-          .map((k) => descriptor.scopes[k]?.description ?? k)
-          .join(", ")
-      );
-      const missingScopesList = computed(() =>
-        missingScopes
-          .map((k) => descriptor.scopes[k]?.description ?? k)
-          .join(", ")
-      );
 
       const manageButtonStyle = {
         padding: "6px 12px",
@@ -457,7 +504,7 @@ export function createAuthManager<T, R>(
             }}
           >
             To use this feature, connect a {descriptor.displayName}{" "}
-            account with these permissions: {scopesList}
+            account with these permissions: {authState.scopesList}
           </p>
           {pickerUI}
           <button
@@ -552,7 +599,7 @@ export function createAuthManager<T, R>(
             </h4>
             <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
               Connected as <strong>{currentEmail}</strong>, but missing:{" "}
-              {missingScopesList}
+              {authState.missingScopesList}
             </div>
           </div>
           {pickerUI}
@@ -678,7 +725,7 @@ export function createAuthManager<T, R>(
               borderBottom: readyBorderBottom,
             }}
           >
-            {wishResult.result?.userChip as any}
+            {authState.userChip as any}
             <div
               style={{
                 marginLeft: "auto",
@@ -767,25 +814,25 @@ export function createAuthManager<T, R>(
       );
 
       // Compose fullUI via chained ifElse
-      const loginOrLoad = ifElse(isNeedsLogin, needsLoginUI, loadingUI);
+      const loginOrLoad = ifElse(authState.isNeedsLogin, needsLoginUI, loadingUI);
       const scopesOrPrev = ifElse(
         isMissingScopes,
         missingScopesUI,
         loginOrLoad,
       );
       const expiredOrPrev = ifElse(
-        isTokenExpiredState,
+        authState.isTokenExpiredState,
         tokenExpiredUI,
         scopesOrPrev,
       );
       const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
-      const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
+      const fullUI = ifElse(authState.isReadyState, readyUI, refreshOrPrev);
 
       // ====================================================================
       // RETURN
       // ====================================================================
       return {
-        auth: computed(() => auth ?? null),
+        auth,
         authInfo,
         isReady,
         currentEmail,

@@ -94,25 +94,7 @@ export default pattern((state) => {
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ item, state }) => item.price * (1 - state.discount)), __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, { item: {
-                        price: item.key("price")
-                    } }, ({ item }) => item.price))}
+                }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
           </div>);
             }, {
                 type: "object",

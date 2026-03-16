@@ -31,8 +31,7 @@ export default pattern(() => {
     }, ({ value: v, prefix }) => `${prefix.get()}${v}`);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
-    type: "string",
-    asOpaque: true
+    type: "string"
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

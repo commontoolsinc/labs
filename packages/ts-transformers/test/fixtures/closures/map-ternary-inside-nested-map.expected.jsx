@@ -23,6 +23,13 @@ interface PatternInput {
     ]>>;
     showInactive?: Default<boolean, false>;
 }
+// FIXTURE: map-ternary-inside-nested-map
+// Verifies: ternaries inside nested .map() callbacks are transformed to ifElse
+//   outer ternary → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
+//   outer .map(fn) → .mapWithPattern(pattern(...), {showInactive})
+//   inner .map(fn) → .mapWithPattern(pattern(...), {showInactive})
+//   inner ternary → ifElse(tag.active, tag.name, derive(... ifElse(showInactive, ...)))
+// Context: Nested maps with ternaries at both levels; captures showInactive through both map layers
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     const showInactive = __ct_pattern_input.key("showInactive");
@@ -129,33 +136,7 @@ export default pattern((__ct_pattern_input) => {
                     tags: {
                         length: item.key("tags").length
                     }
-                } }, ({ item }) => __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            tags: {
-                                type: "object",
-                                properties: {
-                                    length: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["length"]
-                            }
-                        },
-                        required: ["tags"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    tags: {
-                        length: item.tags.length
-                    }
-                } }, ({ item }) => item.tags.length > 0)), item.key("label"), "No tags")}</strong>
+                } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const tag = __ct_pattern_input.key("element");
@@ -194,33 +175,7 @@ export default pattern((__ct_pattern_input) => {
                         tag: {
                             name: tag.key("name")
                         }
-                    }, ({ showInactive, tag }) => __ctHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, showInactive, __ctHelpers.derive({
-                        type: "object",
-                        properties: {
-                            tag: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["tag"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, { tag: {
-                            name: tag.name
-                        } }, ({ tag }) => `(${tag.name})`), "")))}
+                    }, ({ showInactive, tag }) => showInactive ? `(${tag.name})` : ""))}
                   </li>);
                 }, {
                     type: "object",

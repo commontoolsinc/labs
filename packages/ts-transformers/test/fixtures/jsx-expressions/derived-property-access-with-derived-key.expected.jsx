@@ -11,6 +11,11 @@ interface Assignment {
 // CT-1036: Property access on derived grouped objects with derived keys
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
+// FIXTURE: derived-property-access-with-derived-key
+// Verifies: .map() chains with derived keys and element access are fully transformed
+//   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
+//   groupedByAisle[aisleName].map  → derive({groupedByAisle, aisleName}, ...).mapWithPattern(...)
+// Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     // Create assignments with aisle data
@@ -215,7 +220,7 @@ export default pattern((__ct_pattern_input) => {
                 const groupedByAisle = __ct_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
-              {(__ctHelpers.derive({
+              {__ctHelpers.derive({
                     type: "object",
                     properties: {
                         groupedByAisle: {
@@ -261,10 +266,14 @@ export default pattern((__ct_pattern_input) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Assignment"
-                    },
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Assignment"
+                            }
+                        }],
                     $defs: {
                         Assignment: {
                             type: "object",
@@ -295,7 +304,7 @@ export default pattern((__ct_pattern_input) => {
                 } as const satisfies __ctHelpers.JSONSchema, {
                     groupedByAisle: groupedByAisle,
                     aisleName: aisleName
-                }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const assignment = __ct_pattern_input.key("element");
                     return (<div>
                   <span>{__ctHelpers.derive({
