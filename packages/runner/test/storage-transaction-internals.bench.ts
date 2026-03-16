@@ -118,6 +118,27 @@ Deno.bench("Storage tx internals - v2 transaction root read x100", async () => {
 });
 
 Deno.bench(
+  "Storage tx internals - v2 transaction trackReadWithoutLoad root read x10000",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const tx = new V2StorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.read({
+          space,
+          id,
+          type,
+          path: ["value"],
+        }, { trackReadWithoutLoad: true });
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
   "Storage tx internals - v1 storage tx warm root read x10000",
   async () => {
     const storage = await seedV1Storage();
@@ -203,6 +224,25 @@ Deno.bench("Storage tx internals - attestation sibling write x100", () => {
   }
 });
 
+Deno.bench("Storage tx internals - attestation sibling read+write x100", () => {
+  let attestation = seedAttestation();
+  for (let index = 0; index < 100; index += 1) {
+    readAttestation(attestation, {
+      id,
+      type,
+      path: ["value", "count"],
+    });
+    const result = writeAttestation(attestation, {
+      id,
+      type,
+      path: ["value", "count"],
+    }, index);
+    if (result.ok) {
+      attestation = result.ok;
+    }
+  }
+});
+
 Deno.bench(
   "Storage tx internals - v1 chronicle sibling write x100",
   async () => {
@@ -244,6 +284,33 @@ Deno.bench(
       tx.write({ space, id, type, path: [] }, seedDocument);
       for (let index = 0; index < 100; index += 1) {
         tx.write({ space, id, type, path: ["value", "count"] }, index);
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v2 transaction direct writeWithinSpace sibling write x100",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const tx = new V2StorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      const txInternal = tx as unknown as {
+        writeWithinSpace(
+          space: string,
+          address: { id: string; type: string; path: string[] },
+          value?: unknown,
+        ): unknown;
+      };
+      for (let index = 0; index < 100; index += 1) {
+        txInternal.writeWithinSpace(space, {
+          id,
+          type,
+          path: ["value", "count"],
+        }, index);
       }
     } finally {
       await storage.close();
