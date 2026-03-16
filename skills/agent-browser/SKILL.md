@@ -4,7 +4,7 @@ description: Browser automation CLI for AI agents. Use when the user needs to in
 allowed-tools: Bash(agent-browser:*)
 ---
 
-This skill is the Claude wrapper for the shared manual testing guidance in:
+Start with the shared manual testing guidance in:
 
 - `docs/common/ai/manual-testing-guide.md`
 
@@ -28,5 +28,5 @@ agent-browser wait --load networkidle # Wait for network idle
 agent-browser screenshot              # Screenshot to temp dir
 ```
 
-The deeper command reference and templates remain under this skill's
+The deeper command reference and templates remain under this skill package's
 `references/` and `templates/` directories.

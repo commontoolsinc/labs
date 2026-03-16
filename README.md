@@ -60,23 +60,28 @@ prefixed components for pattern UIs.
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
 patterns for building with CommonTools.
 
-**Pattern Development**: Patterns can be developed using LLM assistance with the
-`/pattern-dev` skill. See [Pattern Documentation](./docs/common/) for patterns,
+**Pattern Development**: Patterns can be developed using the repo-local
+`skills/pattern-dev/` skill package. Claude compatibility still exposes this as
+`/pattern-dev`. See [Pattern Documentation](./docs/common/) for patterns,
 components, and handlers.
 
 ## Development & Integrations
 
-### Claude Code Skills & Commands
+### AI Skills & Commands
 
-This repository includes Claude Code skills and commands for common workflows:
+This repository includes repo-local skills plus Claude compatibility commands
+for common workflows:
 
-- `/pattern-dev` - Develop patterns with LLM assistance
-- `/pattern-test` - Write and run pattern tests
-- `/pattern-deploy` - Deploy patterns and test with CLI
+- `skills/pattern-dev/` - Develop patterns with LLM assistance
+- `skills/pattern-test/` - Write and run pattern tests
+- `skills/pattern-deploy/` - Deploy patterns and test with CLI
 - `/start-local-dev` - Start local dev servers
 - `/deps` - Dependency and integration setup
 - `/fix-issue` - Fix a specific issue
 - `/oracle` - Investigate how things actually work
+
+Claude compatibility preserves the existing `/pattern-dev`, `/pattern-test`,
+and related skill names through `/.claude/skills/`.
 
 ### Dependencies & Integrations
 

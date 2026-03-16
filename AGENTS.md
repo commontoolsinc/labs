@@ -24,7 +24,9 @@ Common Tools product.
 
 ## Pattern Development
 
-If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
+If you are developing patterns, use the repo-local `pattern-dev` skill at
+`skills/pattern-dev/SKILL.md`. Claude compatibility paths under
+`.claude/skills/` still exist, but `skills/` is the canonical source.
 
 ### Useful Pattern documentation
 

@@ -237,5 +237,6 @@ rejects these with EACCES. Use CLI tools, not Finder, to browse mounted spaces.
 - `packages/fuse/cell-bridge.ts` — cell-to-filesystem bridge
 - `packages/fuse/tree-builder.ts` — JSON-to-tree conversion
 - `docs/specs/fuse-filesystem/` — 7-part specification
-- Use `Skill("ct")` for CLI command reference
-- Use `Skill("pattern-dev")` for pattern development
+- Use the `ct` skill, or read `skills/ct/SKILL.md`, for CLI command reference
+- Use the `pattern-dev` skill, or read `skills/pattern-dev/SKILL.md`, for
+  pattern development

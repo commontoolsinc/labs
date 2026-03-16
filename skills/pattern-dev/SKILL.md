@@ -3,16 +3,17 @@ name: pattern-dev
 description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this piece/patch", or questions about handlers and reactive patterns.
 ---
 
-This skill is the Claude wrapper for the shared pattern development guidance in:
+Start with the shared pattern development guidance in:
 
 - `docs/common/ai/pattern-development-guide.md`
 
 Read that guide first. It is the canonical, agent-neutral reference.
 
-Claude-specific notes:
+Runtime notes:
 
-- Use `Skill("ct")` when you need CLI command details.
-- If you delegate to other Claude agents, pass file paths rather than pasted
+- Use the `ct` skill, or read `skills/ct/SKILL.md`, when you need CLI command
+  details.
+- If your runtime supports delegation, pass file paths rather than pasted
   summaries.
 
 Phase skills consult as needed:

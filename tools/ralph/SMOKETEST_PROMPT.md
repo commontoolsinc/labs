@@ -4,7 +4,8 @@ Goal: implement the task below
 
 <SMOKETEST_TASK>
 
-1. Use Claude Skills "pattern-dev" to work on the task above.
+1. Use the repo-local `pattern-dev` skill at `skills/pattern-dev/` to work on
+   the task above. Claude compatibility still exposes this as `pattern-dev`.
 
    IMPORTANT:
    - Create your pattern files directly in /app/smoketest/${RALPH_ID}/
@@ -13,9 +14,9 @@ Goal: implement the task below
 
 2. Format with `deno fmt` for the changed files.
 
-3. Once tests pass, deploy it locally using Claude Skill "ct" for deployment
-   commands. It should deploy to http://localhost:8000. Servers are already
-   running.
+3. Once tests pass, deploy it locally using the repo-local `ct` skill at
+   `skills/ct/` for deployment commands. It should deploy to
+   http://localhost:8000. Servers are already running.
 
    Remember to use space name "ralph${RALPH_ID}" when deploying.
 

@@ -3,7 +3,7 @@ name: pattern-critic
 description: Critic agent that reviews pattern code for violations of documented rules, gotchas, and anti-patterns. Produces categorized checklist output with [PASS]/[FAIL] for each rule.
 ---
 
-This skill is the Claude wrapper for the shared critique guidance in:
+Start with the shared critique guidance in:
 
 - `docs/common/ai/pattern-critique-guide.md`
 

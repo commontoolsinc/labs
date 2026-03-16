@@ -4,7 +4,8 @@ description: Design schemas.tsx with Input/Output types for patterns
 user-invocable: false
 ---
 
-Use `Skill("ct")` for ct CLI documentation when running commands.
+Use the `ct` skill, or read `skills/ct/SKILL.md`, for CLI documentation when
+running commands.
 
 # Schema Design Phase
 
