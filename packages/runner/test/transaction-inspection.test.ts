@@ -198,4 +198,64 @@ describe("transaction inspection", () => {
       await storageManager.close();
     }
   });
+
+  it("preserves interleaved journal activity order on the native v2 path", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const tx = storageManager.edit();
+      const id = "test:transaction-inspection-activity-order-v2" as const;
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { count: 1 } });
+      tx.read({
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      });
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "count"],
+      }, 2);
+
+      assertEquals([...tx.journal.activity()], [
+        {
+          write: {
+            space,
+            id,
+            type: "application/json",
+            path: [],
+          },
+        },
+        {
+          read: {
+            space,
+            id,
+            type: "application/json",
+            path: ["value"],
+            meta: {},
+          },
+        },
+        {
+          write: {
+            space,
+            id,
+            type: "application/json",
+            path: ["value", "count"],
+          },
+        },
+      ]);
+    } finally {
+      await storageManager.close();
+    }
+  });
 });
