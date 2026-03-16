@@ -13,7 +13,6 @@ _deno.lock
 .pr-desc.tmp
 dist/
 .claude/settings.local.json
-/.agents
 .agents/settings.local.json
 .ct/
 claude-research.key
