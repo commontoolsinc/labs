@@ -29,35 +29,35 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
   }
 
   // After the boolean check, `schema` is necessarily a `JSONSchemaObj`. We use
-  // a local `obj` variable so TypeScript can track the object-only type through
+  // a local `schemaObj` variable so TypeScript can track the object-only type through
   // the spread and freeze operations, then cast back to `T` on return.
-  let obj = schema as Exclude<T, boolean>;
+  let schemaObj = schema as Exclude<T, boolean>;
 
-  if (Object.isFrozen(obj)) {
-    // `obj` is already frozen...
-    if (isDeepFrozen(obj)) {
+  if (Object.isFrozen(schemaObj)) {
+    // `schemaObj` is already frozen...
+    if (isDeepFrozen(schemaObj)) {
       // ...and is in fact already deep-frozen, so we can return it directly.
-      return obj as T;
+      return schemaObj as T;
     } else {
       // ...but it's not deep-frozen, so we have to shallow-clone and modify
       // (even if `canShare === true`).
-      obj = { ...obj };
+      schemaObj = { ...schemaObj };
     }
   } else if (!canShare) {
-    // `obj` is not frozen but also can't be modified; shallow-clone it.
-    obj = { ...obj };
+    // `schemaObj` is not frozen but also can't be modified; shallow-clone it.
+    schemaObj = { ...schemaObj };
   }
 
-  // At this point, we have a mutable `obj` which is allowed to be mutated
+  // At this point, we have a mutable `schemaObj` which is allowed to be mutated
   // and is to become the frozen return value. TODO(danfuzz):
   // `structuredClone()` will no longer be appropriate to use once the schema
   // system grows to support the full rich-data model.
-  const record = obj as Record<string, unknown>;
-  for (const [key, value] of Object.entries(record)) {
-    record[key] = isDeepFrozen(value)
+  const schemaRecord = schemaObj as Record<string, unknown>;
+  for (const [key, value] of Object.entries(schemaRecord)) {
+    schemaRecord[key] = isDeepFrozen(value)
       ? value
       : deepFreeze(structuredClone(value));
   }
 
-  return Object.freeze(obj) as T;
+  return Object.freeze(schemaObj) as T;
 }
