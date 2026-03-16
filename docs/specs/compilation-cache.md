@@ -245,17 +245,30 @@ async function computeGitFingerprint(): Promise<string | undefined> {
 ```
 
 **Disabling the cache**: Two independent env flags control caching, both
-defaulting to `false` (off):
+defaulting to `true` (on):
 
-- `COMPILATION_CACHE_SERVER=true` — enables server-side caching in toolshed.
-- `COMPILATION_CACHE_CLIENT=true` — enables client-side caching in the browser
+- `COMPILATION_CACHE_SERVER` — controls server-side caching in toolshed.
+- `COMPILATION_CACHE_CLIENT` — controls client-side caching in the browser
   (injected at build time via esbuild define in `felt.config.ts`).
+
+To disable caching (e.g. for debugging or bisecting a cache-related bug):
+
+```sh
+# Disable server-side cache only
+COMPILATION_CACHE_SERVER=false deno task dev-local
+
+# Disable client-side cache only
+COMPILATION_CACHE_CLIENT=false deno task dev-local
+
+# Disable both
+COMPILATION_CACHE_SERVER=false COMPILATION_CACHE_CLIENT=false deno task dev-local
+```
 
 If no fingerprint is available (e.g., `buildHash` not provided in
 `InitializationData`, or no git repo on the server), the cache is also disabled
 even if the flag is set. All cache code paths are guarded by
 `if (this.cachedCompiler)` checks, so the absence of the object means no
-caching — identical to today's behavior.
+caching.
 
 #### CompilationCacheStorage (interface)
 
@@ -622,18 +635,18 @@ freshness. If the fingerprint matches, the entry is valid regardless of age.
 ### Disabling the Cache
 
 The cache is disabled by not constructing a `CachedCompiler`. Both environments
-require an explicit opt-in env flag (defaulting to `false`):
+enable caching by default (`true`):
 
-- **Browser**: Set `COMPILATION_CACHE_CLIENT=true` to enable. The flag is
-  injected at build time via esbuild define in `felt.config.ts`. Even when
-  enabled, if `InitializationData.buildHash` is absent (no build manifest),
-  no cache is created.
-- **Server**: Set `COMPILATION_CACHE_SERVER=true` to enable. Even when enabled,
-  if no git fingerprint is available, no cache is created. The cache directory
-  is configurable via `COMPILATION_CACHE_FS_DIR` (default:
-  `/tmp/ct-compilation-cache`).
+- **Browser**: `COMPILATION_CACHE_CLIENT` defaults to `true`. Set to `false` to
+  disable. The flag is injected at build time via esbuild define in
+  `felt.config.ts`. Even when enabled, if `InitializationData.buildHash` is
+  absent (no build manifest), no cache is created.
+- **Server**: `COMPILATION_CACHE_SERVER` defaults to `true`. Set to `false` to
+  disable. Even when enabled, if no git fingerprint is available, no cache is
+  created. The cache directory is configurable via `COMPILATION_CACHE_FS_DIR`
+  (default: `/tmp/ct-compilation-cache`).
 - **Tests**: Don't provide a `CachedCompiler` to the Runtime — tests run with
-  no persistent cache by default (same as today).
+  no persistent cache by default.
 
 ### Observability
 

@@ -203,13 +203,13 @@ const EnvSchema = z.object({
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)
   // ===========================================================================
-  COMPILATION_CACHE_SERVER: z.string().default("false").transform((
+  COMPILATION_CACHE_SERVER: z.string().default("true").transform((
     v,
   ) => v === "true"),
   // COMPILATION_CACHE_CLIENT is read by the shell's felt.config.ts via
   // Deno.env.get() at build time (esbuild define), not by toolshed code.
   // It's defined here so the start scripts can pass it through consistently.
-  COMPILATION_CACHE_CLIENT: z.string().default("false").transform((
+  COMPILATION_CACHE_CLIENT: z.string().default("true").transform((
     v,
   ) => v === "true"),
   // Directory for the server-side filesystem compilation cache.
