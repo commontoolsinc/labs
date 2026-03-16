@@ -342,8 +342,11 @@ function buildShrunkTypeNodeFromTypeNode(
       const resolvedType = checker.getTypeFromTypeNode(node);
       const tc = checker as ts.TypeChecker & {
         isArrayType?: (t: ts.Type) => boolean;
+        isTupleType?: (t: ts.Type) => boolean;
       };
-      isArray = !!tc.isArrayType?.(resolvedType);
+      isArray = !!tc.isArrayType?.(resolvedType) ||
+        !!tc.isTupleType?.(resolvedType) ||
+        !!checker.getIndexTypeOfType(resolvedType, ts.IndexKind.Number);
     }
     if (isArray) {
       // Properties that don't require item-level data.
