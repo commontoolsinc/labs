@@ -1,11 +1,7 @@
 /// <cts-enable />
 import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
-import {
-  Controls,
-  SwitchControl,
-  TextControl,
-} from "../ui/controls/index.ts";
+import { Controls, SwitchControl, TextControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface InputStoryInput {}

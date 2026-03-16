@@ -21,16 +21,15 @@ const styles = {
     backgroundColor: "#f6f7f9",
     borderRight: "1px solid #e6e9ed",
     overflowY: "auto",
-    padding: "16px 0",
     flexShrink: "0",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
+    gap: "16px",
   },
   header: {
-    padding: "0 16px 16px",
+    padding: "16px",
     borderBottom: "1px solid #e6e9ed",
   },
   headerTitle: {
@@ -38,6 +37,11 @@ const styles = {
     fontWeight: "700",
     color: "#2e3438",
     letterSpacing: "-0.01em",
+  },
+  content: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
   },
 };
 
@@ -47,28 +51,31 @@ export const Sidebar = pattern<SidebarInput, SidebarOutput>(
       [NAME]: "Sidebar",
       [UI]: (
         <div style={styles.root}>
-          {/* Logo area */}
+          {/* Header area */}
           <div style={styles.header}>
             <div style={styles.headerTitle}>
               Component Catalog
             </div>
           </div>
 
-          {categories.map((category) => (
-            <CategoryRow name={category.name}>
-              {/* TODO: See if we can improve our types for arrays of VNode children. */}
-              {/* This fragment feels uncessary */}
-              <>
-                {category.items.map((item) => (
-                  <CategoryRowItem
-                    selected={selected}
-                    item={item}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </>
-            </CategoryRow>
-          ))}
+          {/* Content area */}
+          <div style={styles.content}>
+            {categories.map((category) => (
+              <CategoryRow name={category.name}>
+                {/* TODO: See if we can improve our types for arrays of VNode children. */}
+                {/* This fragment feels uncessary */}
+                <>
+                  {category.items.map((item) => (
+                    <CategoryRowItem
+                      selected={selected}
+                      item={item}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </>
+              </CategoryRow>
+            ))}
+          </div>
         </div>
       ),
     };

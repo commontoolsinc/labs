@@ -44,6 +44,10 @@ interface CatalogInput {
         { id: "toggle"; label: "Toggle" },
         { id: "toggle-group"; label: "Toggle Group" },
         { id: "message-input"; label: "Message Input" },
+        { id: "calendar"; label: "Calendar" },
+        { id: "radio"; label: "Radio" },
+        { id: "autocomplete"; label: "Autocomplete" },
+        { id: "tags"; label: "Tags" },
         { id: "fab"; label: "FAB" },
       ];
     },
@@ -59,6 +63,7 @@ interface CatalogInput {
         { id: "hgroup"; label: "HGroup" },
         { id: "vscroll"; label: "VScroll" },
         { id: "hscroll"; label: "HScroll" },
+        { id: "grid"; label: "Grid" },
       ];
     },
     {
@@ -71,6 +76,9 @@ interface CatalogInput {
         { id: "separator"; label: "Separator" },
         { id: "markdown"; label: "Markdown" },
         { id: "svg"; label: "SVG" },
+        { id: "kbd"; label: "Kbd" },
+        { id: "code-editor"; label: "Code Editor" },
+        { id: "copy-button"; label: "Copy Button" },
       ];
     },
     {
@@ -79,6 +87,7 @@ interface CatalogInput {
         { id: "progress"; label: "Progress" },
         { id: "loader"; label: "Loader" },
         { id: "skeleton"; label: "Skeleton" },
+        { id: "alert"; label: "Alert" },
       ];
     },
     {
@@ -87,6 +96,7 @@ interface CatalogInput {
         { id: "collapsible"; label: "Collapsible" },
         { id: "tab-list"; label: "Tab List" },
         { id: "tabs"; label: "Tabs" },
+        { id: "table"; label: "Table" },
       ];
     },
     {
@@ -145,7 +155,7 @@ const styles = {
 export default pattern<CatalogInput, CatalogOutput>(
   ({ selectedStory, categories }) => {
     const selected = computed(() => selectedStory.get());
-    const story = StoryRenderer({ selectedStory });
+    const story = StoryRenderer({ selected });
 
     const handleSelect = action(({ id }: { id: string }) => {
       selectedStory.set(id);

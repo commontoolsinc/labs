@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { handler, NAME, pattern, UI, type VNode, Writable } from "commontools";
-import { Controls, SwitchControl } from "../ui/controls.tsx";
+import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface ChatStoryInput {}
@@ -75,10 +75,10 @@ const sampleTools = [
 ];
 
 const sendMessage = handler<
-  unknown,
+  CustomEvent<{ text?: string }>,
   { messages: Writable<typeof sampleMessages> }
->((_event, { messages }) => {
-  const text = (_event as CustomEvent)?.detail?.text as string | undefined;
+>((event, { messages }) => {
+  const text = event?.detail?.text;
   if (text?.trim()) {
     messages.set([
       ...messages.get(),

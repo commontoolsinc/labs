@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { computed, NAME, pattern, UI, type VNode } from "commontools";
 
 import ButtonStory from "../stories/ct-button-story.tsx";
 import CheckboxStory from "../stories/ct-checkbox-story.tsx";
@@ -50,7 +50,7 @@ import TagsStory from "../stories/ct-tags-story.tsx";
 import GridStory from "../stories/ct-grid-story.tsx";
 
 interface StoryRendererInput {
-  selectedStory: Writable<string>;
+  selected: string;
 }
 
 interface StoryRendererOutput {
@@ -66,9 +66,9 @@ type CatalogStory = {
 } | null;
 
 export default pattern<StoryRendererInput, StoryRendererOutput>(
-  ({ selectedStory }) => {
+  ({ selected }) => {
     const story = computed<CatalogStory>(() => {
-      switch (selectedStory.get()) {
+      switch (selected) {
         case "button":
           return ButtonStory({});
         case "checkbox":

@@ -24,7 +24,7 @@ export default pattern<TagsStoryInput, TagsStoryOutput>(() => {
         >
           Tags
         </div>
-        <ct-tags tags={["TypeScript", "React", "Node.js", "Deno"]} readonly />
+        <ct-tags tags={["TypeScript", "React", "Node.js", "Deno"]} />
       </div>
     ),
     controls: (
