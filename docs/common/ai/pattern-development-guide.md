@@ -8,18 +8,9 @@ This is the agent-neutral reference for building Common Fabric patterns.
 - Start simple and keep the first implementation runnable.
 - Prefer one-file patterns first. Split files only when complexity demands it.
 - Iterate through `Sketch -> Run -> Verify -> Improve`.
+- Prefer validated docs and references over blindly copying an existing pattern.
 
-## Verification Loop
-
-Use the runtime, not just static reasoning:
-
-- `deno task ct check <pattern>.tsx`
-- `deno task ct check <pattern>.tsx --no-run` for faster type validation
-- `deno task ct test <pattern>.test.tsx` when tests are justified
-
-Each increment should be small enough that you can check it immediately.
-
-## Structure Guidance
+## Pattern Structure
 
 Start with:
 
@@ -33,7 +24,42 @@ Only split into `schemas.tsx` or additional modules when:
 - a helper has clear reuse value
 - the main file becomes harder to evolve than to split
 
-## Action vs Handler
+Do not split by default. A moderate pattern with a few entities can still live
+comfortably in one file while you discover the right shape.
+
+## Development Loop: Sketch -> Run -> Iterate
+
+Do not write the finished code up front. Write the minimum needed to see real
+behavior:
+
+1. Sketch
+   - define the types
+   - add one handler or action
+   - render the simplest useful UI
+2. Run it
+   - use `deno task ct check <pattern>.tsx`
+3. Verify
+   - does it render?
+   - do the core interactions fire?
+   - do the values move the way you expect?
+4. Iterate
+   - add one more meaningful piece and rerun
+
+If you cannot run what you have written, you have probably written too much
+before validating enough.
+
+## Verification Loop
+
+Use the runtime, not just static reasoning:
+
+- `deno task ct check <pattern>.tsx`
+- `deno task ct check <pattern>.tsx --no-run` for faster type validation
+- `deno task ct test <pattern>.test.tsx` when tests are justified
+
+Primary verification is still runtime behavior. Tests are for logic that is
+awkward, fragile, or expensive to verify by clicking.
+
+## action() vs handler()
 
 Default to `action()` when the behavior is specific to one pattern instance and
 can close over pattern-local state.
@@ -49,10 +75,145 @@ Decision rule:
 - if the behavior needs different data at different call sites, use `handler()`
 - otherwise, use `action()`
 
+### Correct `action()` usage
+
+```tsx
+const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
+  const menuOpen = Writable.of(false);
+
+  const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
+  const clearContent = action(() => content.set(""));
+
+  return {
+    [UI]: (
+      <>
+        <ct-button onClick={toggleMenu}>Menu</ct-button>
+        <ct-button onClick={clearContent}>Clear</ct-button>
+      </>
+    ),
+    content,
+  };
+});
+```
+
+### Correct `handler()` usage
+
+```tsx
+const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
+  (_, { item, items }) => {
+    const list = items.get();
+    items.set(list.filter((entry) => entry !== item));
+  },
+);
+
+const List = pattern<ListInput, ListOutput>(({ items }) => ({
+  [UI]: (
+    <ul>
+      {items.map((item) => (
+        <li>
+          {item.name}
+          <ct-button onClick={deleteItem({ item, items })}>Delete</ct-button>
+        </li>
+      ))}
+    </ul>
+  ),
+  items,
+}));
+```
+
 ## Common Pitfalls
 
-- Do not use `computed()` to gate JSX sections; use JSX conditionals directly.
-- Do not call `.set()` on upstream cells from inside `computed()`.
-- Do not write finished code upfront; get something running early.
-- Keep composed pattern input/output names aligned exactly.
-- Prefer docs and validated references over copying existing pattern code blindly.
+### Conditional JSX
+
+Do not use `computed()` to gate JSX sections. Use JSX conditionals directly.
+The JSX transformer handles ternaries correctly, including nested ternaries.
+
+```tsx
+// Wrong
+{computed(() => {
+  if (!showAdmin.get()) return null;
+  return <div>{showForm ? <form>...</form> : null}</div>;
+})}
+
+// Right
+{showAdmin
+  ? <div>{showForm ? <form>...</form> : null}</div>
+  : null}
+```
+
+Inside `computed()`, a `Writable<boolean>` is just a JS object and therefore
+truthy. That leads to subtle incorrect rendering.
+
+### CORS and `fetchData`
+
+Patterns run in the browser. Any URL used with `fetchData` must be
+CORS-compatible. RSS feeds, private APIs, and many XML endpoints do not expose
+the required headers. Prefer public JSON APIs that explicitly allow
+cross-origin requests.
+
+If a brief requests a non-CORS source, substitute a compatible equivalent and
+note the change instead of shipping a pattern that cannot run in the browser.
+
+### Reactive Cycles
+
+Do not call `.set()` on upstream cells from inside `computed()`. If the write
+feeds back into the same reactive graph, the runtime will cycle and eventually
+throw.
+
+```tsx
+// Wrong
+const sorted = computed(() => {
+  const items = allItems.get();
+  statusMessage.set(`${items.length} items`);
+  return items.sort(compareFn);
+});
+
+// Right
+const sorted = computed(() => [...allItems.get()].sort(compareFn));
+const updateStatus = action(() => {
+  statusMessage.set(`${allItems.get().length} items`);
+});
+```
+
+Use `computed()` for derivation and `action()` for side effects.
+
+### Composition Contracts
+
+When one pattern feeds another, output field names and input field names must
+match exactly. There is no automatic name mapping. `chartData` and
+`chartEntries` are different contracts.
+
+Coordinate naming across related patterns before implementation. Mismatched
+field names create silent friction later and are easy to miss during assembly.
+
+## Workflow Guidance
+
+The common operating rhythm is:
+
+1. build the smallest coherent version
+2. run it locally
+3. review against the documented gotchas
+4. deploy or runtime-check it in a representative environment
+5. tighten or expand only after the earlier slice works
+
+Always review before first deploy when the change is larger than a trivial fix.
+The fast review step catches many convention and reactivity mistakes before
+they become runtime debugging sessions.
+
+## Documentation Priorities
+
+Start with `docs/common/patterns/`, especially the meta guidance under
+`docs/common/patterns/meta/`.
+
+Then consult the targeted references as needed:
+
+- `docs/common/concepts/types-and-schemas/`
+- `docs/common/concepts/action.md`
+- `docs/common/concepts/handler.md`
+- `docs/common/workflows/pattern-testing.md`
+- `docs/common/components/COMPONENTS.md`
+- `docs/development/debugging/`
+
+Prefer documentation over existing patterns in `packages/patterns/`. Existing
+patterns are useful reference points but may include older idioms or locally
+driven compromises.
