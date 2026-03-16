@@ -60,6 +60,11 @@ import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import type { CachedCompiler } from "./compilation-cache/mod.ts";
+import {
+  type CfcTrustContext,
+  type CfcTrustContextSource,
+  resolveCfcTrustContextSnapshot,
+} from "./cfc/integrity-trust.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -124,6 +129,8 @@ export interface RuntimeOptions {
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
+  /** Optional trust statements/delegations used when evaluating CFC concept guards. */
+  cfcTrustContext?: CfcTrustContextSource;
 }
 
 /**
@@ -195,6 +202,7 @@ export class Runtime {
   readonly experimental: Required<ExperimentalOptions>;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
+  readonly cfcTrustContextSource?: CfcTrustContextSource;
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
 
@@ -246,6 +254,7 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
+    this.cfcTrustContextSource = options.cfcTrustContext;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
@@ -302,6 +311,10 @@ export class Runtime {
    */
   idle(): Promise<void> {
     return this.scheduler.idle();
+  }
+
+  getCfcTrustContextSnapshot(): CfcTrustContext | undefined {
+    return resolveCfcTrustContextSnapshot(this.cfcTrustContextSource);
   }
 
   /**

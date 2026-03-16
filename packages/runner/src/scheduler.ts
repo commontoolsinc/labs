@@ -54,6 +54,7 @@ import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import {
   isCommitBearingAttempt,
   prepareCfcCommitIfNeeded,
+  type PrepareCfcCommitIfNeededOptions,
 } from "./cfc/prepare-shim.ts";
 import type { CfcImplementationIdentity } from "./cfc/implementation-identity.ts";
 import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
@@ -913,7 +914,7 @@ export class Scheduler {
           logger.timeStart("scheduler", "run", "commit");
           const commitPromise = commitWithCfcPrepare(
             tx,
-            this.runtime.experimental.cfcBoundaryEnforcement,
+            this.runtime,
             getAnnotatedImplementationIdentity(action),
           );
           logger.timeEnd("scheduler", "run", "commit");
@@ -2780,7 +2781,7 @@ export class Scheduler {
           } finally {
             const { error: commitError } = await commitWithCfcPrepare(
               tx,
-              this.runtime.experimental.cfcBoundaryEnforcement,
+              this.runtime,
               getAnnotatedImplementationIdentity(handler),
             );
             // If the transaction failed, and we have retries left, queue the
@@ -3496,9 +3497,21 @@ function getAnnotatedImplementationIdentity(
   return annotated.cfcImplementationIdentity;
 }
 
+function getRuntimePrepareOptions(
+  runtime: Runtime,
+  implementationIdentity?: CfcImplementationIdentity,
+): PrepareCfcCommitIfNeededOptions {
+  return {
+    enforceBoundary: runtime.experimental.cfcBoundaryEnforcement,
+    implementationIdentity,
+    actingPrincipal: runtime.userIdentityDID,
+    trustContext: runtime.getCfcTrustContextSnapshot(),
+  };
+}
+
 function commitWithCfcPrepare(
   tx: IExtendedStorageTransaction,
-  enforceBoundary: boolean,
+  runtime: Runtime,
   implementationIdentity?: CfcImplementationIdentity,
 ): Promise<Result<Unit, CommitError>> {
   if (tx.status().status !== "ready") {
@@ -3509,10 +3522,10 @@ function commitWithCfcPrepare(
     return tx.commit();
   }
 
-  return prepareCfcCommitIfNeeded(tx, {
-    enforceBoundary,
-    implementationIdentity,
-  })
+  return prepareCfcCommitIfNeeded(
+    tx,
+    getRuntimePrepareOptions(runtime, implementationIdentity),
+  )
     .then(() => tx.commit())
     .catch((error) => {
       tx.abort(error);

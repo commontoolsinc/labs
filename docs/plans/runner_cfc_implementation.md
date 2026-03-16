@@ -37,7 +37,7 @@ effects and deterministic schema binding.
       executing implementation identity (`CodeHash` or `Builtin(name)`) is
       trusted for concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision`.
-- [ ] Concept-valued integrity guards are evaluated from concrete integrity
+- [x] Concept-valued integrity guards are evaluated from concrete integrity
       against the acting principal's trust closure; runner must not require
       derived concept atoms to be persisted on stored values.
 
@@ -88,7 +88,7 @@ effects and deterministic schema binding.
 - [ ] Define `TrustContextSnapshot` / stable trust-context hash used by
       boundary evaluation (verifier delegations, trusted statements, optional
       concept-order edges) for the acting principal.
-- [ ] Define integrity-guard matcher semantics: concept requirements are
+- [x] Define integrity-guard matcher semantics: concept requirements are
       satisfied by concrete witnesses under acting-user trust closure, not by
       materialized concept atoms in stored labels.
 
@@ -108,7 +108,7 @@ effects and deterministic schema binding.
       labels), not ambient control-integrity context alone.
 - [x] Multi-atom confidentiality preconditions default to clause-local matching;
       cross-clause matching must be explicit.
-- [ ] Boundary prepare/policy evaluation is acting-principal scoped: the same
+- [x] Boundary prepare/policy evaluation is acting-principal scoped: the same
       concrete integrity may satisfy a concept guard for one user and not for
       another.
 - [ ] Rewriting one confidentiality clause must not authorize unrelated clauses;
@@ -265,7 +265,7 @@ Primary files:
 - [x] Implement consumed-input label gathering from canonical reads.
 - [x] Implement coherent `requiredIntegrity` verification for object-level
       annotations.
-- [ ] Implement concept-valued `requiredIntegrity` matching from available
+- [x] Implement concept-valued `requiredIntegrity` matching from available
       concrete integrity via acting-user trust closure.
 - [x] Implement `maxConfidentiality` checks.
 - [x] Respect same-attempt semantics only.
@@ -332,7 +332,7 @@ Primary files:
       (`anywhere`) matching.
 - [x] Return explicit non-convergence signal from bounded policy fixpoint
       evaluation and reject boundary attempt on that signal.
-- [ ] Match concept-valued integrity preconditions against available concrete
+- [x] Match concept-valued integrity preconditions against available concrete
       integrity using the acting principal's trust closure.
 - [ ] Bind prepare success to the acting principal + trust-context snapshot used
       for evaluation; if that snapshot changes before commit, invalidate
@@ -360,7 +360,7 @@ Primary file:
 ### 6.1 Reactive Action Path (`run`)
 
 - [x] Insert prepare step between action completion and `tx.commit()`.
-- [ ] Pass acting principal + trust-context snapshot into prepare evaluation.
+- [x] Pass acting principal + trust-context snapshot into prepare evaluation.
 - [x] Keep existing commit retry loop behavior where applicable.
 - [x] On retryable commit failure, ensure fresh tx reruns action and prepare.
 - [ ] Ensure retryable reruns use a fresh trust-context snapshot.
@@ -576,7 +576,7 @@ Primary test location:
 - [x] `cfc-flow-precision.test.ts` covers untrusted custom builtin-name
       overrides falling back conservative.
 - [ ] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
-- [ ] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
+- [x] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
 - [ ] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
 - [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
 - [ ] `cfc-trust-context-change-invalidates-prepare.test.ts`
@@ -665,11 +665,11 @@ Primary docs:
 - [x] Confirm bounded fixpoint evaluation rejects on non-convergence.
 - [x] Confirm runner tests cover guard-false, ambient-token-smuggling, and
       cross-clause-mixing attack shapes.
-- [ ] Confirm concept-valued integrity guards are evaluated from concrete
+- [x] Confirm concept-valued integrity guards are evaluated from concrete
       integrity via acting-principal trust closure.
 - [ ] Confirm concrete integrity is persisted; derived concept satisfaction is
       boundary-evaluated and not serialized into stored labels.
-- [ ] Confirm the same concrete evidence may satisfy concept guards for one
+- [x] Confirm the same concrete evidence may satisfy concept guards for one
       acting principal and fail for another.
 - [ ] Confirm clause-local release semantics prevent `User(A)` rewrites from
       implicitly authorizing independent `User(B)` / owner clauses.

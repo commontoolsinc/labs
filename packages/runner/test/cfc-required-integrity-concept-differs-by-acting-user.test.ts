@@ -50,7 +50,7 @@ async function seedRuntime(
   space: MemorySpace,
   sourceName: string,
   targetName: string,
-): Promise<{ source: Cell<number>; target: Cell<number> }> {
+): Promise<{ target: Cell<number> }> {
   let tx = runtime.edit();
   const source = runtime.getCell<number>(space, sourceName, undefined, tx);
   const target = runtime.getCell<number>(space, targetName, undefined, tx);
@@ -73,7 +73,9 @@ async function seedRuntime(
   result = await tx.commit();
   expect(result.error).toBeUndefined();
 
-  return { source, target };
+  const refreshedTarget = runtime.getCell<number>(space, targetName);
+  await refreshedTarget.pull();
+  return { target: refreshedTarget };
 }
 
 async function waitForCellValue(
@@ -110,36 +112,47 @@ describe("CFC requiredIntegrity acting principal scoping", () => {
     trustedRuntime.scheduler.disablePullMode();
     untrustedRuntime.scheduler.disablePullMode();
 
+    const trustedSpace = trustedSigner.did() as MemorySpace;
+    const untrustedSpace = otherSigner.did() as MemorySpace;
+    const sourceName = "cfc-acting-principal-source";
+    const targetName = "cfc-acting-principal-target";
+
+    const trustedAction = (tx: IExtendedStorageTransaction) => {
+      const source = trustedRuntime.getCell<number>(trustedSpace, sourceName);
+      const target = trustedRuntime.getCell<number>(trustedSpace, targetName);
+      const value = Number(
+        source.withTx(tx).asSchema(conceptRequiredIntegritySchema).get() ?? 0,
+      );
+      target.withTx(tx).set(value + 1);
+    };
+    const untrustedAction = (tx: IExtendedStorageTransaction) => {
+      const source = untrustedRuntime.getCell<number>(
+        untrustedSpace,
+        sourceName,
+      );
+      const target = untrustedRuntime.getCell<number>(
+        untrustedSpace,
+        targetName,
+      );
+      const value = Number(
+        source.withTx(tx).asSchema(conceptRequiredIntegritySchema).get() ?? 0,
+      );
+      target.withTx(tx).set(value + 1);
+    };
+
     try {
-      const trustedSpace = trustedSigner.did() as MemorySpace;
-      const untrustedSpace = otherSigner.did() as MemorySpace;
       const trusted = await seedRuntime(
         trustedRuntime,
         trustedSpace,
-        "cfc-acting-principal-source",
-        "cfc-acting-principal-target",
+        sourceName,
+        targetName,
       );
       const untrusted = await seedRuntime(
         untrustedRuntime,
         untrustedSpace,
-        "cfc-acting-principal-source",
-        "cfc-acting-principal-target",
+        sourceName,
+        targetName,
       );
-
-      const trustedAction = (tx: IExtendedStorageTransaction) => {
-        const value = Number(
-          trusted.source.withTx(tx).asSchema(conceptRequiredIntegritySchema)
-            .get() ?? 0,
-        );
-        trusted.target.withTx(tx).set(value + 1);
-      };
-      const untrustedAction = (tx: IExtendedStorageTransaction) => {
-        const value = Number(
-          untrusted.source.withTx(tx).asSchema(conceptRequiredIntegritySchema)
-            .get() ?? 0,
-        );
-        untrusted.target.withTx(tx).set(value + 1);
-      };
 
       await trustedRuntime.scheduler.run(trustedAction);
       await untrustedRuntime.scheduler.run(untrustedAction);
@@ -147,8 +160,11 @@ describe("CFC requiredIntegrity acting principal scoping", () => {
       expect(await waitForCellValue(trusted.target, 2)).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 50));
       await untrusted.target.pull();
+      expect(trusted.target.get()).toBe(2);
       expect(untrusted.target.get()).toBe(0);
     } finally {
+      trustedRuntime.scheduler.unsubscribe(trustedAction);
+      untrustedRuntime.scheduler.unsubscribe(untrustedAction);
       await trustedRuntime.dispose();
       await untrustedRuntime.dispose();
       await trustedStorageManager.close();

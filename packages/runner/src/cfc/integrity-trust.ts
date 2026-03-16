@@ -23,9 +23,23 @@ export interface CfcTrustContext {
   readonly conceptEdges?: readonly CfcTrustConceptEdge[];
 }
 
+export type CfcTrustContextSource =
+  | CfcTrustContext
+  | (() => CfcTrustContext | undefined);
+
 export interface CfcIntegrityTrustOptions {
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+}
+
+export function resolveCfcTrustContextSnapshot(
+  source: CfcTrustContextSource | undefined,
+): CfcTrustContext | undefined {
+  const trustContext = typeof source === "function" ? source() : source;
+  if (!trustContext) {
+    return undefined;
+  }
+  return structuredClone(trustContext);
 }
 
 function delegationAllowsConcept(
