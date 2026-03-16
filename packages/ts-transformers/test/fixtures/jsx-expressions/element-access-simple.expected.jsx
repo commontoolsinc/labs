@@ -38,7 +38,11 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: ["string", "undefined"]
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string"
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 index: state.key("index")
@@ -63,7 +67,11 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: ["string", "undefined"]
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string"
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
@@ -96,7 +104,11 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: ["number", "undefined"]
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number"
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
@@ -146,10 +158,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -57,7 +57,11 @@ export default pattern(() => {
                             type: "boolean"
                         },
                         result: {
-                            type: ["string", "undefined"]
+                            anyOf: [{
+                                    type: "undefined"
+                                }, {
+                                    type: ["string", "undefined"]
+                                }]
                         }
                     },
                     required: ["pending"]
@@ -65,7 +69,11 @@ export default pattern(() => {
             },
             required: ["genResult"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: ["string", "undefined"]
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: ["string", "undefined"]
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { genResult: {
                 pending: genResult.pending,
                 result: genResult.result

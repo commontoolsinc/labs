@@ -23,33 +23,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
-        <p>Total items: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: {
-                    length: state.key("items").length
-                }
-            } }, ({ state }) => state.items.length)}</p>
+        <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
           {__ctHelpers.derive({
@@ -235,10 +209,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
                         type: "object",
                         properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -260,33 +234,7 @@ export default pattern((state) => {
         </ul>
 
         <h3>Array Methods</h3>
-        <p>Item count: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: {
-                    length: state.key("items").length
-                }
-            } }, ({ state }) => state.items.length)}</p>
+        <p>Item count: {state.key("items", "length")}</p>
         <p>Active items: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -559,33 +507,7 @@ export default pattern((state) => {
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: {
-                    length: state.key("items").length
-                }
-            } }, ({ state }) => state.items.length)} data-has-filter={__ctHelpers.derive({
+        <div data-item-count={state.key("items", "length")} data-has-filter={__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -669,10 +591,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

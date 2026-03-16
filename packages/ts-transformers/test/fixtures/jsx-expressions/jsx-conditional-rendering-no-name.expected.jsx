@@ -338,54 +338,31 @@ export default pattern((state) => {
 
         <h3>IfElse Component</h3>
         {ifElse({
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                $ref: "#/$defs/UIRenderable",
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
                 }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.key("count")
-            } }, ({ state }) => <div>User is active with {state.count} items</div>), <div>User is inactive</div>)}
+            } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), <div>User is active with {state.key("count")} items</div>, <div>User is inactive</div>)}
 
         {ifElse({
             type: "boolean"
@@ -399,7 +376,20 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, {
+            $ref: "#/$defs/UIRenderable",
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -417,81 +407,9 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 5), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.key("count")
-            } }, ({ state }) => <ul>
-            <li>Many items: {state.count}</li>
-          </ul>), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.key("count")
-            } }, ({ state }) => <p>Few items: {state.count}</p>))}
+            } }, ({ state }) => state.count > 5), <ul>
+            <li>Many items: {state.key("count")}</li>
+          </ul>, <p>Few items: {state.key("count")}</p>)}
       </div>),
     };
 }, {
@@ -530,10 +448,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

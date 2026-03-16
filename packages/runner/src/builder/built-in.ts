@@ -420,7 +420,7 @@ export const patternTool = (<
 ): PatternToolResult<E> => {
   const resolvedPattern = isPattern(fnOrPattern)
     ? fnOrPattern
-    : pattern(fnOrPattern as Parameters<typeof pattern>[0]);
+    : pattern(fnOrPattern as unknown as Parameters<typeof pattern>[0]);
 
   return {
     pattern: resolvedPattern,

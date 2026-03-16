@@ -38,7 +38,11 @@ export default pattern((state) => {
                     },
                     required: ["state", "tag"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: ["number", "undefined"]
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "number"
+                        }]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     state: {
                         tagCounts: state.key("tagCounts")
@@ -77,10 +81,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
                         type: "object",
                         properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -131,10 +135,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -10,13 +10,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler({
-            type: "object",
-            properties: {
-                detail: {
-                    type: "unknown"
-                }
-            },
-            required: ["detail"]
+            type: "unknown"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
@@ -62,10 +56,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -302,19 +302,9 @@ export default pattern((state) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
-            $ref: "#/$defs/JSXElement"
+            $ref: "#/$defs/UIRenderable"
         },
         $defs: {
-            JSXElement: {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }]
-            },
             UIRenderable: {
                 type: "object",
                 properties: {
@@ -427,7 +417,20 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        $ref: "#/$defs/UIRenderable",
+                        $defs: {
+                            UIRenderable: {
+                                type: "object",
+                                properties: {
+                                    $UI: {
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }
+                                },
+                                required: ["$UI"]
+                            }
+                        }
+                    } as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
               </button>
               {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
               {comment.reactions.map((reaction, reactionIndex) => (<span>
@@ -504,10 +507,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
                         type: "object",
                         properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -569,10 +572,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
                         type: "object",
                         properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -599,51 +602,106 @@ export default pattern((state) => {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
         {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
-        {laneLabels.map((label, labelIndex) => (<header data-lane-label={labelIndex}>
+        {laneLabels.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const label = __ct_pattern_input.key("element");
+                const labelIndex = __ct_pattern_input.key("index");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<header data-lane-label={labelIndex}>
             {__ctHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    labelIndex: {
-                        type: "number"
-                    }
-                },
-                required: ["labelIndex"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, { labelIndex: labelIndex }, ({ labelIndex }) => labelIndex === 0), __ctHelpers.derive({
-                type: "object",
-                properties: {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        labelIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["labelIndex"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, { labelIndex: labelIndex }, ({ labelIndex }) => labelIndex === 0), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                lane: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["lane"]
+                        },
+                        label: {
+                            type: "string"
+                        }
+                    },
+                    required: ["state", "label"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
                     state: {
+                        lane: state.key("lane")
+                    },
+                    label: label
+                }, ({ state, label }) => `${state.lane}:${label}`), label)}
+          </header>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
                         type: "object",
                         properties: {
-                            lane: {
-                                type: "string"
+                            state: {
+                                type: "object",
+                                properties: {
+                                    lane: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["lane"]
                             }
                         },
-                        required: ["lane"]
-                    },
-                    label: {
-                        type: "string"
+                        required: ["state"]
                     }
                 },
-                required: ["state", "label"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    lane: state.lane
-                },
-                label: label
-            }, ({ state, label }) => `${state.lane}:${label}`), label)}
-          </header>))}
+                    lane: state.key("lane")
+                }
+            })}
         {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
         {threadRows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
@@ -653,7 +711,7 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/JSXElement"
+                        $ref: "#/$defs/UIRenderable"
                     },
                     index: {
                         type: "number"
@@ -661,16 +719,6 @@ export default pattern((state) => {
                 },
                 required: ["element"],
                 $defs: {
-                    JSXElement: {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }]
-                    },
                     UIRenderable: {
                         type: "object",
                         properties: {
@@ -685,10 +733,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
                         type: "object",
                         properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -778,10 +826,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

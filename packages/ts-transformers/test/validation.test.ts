@@ -1020,7 +1020,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
-    "does not report opaque-get on plain pattern callback input",
+    "errors on .get() called on pattern input without Writable",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, computed } from "commontools";
@@ -1034,11 +1034,8 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.some((error) => error.type === "opaque-get:invalid-call"),
-        false,
-        "Pattern callback parameters should keep their declared semantics",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
     },
   );
 
