@@ -3188,6 +3188,7 @@ interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTTagsAttributes<T> extends CTHTMLAttributes<T> {
   "tags"?: string[];
+  "readonly"?: boolean;
   "onct-change"?: EventHandler<any>;
 }
 
