@@ -8,17 +8,22 @@ const space = signer.did();
 const SUBSCRIPTION_COUNT = 256;
 const UPDATE_COUNT = 5;
 const PROCESS_URI = "of:source-topology-process" as const;
-const BASE_URIS = ["of:source-topology-base-1", "of:source-topology-base-2"] as const;
+const BASE_URIS = [
+  "of:source-topology-base-1",
+  "of:source-topology-base-2",
+] as const;
 const PATTERN_ID = "bench-pattern:source-topology";
-const PATTERN_URI =
-  `of:${refer({ causal: { patternId: PATTERN_ID, type: "pattern" } }).toJSON()["/"]}` as const;
+const PATTERN_URI = `of:${
+  refer({ causal: { patternId: PATTERN_ID, type: "pattern" } }).toJSON()["/"]
+}` as const;
 
 type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
   open(space: string): infer T;
 } ? T
   : never;
 
-const pieceUri = (index: number) => `of:source-topology-piece-${index}` as const;
+const pieceUri = (index: number) =>
+  `of:source-topology-piece-${index}` as const;
 
 const pieceValue = (withPatternLink: boolean) =>
   withPatternLink
@@ -95,7 +100,11 @@ const runRetargetLoop = async (
     await (provider as any).send([{
       uri: PROCESS_URI,
       value: {
-        source: { "/": version % 2 === 0 ? "source-topology-base-2" : "source-topology-base-1" },
+        source: {
+          "/": version % 2 === 0
+            ? "source-topology-base-2"
+            : "source-topology-base-1",
+        },
       },
     }]);
     await storageManager.synced();

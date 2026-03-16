@@ -473,7 +473,9 @@ function printStorageStats(elapsedMs: number, limit = 16): void {
   if (timingEntries.length > 0) {
     timingEntries.sort((a, b) => b.p95 - a.p95);
     console.log(
-      `           Timings (top ${Math.min(limit, timingEntries.length)} by p95):`,
+      `           Timings (top ${
+        Math.min(limit, timingEntries.length)
+      } by p95):`,
     );
     for (const entry of timingEntries.slice(0, limit)) {
       const name = entry.name.padEnd(35);
