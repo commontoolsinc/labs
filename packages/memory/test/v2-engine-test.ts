@@ -1143,3 +1143,108 @@ Deno.test("memory v2 engine resolves pending reads by session localSeq", async (
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 engine rejects pending reads when later commits touch the read path", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ foo: 0, bar: 0 }),
+        }],
+      },
+    });
+
+    const localBase = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 2 },
+      },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{ id: "entity:source", path: ["foo"], seq: 1 }],
+          pending: [],
+        },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "replace", path: "/foo", value: 1 }],
+        }],
+      },
+    });
+    assertEquals(localBase.seq, 2);
+
+    const remote = applyCommit(engine, {
+      sessionId: "session:2",
+      invocation: {
+        ...invocation,
+        args: { localSeq: 1, actor: "other" },
+      },
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "replace", path: "/bar", value: 1 }],
+        }],
+      },
+    });
+    assertEquals(remote.seq, 3);
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: {
+            ...invocation,
+            args: { localSeq: 3 },
+          },
+          authorization,
+          commit: {
+            localSeq: 3,
+            reads: {
+              confirmed: [],
+              pending: [{ id: "entity:source", path: ["bar"], localSeq: 2 }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:target",
+              value: toEntityDocument({ derived: true }),
+            }],
+          },
+        }),
+      Error,
+      "stale pending read",
+    );
+
+    assertEquals(read(engine, { id: "entity:target" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

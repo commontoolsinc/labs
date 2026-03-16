@@ -715,7 +715,12 @@ const applyCommitTransaction = (
   }
 
   validateConfirmedReads(engine, branch, commit);
-  const resolvedPendingReads = resolvePendingReads(engine, sessionId, commit);
+  const resolvedPendingReads = resolvePendingReads(
+    engine,
+    sessionId,
+    branch,
+    commit,
+  );
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const hash = toReference(commit);
@@ -901,6 +906,7 @@ const parsePointer = (path: string): string[] => {
 const resolvePendingReads = (
   engine: Engine,
   sessionId: SessionId,
+  branch: BranchName,
   commit: ClientCommit,
 ): Array<{ localSeq: number; hash: Reference; seq: number }> => {
   const resolutions = new Map<
@@ -909,23 +915,42 @@ const resolvePendingReads = (
   >();
 
   for (const read of commit.reads.pending) {
-    if (resolutions.has(read.localSeq)) {
-      continue;
+    let resolution = resolutions.get(read.localSeq);
+    if (!resolution) {
+      const row = engine.statements.selectPendingResolution.get({
+        session_id: sessionId,
+        local_seq: read.localSeq,
+      }) as { hash: string; seq: number } | undefined;
+      if (!row) {
+        throw new ConflictError(
+          `pending dependency not resolved: ${read.localSeq}`,
+        );
+      }
+      resolution = {
+        localSeq: read.localSeq,
+        hash: row.hash as Reference,
+        seq: row.seq,
+      };
+      resolutions.set(read.localSeq, resolution);
     }
-    const row = engine.statements.selectPendingResolution.get({
-      session_id: sessionId,
-      local_seq: read.localSeq,
-    }) as { hash: string; seq: number } | undefined;
-    if (!row) {
+
+    const conflicts = engine.statements.selectLatestConflict.all({
+      branch,
+      id: read.id,
+      after_seq: resolution.seq,
+    }) as Array<{
+      seq: number;
+      fact_type: Operation["op"];
+      data: string | null;
+    }>;
+    const conflict = conflicts.find((candidate) =>
+      factOverlapsRead(candidate, read.path)
+    );
+    if (conflict !== undefined) {
       throw new ConflictError(
-        `pending dependency not resolved: ${read.localSeq}`,
+        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflict.seq}`,
       );
     }
-    resolutions.set(read.localSeq, {
-      localSeq: read.localSeq,
-      hash: row.hash as Reference,
-      seq: row.seq,
-    });
   }
 
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);

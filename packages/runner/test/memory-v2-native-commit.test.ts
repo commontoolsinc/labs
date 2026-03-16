@@ -243,6 +243,75 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array element
   }
 });
 
+Deno.test("memory v2 transactions drop same-tx add-then-remove paths from patch drafts", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-native-elide-noop-remove",
+      type,
+      path: [],
+    }, { value: { profile: { name: "Ada" } } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const addWrite = tx.write({
+      space,
+      id: "of:memory-v2-native-elide-noop-remove",
+      type,
+      path: ["value", "profile", "subtitle"],
+    }, "Analyst");
+    assert(addWrite.ok);
+    const removeWrite = tx.write({
+      space,
+      id: "of:memory-v2-native-elide-noop-remove",
+      type,
+      path: ["value", "profile", "subtitle"],
+    }, undefined);
+    assert(removeWrite.ok);
+    const renameWrite = tx.write({
+      space,
+      id: "of:memory-v2-native-elide-noop-remove",
+      type,
+      path: ["value", "profile", "name"],
+    }, "Grace");
+    assert(renameWrite.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-native-elide-noop-remove",
+        type,
+        value: { value: { profile: { name: "Grace" } } },
+        patches: [{
+          op: "replace",
+          path: "/profile/name",
+          value: "Grace",
+        }],
+      }],
+    }]);
+
+    const verify = storage.edit();
+    const readResult = verify.read({
+      space,
+      id: "of:memory-v2-native-elide-noop-remove",
+      type,
+      path: ["value"],
+    });
+    assertEquals(readResult.ok?.value, { profile: { name: "Grace" } });
+  } finally {
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions preserve the original previousValue across repeated primitive path writes", async () => {
   const { storage } = captureNativeDrafts();
 

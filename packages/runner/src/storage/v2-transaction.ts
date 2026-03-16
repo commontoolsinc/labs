@@ -1558,12 +1558,18 @@ export class V2StorageTransaction implements IStorageTransaction {
       ) {
         return null;
       }
+      if (deepEqual(value, previousValue)) {
+        continue;
+      }
 
       patchDetails.set(patchPath.join("\0"), {
         path: patchPath,
         value,
         previousValue,
       });
+    }
+    if (patchDetails.size === 0) {
+      return null;
     }
 
     const compactedPaths = [...patchDetails.values()].map((detail) =>

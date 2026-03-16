@@ -231,6 +231,11 @@ const compactCommitReads = <
   });
 };
 
+const toCommitReadPath = (path: readonly (string | number)[]): string[] => {
+  const segments = path.map(String);
+  return segments[0] === "value" ? segments.slice(1) : segments;
+};
+
 class WebSocketTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -994,14 +999,14 @@ class SpaceReplica implements ISpaceReplica {
       if (pendingLocalSeq !== undefined) {
         pending.push({
           id: read.id as URI,
-          path: ["value", ...read.path.map(String)],
+          path: toCommitReadPath(read.path),
           localSeq: pendingLocalSeq,
           ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
         });
       } else {
         confirmed.push({
           id: read.id as URI,
-          path: ["value", ...read.path.map(String)],
+          path: toCommitReadPath(read.path),
           seq: typeof read.meta?.seq === "number"
             ? read.meta.seq
             : record?.confirmed.seq ?? 0,
