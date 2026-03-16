@@ -11,6 +11,9 @@ const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const TEST_REFRESH_DELAY_MS = 0;
+
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
   assertExists(message, "expected a server message");
@@ -27,8 +30,26 @@ const assertUpdate = (message: ServerMessage): GraphUpdateMessage => {
   return message as GraphUpdateMessage;
 };
 
+const takeResponse = (
+  messages: ServerMessage[],
+  requestId: string,
+): ResponseMessage<unknown> => {
+  const index = messages.findIndex((message) =>
+    message.type === "response" && message.requestId === requestId
+  );
+  assertEquals(index >= 0, true, `expected response for ${requestId}`);
+  return assertResponse(messages.splice(index, 1)[0]);
+};
+
 class CountingServer extends Server {
   queryCount = 0;
+
+  constructor(options: ConstructorParameters<typeof Server>[0] = {}) {
+    super({
+      subscriptionRefreshDelayMs: TEST_REFRESH_DELAY_MS,
+      ...options,
+    });
+  }
 
   override async evaluateGraphQuery(
     space: string,
@@ -41,10 +62,14 @@ class CountingServer extends Server {
   }
 }
 
-Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server"),
+const createServer = (store: string) =>
+  new Server({
+    store: new URL(store),
+    subscriptionRefreshDelayMs: TEST_REFRESH_DELAY_MS,
   });
+
+Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
+  const server = createServer("memory://memory-v2-server");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-server";
@@ -135,9 +160,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
 });
 
 Deno.test("memory v2 server graph queries follow source lineage from source-only docs", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-source-lineage"),
-  });
+  const server = createServer("memory://memory-v2-server-source-lineage");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-source-lineage";
@@ -224,6 +247,180 @@ Deno.test("memory v2 server graph queries follow source lineage from source-only
   );
 
   await server.close();
+});
+
+Deno.test("memory v2 server batches nearby commits into one subscription refresh", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-refresh-batching"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-refresh-batching";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 0,
+          },
+        },
+      }],
+    },
+  }));
+  assertResponse(shiftMessage(messages));
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+      subscribe: true,
+    },
+  }));
+  assertResponse(shiftMessage(messages));
+  messages.length = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 1,
+          },
+        },
+      }],
+    },
+  }));
+  takeResponse(messages, "tx-1");
+
+  await sleep(2);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-2",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 2,
+          },
+        },
+      }],
+    },
+  }));
+  takeResponse(messages, "tx-2");
+
+  await sleep(20);
+
+  const updates = messages.filter((message): message is GraphUpdateMessage =>
+    message.type === "graph.update"
+  );
+  assertEquals(updates.length, 1);
+  assertEquals(
+    updates[0].result.entities.map((entity) => ({
+      id: entity.id,
+      count: (entity.document as any)?.value?.count,
+    })),
+    [{
+      id: "of:doc:1",
+      count: 2,
+    }],
+  );
+
+  await server.close();
+});
+
+Deno.test("memory v2 server cancels scheduled refresh when the last connection closes", async () => {
+  const server = createServer("memory://memory-v2-server-refresh-disconnect");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-refresh-disconnect";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            hello: "world",
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  connection.close();
 });
 
 Deno.test("memory v2 server does not reevaluate plain source-lineage queries for sigil-only changes", async () => {
@@ -468,9 +665,7 @@ Deno.test("memory v2 server does not reevaluate plain source-lineage queries for
 });
 
 Deno.test("memory v2 server pushes graph query subscription updates", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-subscribe"),
-  });
+  const server = createServer("memory://memory-v2-server-subscribe");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-subscribe";
@@ -562,9 +757,7 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
 });
 
 Deno.test("memory v2 server coalesces subscription refresh after pending commits", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-coalesce"),
-  });
+  const server = createServer("memory://memory-v2-server-coalesce");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-coalesce";
@@ -846,9 +1039,7 @@ Deno.test("memory v2 server patches plain dirty docs without reevaluating the fu
 });
 
 Deno.test("memory v2 server batches identical graph updates across subscriptions", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-batched-updates"),
-  });
+  const server = createServer("memory://memory-v2-server-batched-updates");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-batched-updates";
@@ -1487,9 +1678,9 @@ Deno.test("memory v2 server reevaluates queries when a root doc gains a sigil li
 });
 
 Deno.test("memory v2 server continues refreshing subscriptions after a reevaluation adds a linked entity", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-linked-entity-refresh"),
-  });
+  const server = createServer(
+    "memory://memory-v2-server-linked-entity-refresh",
+  );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-linked-entity-refresh";
@@ -1974,9 +2165,7 @@ Deno.test("memory v2 server invalidates cached subscribed graph queries after he
 });
 
 Deno.test("memory v2 server flushes subscription refresh before returning conflicts", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-server-conflict-flush"),
-  });
+  const server = createServer("memory://memory-v2-server-conflict-flush");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-conflict-flush";

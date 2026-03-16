@@ -9,6 +9,9 @@ import {
   DEFAULT_MEMORY_VERSION,
   type DID,
   type Fact,
+  getDefaultMemoryVersion,
+  getIntegrationMemoryVersionOverride,
+  INTEGRATION_MEMORY_VERSION_ENV,
   type Invariant as IClaim,
   type MemorySpace,
   type MemoryVersion,
@@ -43,7 +46,12 @@ export type {
   Unit,
   URI,
 };
-export { DEFAULT_MEMORY_VERSION };
+export {
+  DEFAULT_MEMORY_VERSION,
+  getDefaultMemoryVersion,
+  getIntegrationMemoryVersionOverride,
+  INTEGRATION_MEMORY_VERSION_ENV,
+};
 
 export type ChangeGroup = unknown;
 

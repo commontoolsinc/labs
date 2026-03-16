@@ -3,7 +3,7 @@ import * as Consumer from "@commonfabric/memory/consumer";
 import * as V2Storage from "./v2.ts";
 import * as V2Emulate from "./v2-emulate.ts";
 import {
-  DEFAULT_MEMORY_VERSION,
+  getDefaultMemoryVersion,
   type Options,
   Provider,
   StorageManager as BaseStorageManager,
@@ -93,7 +93,7 @@ export class StorageManager extends BaseStorageManager {
     | StorageManagerEmulator
     | V2Storage.StorageManager
     | V2Emulate.EmulatedStorageManager {
-    const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
     if (memoryVersion === "v2") {
       if (options.address.protocol === "memory:") {
         return this.emulate(options);
@@ -118,7 +118,7 @@ export class StorageManager extends BaseStorageManager {
   static emulate(
     options: Omit<Options, "address">,
   ): StorageManagerEmulator | V2Emulate.EmulatedStorageManager {
-    const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
     if (memoryVersion === "v2") {
       return V2Emulate.EmulatedStorageManager.emulate(options);
     }

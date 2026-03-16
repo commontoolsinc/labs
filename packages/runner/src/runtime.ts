@@ -35,8 +35,8 @@ import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
   ChangeGroup,
   CommitError,
-  DEFAULT_MEMORY_VERSION,
   DID,
+  getDefaultMemoryVersion,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -263,9 +263,10 @@ export class Runtime {
   #ambientReadTx?: IExtendedStorageTransaction;
 
   constructor(options: RuntimeOptions) {
-    this.memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    const defaultMemoryVersion = getDefaultMemoryVersion();
+    this.memoryVersion = options.memoryVersion ?? defaultMemoryVersion;
     const storageManagerMemoryVersion = options.storageManager.memoryVersion ??
-      DEFAULT_MEMORY_VERSION;
+      defaultMemoryVersion;
 
     if (storageManagerMemoryVersion !== this.memoryVersion) {
       throw new Error(

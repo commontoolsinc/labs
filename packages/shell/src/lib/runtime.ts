@@ -13,7 +13,11 @@ import {
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
-import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "./env.ts";
+import {
+  COMPILATION_CACHE_CLIENT,
+  EXPERIMENTAL,
+  MEMORY_VERSION,
+} from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
@@ -333,6 +337,7 @@ export class RuntimeInternals extends EventTarget {
       spaceIdentity: session.spaceIdentity,
       spaceDid: session.space,
       spaceName: session.spaceName,
+      memoryVersion: MEMORY_VERSION,
       experimental: EXPERIMENTAL,
       buildHash,
     });

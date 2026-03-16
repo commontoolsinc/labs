@@ -36,6 +36,8 @@ const logger = getLogger("memory-v2-server", {
   level: "warn",
 });
 
+const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
+
 type SessionState = {
   id: string;
   space: string;
@@ -483,6 +485,7 @@ export class Server {
       sessions?: SessionRegistry;
       serverSeq?: () => number;
       store?: URL;
+      subscriptionRefreshDelayMs?: number;
     } = {},
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
@@ -497,6 +500,9 @@ export class Server {
 
   disconnect(connection: Connection): void {
     this.#connections.delete(connection);
+    if (this.#connections.size === 0) {
+      this.cancelScheduledRefresh();
+    }
   }
 
   cacheSubscriptions(subscriptions: Iterable<SubscriptionState>): void {
@@ -520,10 +526,7 @@ export class Server {
   }
 
   async close(): Promise<void> {
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
-    }
+    this.cancelScheduledRefresh();
     await this.#refreshing;
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
@@ -795,10 +798,7 @@ export class Server {
 
   async flushSubscriptions(spaces?: Iterable<string>): Promise<void> {
     logger.timeStart("schema-flush");
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
-    }
+    this.cancelScheduledRefresh();
 
     const run = async () => {
       await this.refreshLoop(
@@ -829,7 +829,19 @@ export class Server {
     this.#refreshTimer = setTimeout(() => {
       this.#refreshTimer = null;
       void this.flushSubscriptions();
-    }, 0);
+    }, this.options.subscriptionRefreshDelayMs ??
+      SUBSCRIPTION_REFRESH_DELAY_MS);
+  }
+
+  private cancelScheduledRefresh(): void {
+    if (this.#refreshTimer !== null) {
+      clearTimeout(this.#refreshTimer);
+      this.#refreshTimer = null;
+    }
+    if (this.#connections.size === 0) {
+      this.#dirtySpaces.clear();
+      this.#dirtyDocsBySpace.clear();
+    }
   }
 
   private async refreshLoop(initial?: Set<string>): Promise<void> {

@@ -8,6 +8,29 @@ export type { SchemaPathSelector };
 export type { JSONValue };
 export type MemoryVersion = "v1" | "v2";
 export const DEFAULT_MEMORY_VERSION: MemoryVersion = "v2";
+export const INTEGRATION_MEMORY_VERSION_ENV = "CT_INTEGRATION_MEMORY_VERSION";
+
+type MaybeDeno = {
+  env?: {
+    get(name: string): string | undefined;
+  };
+};
+
+export function getIntegrationMemoryVersionOverride():
+  | MemoryVersion
+  | undefined {
+  try {
+    const deno = (globalThis as typeof globalThis & { Deno?: MaybeDeno }).Deno;
+    const value = deno?.env?.get?.(INTEGRATION_MEMORY_VERSION_ENV);
+    return value === "v1" || value === "v2" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function getDefaultMemoryVersion(): MemoryVersion {
+  return getIntegrationMemoryVersionOverride() ?? DEFAULT_MEMORY_VERSION;
+}
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;

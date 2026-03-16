@@ -12,7 +12,7 @@ import {
 import {
   AsyncResult,
   ConnectionError,
-  DEFAULT_MEMORY_VERSION,
+  getDefaultMemoryVersion,
   MemorySession,
   MemorySpace as Subject,
   type MemoryVersion,
@@ -332,7 +332,7 @@ export interface Options extends ServiceOptions {
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: Subject,
-  memoryVersion: MemoryVersion = DEFAULT_MEMORY_VERSION,
+  memoryVersion: MemoryVersion = getDefaultMemoryVersion(),
 ): URL => {
   const isFile = Path.extname(store.pathname) !== "";
 

@@ -8,6 +8,7 @@ import * as V2Emulate from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   DEFAULT_MEMORY_VERSION,
+  INTEGRATION_MEMORY_VERSION_ENV,
   type IStorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -35,6 +36,60 @@ describe("memoryVersion cutover seam", () => {
 
     await runtime.dispose();
     await storageManager.close();
+  });
+
+  it("honors the integration memory version override when memoryVersion is omitted", async () => {
+    const previous = Deno.env.get(INTEGRATION_MEMORY_VERSION_ENV);
+    Deno.env.set(INTEGRATION_MEMORY_VERSION_ENV, "v1");
+
+    try {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+
+      expect(runtime.memoryVersion).toBe("v1");
+      expect(storageManager.memoryVersion).toBe("v1");
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      if (previous === undefined) {
+        Deno.env.delete(INTEGRATION_MEMORY_VERSION_ENV);
+      } else {
+        Deno.env.set(INTEGRATION_MEMORY_VERSION_ENV, previous);
+      }
+    }
+  });
+
+  it("prefers an explicit memoryVersion over the integration override", async () => {
+    const previous = Deno.env.get(INTEGRATION_MEMORY_VERSION_ENV);
+    Deno.env.set(INTEGRATION_MEMORY_VERSION_ENV, "v1");
+
+    try {
+      const storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v2",
+      });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        memoryVersion: "v2",
+      });
+
+      expect(runtime.memoryVersion).toBe("v2");
+      expect(storageManager.memoryVersion).toBe("v2");
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      if (previous === undefined) {
+        Deno.env.delete(INTEGRATION_MEMORY_VERSION_ENV);
+      } else {
+        Deno.env.set(INTEGRATION_MEMORY_VERSION_ENV, previous);
+      }
+    }
   });
 
   it("uses the v2 storage manager implementations when the default is v2", async () => {

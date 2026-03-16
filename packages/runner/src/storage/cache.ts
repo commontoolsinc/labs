@@ -52,7 +52,7 @@ import {
 import {
   Assert,
   Claim,
-  DEFAULT_MEMORY_VERSION,
+  getDefaultMemoryVersion,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -1529,7 +1529,7 @@ export class ProviderConnection implements IStorageProvider {
       provider,
       inspector,
       spaceIdentity,
-      memoryVersion = DEFAULT_MEMORY_VERSION,
+      memoryVersion = getDefaultMemoryVersion(),
     }: ProviderConnectionOptions,
   ) {
     this.address = address;
@@ -1922,7 +1922,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
     spaceIdentity,
-    memoryVersion = DEFAULT_MEMORY_VERSION,
+    memoryVersion = getDefaultMemoryVersion(),
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
@@ -2181,7 +2181,7 @@ export class StorageManager implements IStorageManager {
   static open(options: V1StorageManagerOptions): StorageManager;
   static open(options: V2StorageManagerOptions): V2Storage.StorageManager;
   static open(options: Options): StorageManager | V2Storage.StorageManager {
-    const memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
+    const memoryVersion = options.memoryVersion ?? getDefaultMemoryVersion();
     if (memoryVersion === "v2") {
       return V2Storage.StorageManager.open(options);
     }
@@ -2199,7 +2199,7 @@ export class StorageManager implements IStorageManager {
       address,
       as,
       id = crypto.randomUUID(),
-      memoryVersion = DEFAULT_MEMORY_VERSION,
+      memoryVersion = getDefaultMemoryVersion(),
       settings = defaultSettings,
       spaceIdentity,
     }: Options,
