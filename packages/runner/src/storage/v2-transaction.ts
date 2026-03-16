@@ -61,6 +61,7 @@ type DocumentEntry = {
   current: RootAttestation;
   seq?: number;
   validated: boolean;
+  frozenReads: Map<string, StorableDatum | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
 };
 
@@ -521,10 +522,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       return result;
     }
 
+    const cacheKey = encodePointer(memoryAddress.path);
+    if (doc.frozenReads.has(cacheKey)) {
+      return {
+        ok: {
+          ...result.ok,
+          value: doc.frozenReads.get(cacheKey),
+        },
+      };
+    }
+
+    const frozenValue = freezeReadValue(result.ok.value);
+    doc.frozenReads.set(cacheKey, frozenValue);
     return {
       ok: {
         ...result.ok,
-        value: freezeReadValue(result.ok.value),
+        value: frozenValue,
       },
     };
   }
@@ -590,6 +603,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = next;
+    doc.frozenReads.clear();
     this.#activity.push({
       write: {
         space,
@@ -687,6 +701,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = next;
+    doc.frozenReads.clear();
     this.#activity.push({
       write: {
         space,
@@ -795,6 +810,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         current: loaded,
         seq,
         validated: false,
+        frozenReads: new Map(),
         writeDetails: new Map(),
       };
       branch.docs.set(key, doc);

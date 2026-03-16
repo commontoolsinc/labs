@@ -113,6 +113,40 @@ Deno.bench("Storage tx internals - v2 transaction root read x100", async () => {
   }
 });
 
+Deno.bench(
+  "Storage tx internals - v1 storage tx warm root read x10000",
+  async () => {
+    const storage = await seedV1Storage();
+    try {
+      const tx = createStorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.read({ space, id, type, path: ["value"] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.read({ space, id, type, path: ["value"] });
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
+Deno.bench(
+  "Storage tx internals - v2 transaction warm root read x10000",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const tx = new V2StorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      tx.read({ space, id, type, path: ["value"] });
+      for (let index = 0; index < 10_000; index += 1) {
+        tx.read({ space, id, type, path: ["value"] });
+      }
+    } finally {
+      await storage.close();
+    }
+  },
+);
+
 Deno.bench("Storage tx internals - attestation sibling write x100", () => {
   let attestation = seedAttestation();
   for (let index = 0; index < 100; index += 1) {
