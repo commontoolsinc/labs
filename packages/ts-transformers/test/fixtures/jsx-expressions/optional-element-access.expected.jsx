@@ -37,12 +37,12 @@ export default pattern(() => {
             properties: {
                 list: {
                     anyOf: [{
-                            type: "undefined"
-                        }, {
                             type: "array",
                             items: {
                                 type: "string"
                             }
+                        }, {
+                            type: "undefined"
                         }],
                     asCell: true
                 }

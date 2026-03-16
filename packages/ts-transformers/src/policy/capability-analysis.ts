@@ -461,6 +461,12 @@ export function analyzeFunctionCapabilities(
     // READER_METHODS handler encounters these, it skips the blanket [] read.
     const resolvedGetCalls = new Set<ts.Node>();
 
+    // Track alias names (e.g. "notes") that were resolved with specific
+    // property paths through a .get() chain.  When the identifier handler
+    // encounters a synthetic identifier with no parent pointer, it can skip
+    // the blanket read if the alias already has a more specific path.
+    const aliasesWithSpecificPaths = new Set<string>();
+
     const resolveFromAccess = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
@@ -807,6 +813,11 @@ export function analyzeFunctionCapabilities(
               // Preserve narrowed-path reads while avoiding false root-read expansion.
               if (!source.dynamic && source.path.length === 0) {
                 markPassthrough(source.root);
+              } else if (aliasesWithSpecificPaths.has(node.text)) {
+                // This alias was already resolved with specific property paths
+                // (e.g. notes.get().length → ["notes", "length"]).  The blanket
+                // read from the detached identifier is redundant.
+                markPassthrough(source.root);
               } else {
                 trackReadRef(source);
               }
@@ -861,6 +872,22 @@ export function analyzeFunctionCapabilities(
             const ref = resolveSourceRef(node);
             if (ref) {
               trackReadRef(ref);
+              // If this resolution went through a .get() call (the ref has
+              // a longer path than a bare alias), record the alias name so
+              // the identifier handler can skip redundant blanket reads.
+              if (ref.path.length > 0) {
+                // Find the root identifier text from the expression chain
+                let rootExpr: ts.Expression =
+                  ts.isPropertyAccessExpression(node)
+                    ? node.expression
+                    : (node as ts.ElementAccessExpression).expression;
+                while (ts.isPropertyAccessExpression(rootExpr)) {
+                  rootExpr = rootExpr.expression;
+                }
+                if (ts.isIdentifier(rootExpr) && aliases.has(rootExpr.text)) {
+                  aliasesWithSpecificPaths.add(rootExpr.text);
+                }
+              }
             }
           }
         }

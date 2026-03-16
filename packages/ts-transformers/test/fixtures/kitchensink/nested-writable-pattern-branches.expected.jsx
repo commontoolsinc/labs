@@ -72,7 +72,7 @@ export default pattern((state) => {
                     sections: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Section"
+                            type: "unknown"
                         },
                         asCell: true
                     }
@@ -80,57 +80,7 @@ export default pattern((state) => {
                 required: ["sections"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Section: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    title: {
-                        type: "string"
-                    },
-                    expanded: {
-                        type: "boolean"
-                    },
-                    accent: {
-                        type: "string"
-                    },
-                    tasks: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Task"
-                        }
-                    }
-                },
-                required: ["id", "title", "expanded", "tasks"]
-            },
-            Task: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    label: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    },
-                    tags: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    note: {
-                        type: "string"
-                    }
-                },
-                required: ["id", "label", "done", "tags"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, { state: {

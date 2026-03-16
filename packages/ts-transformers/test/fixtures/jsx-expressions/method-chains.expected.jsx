@@ -125,13 +125,9 @@ export default pattern((state) => {
                                 type: "number"
                             },
                             asOpaque: true
-                        },
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
                         }
                     },
-                    required: ["items", "threshold"]
+                    required: ["items"]
                 }
             },
             required: ["state"]
@@ -337,17 +333,9 @@ export default pattern((state) => {
                                 type: "number"
                             },
                             asOpaque: true
-                        },
-                        start: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        end: {
-                            type: "number",
-                            asOpaque: true
                         }
                     },
-                    required: ["items", "start", "end"]
+                    required: ["items"]
                 }
             },
             required: ["state"]
@@ -775,13 +763,9 @@ export default pattern((state) => {
                                 required: ["name", "age", "active"]
                             },
                             asOpaque: true
-                        },
-                        minAge: {
-                            type: "number",
-                            asOpaque: true
                         }
                     },
-                    required: ["users", "minAge"]
+                    required: ["users"]
                 }
             },
             required: ["state"]

@@ -332,11 +332,19 @@ function buildShrunkTypeNodeFromTypeNode(
   // Shrink array types: when only array-intrinsic properties (e.g. `length`)
   // are accessed, replace the item type with `unknown` to avoid fetching full
   // item schemas.  The result stays array-shaped for runtime schema matching.
-  // Handles both `Item[]` (ArrayTypeNode) and `Array<Item>` (TypeReferenceNode).
+  // Handles `Item[]` (ArrayTypeNode), `Array<Item>` (TypeReferenceNode), and
+  // type aliases that resolve to arrays (via the type checker).
   {
-    const isArray = ts.isArrayTypeNode(node) ||
+    let isArray = ts.isArrayTypeNode(node) ||
       (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
         node.typeName.text === "Array");
+    if (!isArray && checker && ts.isTypeReferenceNode(node)) {
+      const resolvedType = checker.getTypeFromTypeNode(node);
+      const tc = checker as ts.TypeChecker & {
+        isArrayType?: (t: ts.Type) => boolean;
+      };
+      isArray = !!tc.isArrayType?.(resolvedType);
+    }
     if (isArray) {
       // Properties that don't require item-level data.
       const NON_ITEM_PROPS = new Set([
@@ -1064,15 +1072,26 @@ export function applyShrinkAndWrap(
         checker,
       );
       shrunk = typeDriven ?? nodeDriven;
-      if (
-        typeDriven &&
-        nodeDriven &&
-        containsAnyOrUnknownTypeNode(typeDriven) &&
-        !containsAnyOrUnknownTypeNode(nodeDriven)
-      ) {
-        // Prefer node-driven shrinking when type-driven rebuilding widens nested
-        // members to `any`/`unknown` (e.g. array items or optional fields).
-        shrunk = nodeDriven;
+      if (typeDriven && nodeDriven) {
+        if (
+          containsAnyOrUnknownTypeNode(typeDriven) &&
+          !containsAnyOrUnknownTypeNode(nodeDriven)
+        ) {
+          // Prefer node-driven shrinking when type-driven rebuilding widens
+          // nested members to `any`/`unknown` (e.g. array items or optional
+          // fields).
+          shrunk = nodeDriven;
+        } else if (
+          nodeDriven !== baseTypeNode &&
+          containsAnyOrUnknownTypeNode(nodeDriven) &&
+          !containsAnyOrUnknownTypeNode(typeDriven)
+        ) {
+          // Prefer node-driven when it intentionally shrunk array items to
+          // `unknown` (e.g. Cell<Item[]> where only .length is accessed).
+          // Type-driven can't shrink through Cell wrappers since it operates
+          // on ts.Type which doesn't expose the Cell's inner type.
+          shrunk = nodeDriven;
+        }
       }
     } else {
       // Source-authored nodes preserve exact unions/aliases; keep them first.
