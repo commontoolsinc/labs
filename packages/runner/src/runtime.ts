@@ -260,6 +260,7 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
+  #ambientReadTx?: IExtendedStorageTransaction;
 
   constructor(options: RuntimeOptions) {
     this.memoryVersion = options.memoryVersion ?? DEFAULT_MEMORY_VERSION;
@@ -320,6 +321,14 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
+    if (this.memoryVersion === "v2") {
+      this.storageManager.subscribe({
+        next: () => {
+          this.clearAmbientReadTx();
+          return undefined;
+        },
+      });
+    }
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
@@ -434,7 +443,7 @@ export class Runtime {
    * Any unawaited tx.commit() calls will be canceled when
    * storageManager.close() tears down storage sessions. Callers
    * should await all pending commits before calling dispose().
-   */
+  */
   async dispose(): Promise<void> {
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
@@ -442,7 +451,7 @@ export class Runtime {
       queue.abortPending();
     }
     this.queues.clear();
-
+    this.clearAmbientReadTx();
     // Stop all running docs
     this.runner.stopAll();
 
@@ -489,6 +498,7 @@ export class Runtime {
   edit(
     options: { changeGroup?: ChangeGroup } = {},
   ): IExtendedStorageTransaction {
+    this.clearAmbientReadTx();
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
@@ -582,7 +592,26 @@ export class Runtime {
    * transaction.
    */
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
-    return tx?.status().status === "ready" ? tx : this.edit();
+    if (tx?.status().status === "ready") {
+      return tx;
+    }
+    if (this.memoryVersion !== "v2") {
+      return this.edit();
+    }
+    if (this.#ambientReadTx?.status().status === "ready") {
+      return this.#ambientReadTx;
+    }
+    const ambient = this.edit();
+    this.#ambientReadTx = ambient;
+    return ambient;
+  }
+
+  private clearAmbientReadTx(): void {
+    const ambient = this.#ambientReadTx;
+    this.#ambientReadTx = undefined;
+    if (ambient?.status().status === "ready") {
+      ambient.abort();
+    }
   }
 
   // Cell factory methods

@@ -90,8 +90,7 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const txStatus = tx?.status();
-  const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
+  const readTx = runtime.readTx(tx);
   link = resolveLink(runtime, readTx, link);
   const value = readTx.readValueOrThrow(link) as any;
 
@@ -168,9 +167,7 @@ export function createQueryResultProxy<T>(
             let index = 0;
             return {
               next() {
-                const readTx = (tx?.status().status === "ready")
-                  ? tx
-                  : runtime.edit();
+                const readTx = runtime.readTx(tx);
                 const length = readTx.readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
@@ -198,7 +195,7 @@ export function createQueryResultProxy<T>(
           };
         }
 
-        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        const readTx = runtime.readTx(tx);
         const current = readTx.readValueOrThrow(link) as typeof value;
 
         const returnValue = Reflect.get(current, prop, current);
@@ -219,9 +216,7 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const readTx = (tx?.status().status === "ready")
-              ? tx
-              : runtime.edit();
+            const readTx = runtime.readTx(tx);
             const length = readTx.readValueOrThrow({
               ...link,
               path: [...link.path, "length"],
@@ -269,9 +264,7 @@ export function createQueryResultProxy<T>(
               // CT-1173: Read fresh value from transaction, not stale proxy target.
               // The proxy target (value) is captured at proxy creation time and
               // becomes stale after writes. We must read current state from tx.
-              const readTx = (tx?.status().status === "ready")
-                ? tx
-                : runtime.edit();
+              const readTx = runtime.readTx(tx);
               const currentValue = readTx.readValueOrThrow(link) as any[];
               copy = [...currentValue];
             } else {
@@ -395,7 +388,7 @@ export function createQueryResultProxy<T>(
       return true;
     },
     ownKeys: () => {
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
       if (isRecord(current)) {
         return Reflect.ownKeys(current);
@@ -413,7 +406,7 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return Object.getOwnPropertyDescriptor(value, prop);
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link) as typeof value;
       if (isRecord(current) && prop in current) {
         return {
@@ -435,7 +428,7 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return prop in value;
       }
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link);
       if (isRecord(current)) {
         return prop in current;

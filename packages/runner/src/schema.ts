@@ -378,13 +378,10 @@ export function validateAndTransform(
   _seen?: Array<[string, any]>,
   options?: ValidateAndTransformOptions,
 ): any {
-  // If the transaction is no longer open, just treat it as no transaction, i.e.
-  // create temporary transactions to read. The main reason we use transactions
-  // here is so that this operation can see open reads, that are only accessible
-  // from the tx. Once tx.commit() is called, all that data is either available
-  // via other transactions or has been rolled back. Either way, we want to
-  // reflect that reality.
-  if (tx?.status().status !== "ready") tx = undefined;
+  // If the transaction is no longer open, read through the runtime's ambient
+  // read path instead. Open transactions still take precedence so reads can see
+  // their own uncommitted state.
+  tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
   const schema = link.schema;
@@ -393,7 +390,6 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  tx = tx ?? runtime.edit();
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
 
   const resolvedLinkSchema = resolveSchema(resolvedLink.schema);
