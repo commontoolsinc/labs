@@ -25,6 +25,7 @@ interface Section {
     accent?: string;
     tasks: Task[];
 }
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const selectTask = handler({
     type: "unknown"
 } as const satisfies __ctHelpers.JSONSchema, {
