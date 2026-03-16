@@ -1,4 +1,5 @@
 import type { JSONValue } from "../interface.ts";
+import { refer } from "../reference.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -6,6 +7,7 @@ import {
   isPrimitiveCellLink,
   isSigilWriteRedirectLink,
 } from "../../runner/src/link-types.ts";
+import { parseLink } from "../../runner/src/link-utils.ts";
 import {
   type Blob,
   type ClientMessage,
@@ -597,6 +599,14 @@ export class Server {
     );
     const nextById = new Map(previousById);
     const engine = await this.openEngine(space);
+    const sourcePatched = canPatchPlainRootSourceQuery(subscription.query)
+      ? recomputePlainRootSourceQueryResult(
+        space,
+        subscription.query,
+        engine,
+        cache,
+      )
+      : null;
 
     for (const id of touchedIds) {
       const previous = previousById.get(id);
@@ -606,6 +616,15 @@ export class Server {
         current.document,
       );
       if (topologyChange !== null) {
+        if (topologyChange === "source" && sourcePatched !== null) {
+          logger.debug("subscription-refresh/direct-patch/topology-source");
+          logger.debug(
+            `subscription-refresh/direct-patch/topology-source/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+          return sourcePatched;
+        }
         if (
           topologyChange === "sigil" &&
           queryIgnoresSigilTopology(subscription.query) &&
@@ -887,12 +906,55 @@ const queryHasRoot = (query: GraphQuery, id: string): boolean =>
 const queryIgnoresSigilTopology = (query: GraphQuery): boolean =>
   query.roots.every((root) => root.selector.schema === false);
 
+const canPatchPlainRootSourceQuery = (query: GraphQuery): boolean =>
+  query.roots.every((root) =>
+    root.selector.schema === false && root.selector.path.length === 0
+  );
+
 const documentHasRootSigilRedirect = (document: unknown): boolean => {
   if (document === null || typeof document !== "object") {
     return false;
   }
   const value = (document as { value?: unknown }).value;
   return isSigilWriteRedirectLink(value);
+};
+
+const documentSourceId = (document: unknown): string | null => {
+  if (!isRecord(document) || !isRecord(document.source)) {
+    return null;
+  }
+  const shortId = document.source["/"];
+  return typeof shortId === "string" ? `of:${shortId}` : null;
+};
+
+const documentPatternId = (document: unknown, space: string): string | null => {
+  if (!isRecord(document) || !isRecord(document.value)) {
+    return null;
+  }
+  const value = document.value;
+  if (typeof value.$TYPE === "string") {
+    const shortId = refer({
+      causal: { patternId: value.$TYPE, type: "pattern" },
+    }).toJSON()["/"];
+    return `of:${shortId}`;
+  }
+  if (!isPrimitiveCellLink(value.spell)) {
+    return null;
+  }
+  const parsed = parseLink(value.spell, {
+    space: space as any,
+    id: "" as any,
+    type: "application/json",
+    path: [],
+  });
+  if (
+    parsed?.space !== space ||
+    typeof parsed.id !== "string" ||
+    (parsed.type ?? "application/json") !== "application/json"
+  ) {
+    return null;
+  }
+  return parsed.id;
 };
 
 const cacheKeyForEntity = (branch: string, id: string): string =>
@@ -919,6 +981,53 @@ const getOrLoadEntitySnapshot = (
   };
   cache.set(key, snapshot);
   return snapshot;
+};
+
+const recomputePlainRootSourceQueryResult = (
+  space: string,
+  query: GraphQuery,
+  engine: Engine.Engine,
+  cache: Map<string, EntitySnapshot>,
+): GraphQueryResult | null => {
+  const branch = query.branch ?? "";
+  const entities = new Map<string, EntitySnapshot>();
+  const pending = [...new Set(query.roots.map((root) => root.id))];
+  const rootIds = new Set(pending);
+  const visited = new Set<string>();
+
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (visited.has(id)) {
+      continue;
+    }
+    visited.add(id);
+
+    const snapshot = getOrLoadEntitySnapshot(cache, engine, id, branch);
+    if (rootIds.has(id) || snapshot.document !== null) {
+      entities.set(id, snapshot);
+    }
+    if (snapshot.document === null) {
+      continue;
+    }
+    if (rootIds.has(id) && documentHasRootSigilRedirect(snapshot.document)) {
+      return null;
+    }
+    const patternId = documentPatternId(snapshot.document, space);
+    if (patternId !== null) {
+      pending.push(patternId);
+    }
+    const sourceId = documentSourceId(snapshot.document);
+    if (sourceId !== null) {
+      pending.push(sourceId);
+    }
+  }
+
+  return {
+    serverSeq: Engine.headSeq(engine, branch),
+    entities: [...entities.values()].sort((left, right) =>
+      left.id.localeCompare(right.id)
+    ),
+  };
 };
 
 const documentTopologyChangeReason = (
