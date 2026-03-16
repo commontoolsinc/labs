@@ -9,6 +9,7 @@ import {
   Fact,
   TransactionBuilder,
 } from "@commonfabric/memory";
+import * as Codec from "@commonfabric/memory/codec";
 import * as Commit from "@commonfabric/memory/commit";
 import { Identity } from "@commonfabric/identity";
 
@@ -112,5 +113,86 @@ Deno.test("test consumer", async () => {
   } finally {
     await server.shutdown();
     Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_DIR));
+  }
+});
+
+Deno.test("memory websocket preserves early v1 frames during negotiation", async () => {
+  const server = Deno.serve({ port: 9000 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  const docA = `of:${refer({ one: "a" })}` as const;
+  const docB = `of:${refer({ two: "b" })}` as const;
+
+  try {
+    const consumer = Consumer.create({ as: alice });
+    const memory = consumer.mount(alice.did());
+    const invocations = consumer.readable.getReader();
+
+    memory.query({
+      select: {
+        [docA]: {
+          [the]: {},
+        },
+      },
+    });
+    memory.query({
+      select: {
+        [docB]: {
+          [the]: {},
+        },
+      },
+    });
+
+    const first = await invocations.read();
+    const second = await invocations.read();
+    assert(!first.done);
+    assert(!second.done);
+
+    const socket = new WebSocket(address);
+    const receipts: { the?: string }[] = [];
+    const completion = Promise.withResolvers<void>();
+    const timeout = setTimeout(() => {
+      completion.reject(
+        new Error("Timed out waiting for two v1 task/return receipts"),
+      );
+    }, 3_000);
+
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+      const receipt = Codec.Receipt.fromString(event.data);
+      receipts.push(receipt);
+      const taskReturns = receipts.filter((entry) => entry.the === "task/return");
+      if (taskReturns.length >= 2) {
+        clearTimeout(timeout);
+        completion.resolve();
+      }
+    });
+    socket.addEventListener(
+      "open",
+      () => {
+        socket.send(Codec.UCAN.toString(first.value));
+        socket.send(Codec.UCAN.toString(second.value));
+      },
+      { once: true },
+    );
+
+    await completion.promise;
+    assertEquals(
+      receipts.filter((entry) => entry.the === "task/return").length,
+      2,
+    );
+
+    consumer.close();
+    socket.close();
+  } finally {
+    await server.shutdown();
+    try {
+      Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_DIR));
+    } catch (_error) {
+      // Ignore missing sqlite cleanup in read-only websocket test.
+    }
   }
 });

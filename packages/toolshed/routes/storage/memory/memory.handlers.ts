@@ -5,60 +5,93 @@ import * as Codec from "@commonfabric/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 
-const readFirstSocketMessage = async (
-  socket: WebSocket,
-): Promise<string | undefined> => {
-  return await new Promise((resolve, reject) => {
-    const onMessage = (event: MessageEvent) => {
-      cleanup();
-      if (typeof event.data !== "string") {
-        reject(new Error("Memory websocket expects text frames"));
-        return;
-      }
-      resolve(event.data);
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error("Memory websocket failed before negotiation"));
-    };
-    const onClose = () => {
-      cleanup();
-      resolve(undefined);
-    };
-    const cleanup = () => {
-      socket.removeEventListener("message", onMessage);
-      socket.removeEventListener("error", onError);
-      socket.removeEventListener("close", onClose);
-    };
+type NegotiatedSocket = {
+  firstMessage: string | undefined;
+  readable: ReadableStream<string>;
+  writable: WritableStream<string>;
+};
 
-    socket.addEventListener("message", onMessage, { once: true });
-    socket.addEventListener("error", onError, { once: true });
-    socket.addEventListener("close", onClose, { once: true });
+const openNegotiatedSocket = async (
+  socket: WebSocket,
+): Promise<NegotiatedSocket> => {
+  const channel = Memory.Socket.from<string, string>(socket);
+  const reader = channel.readable.getReader();
+  let first;
+  try {
+    first = await reader.read();
+  } catch (_error) {
+    throw new Error("Memory websocket failed before negotiation");
+  }
+
+  if (first.done) {
+    return {
+      firstMessage: undefined,
+      readable: new ReadableStream<string>({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      writable: channel.writable,
+    };
+  }
+
+  if (typeof first.value !== "string") {
+    throw new Error("Memory websocket expects text frames");
+  }
+
+  const readable = new ReadableStream<string>({
+    start(controller) {
+      controller.enqueue(first.value);
+      void (async () => {
+        try {
+          while (true) {
+            const next = await reader.read();
+            if (next.done) {
+              controller.close();
+              break;
+            }
+            if (typeof next.value !== "string") {
+              throw new Error("Memory websocket expects text frames");
+            }
+            controller.enqueue(next.value);
+          }
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          reader.releaseLock();
+        }
+      })();
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
   });
+
+  return {
+    firstMessage: first.value,
+    readable,
+    writable: channel.writable,
+  };
 };
 
 const attachSocketPipeline = (
-  socket: WebSocket,
+  channel: Pick<NegotiatedSocket, "readable" | "writable">,
   session: Memory.ProviderSession<Memory.Protocol>,
-  firstMessages: readonly string[] = [],
 ) => {
-  const { readable, writable } = Memory.Socket.fromWithPrefix<string, string>(
-    socket,
-    firstMessages,
-  );
-
-  readable
+  channel.readable
     .pipeThrough(Codec.UCAN.fromStringStream())
     .pipeThrough(session)
     .pipeThrough(Codec.Receipt.toStringStream())
-    .pipeTo(writable);
+    .pipeTo(channel.writable);
 };
 
-const attachV1SocketPipeline = (socket: WebSocket, firstMessage: string) =>
-  attachSocketPipeline(socket, memory.session(), [firstMessage]);
+const attachV1SocketPipeline = (
+  channel: Pick<NegotiatedSocket, "readable" | "writable">,
+) => attachSocketPipeline(channel, memory.session());
 
 const attachV2SocketPipeline = async (
   socket: WebSocket,
+  channel: Pick<NegotiatedSocket, "readable">,
   firstMessage: string,
 ): Promise<boolean> => {
   if (Memory.V2Server.parseClientMessage(firstMessage) === null) {
@@ -68,24 +101,28 @@ const attachV2SocketPipeline = async (
   const connection = memoryV2Server.connect((message) => {
     socket.send(JSON.stringify(message));
   });
-  const onMessage = (event: MessageEvent) => {
-    if (typeof event.data !== "string") {
-      socket.close(1003, "Memory websocket expects text frames");
-      return;
-    }
-    void connection.receive(event.data);
-  };
   const onClose = () => {
-    socket.removeEventListener("message", onMessage);
-    socket.removeEventListener("close", onClose);
-    socket.removeEventListener("error", onClose);
+    readable.cancel().catch(() => {});
     connection.close();
   };
-
-  socket.addEventListener("message", onMessage);
   socket.addEventListener("close", onClose, { once: true });
   socket.addEventListener("error", onClose, { once: true });
-  await connection.receive(firstMessage);
+  const readable = channel.readable.getReader();
+  void (async () => {
+    try {
+      while (true) {
+        const next = await readable.read();
+        if (next.done) {
+          break;
+        }
+        await connection.receive(next.value);
+      }
+    } catch (_error) {
+      socket.close(1011, "Memory websocket receive failure");
+    } finally {
+      onClose();
+    }
+  })();
 
   return true;
 };
@@ -178,18 +215,19 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       span.setAttribute("websocket.upgrade", "success");
 
       void createSpan("memory.socket.setup", async (setupSpan) => {
-        const firstMessage = await readFirstSocketMessage(socket);
+        const channel = await openNegotiatedSocket(socket);
+        const firstMessage = channel.firstMessage;
         if (firstMessage === undefined) {
           setupSpan.setAttribute("socket.setup", "closed-before-message");
           return;
         }
 
-        if (await attachV2SocketPipeline(socket, firstMessage)) {
+        if (await attachV2SocketPipeline(socket, channel, firstMessage)) {
           setupSpan.setAttribute("socket.setup", "memory-v2");
           return;
         }
 
-        attachV1SocketPipeline(socket, firstMessage);
+        attachV1SocketPipeline(channel);
         setupSpan.setAttribute("socket.setup", "memory-v1");
       });
 
