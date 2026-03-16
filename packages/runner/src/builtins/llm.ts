@@ -458,7 +458,9 @@ export function llm(
         getRunForCancellation,
         thisRun,
         () => {
-          previousCallHash = undefined;
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
         },
       )
     );
@@ -666,7 +668,9 @@ export function generateText(
         getRunForCancellation,
         thisRun,
         () => {
-          previousCallHash = undefined;
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
         },
       )
     );
