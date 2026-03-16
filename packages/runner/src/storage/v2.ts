@@ -633,7 +633,11 @@ const normalizeSyncEntries = (
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
-  readonly #sessionHandle: Promise<{
+  readonly #createSession: () => Promise<{
+    client: MemoryV2Client.Client;
+    session: MemoryV2Client.SpaceSession;
+  }>;
+  #sessionHandle?: Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
@@ -650,7 +654,7 @@ class SpaceReplica implements ISpaceReplica {
   constructor(options: ProviderOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
-    this.#sessionHandle = options.createSession();
+    this.#createSession = options.createSession;
   }
 
   did(): MemorySpace {
@@ -710,8 +714,11 @@ class SpaceReplica implements ISpaceReplica {
 
   async close(): Promise<void> {
     await this.synced();
-    const { client } = await this.#sessionHandle;
-    await client.close();
+    const sessionHandle = this.#sessionHandle;
+    if (sessionHandle) {
+      const { client } = await sessionHandle;
+      await client.close();
+    }
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
   }
@@ -827,7 +834,7 @@ class SpaceReplica implements ISpaceReplica {
     task: SyncTask,
   ): Promise<Result<Unit, PullError>> {
     try {
-      const { session } = await this.#sessionHandle;
+      const { session } = await this.sessionHandle();
       const view = await session.queryGraph({
         subscribe: true,
         roots: entries.map(([address, selector]) => ({
@@ -938,7 +945,7 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     try {
-      const { session } = await this.#sessionHandle;
+      const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
       return { ok: {} };
@@ -1155,6 +1162,14 @@ class SpaceReplica implements ISpaceReplica {
         confirmed.seq === entity.seq &&
         confirmed.hash === entity.hash;
     });
+  }
+
+  private sessionHandle(): Promise<{
+    client: MemoryV2Client.Client;
+    session: MemoryV2Client.SpaceSession;
+  }> {
+    this.#sessionHandle ??= this.#createSession();
+    return this.#sessionHandle;
   }
 }
 

@@ -72,28 +72,34 @@ Deno.bench("Immutable cell - empty tx commit only (100x)", async () => {
   }
 });
 
-Deno.bench("Immutable cell - create cell with tx, no commit (100x)", async () => {
-  const { runtime, storageManager } = setup();
-  try {
-    for (let index = 0; index < 100; index += 1) {
-      const tx = runtime.edit();
-      runtime.getImmutableCell(space, makeData(index), schema, tx);
-      tx.abort("bench");
+Deno.bench(
+  "Immutable cell - create cell with tx, no commit (100x)",
+  async () => {
+    const { runtime, storageManager } = setup();
+    try {
+      for (let index = 0; index < 100; index += 1) {
+        const tx = runtime.edit();
+        runtime.getImmutableCell(space, makeData(index), schema, tx);
+        tx.abort("bench");
+      }
+    } finally {
+      await cleanup(runtime, storageManager);
     }
-  } finally {
-    await cleanup(runtime, storageManager);
-  }
-});
+  },
+);
 
-Deno.bench("Immutable cell - create cell with tx and commit (100x)", async () => {
-  const { runtime, storageManager } = setup();
-  try {
-    for (let index = 0; index < 100; index += 1) {
-      const tx = runtime.edit();
-      runtime.getImmutableCell(space, makeData(index), schema, tx);
-      await tx.commit();
+Deno.bench(
+  "Immutable cell - create cell with tx and commit (100x)",
+  async () => {
+    const { runtime, storageManager } = setup();
+    try {
+      for (let index = 0; index < 100; index += 1) {
+        const tx = runtime.edit();
+        runtime.getImmutableCell(space, makeData(index), schema, tx);
+        await tx.commit();
+      }
+    } finally {
+      await cleanup(runtime, storageManager);
     }
-  } finally {
-    await cleanup(runtime, storageManager);
-  }
-});
+  },
+);
