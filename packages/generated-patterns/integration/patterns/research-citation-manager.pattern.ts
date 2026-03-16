@@ -316,7 +316,7 @@ const retagCitation = handler(
 
 const updateActiveStyle = handler(
   (
-    event: { style?: unknown } | string | undefined,
+    event: { style?: string } | string | undefined,
     context: { style: Cell<CitationStyle | string> },
   ) => {
     const requested = typeof event === "string"
