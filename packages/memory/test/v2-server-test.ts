@@ -603,6 +603,92 @@ Deno.test("memory v2 server patches plain dirty docs without reevaluating the fu
   await server.close();
 });
 
+Deno.test("memory v2 server batches identical graph updates across subscriptions", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-batched-updates"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-batched-updates";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  for (const requestId of ["query-1", "query-2"]) {
+    await connection.receive(JSON.stringify({
+      type: "graph.query",
+      requestId,
+      space,
+      sessionId,
+      query: {
+        subscribe: true,
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }));
+  }
+
+  const first = assertResponse(shiftMessage(messages));
+  const second = assertResponse(shiftMessage(messages));
+  const firstSubscriptionId = (first.ok as any)?.subscriptionId;
+  const secondSubscriptionId = (second.ok as any)?.subscriptionId;
+  assertExists(firstSubscriptionId);
+  assertExists(secondSubscriptionId);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 1,
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.subscriptionIds?.sort(), [
+    firstSubscriptionId,
+    secondSubscriptionId,
+  ].sort());
+  assertEquals(update.result.entities.map((entity: any) => entity.id), [
+    "of:doc:1",
+  ]);
+  assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
 Deno.test("memory v2 server reevaluates queries when a root doc gains a sigil link", async () => {
   const server = new CountingServer({
     store: new URL("memory://memory-v2-server-sigil-topology"),

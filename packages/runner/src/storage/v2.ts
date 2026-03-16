@@ -996,6 +996,18 @@ class SpaceReplica implements ISpaceReplica {
     entities: EntitySnapshot[],
     type: "pull" | "integrate",
   ): void {
+    if (
+      type === "integrate" &&
+      entities.every((entity) => {
+        const confirmed = this.#docs.get(entity.id as URI)?.confirmed;
+        return confirmed !== undefined &&
+          confirmed.seq === entity.seq &&
+          confirmed.hash === entity.hash;
+      })
+    ) {
+      return;
+    }
+
     const before = Differential.checkout(
       this,
       entities.map((entity) => snapshotState(this, entity.id as URI)),

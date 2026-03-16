@@ -148,8 +148,13 @@ export class Client {
       return;
     }
     if (isGraphUpdate(message)) {
-      const subscription = this.#subscriptions.get(message.subscriptionId);
-      if (subscription) {
+      const subscriptionIds = message.subscriptionIds ??
+        (message.subscriptionId ? [message.subscriptionId] : []);
+      for (const subscriptionId of subscriptionIds) {
+        const subscription = this.#subscriptions.get(subscriptionId);
+        if (!subscription) {
+          continue;
+        }
         subscription.session.noteResult(message.result);
         subscription.view.push(message.result);
       }

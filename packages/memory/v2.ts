@@ -192,7 +192,8 @@ export interface ResponseMessage<Result> {
 
 export interface GraphUpdateMessage {
   type: "graph.update";
-  subscriptionId: string;
+  subscriptionId?: string;
+  subscriptionIds?: string[];
   space: string;
   result: GraphQueryResult;
 }

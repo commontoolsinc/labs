@@ -125,6 +125,13 @@
 - [ ] Continue tuning blob I/O once benchmark evidence shows it is still a meaningful outlier.
 - [ ] Revisit any future bulk-write shortcut only after benchmark evidence shows it clearly beats the existing `writeValueOrThrow()` compatibility path.
 
+## Future Performance Follow-Ups
+- [ ] Reduce the remaining `storage-subscription-refresh.bench.ts` gap for many active path subscriptions on one document with repeated same-doc updates. The macro `pattern-tests` task is now slightly faster on v2, but the focused microbench is still roughly `1.7x` slower than v1.
+- [ ] Re-profile `cell.bench.ts` hotspots such as `Cell get - simple value with schema` and `Cell creation - immutable`, which still suggest extra v2 overhead in schema-aware materialization, frozen rich-storable reads, or query-result wrapper setup.
+- [ ] Keep pushing the large single-transaction `Cell.set()` write-count cases toward or past v1 without dropping back to document-wide `set`. The remaining target cluster is the large-object / small-array / repeated-update family in [cell-set.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-set.bench.ts).
+- [ ] Continue using fair semantic document-value benches, not raw root-envelope writes, whenever comparing v1 and v2 storage paths. Benchmark shape mismatches already hid real progress once and should not steer future tuning.
+- [ ] Investigate whether remaining scheduler/subscription outliers are dominated by wrapper/proxy fan-out costs above storage rather than the v2 engine itself before doing deeper storage-path surgery.
+
 ## Phase 3: Advanced Features After The Cutover
 - [ ] Wire up branches end to end using the already-created `branch` table: create/delete/list, branch-scoped head resolution, merge proposals, branch-aware queries/subscriptions, and point-in-time reads on branches.
 - [ ] Add garbage-collection scheduling for facts, snapshots, blobs, and deleted branches once retention rules are defined.

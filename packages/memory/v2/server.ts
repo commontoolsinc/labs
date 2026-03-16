@@ -284,6 +284,10 @@ class Connection {
         sharedMemos: new Map(),
       };
       const directCache = new Map<string, EntitySnapshot>();
+      const pendingUpdates = new Map<string, {
+        result: GraphQueryResult;
+        subscriptionIds: string[];
+      }>();
       for (const subscription of this.subscriptionsForSpace(space)) {
         if (
           dirtyIds !== undefined &&
@@ -308,14 +312,28 @@ class Connection {
         }
         subscription.entities = state.entities;
         subscription.serverSeq = state.serverSeq;
+        const result = {
+          ...state,
+          subscriptionId: subscription.id,
+        };
+        const key = graphUpdateKey(result);
+        const grouped = pendingUpdates.get(key);
+        if (grouped) {
+          grouped.subscriptionIds.push(subscription.id);
+          continue;
+        }
+        pendingUpdates.set(key, {
+          result,
+          subscriptionIds: [subscription.id],
+        });
+      }
+      for (const grouped of pendingUpdates.values()) {
         this.send({
           type: "graph.update",
-          subscriptionId: subscription.id,
+          subscriptionId: grouped.subscriptionIds[0],
+          subscriptionIds: grouped.subscriptionIds,
           space,
-          result: {
-            ...state,
-            subscriptionId: subscription.id,
-          },
+          result: grouped.result,
         });
       }
     } finally {
@@ -752,8 +770,7 @@ const sameEntities = (
     return other !== undefined &&
       entity.id === other.id &&
       entity.seq === other.seq &&
-      entity.hash === other.hash &&
-      JSON.stringify(entity.document) === JSON.stringify(other.document);
+      entity.hash === other.hash;
   });
 };
 
@@ -877,6 +894,16 @@ const collectValueTopologyRefs = (
 };
 
 const queryCacheKey = (query: GraphQuery): string => JSON.stringify(query);
+
+const graphUpdateKey = (result: GraphQueryResult): string =>
+  JSON.stringify({
+    serverSeq: result.serverSeq,
+    entities: result.entities.map((entity) => ({
+      id: entity.id,
+      seq: entity.seq,
+      hash: entity.hash,
+    })),
+  });
 
 export const parseClientMessage = (
   payload: string,
