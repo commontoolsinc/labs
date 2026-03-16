@@ -1617,15 +1617,19 @@ describe("compactChangeSet", () => {
     });
 
     it("prefers the transaction batch hook when applying a change set", () => {
-      const batches: Array<Array<{ address: ChangeSet[0]["location"]; value: unknown }>> = [];
+      const batches: Array<
+        Array<{ address: ChangeSet[0]["location"]; value: unknown }>
+      > = [];
       const txWithBatch = {
         writeValueOrThrow() {
           throw new Error("applyChangeSet should use writeValuesOrThrow");
         },
-        writeValuesOrThrow(writes: Iterable<{
-          address: ChangeSet[0]["location"];
-          value: unknown;
-        }>) {
+        writeValuesOrThrow(
+          writes: Iterable<{
+            address: ChangeSet[0]["location"];
+            value: unknown;
+          }>,
+        ) {
           batches.push([...writes]);
         },
       } as unknown as IExtendedStorageTransaction;

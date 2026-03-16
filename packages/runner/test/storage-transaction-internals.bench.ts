@@ -127,18 +127,21 @@ Deno.bench("Storage tx internals - attestation sibling write x100", () => {
   }
 });
 
-Deno.bench("Storage tx internals - v1 chronicle sibling write x100", async () => {
-  const storage = await seedV1Storage();
-  try {
-    const chronicle = openChronicle(storage.open(space).replica);
-    chronicle.write({ id, type, path: [] }, seedDocument);
-    for (let index = 0; index < 100; index += 1) {
-      chronicle.write({ id, type, path: ["value", "count"] }, index);
+Deno.bench(
+  "Storage tx internals - v1 chronicle sibling write x100",
+  async () => {
+    const storage = await seedV1Storage();
+    try {
+      const chronicle = openChronicle(storage.open(space).replica);
+      chronicle.write({ id, type, path: [] }, seedDocument);
+      for (let index = 0; index < 100; index += 1) {
+        chronicle.write({ id, type, path: ["value", "count"] }, index);
+      }
+    } finally {
+      await storage.close();
     }
-  } finally {
-    await storage.close();
-  }
-});
+  },
+);
 
 Deno.bench(
   "Storage tx internals - v1 storage tx sibling write x100",
@@ -156,15 +159,18 @@ Deno.bench(
   },
 );
 
-Deno.bench("Storage tx internals - v2 transaction sibling write x100", async () => {
-  const storage = await seedV2Storage();
-  try {
-    const tx = new V2StorageTransaction(storage);
-    tx.write({ space, id, type, path: [] }, seedDocument);
-    for (let index = 0; index < 100; index += 1) {
-      tx.write({ space, id, type, path: ["value", "count"] }, index);
+Deno.bench(
+  "Storage tx internals - v2 transaction sibling write x100",
+  async () => {
+    const storage = await seedV2Storage();
+    try {
+      const tx = new V2StorageTransaction(storage);
+      tx.write({ space, id, type, path: [] }, seedDocument);
+      for (let index = 0; index < 100; index += 1) {
+        tx.write({ space, id, type, path: ["value", "count"] }, index);
+      }
+    } finally {
+      await storage.close();
     }
-  } finally {
-    await storage.close();
-  }
-});
+  },
+);
