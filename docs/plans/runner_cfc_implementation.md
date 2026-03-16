@@ -37,6 +37,9 @@ effects and deterministic schema binding.
       executing implementation identity (`CodeHash` or `Builtin(name)`) is
       trusted for concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision`.
+- [ ] Concept-valued integrity guards are evaluated from concrete integrity
+      against the acting principal's trust closure; runner must not require
+      derived concept atoms to be persisted on stored values.
 
 ### 0.2 Phase-1 Schema Policy (Explicit)
 
@@ -82,6 +85,12 @@ effects and deterministic schema binding.
 - [x] Define `PreparedDigestInput` and stable hash strategy.
 - [x] Define implementation-identity derivation for trust gates:
       `CodeHash` for code modules and `Builtin(name)` for runtime built-ins.
+- [ ] Define `TrustContextSnapshot` / stable trust-context hash used by
+      boundary evaluation (verifier delegations, trusted statements, optional
+      concept-order edges) for the acting principal.
+- [ ] Define integrity-guard matcher semantics: concept requirements are
+      satisfied by concrete witnesses under acting-user trust closure, not by
+      materialized concept atoms in stored labels.
 
 ### 1.3 Invariants (Must Hold)
 
@@ -99,13 +108,20 @@ effects and deterministic schema binding.
       labels), not ambient control-integrity context alone.
 - [x] Multi-atom confidentiality preconditions default to clause-local matching;
       cross-clause matching must be explicit.
+- [ ] Boundary prepare/policy evaluation is acting-principal scoped: the same
+      concrete integrity may satisfy a concept guard for one user and not for
+      another.
+- [ ] Rewriting one confidentiality clause must not authorize unrelated clauses;
+      in particular, releasing `User(A)` does not release independent
+      `User(B)` / owner clauses without their own policy path.
 - [x] When a schema flow-precision claim would be less restrictive than
       conservative propagation, runtime must trust-gate by
       `https://commonfabric.org/cfc/concepts/flow-taint-precision` and
       otherwise fail closed to conservative labels.
-- [x] Map-like precision claims must be validated for both
-      `KeyLocalShapePreserved` and `KeyLocalWriteDependency` before reduced
-      tainting is accepted.
+- [x] Legacy `KeyLocalShapePreserved` / `KeyLocalWriteDependency` map
+      precision is trust-gated and fail-closed when untrusted.
+- [ ] Align flow-precision claim handling to spec
+      `PointwisePresencePreserved` / `PointwiseWriteDependency`.
 - [-] Direct CAS reads must be label-gated (`hash + expectedLabel` + caller
       readability), not hash-knowledge gated.
 - [-] Direct CAS miss outcomes (absent hash, label mismatch, unreadable label)
@@ -184,9 +200,9 @@ Primary files:
       canonical reads, attempted writes, internal flags.
 - [x] Exclude unstable fields (timestamps/non-deterministic IDs unless needed).
 - [x] Use stable serialization before hashing.
-- [ ] Include tx identity scope in digest input used for flow-precision trust
-      decisions (`CodeHash` / `Builtin(name)` identity + trust-evaluation
-      principal scope).
+- [ ] Include tx identity scope and trust-context snapshot in digest input used
+      for flow-precision trust decisions (`CodeHash` / `Builtin(name)` identity
+      + acting-principal trust-context hash).
 
 ### 3.5 Acceptance Criteria
 
@@ -249,6 +265,8 @@ Primary files:
 - [x] Implement consumed-input label gathering from canonical reads.
 - [x] Implement coherent `requiredIntegrity` verification for object-level
       annotations.
+- [ ] Implement concept-valued `requiredIntegrity` matching from available
+      concrete integrity via acting-user trust closure.
 - [x] Implement `maxConfidentiality` checks.
 - [x] Respect same-attempt semantics only.
 
@@ -265,8 +283,13 @@ Primary files:
       concept `https://commonfabric.org/cfc/concepts/flow-taint-precision` on
       executing implementation identity (`CodeHash` or `Builtin(name)`);
       otherwise use `L_default`.
-- [x] Validate map-like claim semantics (`KeyLocalShapePreserved`,
+- [x] Validate legacy map-like claim semantics (`KeyLocalShapePreserved`,
       `KeyLocalWriteDependency`) before applying claim-derived precision.
+- [ ] Rename and align claim parsing/validation to
+      `PointwisePresencePreserved` / `PointwiseWriteDependency`.
+- [ ] Extend collection-structure handling for prefix-sensitive built-ins
+      (`filter`, `flatMap`) so membership/domain, order/offset, and
+      multiplicity can be tainted independently.
 - [x] Treat missing/unknown implementation identity as untrusted and fall back
       to conservative labels (fail closed for trust-sensitive claims).
 - [x] Implement flow-precision evaluation in
@@ -288,6 +311,8 @@ Primary files:
 - [x] Compute new effective labels for outputs/writes.
 - [x] Resolve schema to canonical bytes and compute hash.
 - [x] Write `cfc.schemaHash` and `cfc.labels` as part of prepare path.
+- [ ] Persist concrete integrity evidence only; do not materialize
+      trust-closure-derived concept atoms into stored labels.
 - [x] Ensure prepare fails if schema hash cannot be resolved.
 
 ### 5.5 Prepare Outcome Handling
@@ -307,6 +332,13 @@ Primary files:
       (`anywhere`) matching.
 - [x] Return explicit non-convergence signal from bounded policy fixpoint
       evaluation and reject boundary attempt on that signal.
+- [ ] Match concept-valued integrity preconditions against available concrete
+      integrity using the acting principal's trust closure.
+- [ ] Bind prepare success to the acting principal + trust-context snapshot used
+      for evaluation; if that snapshot changes before commit, invalidate
+      preparation.
+- [ ] Enforce clause-local release semantics across confidentiality CNF; do not
+      add any "any one authorizer unlocks all clauses" shortcut.
 - [x] Apply trusted flow-precision gate:
       less-restrictive claim labels require trust in concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision`; untrusted
@@ -328,14 +360,18 @@ Primary file:
 ### 6.1 Reactive Action Path (`run`)
 
 - [x] Insert prepare step between action completion and `tx.commit()`.
+- [ ] Pass acting principal + trust-context snapshot into prepare evaluation.
 - [x] Keep existing commit retry loop behavior where applicable.
 - [x] On retryable commit failure, ensure fresh tx reruns action and prepare.
+- [ ] Ensure retryable reruns use a fresh trust-context snapshot.
 
 ### 6.2 Event Handler Path
 
 - [x] Insert prepare step before commit in event execution flow.
 - [x] Preserve existing requeue retry behavior for retryable failures.
 - [x] Ensure no stale prepare state survives into requeued attempt.
+- [ ] Re-evaluate concept guards using the requeued attempt's acting principal +
+      trust-context snapshot.
 
 ### 6.3 Error Classification
 
@@ -531,13 +567,22 @@ Primary test location:
       claims using claimed precision.
 - [x] `cfc-flow-precision.test.ts` covers not-less-restrictive claims without
       trust.
-- [ ] Add explicit missing-`KeyLocalShapePreserved` regression coverage.
+- [ ] Add explicit `PointwisePresencePreserved` regression coverage.
 - [x] `cfc-flow-precision.test.ts` covers malformed/missing
       `KeyLocalWriteDependency` fallback.
+- [ ] Add explicit `PointwiseWriteDependency` regression coverage.
 - [x] `cfc-scheduler-prepare-shim.test.ts` covers builtin identity propagation
       through scheduler prepare.
 - [x] `cfc-flow-precision.test.ts` covers untrusted custom builtin-name
       overrides falling back conservative.
+- [ ] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
+- [ ] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
+- [ ] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
+- [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
+- [ ] `cfc-trust-context-change-invalidates-prepare.test.ts`
+- [ ] `cfc-flow-precision-builtin-trust-resolution.test.ts`
+- [ ] `cfc-filter-membership-vs-order-precision.test.ts`
+- [ ] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`
 
 ### 11.5 Side-Effect Gating Tests
 
@@ -620,11 +665,21 @@ Primary docs:
 - [x] Confirm bounded fixpoint evaluation rejects on non-convergence.
 - [x] Confirm runner tests cover guard-false, ambient-token-smuggling, and
       cross-clause-mixing attack shapes.
+- [ ] Confirm concept-valued integrity guards are evaluated from concrete
+      integrity via acting-principal trust closure.
+- [ ] Confirm concrete integrity is persisted; derived concept satisfaction is
+      boundary-evaluated and not serialized into stored labels.
+- [ ] Confirm the same concrete evidence may satisfy concept guards for one
+      acting principal and fail for another.
+- [ ] Confirm clause-local release semantics prevent `User(A)` rewrites from
+      implicitly authorizing independent `User(B)` / owner clauses.
 - [x] Confirm flow-precision claims are trust-gated by concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision` with
       conservative fallback when untrusted.
-- [x] Confirm map-like claims enforce `KeyLocalShapePreserved` and
-      `KeyLocalWriteDependency` before reducing taint.
+- [ ] Confirm spec-aligned `PointwisePresencePreserved` /
+      `PointwiseWriteDependency` replace legacy `KeyLocal*` claim parsing.
+- [ ] Confirm prefix-sensitive built-ins (`filter`, `flatMap`) taint
+      membership/domain independently from order/offset/multiplicity.
 - [x] Confirm builtin modules can make trusted flow-precision claims via
       `Builtin(name)` identity and share the same trust gate semantics as
       `CodeHash`.
@@ -647,8 +702,8 @@ Primary docs:
 - [x] Step G: complete Section 10 (legacy cleanup).
 - [x] Step H: complete Section 11 (full test matrix).
 - [x] Step I: complete Section 12 and 13 (rollout/docs) for baseline CFC work.
-- [ ] Step J: complete flow-precision additions in Sections 1, 3, 5, 6, 11,
-      and 13.
+- [ ] Step J: complete acting-principal trust-closure + flow-precision
+      additions in Sections 1, 3, 5, 6, 11, and 13.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [ ] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
