@@ -612,28 +612,30 @@ export class Server {
           !documentHasRootSigilRedirect(previous?.document) &&
           !documentHasRootSigilRedirect(current.document)
         ) {
-          logger.debug("subscription-refresh/patch-skip/topology-change/ignored");
+          logger.debug(
+            "subscription-refresh/patch-skip/topology-change/ignored",
+          );
           logger.debug(
             `subscription-refresh/patch-skip/topology-change/ignored/${
               graphQueryShapeKey(subscription.query)
             }`,
           );
         } else {
-        logger.debug("subscription-refresh/patch-skip/topology-change");
-        logger.debug(
-          `subscription-refresh/patch-skip/topology-change/${topologyChange}`,
-        );
-        logger.debug(
-          `subscription-refresh/patch-skip/topology-change-shape/${
-            graphQueryShapeKey(subscription.query)
-          }`,
-        );
-        logger.debug(
-          `subscription-refresh/patch-skip/topology-change-shape/${
-            topologyChange
-          }/${graphQueryShapeKey(subscription.query)}`,
-        );
-        return null;
+          logger.debug("subscription-refresh/patch-skip/topology-change");
+          logger.debug(
+            `subscription-refresh/patch-skip/topology-change/${topologyChange}`,
+          );
+          logger.debug(
+            `subscription-refresh/patch-skip/topology-change-shape/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+          logger.debug(
+            `subscription-refresh/patch-skip/topology-change-shape/${topologyChange}/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+          return null;
         }
       }
 
