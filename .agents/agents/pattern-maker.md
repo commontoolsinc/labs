@@ -14,6 +14,7 @@ hooks:
 **When confused, search `docs/` first.** Key references:
 - `docs/common/` — patterns, reactivity, components, types
 - `docs/development/debugging/` — errors, gotchas, troubleshooting
+- `docs/common/ai/pattern-development-guide.md` — canonical shared development guidance
 
 Use Skill('pattern-schema') for types, Skill('pattern-implement') for code.
 
