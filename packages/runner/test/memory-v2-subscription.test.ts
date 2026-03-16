@@ -34,6 +34,12 @@ class Subscription implements IStorageNotification {
       notification.type === "revert"
     );
   }
+
+  get pulls() {
+    return this.notifications.filter((notification) =>
+      notification.type === "pull"
+    );
+  }
 }
 
 const waitFor = async (
@@ -245,5 +251,37 @@ describe("Memory v2 storage notifications", () => {
       source,
     });
     expect(subscription.reverts.at(-1)?.reason.name).toBe("ConflictError");
+  });
+
+  it("does not emit duplicate pull notifications for unchanged v2 sync results", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const uri = `of:memory-v2-pull-dedupe-${Date.now()}` as URI;
+    await storageManager.session().mount(space).transact({
+      changes: Changes.from([Fact.assert({
+        the: "application/json",
+        of: uri,
+        is: {
+          items: [
+            { count: 1, label: "one" },
+            { count: 2, label: "two" },
+          ],
+        },
+      })]),
+    });
+
+    const provider = storageManager.open(space);
+    await provider.sync(uri, {
+      path: ["items", "0", "count"],
+      schema: false,
+    });
+    expect(subscription.pulls).toHaveLength(1);
+
+    await provider.sync(uri, {
+      path: ["items", "1", "count"],
+      schema: false,
+    });
+    expect(subscription.pulls).toHaveLength(1);
   });
 });

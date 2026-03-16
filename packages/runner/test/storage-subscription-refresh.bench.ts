@@ -58,6 +58,11 @@ const setup = async (sourceBacked: boolean) => {
   return { storageManager, provider, uri };
 };
 
+const setupOnly = async (sourceBacked: boolean) => {
+  const { storageManager } = await setup(sourceBacked);
+  await cleanup(storageManager);
+};
+
 const cleanup = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
@@ -78,6 +83,22 @@ const runUpdateLoop = async (
     await storageManager.synced();
   }
 };
+
+Deno.bench(
+  "Storage - subscription setup plain doc (256 selectors)",
+  { group: "subscription-refresh" },
+  async () => {
+    await setupOnly(false);
+  },
+);
+
+Deno.bench(
+  "Storage - subscription setup source-backed doc (256 selectors)",
+  { group: "subscription-refresh" },
+  async () => {
+    await setupOnly(true);
+  },
+);
 
 Deno.bench(
   "Storage - subscription refresh plain doc (256 selectors, 5 updates)",

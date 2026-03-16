@@ -126,11 +126,12 @@
 - [ ] Revisit any future bulk-write shortcut only after benchmark evidence shows it clearly beats the existing `writeValueOrThrow()` compatibility path.
 
 ## Future Performance Follow-Ups
-- [ ] Reduce the remaining `storage-subscription-refresh.bench.ts` gap for many active path subscriptions on one document with repeated same-doc updates. The macro `pattern-tests` task is now slightly faster on v2, but the focused microbench is still roughly `1.7x` slower than v1.
+- [x] Reduce the remaining `storage-subscription-refresh.bench.ts` gap for many active path subscriptions on one document with repeated same-doc updates. The v2 path now canonicalizes schemaless same-document syncs down to one document-level subscription, and the focused bench is well ahead of the current v1 baseline (`~36-39 ms` on v2 vs `~157 ms` on v1 for the plain-doc variant on this machine).
 - [ ] Re-profile `cell.bench.ts` hotspots such as `Cell get - simple value with schema` and `Cell creation - immutable`, which still suggest extra v2 overhead in schema-aware materialization, frozen rich-storable reads, or query-result wrapper setup.
 - [ ] Keep pushing the large single-transaction `Cell.set()` write-count cases toward or past v1 without dropping back to document-wide `set`. The remaining target cluster is the large-object / small-array / repeated-update family in [cell-set.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-set.bench.ts).
 - [ ] Continue using fair semantic document-value benches, not raw root-envelope writes, whenever comparing v1 and v2 storage paths. Benchmark shape mismatches already hid real progress once and should not steer future tuning.
 - [ ] Investigate whether remaining scheduler/subscription outliers are dominated by wrapper/proxy fan-out costs above storage rather than the v2 engine itself before doing deeper storage-path surgery.
+- [ ] Decide whether the new schemaless same-document sync canonicalization should widen beyond `schema: false` roots, and only do so with explicit coverage for linked-doc / schema-driven query cases so we do not collapse meaningfully different subscriptions by accident.
 
 ## Phase 3: Advanced Features After The Cutover
 - [ ] Wire up branches end to end using the already-created `branch` table: create/delete/list, branch-scoped head resolution, merge proposals, branch-aware queries/subscriptions, and point-in-time reads on branches.

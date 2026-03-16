@@ -614,6 +614,20 @@ type SyncTask = {
   updates?: Promise<void>;
 };
 
+const normalizeSyncSelector = (
+  selector: SchemaPathSelector | undefined,
+): SchemaPathSelector => {
+  if (selector !== undefined && selector.schema !== false) {
+    return selector;
+  }
+  return { path: [], schema: false };
+};
+
+const normalizeSyncEntries = (
+  entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
+): [{ id: URI; type: MIME }, SchemaPathSelector][] =>
+  entries.map(([address, selector]) => [address, normalizeSyncSelector(selector)]);
+
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
@@ -721,9 +735,10 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     }
 
-    const key = stableHash(entries.map(([address, selector]) => ({
+    const normalizedEntries = normalizeSyncEntries(entries);
+    const key = stableHash(normalizedEntries.map(([address, selector]) => ({
       id: address.id,
-      selector: selector ?? { path: [], schema: false },
+      selector,
     })));
     const existing = this.#syncTasks.get(key);
     if (existing) {
@@ -733,7 +748,7 @@ class SpaceReplica implements ISpaceReplica {
     const task = {
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
-    const promise = this.startSync(entries, task);
+    const promise = this.startSync(normalizedEntries, task);
     task.promise = promise;
     this.#syncTasks.set(key, task);
     this.#syncPromises.add(promise);
@@ -806,7 +821,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async startSync(
-    entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
+    entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
     task: SyncTask,
   ): Promise<Result<Unit, PullError>> {
     try {
@@ -815,7 +830,7 @@ class SpaceReplica implements ISpaceReplica {
         subscribe: true,
         roots: entries.map(([address, selector]) => ({
           id: address.id,
-          selector: selector ?? { path: [], schema: false },
+          selector,
         })),
       });
 
@@ -996,15 +1011,7 @@ class SpaceReplica implements ISpaceReplica {
     entities: EntitySnapshot[],
     type: "pull" | "integrate",
   ): void {
-    if (
-      type === "integrate" &&
-      entities.every((entity) => {
-        const confirmed = this.#docs.get(entity.id as URI)?.confirmed;
-        return confirmed !== undefined &&
-          confirmed.seq === entity.seq &&
-          confirmed.hash === entity.hash;
-      })
-    ) {
+    if (this.isDuplicateConfirmedResult(entities)) {
       return;
     }
 
@@ -1135,6 +1142,17 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
+  }
+
+  private isDuplicateConfirmedResult(
+    entities: readonly EntitySnapshot[],
+  ): boolean {
+    return entities.every((entity) => {
+      const confirmed = this.#docs.get(entity.id as URI)?.confirmed;
+      return confirmed !== undefined &&
+        confirmed.seq === entity.seq &&
+        confirmed.hash === entity.hash;
+    });
   }
 }
 
