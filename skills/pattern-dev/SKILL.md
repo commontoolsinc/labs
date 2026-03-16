@@ -44,8 +44,8 @@ Task({
 })
 ```
 
-- Run a critic pass before first deploy unless the change is a tiny,
-  low-risk fix.
+- Run a critic pass before first deploy unless the change is a tiny, low-risk
+  fix.
 - At useful milestones, offer a commit.
 
 ### Other runtimes
