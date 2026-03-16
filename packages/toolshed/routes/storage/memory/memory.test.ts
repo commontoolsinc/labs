@@ -164,7 +164,9 @@ Deno.test("memory websocket preserves early v1 frames during negotiation", async
       }
       const receipt = Codec.Receipt.fromString(event.data);
       receipts.push(receipt);
-      const taskReturns = receipts.filter((entry) => entry.the === "task/return");
+      const taskReturns = receipts.filter((entry) =>
+        entry.the === "task/return"
+      );
       if (taskReturns.length >= 2) {
         clearTimeout(timeout);
         completion.resolve();

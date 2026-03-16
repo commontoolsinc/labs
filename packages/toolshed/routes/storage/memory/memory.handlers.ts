@@ -89,11 +89,11 @@ const attachV1SocketPipeline = (
   channel: Pick<NegotiatedSocket, "readable" | "writable">,
 ) => attachSocketPipeline(channel, memory.session());
 
-const attachV2SocketPipeline = async (
+const attachV2SocketPipeline = (
   socket: WebSocket,
   channel: Pick<NegotiatedSocket, "readable">,
   firstMessage: string,
-): Promise<boolean> => {
+): boolean => {
   if (Memory.V2Server.parseClientMessage(firstMessage) === null) {
     return false;
   }
@@ -222,7 +222,7 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
           return;
         }
 
-        if (await attachV2SocketPipeline(socket, channel, firstMessage)) {
+        if (attachV2SocketPipeline(socket, channel, firstMessage)) {
           setupSpan.setAttribute("socket.setup", "memory-v2");
           return;
         }
