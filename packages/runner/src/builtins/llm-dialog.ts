@@ -2530,7 +2530,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     })
     .catch((error: unknown) => {
       console.error("Error generating data", error);
-      runtime.editWithRetry((tx) => {
+      safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
         pending.withTx(tx).set(false);
       });
     });

@@ -995,7 +995,8 @@ export function generateObject<T extends Record<string, unknown>>(
       };
 
       // Always set system prompt with context documentation
-      generateObjectParams.system = (system ?? "") + contextDocs;
+      generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
+        "You are a helpful assistant.";
 
       const hash = refer(generateObjectParams).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as

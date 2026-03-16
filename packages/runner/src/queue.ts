@@ -56,7 +56,18 @@ export class AsyncSemaphoreQueue {
       this.#active++;
       const { fn, resolvers } = item;
 
-      fn().then(
+      let promise: Promise<unknown>;
+      try {
+        promise = fn();
+      } catch (error) {
+        this.#active--;
+        this.#failed++;
+        resolvers.reject(error);
+        this.#drain();
+        continue;
+      }
+
+      promise.then(
         (result) => {
           this.#active--;
           this.#completed++;
