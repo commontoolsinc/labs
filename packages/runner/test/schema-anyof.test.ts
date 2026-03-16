@@ -257,6 +257,68 @@ describe("Schema - AnyOf Support", () => {
       expect(resultArray.mixed).toEqualIgnoringSymbols(["bar", "baz"]);
     });
 
+    describe("AnyOf with type: unknown", () => {
+      it("object schema before unknown: property value is fully preserved", () => {
+        const c = runtime.getCell<{ item: { name: string } }>(
+          space,
+          "anyOf object-then-unknown preserves property 1",
+          undefined,
+          tx,
+        );
+        c.set({ item: { name: "Alice" } });
+        const schema = {
+          type: "object",
+          properties: {
+            item: {
+              anyOf: [
+                {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+                { type: "unknown" },
+              ],
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = c.asSchema(schema);
+        const result = cell.get();
+        // Object schema matches first; mergeAnyOfMatches returns matches[0]
+        // which is the resolved object, so the full property value is present.
+        expect((result.item as { name: string }).name).toBe("Alice");
+      });
+
+      it("unknown before object schema: property value is fully preserved", () => {
+        const c = runtime.getCell<{ item: { name: string } }>(
+          space,
+          "anyOf unknown-then-object returns undefined 1",
+          undefined,
+          tx,
+        );
+        c.set({ item: { name: "Alice" } });
+        const schema = {
+          type: "object",
+          properties: {
+            item: {
+              anyOf: [
+                { type: "unknown" },
+                {
+                  type: "object",
+                  properties: { name: { type: "string" } },
+                },
+              ],
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = c.asSchema(schema);
+        const result = cell.get();
+        // unknown matches first; mergeAnyOfMatches returns matches[1]
+        // which is the resolved object, so the full property value is present.
+        expect((result.item as { name: string }).name).toBe("Alice");
+      });
+    });
+
     describe("Array anyOf Support", () => {
       it("should handle multiple array type options in anyOf", () => {
         const c = runtime.getCell<{ data: number[] }>(
