@@ -129,6 +129,16 @@ type GlobalWithLoggers = {
           error: number;
           total: number;
         };
+        countsByKey?: Record<
+          string,
+          {
+            debug: number;
+            info: number;
+            warn: number;
+            error: number;
+            total: number;
+          }
+        >;
       }
     >;
   };
@@ -423,6 +433,16 @@ function printStorageStats(elapsedMs: number): void {
     total: number;
   };
 
+  type StorageCountKeyEntry = {
+    logger: string;
+    key: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+
   console.log(`  🗄 ${fmtMs(elapsedMs)} | Storage totals:`);
 
   const timingBreakdown = getTimingStatsBreakdown();
@@ -494,6 +514,43 @@ function printStorageStats(elapsedMs: number): void {
       const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
       console.log(
         `             ${entry.name.padEnd(35)} n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
+
+  const keyEntries: StorageCountKeyEntry[] = [];
+  if (g.commontools?.logger) {
+    for (const [loggerName, logger] of Object.entries(g.commontools.logger)) {
+      if (!isStorageLoggerName(loggerName) || !logger.countsByKey) continue;
+      for (const [key, counts] of Object.entries(logger.countsByKey)) {
+        if (counts.total === 0) continue;
+        keyEntries.push({
+          logger: loggerName,
+          key,
+          d: counts.debug,
+          i: counts.info,
+          w: counts.warn,
+          e: counts.error,
+          total: counts.total,
+        });
+      }
+    }
+  }
+
+  if (keyEntries.length > 0) {
+    keyEntries.sort((a, b) => b.total - a.total);
+    console.log(`           Count keys (top 16):`);
+    for (const entry of keyEntries.slice(0, 16)) {
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${`${entry.logger}/${entry.key}`.padEnd(55)} n=${
           String(entry.total).padStart(7)
         }${levels}`,
       );

@@ -284,30 +284,63 @@ class Connection {
         sharedMemos: new Map(),
       };
       const directCache = new Map<string, EntitySnapshot>();
+      const queryResults = new Map<string, GraphQueryResult>();
       const pendingUpdates = new Map<string, {
         result: GraphQueryResult;
         subscriptionIds: string[];
       }>();
       for (const subscription of this.subscriptionsForSpace(space)) {
+        logger.debug("subscription-refresh/considered");
         if (
           dirtyIds !== undefined &&
           !subscriptionTouchesIds(subscription, dirtyIds)
         ) {
+          logger.debug("subscription-refresh/skipped-clean");
           continue;
         }
-        const state = await this.server.patchSubscriptionEntities(
+        const patched = await this.server.patchSubscriptionEntities(
           space,
           subscription,
           dirtyIds,
           directCache,
-        ) ??
-          await this.server.evaluateGraphQuery(
+        );
+        if (patched !== null) {
+          logger.debug("subscription-refresh/direct-patch");
+          logger.debug(
+            `subscription-refresh/direct-patch-shape/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+        }
+        const state = patched ?? await (async () => {
+          const key = queryCacheKey(subscription.query);
+          const cached = queryResults.get(key);
+          if (cached !== undefined) {
+            logger.debug("subscription-refresh/full-query-cache-hit");
+            logger.debug(
+              `subscription-refresh/full-query-cache-hit-shape/${
+                graphQueryShapeKey(subscription.query)
+              }`,
+            );
+            return cached;
+          }
+          logger.debug("subscription-refresh/full-query");
+          logger.debug(
+            `subscription-refresh/full-query-shape/${
+              graphQueryShapeKey(subscription.query)
+            }`,
+          );
+          const evaluated = await this.server.evaluateGraphQuery(
             space,
             subscription.query,
             undefined,
             reuse,
           );
+          queryResults.set(key, evaluated);
+          return evaluated;
+        })();
         if (sameEntities(state.entities, subscription.entities)) {
+          logger.debug("subscription-refresh/no-change");
           continue;
         }
         subscription.entities = state.entities;
@@ -894,6 +927,19 @@ const collectValueTopologyRefs = (
 };
 
 const queryCacheKey = (query: GraphQuery): string => JSON.stringify(query);
+
+const graphQueryShapeKey = (query: GraphQuery): string =>
+  query.roots
+    .map((root) =>
+      `${encodePath(root.selector.path)}:${
+        root.selector.schema === false ? "plain" : "schema"
+      }`
+    )
+    .sort()
+    .join("|");
+
+const encodePath = (path: readonly string[]): string =>
+  path.length === 0 ? "." : path.join(".");
 
 const graphUpdateKey = (result: GraphQueryResult): string =>
   JSON.stringify({

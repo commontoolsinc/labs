@@ -77,7 +77,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
     space,
     sessionId,
     commit: {
-      localSeq: 1,
+      localSeq: 2,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -295,6 +295,7 @@ Deno.test("memory v2 server pushes graph query subscription updates", async () =
   assertEquals(committed.requestId, "tx-1");
   assertEquals((committed.ok as any)?.seq, 1);
 
+  await tick();
   await tick();
 
   const update = assertUpdate(shiftMessage(messages));
@@ -639,7 +640,18 @@ Deno.test("memory v2 server batches identical graph updates across subscriptions
           id: "of:doc:1",
           selector: {
             path: [],
-            schema: false,
+            schema: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                friend: {
+                  type: "object",
+                  properties: {
+                    city: { type: "string" },
+                  },
+                },
+              },
+            },
           },
         }],
       },
@@ -686,6 +698,137 @@ Deno.test("memory v2 server batches identical graph updates across subscriptions
   );
   assertEquals(update.result.entities.map((entity: any) => entity.id), [
     "of:doc:1",
+  ]);
+  assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server reevaluates identical topology-changing subscriptions only once per refresh", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-batched-refresh-eval"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-batched-refresh-eval";
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:target:1",
+        value: {
+          value: {
+            city: "San Francisco",
+          },
+        },
+      }, {
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            name: "Alice",
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-seed");
+
+  for (const requestId of ["query-1", "query-2"]) {
+    await connection.receive(JSON.stringify({
+      type: "graph.query",
+      requestId,
+      space,
+      sessionId,
+      query: {
+        subscribe: true,
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                friend: {
+                  type: "object",
+                  properties: {
+                    city: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        }],
+      },
+    }));
+  }
+
+  shiftMessage(messages);
+  shiftMessage(messages);
+  server.queryCount = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            name: "Alice",
+            friend: {
+              "/": {
+                "link@1": {
+                  id: "of:target:1",
+                  path: [],
+                  space,
+                },
+              },
+            },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
+
+  await tick();
+  await tick();
+
+  assertEquals(server.queryCount, 1);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(update.result.entities.map((entity: any) => entity.id), [
+    "of:doc:1",
+    "of:target:1",
   ]);
   assertEquals(messages.length, 0);
 
