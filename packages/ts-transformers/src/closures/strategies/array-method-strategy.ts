@@ -9,6 +9,7 @@ import {
   isFunctionLikeExpression,
   isReactiveOriginCall,
   registerSyntheticCallType,
+  type ReactiveContextInfo,
 } from "../../ast/mod.ts";
 import {
   classifyReactiveReceiverKind,
@@ -193,6 +194,63 @@ function isLocalReactiveRewrapAlias(
   return false;
 }
 
+function getNodeSnippet(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  maxLength = 160,
+): string {
+  try {
+    const text = node.getText(sourceFile).replace(/\s+/g, " ").trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 3)}...`;
+  } catch {
+    return ts.SyntaxKind[node.kind];
+  }
+}
+
+type SyntheticComputeOwnedLookup = Pick<
+  TransformationContext,
+  "sourceFile" | "isSyntheticComputeOwnedNode"
+>;
+
+export function assertValidSyntheticComputeOwnedArrayMethodContext(
+  methodCall: ts.CallExpression,
+  contextInfo: ReactiveContextInfo,
+  context: SyntheticComputeOwnedLookup,
+): void {
+  const receiver = ts.isPropertyAccessExpression(methodCall.expression)
+    ? methodCall.expression.expression
+    : undefined;
+  const isSyntheticComputeOwned = context.isSyntheticComputeOwnedNode(
+      methodCall,
+    ) ||
+    (receiver ? context.isSyntheticComputeOwnedNode(receiver) : false);
+
+  if (!isSyntheticComputeOwned) {
+    return;
+  }
+
+  if (contextInfo.kind === "compute") {
+    return;
+  }
+
+  if (
+    contextInfo.kind === "pattern" &&
+    contextInfo.owner === "array-method"
+  ) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Internal Common Tools compiler error: synthetic compute-owned array method retained a non-compute context.",
+      "This is a bug in the compiler, not in your code. Please report it to the maintainers.",
+      `Method call: \`${getNodeSnippet(methodCall, context.sourceFile)}\``,
+      `Reactive context: ${contextInfo.kind} (${contextInfo.owner})`,
+    ].join("\n"),
+  );
+}
+
 /**
  * Check if an array method call should be transformed to its WithPattern variant.
  *
@@ -220,6 +278,11 @@ function shouldTransformArrayMethod(
   const contextInfo = classifyReactiveContext(
     methodCall,
     context.checker,
+    context,
+  );
+  assertValidSyntheticComputeOwnedArrayMethodContext(
+    methodCall,
+    contextInfo,
     context,
   );
 
