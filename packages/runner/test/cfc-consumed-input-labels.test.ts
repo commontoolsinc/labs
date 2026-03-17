@@ -118,4 +118,47 @@ describe("collectConsumedInputLabels", () => {
       integrity: ["source-a"],
     });
   });
+
+  it("preserves multi-clause confidentiality labels", () => {
+    const read: CanonicalBoundaryRead = {
+      space: "did:key:test",
+      id: "of:doc",
+      type: "application/json",
+      path: "/profile/ssn",
+      meta: {},
+      internalVerifierRead: false,
+    };
+
+    const labelsByEntity = new Map<string, Record<string, Labels>>([
+      [
+        consumedReadEntityKey(read),
+        {
+          "/": {
+            classification: [[
+              {
+                type: "https://commonfabric.org/cfc/atom/User",
+                subject: "did:key:alice",
+              },
+            ]] as unknown as Labels["classification"],
+          },
+          "/profile/ssn": {
+            classification: [[
+              "https://commonfabric.org/cfc/atom/EmailSecret",
+            ]] as unknown as Labels["classification"],
+          },
+        },
+      ],
+    ]);
+
+    const labeled = collectConsumedInputLabels([read], labelsByEntity);
+    expect(labeled[0].effectiveLabel).toEqual({
+      classification: [
+        [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: "did:key:alice",
+        }],
+        ["https://commonfabric.org/cfc/atom/EmailSecret"],
+      ],
+    });
+  });
 });
