@@ -31,7 +31,10 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 **Start here:**
 
 - `docs/common/INTRODUCTION.md` - Overview of the pattern system
-- `docs/common/components/COMPONENTS.md` - UI component reference with
+- `packages/patterns/catalog/catalog.tsx` - Authoritative, type-checked
+  component catalog; story files in `packages/patterns/catalog/stories/` show
+  live usage for each component
+- `docs/common/components/COMPONENTS.md` - UI component narrative reference with
   bidirectional binding and event handling
 
 **Core concepts:**

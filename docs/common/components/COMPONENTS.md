@@ -2,6 +2,8 @@
 
 # UI Components Reference
 
+> **Living documentation:** [`packages/patterns/catalog/catalog.tsx`](../../../packages/patterns/catalog/catalog.tsx) is the authoritative, type-checked component catalog. Each component has a story file under [`packages/patterns/catalog/stories/`](../../../packages/patterns/catalog/stories/) showing usage. Refer to those files for the most accurate, up-to-date examples.
+
 CommonTools UI components with bidirectional binding support.
 
 ## Bidirectional Binding
