@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ContextualFlowControl } from "../src/cfc.ts";
+import { normalizeConfidentialityLabel } from "../src/cfc/label-algebra.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commontools/api";
 
@@ -64,5 +65,41 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     };
     expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
       .toThrow(/Failed to resolve \$ref/);
+  });
+});
+
+describe("ContextualFlowControl.schemaAtPath confidentiality labels", () => {
+  it("preserves CNF clauses instead of collapsing to a legacy lattice value", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      ifc: {
+        classification: [[{ kind: "User", id: "alice" }]],
+      },
+      properties: {
+        profile: {
+          type: "object",
+          ifc: {
+            classification: [[{ kind: "Purpose", id: "ops" }]],
+          },
+          properties: {
+            email: { type: "string" },
+          },
+        },
+      },
+    };
+
+    const result = cfc.schemaAtPath(schema, ["profile", "email"]);
+    expect(result).not.toBe(false);
+    expect(
+      normalizeConfidentialityLabel(
+        typeof result === "boolean" ? undefined : result.ifc?.classification,
+      ),
+    ).toEqual(
+      normalizeConfidentialityLabel([
+        [{ kind: "Purpose", id: "ops" }],
+        [{ kind: "User", id: "alice" }],
+      ]),
+    );
   });
 });
