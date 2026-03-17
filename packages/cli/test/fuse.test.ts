@@ -209,6 +209,30 @@ describe("mount state operations", () => {
     await expect(Deno.stat(stalePath)).rejects.toThrow();
   });
 
+  it("findMountForPath matches symlinked aliases for the same mountpoint", async () => {
+    const realRoot = join(tmpDir, "real");
+    const realMount = join(realRoot, "mount");
+    const aliasRoot = join(tmpDir, "alias");
+    await Deno.mkdir(realMount, { recursive: true });
+    await Deno.symlink(realRoot, aliasRoot);
+
+    await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      mountpoint: realMount,
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/base.pem",
+      startedAt: "2026-02-24T00:00:00.000Z",
+    });
+
+    const match = await findMountForPath(
+      join(aliasRoot, "mount/space/pieces/example/result/add.handler"),
+      tmpDir,
+    );
+
+    expect(match).not.toBeNull();
+    expect(match!.entry.mountpoint).toBe(realMount);
+  });
+
   it("ensureExecShim creates a repo-rooted shim that targets packages/cli/mod.ts", async () => {
     const stateDir = join(tmpDir, "state");
     const repoRoot = join(tmpDir, "repo");

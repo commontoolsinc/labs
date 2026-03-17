@@ -11,7 +11,11 @@ import {
   parseExecArgs,
   renderExecHelp,
 } from "./exec-schema.ts";
-import { findMountForPath, type MountStateEntry } from "./fuse.ts";
+import {
+  canonicalizeMountLookupPath,
+  findMountForPath,
+  type MountStateEntry,
+} from "./fuse.ts";
 import { loadManager, type SpaceConfig } from "./piece.ts";
 
 export interface MountedPieceMeta {
@@ -214,7 +218,10 @@ export async function resolveMountedCallableFile(
     );
   }
 
-  const relativePath = relative(mount.entry.mountpoint, absPath);
+  const relativePath = relative(
+    await canonicalizeMountLookupPath(mount.entry.mountpoint),
+    await canonicalizeMountLookupPath(absPath),
+  );
   const callablePath = parseMountedCallablePath(relativePath);
   if (!callablePath) {
     throw new Error(`Path is not a mounted callable file: ${absPath}`);

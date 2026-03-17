@@ -1,5 +1,6 @@
 import { encodeHex } from "@std/encoding/hex";
 import {
+  basename,
   dirname,
   fromFileUrl,
   isAbsolute,
@@ -14,6 +15,28 @@ export interface MountStateEntry {
   apiUrl: string;
   identity: string;
   startedAt: string;
+}
+
+export async function canonicalizeMountLookupPath(
+  path: string,
+): Promise<string> {
+  const resolved = resolve(path);
+  const suffix: string[] = [];
+  let probe = resolved;
+
+  while (true) {
+    try {
+      const real = await Deno.realPath(probe);
+      return suffix.length === 0 ? real : join(real, ...suffix.reverse());
+    } catch {
+      const parent = dirname(probe);
+      if (parent === probe) {
+        return resolved;
+      }
+      suffix.push(basename(probe));
+      probe = parent;
+    }
+  }
 }
 
 function normalizeMountStateEntry(entry: MountStateEntry): MountStateEntry {
@@ -42,7 +65,9 @@ function repoRoot(importMetaUrl: string): string {
 
 /** Hex hash of absolute mountpoint path, used as state filename. */
 export async function mountpointHash(mountpoint: string): Promise<string> {
-  const data = new TextEncoder().encode(resolve(mountpoint));
+  const data = new TextEncoder().encode(
+    await canonicalizeMountLookupPath(mountpoint),
+  );
   const hash = await crypto.subtle.digest("SHA-256", data);
   return encodeHex(new Uint8Array(hash)).slice(0, 16);
 }
@@ -104,10 +129,11 @@ export async function findMountForPath(
   absPath: string,
   stateDir = defaultStateDir(),
 ): Promise<{ entry: MountStateEntry; path: string } | null> {
-  const normalizedPath = resolve(absPath);
+  const normalizedPath = await canonicalizeMountLookupPath(absPath);
   const entries = await readAllMountStates(stateDir);
 
   let bestMatch: { entry: MountStateEntry; path: string } | null = null;
+  let bestMatchMountpoint: string | null = null;
   for (const candidate of entries) {
     if (!isAlive(candidate.entry.pid)) {
       try {
@@ -118,15 +144,19 @@ export async function findMountForPath(
       continue;
     }
 
-    if (!isWithinMountpoint(normalizedPath, candidate.entry.mountpoint)) {
+    const candidateMountpoint = await canonicalizeMountLookupPath(
+      candidate.entry.mountpoint,
+    );
+    if (!isWithinMountpoint(normalizedPath, candidateMountpoint)) {
       continue;
     }
 
     if (
       !bestMatch ||
-      candidate.entry.mountpoint.length > bestMatch.entry.mountpoint.length
+      candidateMountpoint.length > (bestMatchMountpoint?.length ?? -1)
     ) {
       bestMatch = candidate;
+      bestMatchMountpoint = candidateMountpoint;
     }
   }
 

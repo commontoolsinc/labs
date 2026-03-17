@@ -499,6 +499,44 @@ describe("mounted callable resolution and execution", () => {
     expect(entitiesResolved.pieceId).toBe("of:piece-123");
   });
 
+  it("resolves callable paths through a symlinked alias of the mountpoint", async () => {
+    const realRoot = join(tmpDir, "real");
+    const mountpoint = join(realRoot, "mount");
+    const aliasRoot = join(tmpDir, "alias");
+    await Deno.mkdir(mountpoint, { recursive: true });
+    await Deno.symlink(realRoot, aliasRoot);
+
+    await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const filePath = join(
+      aliasRoot,
+      "mount/home/pieces/notes-2/result/add.handler",
+    );
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+
+    expect(resolved.callablePath.rootKind).toBe("pieces");
+    expect(resolved.pieceId).toBe("of:piece-123");
+  });
+
   it("calls asSchemaFromLinks on the resolved child cell", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
