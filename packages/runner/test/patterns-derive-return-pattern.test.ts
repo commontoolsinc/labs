@@ -238,6 +238,101 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     expect(innerLiftRunCount).toBe(innerLiftsAfterFirstRun);
   });
 
+  it("should not spuriously rerun parent derive when returned child pattern changes", async () => {
+    runtime.scheduler.enablePullMode();
+
+    let deriveCallCount = 0;
+    let doubleRunCount = 0;
+    let tripleRunCount = 0;
+
+    const doublePattern = pattern<{ value: number }>(({ value }) => {
+      const doubled = lift((x: number) => {
+        doubleRunCount++;
+        return x * 2;
+      })(value);
+      return { result: doubled };
+    });
+
+    const triplePattern = pattern<{ value: number }>(({ value }) => {
+      const tripled = lift((x: number) => {
+        tripleRunCount++;
+        return x * 3;
+      })(value);
+      return { result: tripled };
+    });
+
+    const outerPattern = pattern<{ mode: string; value: number }>(
+      ({ mode, value }) => {
+        return derive(
+          { mode, value },
+          ({ mode: currentMode, value: currentValue }: {
+            mode: string;
+            value: number;
+          }) => {
+            deriveCallCount++;
+            return currentMode === "double"
+              ? doublePattern({ value: currentValue })
+              : triplePattern({ value: currentValue });
+          },
+        );
+      },
+    );
+
+    const modeCell = runtime.getCell<string>(
+      space,
+      "derive-pattern-replacement-mode",
+    );
+    const valueCell = runtime.getCell<number>(
+      space,
+      "derive-pattern-replacement-value",
+    );
+    modeCell.withTx(tx).set("double");
+    valueCell.withTx(tx).set(5);
+    await tx.commit();
+    await runtime.storageManager.synced();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "derive-pattern-replacement-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern,
+      { mode: modeCell, value: valueCell },
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 10 });
+    expect(deriveCallCount).toBe(1);
+    expect(doubleRunCount).toBe(1);
+    expect(tripleRunCount).toBe(0);
+
+    tx = runtime.edit();
+    modeCell.withTx(tx).send("triple");
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 15 });
+    expect(deriveCallCount).toBe(2);
+    expect(doubleRunCount).toBe(1);
+    expect(tripleRunCount).toBe(1);
+
+    tx = runtime.edit();
+    modeCell.withTx(tx).send("double");
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    expect(await result.pull()).toEqual({ result: 10 });
+    expect(deriveCallCount).toBe(3);
+    expect(doubleRunCount).toBe(2);
+    expect(tripleRunCount).toBe(1);
+  });
+
   it("should handle derive conditionally returning plain value or pattern", async () => {
     // Tests the branch where derive sometimes returns a plain value
     // and sometimes returns a pattern instantiation.
