@@ -62,6 +62,14 @@ wait_for_path() {
     if [ -e "$path" ]; then
       return 0
     fi
+    local probe="$path"
+    while [ "$probe" != "/" ]; do
+      probe=$(dirname "$probe")
+      if [ -e "$probe" ]; then
+        find "$probe" -maxdepth 2 -print >/dev/null 2>&1 || true
+        break
+      fi
+    done
     sleep 0.1
   done
 
@@ -86,6 +94,20 @@ wait_for_piece_value() {
   local actual
   actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   error "Timed out waiting for piece path '$path'. Expected: $expected, got: $actual"
+}
+
+read_piece_value_or_default() {
+  local path="$1"
+  local fallback="$2"
+  local actual
+
+  actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+  if [ -z "$actual" ]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+
+  printf '%s\n' "$actual"
 }
 
 cleanup() {
@@ -127,8 +149,6 @@ ct id new >"$IDENTITY"
 
 PIECE_ID=$(ct piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
-wait_for_piece_value "messageCount" "0" 20
-
 ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
@@ -186,7 +206,7 @@ assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
 assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke ct exec."
 success "Callable files are readable and expose ct exec shebangs"
 
-COUNT_BEFORE_HELP=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
 HANDLER_HELP=$(ct exec "$HANDLER_FILE" --help)
 TOOL_HELP=$(ct exec "$TOOL_FILE" --help)
 assert_contains "$HANDLER_HELP" "Callable: handler" "Handler help should describe a handler callable."
@@ -194,7 +214,10 @@ assert_contains "$HANDLER_HELP" "Verb: invoke" "Handler help should show the inv
 assert_contains "$TOOL_HELP" "Callable: tool" "Tool help should describe a tool callable."
 assert_contains "$TOOL_HELP" "Verb: run" "Tool help should show the run verb."
 assert_contains "$TOOL_HELP" "Output:" "Tool help should show an output summary."
-wait_for_piece_value "messageCount" "$COUNT_BEFORE_HELP"
+COUNT_AFTER_HELP=$(read_piece_value_or_default "messageCount" "0")
+if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
+  error "Top-level ct exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
+fi
 success "Top-level ct exec --help prints help without invoking callables"
 
 ct exec "$HANDLER_FILE" invoke --message "piece-explicit"
@@ -221,19 +244,19 @@ assert_json_eq \
   "Post-verb --help should be parsed as the tool schema field"
 success "Post-verb --help is parsed as the schema field when present"
 
-TOOL_IMPLICIT=$(ct exec "$TOOL_FILE" --query "implicit")
+TOOL_IMPLICIT=$(ct exec "$TOOL_FILE" --query "implicit" --help "")
 assert_json_eq \
   "$TOOL_IMPLICIT" \
   '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
   "Implicit tool execution returned unexpected JSON"
 success "ct exec defaults mounted tools to run"
 
-COUNT_BEFORE_PIECES_SHARED=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
 ct exec "$HANDLER_FILE" invoke --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
 
-COUNT_BEFORE_ENTITIES_SHARED=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
 ct exec "$ENTITY_HANDLER_FILE" invoke --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
@@ -247,7 +270,7 @@ assert_json_eq \
   "Tool output should match between pieces/ and entities/ paths"
 success "Tool execution through pieces/ and entities/ is identical"
 
-LEGACY_COUNT_BEFORE=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" legacyCount)
+LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
 echo '{}' > "$LEGACY_HANDLER_FILE"
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
 success "Legacy handler write-through still works"

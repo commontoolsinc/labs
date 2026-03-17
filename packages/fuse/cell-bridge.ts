@@ -747,6 +747,53 @@ export class CellBridge {
     };
   }
 
+  private materializeTreeValue(
+    rootCell: Cell<unknown>,
+    value: unknown,
+  ): unknown {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+
+    const schema = rootCell.asSchemaFromLinks().schema as Record<
+      string,
+      unknown
+    > | undefined;
+    const properties = schema?.properties as Record<string, unknown> | undefined;
+    if (!properties || Array.isArray(properties)) {
+      return value;
+    }
+
+    const materialized: Record<string, unknown> = {};
+    for (const key of Object.keys(properties)) {
+      const childCell = rootCell.key(key).asSchemaFromLinks();
+      let childValue: unknown;
+      try {
+        childValue = childCell.getRaw?.();
+        if (childValue === undefined) {
+          childValue = childCell.get?.();
+        }
+      } catch {
+        childValue = undefined;
+      }
+
+      const callableKind =
+        classifyCallableEntry(childValue, childCell.schema) ??
+        classifyCallableEntry(childCell, childCell.schema);
+
+      if (callableKind) {
+        materialized[key] = childValue ?? childCell;
+        continue;
+      }
+
+      if (childValue !== undefined) {
+        materialized[key] = childValue;
+      }
+    }
+
+    return Object.keys(materialized).length > 0 ? materialized : value;
+  }
+
   private addCallableFiles(
     propIno: bigint,
     callables: Array<{ key: string; callableKind: CallableKind }>,
@@ -806,17 +853,18 @@ export class CellBridge {
               }
 
               // Rebuild
-              if (newValue !== undefined && newValue !== null) {
+              const treeValue = this.materializeTreeValue(cell, newValue);
+              if (treeValue !== undefined && treeValue !== null) {
                 const { callables, classifyEntry, skipEntry } = this
                   .discoverCallableEntries(
                     cell,
-                    newValue,
+                    treeValue,
                   );
                 const propIno = buildJsonTree(
                   this.tree,
                   pieceIno,
                   propName,
-                  newValue,
+                  treeValue,
                   undefined,
                   resolveLink,
                   0,
@@ -947,7 +995,10 @@ export class CellBridge {
     try {
       // Input data
       const inputCell = await piece.input.getCell();
-      const input = await piece.input.get();
+      const input = this.materializeTreeValue(
+        inputCell,
+        await piece.input.get(),
+      );
       if (input !== undefined && input !== null) {
         const { callables, classifyEntry, skipEntry } = this
           .discoverCallableEntries(
@@ -970,7 +1021,10 @@ export class CellBridge {
 
       // Result data
       const resultCell = await piece.result.getCell();
-      const result = await piece.result.get();
+      const result = this.materializeTreeValue(
+        resultCell,
+        await piece.result.get(),
+      );
       if (result !== undefined && result !== null) {
         const { callables, classifyEntry, skipEntry } = this
           .discoverCallableEntries(

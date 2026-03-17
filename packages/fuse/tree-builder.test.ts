@@ -737,6 +737,116 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   ]);
 });
 
+Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse result roots", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+
+  interface FakeCell {
+    schema: Record<string, unknown> | undefined;
+    get(): unknown;
+    getRaw(): unknown;
+    asSchemaFromLinks(): FakeCell;
+    key(segment: string): FakeCell;
+    isStream?: () => boolean;
+  }
+
+  function makeCell(
+    value: unknown,
+    schema: Record<string, unknown> | undefined,
+    children: Record<string, FakeCell> = {},
+    options: { isStream?: boolean } = {},
+  ): FakeCell {
+    return {
+      schema,
+      get: () => value,
+      getRaw: () => value,
+      asSchemaFromLinks() {
+        return this;
+      },
+      key(segment: string) {
+        return children[segment] ?? makeCell(undefined, undefined);
+      },
+      isStream: options.isStream ? () => true : undefined,
+    };
+  }
+
+  const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
+  const toolCell = makeCell(
+    {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "bound-source" },
+    },
+    undefined,
+  );
+  const resultCell = makeCell(
+    undefined,
+    {
+      type: "object",
+      properties: {
+        recordMessage: { type: "object" },
+        search: { type: "object" },
+      },
+    },
+    {
+      recordMessage: handlerCell,
+      search: toolCell,
+    },
+  );
+
+  const piece = {
+    id: "of:entity-123",
+    name: () => "Sparse Fixture",
+    getPatternMeta: async () => ({ patternName: "Sparse Fixture" }),
+    input: {
+      getCell: async () => makeCell(undefined, { type: "object", properties: {} }),
+      get: async () => undefined,
+    },
+    result: {
+      getCell: async () => resultCell,
+      get: async () => undefined,
+    },
+  };
+
+  interface SparsePiece {
+    id: string;
+    name(): string;
+    getPatternMeta(): Promise<{ patternName: string }>;
+    input: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+    result: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+  }
+
+  type LoadPieceTree = (
+    piece: SparsePiece,
+    parentIno: bigint,
+    name: string,
+    spaceName: string,
+  ) => Promise<bigint>;
+
+  const pieceIno = await (bridge as unknown as {
+    loadPieceTree: LoadPieceTree;
+  }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "recordMessage.handler") !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+
+  const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
+  assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
+  assertEquals(resultJson.search, { "/tool": "search" });
+});
+
 // --- parseSymlinkTarget tests ---
 
 /** Helper: build a minimal tree mimicking a space with pieces. */
