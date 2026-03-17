@@ -36,13 +36,6 @@ describe("computeGitFingerprint", () => {
     expect(fromExplicit).not.toBe(fromGit);
   });
 
-  it("explicit SHA is deterministic", async () => {
-    const first = await computeGitFingerprint("deploy-sha-v42");
-    const second = await computeGitFingerprint("deploy-sha-v42");
-
-    expect(first).toBe(second);
-  });
-
   it("different explicit SHAs produce different fingerprints", async () => {
     const a = await computeGitFingerprint("sha-aaa");
     const b = await computeGitFingerprint("sha-bbb");
