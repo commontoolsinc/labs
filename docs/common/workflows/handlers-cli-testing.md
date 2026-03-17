@@ -68,18 +68,24 @@ deno task ct piece inspect ...
 # Or mount the space and execute the mounted callable file
 deno task ct fuse mount /tmp/ct ...
 head -n1 /tmp/ct/<space>/pieces/<piece>/result/addItem.handler
+deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --help
 deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --title "Test Item"
 
 # Mounted tools surface as .tool files and run through ct exec
 head -n1 /tmp/ct/<space>/pieces/<piece>/result/search.tool
+deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --help
 deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --query "demo"
+
+# The same callable files also exist under entities/<piece-id>/
+deno task ct exec /tmp/ct/<space>/entities/<piece-id>/result/search.tool --query "demo"
 ```
 
 ## Workflow
 
 1. Deploy pattern: `ct piece new`
 2. Either call the handler directly with `ct piece call` or mount the space with `ct fuse mount`
-3. Use `ct exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface
-4. Execute `*.handler` or `*.tool` via `ct exec`; legacy `echo ... > file.handler` still works for handlers
-5. Inspect state with `ct piece inspect` or `ct piece get`
-6. Iterate until the callable works correctly, then build UI on top
+3. Use `ct exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
+4. Execute `*.handler` or `*.tool` via `ct exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
+5. Legacy `echo ... > file.handler` still works for handlers
+6. Inspect state with `ct piece inspect` or `ct piece get`
+7. Iterate until the callable works correctly, then build UI on top

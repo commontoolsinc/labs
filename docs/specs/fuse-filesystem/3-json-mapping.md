@@ -77,6 +77,28 @@ the full JSON representation of that subtree. This is essential for:
 4. Writing to a `.json` file replaces the entire subtree with the parsed
    JSON value.
 
+### Callable Sigils In Aggregate JSON
+
+Top-level callable children under `input/` and `result/` are compacted in
+aggregate `.json` views instead of exposing their internal runtime structure.
+
+- Mounted handlers become `{"\/handler":"<name>"}`
+- Mounted pattern tools become `{"\/tool":"<name>"}`
+
+Example:
+
+```json
+{
+  "title": "My Todos",
+  "addItem": {"/handler":"addItem"},
+  "search": {"/tool":"search"}
+}
+```
+
+This keeps `result.json`, `input.json`, and nested `.json` siblings stable and
+human-readable while the real callable entry remains available as
+`addItem.handler` or `search.tool`.
+
 ### Example
 
 ```

@@ -141,8 +141,10 @@ home/pieces/todo-app/
 ```
 
 Only top-level callable children under `input/` and `result/` are surfaced as
-`*.handler` and `*.tool`. Tool internals such as `pattern/` and `extraParams/`
-do not appear as ordinary mounted directories.
+`*.handler` and `*.tool`. These callable files are readable; the first line is
+a stable `ct exec` shebang, and the same paths are valid under both
+`pieces/<piece-name>/...` and `entities/<piece-id>/...`. Tool internals such as
+`pattern/` and `extraParams/` do not appear as ordinary mounted directories.
 
 ## Name Resolution
 
@@ -182,6 +184,16 @@ entities/
 
 Entity IDs are truncated in the directory listing but can be accessed by prefix
 match (the filesystem resolves the shortest unambiguous prefix).
+
+Mounted callable paths accepted by `ct exec` are limited to the top-level
+callable forms:
+
+```text
+<space>/pieces/<piece-dir>/<input|result>/<name>.handler
+<space>/pieces/<piece-dir>/<input|result>/<name>.tool
+<space>/entities/<entity-id>/<input|result>/<name>.handler
+<space>/entities/<entity-id>/<input|result>/<name>.tool
+```
 
 ## Path Encoding
 

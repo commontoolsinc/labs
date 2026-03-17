@@ -50,6 +50,15 @@ Piece directories always contain: `input.json`, `input/`, `result.json`,
    - synthetic shebang text for `.handler` / `.tool` files
 5. Return the requested byte range (offset + size from the read call).
 
+Mounted callable reads return synthetic text whose first line is:
+
+```text
+#!<stable-ct-shim> exec
+```
+
+This is display-only for this change. The supported execution contract is
+`ct exec <mounted-callable-file> ...`.
+
 Reads are served from a cache. The cache is populated eagerly for subscribed
 cells and lazily for others.
 
@@ -99,8 +108,11 @@ target path parsing rules and examples.
 
 1. Buffer writes until `flush` or `release`.
 2. On flush: parse the buffer as JSON (the event payload).
-3. Send via `stream.send(payload)`.
-4. Return success (fire-and-forget; handler execution is async).
+3. Route the payload to the same top-level piece property path used by mounted
+   handler writes elsewhere in FUSE.
+4. Deduplicate `flush`/`release` so one buffered write triggers one handler
+   invocation.
+5. Return success after the write has been handed to the runtime.
 
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.
@@ -109,6 +121,10 @@ Handlers remain writable so legacy flows like
 
 Mounted `.tool` files are read-only. Writes fail with `EACCES`. Execute them
 through `ct exec <mounted-tool-file> [run] [flags]` instead.
+
+Mounted handler and tool files are both accepted by `ct exec` from either the
+`pieces/` or `entities/` view. Top-level `ct exec <file> --help` always prints
+callable help; after the verb, schema-derived flags own the namespace.
 
 ### `create` (New File)
 

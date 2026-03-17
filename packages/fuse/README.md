@@ -106,6 +106,11 @@ cat home/pieces/todo-app/meta.json
 # Mounted callables are readable and start with a ct exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
 head -n1 home/pieces/todo-app/result/search.tool
+
+# Aggregate JSON hides callable internals behind explicit sigils
+cat home/pieces/todo-app/result.json | jq '.addItem, .search'
+# => {"/handler":"addItem"}
+# => {"/tool":"search"}
 ```
 
 ### Writing
@@ -130,6 +135,12 @@ ct exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 
 # Run a mounted pattern tool (tool input flags come from the pattern schema)
 ct exec home/pieces/todo-app/result/search.tool --query "oat milk"
+
+# Top-level help describes the mounted callable instead of invoking it
+ct exec home/pieces/todo-app/result/search.tool --help
+
+# The same callable paths also exist under entities/<piece-id>/
+ct exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
 
 ### Creating and Deleting
