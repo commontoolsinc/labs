@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
-import { Router, type RouteContext } from "./router.tsx";
+import { type RouteContext, Router } from "./router.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface HomeInput {}
