@@ -325,9 +325,9 @@ Deno.test("schemaToTypeString formats fixture-style PatternToolResult without le
 
   assert(result.includes("search?:"), "should include the tool key");
   assert(result.includes("source"), "should describe the bound extraParams");
-  assert(!result.includes("pattern:"), "pattern internals should stay hidden");
+  assert(!/\bpattern\??:/.test(result), "pattern internals should stay hidden");
   assert(
-    !result.includes("extraParams:"),
+    !/\bextraParams\??:/.test(result),
     "extraParams internals should stay hidden",
   );
 });

@@ -181,10 +181,12 @@ export function buildJsonTree(
 
     // Add .json sibling, replacing stream/handler values with handler sigils
     const jsonValue = d === 0
-      ? transformCallableValues(
-        value,
-        classifyCallableEntry,
-      )
+      ? classifyCallableEntry
+        ? transformCallableValues(
+          value,
+          classifyCallableEntry,
+        )
+        : transformStreamValues(value)
       : value;
     tree.addFile(
       parentIno,

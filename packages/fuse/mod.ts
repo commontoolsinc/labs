@@ -329,10 +329,15 @@ async function main() {
         }
 
         const truncate = (flags & O_TRUNC) !== 0;
+        const initialBuffer = node.callableKind === "handler" && isWriting
+          ? new Uint8Array(0)
+          : truncate
+          ? new Uint8Array(0)
+          : node.script;
         const fh = handles.open(
           inode,
           flags,
-          truncate ? new Uint8Array(0) : node.script,
+          initialBuffer,
         );
         if (truncate) {
           handles.get(fh)!.dirty = true;
@@ -541,6 +546,8 @@ async function main() {
   ): Promise<number> {
     if (!handle || !handle.dirty || !bridge || handle.flushing) return 0;
     handle.flushing = true;
+    const flushVersion = handle.version;
+    const buffer = handle.buffer.slice();
 
     // Handler files: parse JSON and send to stream cell
     const callableNode = tree.getNode(handle.ino);
@@ -549,11 +556,13 @@ async function main() {
         callableNode?.kind === "callable" &&
         callableNode.callableKind === "handler"
       ) {
-        const text = new TextDecoder().decode(handle.buffer);
+        const text = new TextDecoder().decode(buffer);
         const value = JSON.parse(text.trim());
         await bridge.sendToHandler(handle.ino, value);
-        handle.dirty = false;
-        handle.buffer = new Uint8Array(0); // fire-and-forget
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.buffer = new Uint8Array(0); // fire-and-forget
+        }
         return 0;
       }
 
@@ -567,7 +576,7 @@ async function main() {
       const writePath = bridge.resolveWritePath(handle.ino);
       if (!writePath) return EACCES;
 
-      const text = new TextDecoder().decode(handle.buffer);
+      const text = new TextDecoder().decode(buffer);
       let value: unknown;
 
       if (writePath.isJsonFile) {
@@ -601,7 +610,9 @@ async function main() {
       }
 
       await bridge.writeValue(writePath, value);
-      handle.dirty = false;
+      if (handle.version === flushVersion) {
+        handle.dirty = false;
+      }
 
       // Optimistic tree update: update the file node content immediately.
       // The inode may have been invalidated by the subscription rebuild
@@ -626,6 +637,13 @@ async function main() {
       return EIO;
     } finally {
       handle.flushing = false;
+      if (handle.dirty && handle.version !== flushVersion) {
+        queueMicrotask(() => {
+          flushHandle(handle).catch((e) => {
+            console.error(`[fuse] flush retry error: ${e}`);
+          });
+        });
+      }
     }
   }
 

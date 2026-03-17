@@ -110,12 +110,25 @@ read_piece_value_or_default() {
   printf '%s\n' "$actual"
 }
 
+mount_is_active() {
+  local path="$1"
+  local canonical
+
+  canonical=$(cd -P -- "$path" >/dev/null 2>&1 && pwd) || return 1
+  mount | grep -Fq " on $canonical "
+}
+
 cleanup() {
   set +e
+  local can_remove_mountpoint=true
   if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
-    ct fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 || true
+    ct fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
+    if mount_is_active "$MOUNTPOINT"; then
+      >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed"
+      can_remove_mountpoint=false
+    fi
   fi
-  if [ -n "${MOUNTPOINT:-}" ]; then
+  if [ "$can_remove_mountpoint" = true ] && [ -n "${MOUNTPOINT:-}" ]; then
     rm -rf "$MOUNTPOINT"
   fi
   if [ -n "${IDENTITY:-}" ]; then

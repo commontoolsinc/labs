@@ -494,6 +494,21 @@ Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped ob
   });
 });
 
+Deno.test("buildJsonTree - root .json siblings keep ordinary pattern-shaped objects intact without a classifier", () => {
+  const tree = new FsTree();
+  const data = {
+    pattern: "literal-pattern",
+    extraParams: {
+      mode: "keep",
+    },
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const parsed = JSON.parse(getFileContent(tree, tree.rootIno, "result.json"));
+  assertEquals(parsed, data);
+});
+
 Deno.test("FsTree - addCallable creates callable handler node", () => {
   const tree = new FsTree();
   const dirIno = tree.addDir(tree.rootIno, "result", "object");
@@ -635,6 +650,10 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     undefined,
     0,
     (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (_key, value) => {
+      if (isHandlerCell(value) || isStreamValue(value)) return "handler";
+      return isPatternToolValue(value) ? "tool" : null;
+    },
   );
 
   const parsed = JSON.parse(getFileContent(tree, tree.rootIno, "result.json"));

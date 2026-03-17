@@ -55,10 +55,10 @@ These adjustments do not change scope or cost from the approved strategy.
 ## Named sources of truth used below
 
 - **User description**: The original feature request in the trycycle transcript.
-- **Implementation plan**: [docs/plans/2026-03-17-ct-exec-fuse-callables.md](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/docs/plans/2026-03-17-ct-exec-fuse-callables.md), especially `User-visible behavior`, `Important contracts`, and Tasks 1 to 5.
-- **FUSE spec**: [2-path-scheme.md](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/docs/specs/fuse-filesystem/2-path-scheme.md), [3-json-mapping.md](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/docs/specs/fuse-filesystem/3-json-mapping.md), and [4-read-write.md](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/docs/specs/fuse-filesystem/4-read-write.md).
-- **Handler CLI workflow doc**: [handlers-cli-testing.md](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/docs/common/workflows/handlers-cli-testing.md).
-- **Runner guardrails**: Existing tests in [cell-callbacks.test.ts](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/packages/runner/test/cell-callbacks.test.ts), [schema-format.test.ts](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/packages/runner/test/schema-format.test.ts), and [generate-object-tools.test.ts](/Users/berni/.codex/worktrees/8a6c/labs/.worktrees/codex/ct-exec-fuse-tools/packages/runner/test/generate-object-tools.test.ts).
+- **Implementation plan**: [docs/plans/2026-03-17-ct-exec-fuse-callables.md](./2026-03-17-ct-exec-fuse-callables.md), especially `User-visible behavior`, `Important contracts`, and Tasks 1 to 5.
+- **FUSE spec**: [2-path-scheme.md](../specs/fuse-filesystem/2-path-scheme.md), [3-json-mapping.md](../specs/fuse-filesystem/3-json-mapping.md), and [4-read-write.md](../specs/fuse-filesystem/4-read-write.md).
+- **Handler CLI workflow doc**: [handlers-cli-testing.md](../common/workflows/handlers-cli-testing.md).
+- **Runner guardrails**: Existing tests in [cell-callbacks.test.ts](../../packages/runner/test/cell-callbacks.test.ts), [schema-format.test.ts](../../packages/runner/test/schema-format.test.ts), and [generate-object-tools.test.ts](../../packages/runner/test/generate-object-tools.test.ts).
 
 ## Test plan
 

@@ -130,13 +130,22 @@ export const fuse = new Command()
       child.unref();
 
       const pid = child.pid;
-      await writeMountState(stateDir, {
-        pid,
-        mountpoint: absMountpoint,
-        apiUrl,
-        identity,
-        startedAt: new Date().toISOString(),
-      });
+      try {
+        await writeMountState(stateDir, {
+          pid,
+          mountpoint: absMountpoint,
+          apiUrl,
+          identity,
+          startedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        try {
+          Deno.kill(pid, "SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+        throw error;
+      }
 
       console.log(`FUSE mounted in background (PID ${pid})`);
       console.log(`  mountpoint: ${absMountpoint}`);
@@ -152,13 +161,23 @@ export const fuse = new Command()
         stderr: "inherit",
       });
       const child = cmd.spawn();
-      const statePath = await writeMountState(stateDir, {
-        pid: child.pid,
-        mountpoint: absMountpoint,
-        apiUrl,
-        identity,
-        startedAt: new Date().toISOString(),
-      });
+      let statePath: string;
+      try {
+        statePath = await writeMountState(stateDir, {
+          pid: child.pid,
+          mountpoint: absMountpoint,
+          apiUrl,
+          identity,
+          startedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        try {
+          Deno.kill(child.pid, "SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+        throw error;
+      }
 
       await awaitForegroundMountExit(child, statePath);
     }

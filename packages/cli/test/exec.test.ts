@@ -205,6 +205,15 @@ describe("parseExecArgs", () => {
     });
   });
 
+  it("preserves omitted non-object inputs as undefined", () => {
+    const primitive = parseExecArgs(
+      makeSpec("handler", { type: "number" }),
+      ["invoke"],
+    );
+
+    expect(primitive.input).toBeUndefined();
+  });
+
   it("rejects mixed --json and generated flags", () => {
     expect(() =>
       parseExecArgs(

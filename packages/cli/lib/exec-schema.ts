@@ -170,6 +170,8 @@ function parseObjectInput(
       ) {
         throw new Error("Invalid JSON for --json: expected object");
       }
+      // TODO: validate decoded --json input against the linked schema here so
+      // callers get field-level CLI errors before runner-side validation.
       Object.assign(input, parsed as Record<string, unknown>);
       usedJson = true;
       i++;
@@ -302,7 +304,7 @@ export function parseExecArgs(
 
   return {
     verb,
-    input: input ?? {},
+    input: properties ? input ?? {} : input,
     showHelp: false,
   };
 }
