@@ -3,64 +3,18 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
+import type { Schema } from "../builder/types.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
-
-/** The shape of fetchData's input cell. */
-type FetchDataInputs = {
-  url?: string;
-  mode?: "text" | "json";
-  options?: { body?: any; method?: string; headers?: Record<string, string> };
-};
-
-/**
- * Schema for fetchData inputs. Fully specifying the structure (except body,
- * which is `any`) lets cell.asSchema(schema).get() materialize nested
- * properties like options.headers as plain objects instead of proxies.
- */
-const fetchDataInputSchema = {
-  type: "object",
-  properties: {
-    url: { type: "string" },
-    mode: { type: "string" },
-    options: {
-      type: "object",
-      properties: {
-        body: {},
-        method: { type: "string" },
-        headers: {
-          type: "object",
-          additionalProperties: { type: "string" },
-        },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-function snapshotFetchDataInputs(
-  cell: Cell<FetchDataInputs>,
-): FetchDataInputs {
-  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
-    ({} as FetchDataInputs);
-  const mode = snapshot.mode === "text" || snapshot.mode === "json"
-    ? snapshot.mode
-    : undefined;
-  const body = snapshot.options?.body;
-  const options = snapshot.options
-    ? {
-      ...snapshot.options,
-      body: body !== undefined && typeof body !== "string"
-        ? JSON.stringify(body)
-        : body,
-    }
-    : undefined;
-  return { url: snapshot.url, mode, options };
-}
+import {
+  type FetchDataInputs,
+  type NormalizedFetchDataInputs,
+  snapshotFetchDataInputs,
+} from "./fetch-request.ts";
 
 /**
  * Fetch data from a URL.
@@ -251,7 +205,7 @@ export function fetchData(
             return;
           }
 
-          const { url, mode, options } = inputs;
+          const { url, mode, options } = inputs as NormalizedFetchDataInputs;
 
           // Clear any previous result/error when starting a new fetch
           // This ensures observers see a clean pending state
@@ -305,7 +259,7 @@ async function startFetch(
   inputsCell: Cell<FetchDataInputs>,
   url: string,
   mode: "text" | "json" | undefined,
-  options: FetchDataInputs["options"],
+  options: NormalizedFetchDataInputs["options"],
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,

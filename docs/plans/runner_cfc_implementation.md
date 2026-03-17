@@ -489,6 +489,19 @@ Primary file:
 - [x] Add tests covering exact match, audience/endpoint mismatch, payload/key
       mismatch, and missing required fields.
 
+### 6.13 Fetch Request Semantics Derivation
+
+- [x] Factor `fetchData` input normalization into a shared internal helper so
+      the builtin and CFC sink logic use the same request snapshot rules.
+- [x] Add a CFC helper that derives request semantics from normalized fetch
+      inputs (`audience`, endpoint override/default, `payloadDigest`,
+      `idempotencyKey`).
+- [x] Keep existing `fetchData` behavior unchanged by reusing the shared helper
+      in the builtin and re-running existing fetch mutex coverage.
+- [x] Add tests covering body normalization, gmail-style endpoint override,
+      default `METHOD path` endpoint derivation, and missing-URL fail-closed
+      behavior.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -815,6 +828,8 @@ Primary docs:
       handler flow before attaching any sink execution path.
 - [x] Step J.7: add the request-binding predicate a future sink adapter will
       need before touching `fetchData` or other commit points.
+- [x] Step J.8: derive concrete fetch request semantics from the existing
+      `fetchData` input model before adding intent-aware fetch execution.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

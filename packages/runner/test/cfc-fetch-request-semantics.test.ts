@@ -1,8 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  normalizeFetchDataInputs,
-} from "../src/builtins/fetch-request.ts";
+import { normalizeFetchDataInputs } from "../src/builtins/fetch-request.ts";
 import {
   deriveCfcFetchRequestSemantics,
 } from "../src/cfc/fetch-request-semantics.ts";

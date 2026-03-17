@@ -105,6 +105,16 @@ There is now also a request-binding predicate for future sink adapters:
 2. The predicate fails closed when any of those bindings are missing or
    mismatched.
 
+For `fetchData`, runner internals now also expose a shared request snapshot and
+semantics derivation path:
+
+1. `fetchData` input normalization (including structured body stringification)
+   lives in a shared helper, not inline in the builtin.
+2. CFC code can derive request semantics from that normalized snapshot using
+   the same body and header view the builtin uses at execution time.
+3. Endpoint class can be supplied explicitly when a sink policy/refiner needs a
+   logical endpoint name instead of the default `METHOD path` shape.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
