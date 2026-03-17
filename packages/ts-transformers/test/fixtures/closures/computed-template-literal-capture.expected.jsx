@@ -49,8 +49,7 @@ export default pattern((__ct_pattern_input: {
     type: "object",
     properties: {
         url: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         options: {
             type: "object",
@@ -65,8 +64,7 @@ export default pattern((__ct_pattern_input: {
                     required: ["Authorization"]
                 }
             },
-            required: ["headers"],
-            asOpaque: true
+            required: ["headers"]
         }
     },
     required: ["url", "options"]
