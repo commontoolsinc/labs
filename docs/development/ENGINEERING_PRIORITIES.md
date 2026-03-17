@@ -16,7 +16,7 @@ asking the right questions:
 Users don't think in these terms, but their satisfaction — or frustration —
 maps to them. Eventually each dimension should have an in-depth program
 document (like `PERFORMANCE_PROGRAM.md` for speed) that captures our
-principles, current state, strategy, and active projects.
+principles, strategy, and current state.
 
 Product owns the prioritization across these dimensions — they collect user
 feedback, assess the most urgent needs, and decide where we focus. Engineering
