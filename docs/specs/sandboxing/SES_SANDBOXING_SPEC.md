@@ -194,9 +194,9 @@ The `ts-transformers` package requires the following enhancements:
 
 | Transformation | Current Behavior | New Behavior |
 |----------------|------------------|--------------|
-| `computed(() => ...)` | → `derive({}, () => ...)` | → call to module-scope `lift` (when external refs exist) |
-| `action(() => ...)` | → `handler((_, {}) => ...)({})` | → call to module-scope `handler` (when external refs exist) |
-| inline `derive(input, fn)` | kept inline | → call to module-scope `lift` (when external refs exist) |
+| `computed(() => ...)` | → `derive({}, () => ...)` | → hoist `lift(...)` when the post-transform callback still depends on imports or module scope |
+| `action(() => ...)` | → `handler((_, {}) => ...)({})` | → hoist `handler(...)` when the post-transform callback still depends on imports or module scope |
+| inline `derive(input, fn)` | kept inline | → hoist `lift(...)` when the post-transform callback still depends on imports or module scope |
 | `lift(...)` | allowed inline | **ERROR** if not at module scope |
 | `handler(...)` | allowed inline | **ERROR** if not at module scope |
 | module-scope calls | minimal validation | strict allowlist enforcement |
@@ -505,26 +505,43 @@ structure if the emitted grammar is kept small and canonical.
 
 ### 4.3 Hoisting Inline Transformations
 
-Hoisting to module scope only occurs when the inline function body references
-external symbols (variables from the enclosing scope). Self-contained callbacks
-(where all identifiers are parameters or locally defined) remain inline — this
-is the default behavior, not merely an optimization.
+Hoisting decisions are made against the post-transform builder form, not the
+raw authored callback.
+
+By the time this hoisting pass runs:
+
+- `computed(...)` has already been rewritten to `derive(...)`
+- `action(...)` has already been rewritten to `handler(...)(params)`
+- closure lowering has already converted local closed-over values into explicit
+  callback parameters / params objects where possible
+- `mapWithPattern(...)` and `patternTool(...)` have already been expressed as
+  inner-scope `pattern(...)` forms with explicit captures
+
+The hoisting pass therefore only cares about what still crosses the callback
+boundary after those rewrites: remaining free variables, imported symbols, and
+module-scoped bindings.
+
+Self-contained callbacks remain inline. A callback is self-contained when, after
+the earlier rewrites, all referenced values are callback parameters or locals.
+This is the default behavior, not merely an optimization.
 
 **Detection criteria for leaving inline (no hoisting needed):**
-- No free variables (all identifiers are parameters or locally defined)
+- No remaining free variables after closure lowering
+- No imported symbol references
+- No module-scoped binding references
 - No `this` references
 - No `arguments` references
 - No `eval` or `Function` calls
 
 ```typescript
-// This stays inline (self-contained — no external references)
+// This stays inline (self-contained after normalization)
 const doubled = derive(props.value, x => x * 2);
 
-// This MUST be hoisted (references outer scope variable `multiplier`)
+// This MUST be hoisted (still references module scope after normalization)
 const doubled = derive(props.value, x => x * multiplier);
 ```
 
-#### 4.3.1 Computed → Lifted Call (when external references exist)
+#### 4.3.1 Computed / Derive Hoisting Rule
 
 **Before (current):**
 ```typescript
@@ -542,7 +559,18 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-**After transformation (new, only when external references exist):**
+If the post-transform derive callback is self-contained, it stays inline.
+
+If the post-transform derive callback still references imports or module scope,
+the transformer must hoist the builder factory, not the fully applied call.
+
+Concretely:
+
+- starting point: `derive(inputSchema, outputSchema, params, fn)`
+- hoist target: `lift(inputSchema, outputSchema, fn)`
+- original-site replacement: `hoistedLift(params)`
+
+**After transformation (new, when hoisting is required):**
 ```typescript
 // Hoisted to module scope
 const __computed_1 = lift<{ value: number }, number>(
@@ -555,7 +583,13 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-#### 4.3.2 Action → Handler Call (when external references exist)
+The same rule applies to explicit `derive(...)` calls:
+
+- if the post-transform callback is self-contained, keep `derive(...)` inline
+- if it still depends on imports or module scope, hoist `lift(...)` and leave
+  the application with `(params)` at the original location
+
+#### 4.3.2 Action / Handler Hoisting Rule
 
 **Before (current):**
 ```typescript
@@ -567,7 +601,19 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-**After transformation (new):**
+If the post-transform handler callback is self-contained, the inline
+`handler(...)(params)` form may remain at the original location.
+
+If the post-transform handler callback still references imports or module scope,
+the transformer must hoist the builder factory, not the final bound result.
+
+Concretely:
+
+- starting point: `handler(eventSchema, stateSchema, fn)(params)`
+- hoist target: `handler(eventSchema, stateSchema, fn)`
+- original-site replacement: `hoistedHandler(params)`
+
+**After transformation (when hoisting is required):**
 ```typescript
 // Hoisted to module scope
 const __action_1 = handler<void, { count: Cell<number> }>(
@@ -582,7 +628,12 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-#### 4.3.3 Inline Derive → Lifted Call (when external references exist)
+#### 4.3.3 Pattern-Based Inner-Scope Forms
+
+The `pattern(...)` forms created for `mapWithPattern(...)`,
+`filterWithPattern(...)`, `flatMapWithPattern(...)`, and `patternTool(...)`
+remain inner-scope constructs in this phase. They already carry their captures
+explicitly and are not the target of the module-hoisting rule above.
 
 **Before:**
 ```typescript
@@ -591,6 +642,16 @@ export const MyPattern = pattern<Input, Output>((props) => {
   return { total };
 });
 ```
+
+For reactive collection methods, the current transformation remains:
+
+- detect a reactive receiver
+- rewrite `.map()` / `.filter()` / `.flatMap()` to the corresponding
+  `*WithPattern(...)` form
+- keep the generated `pattern(...)` callback inline with explicit params/captures
+
+These transforms are driven by reactive receiver semantics, not by the
+module-hoisting rule.
 
 **After transformation:**
 ```typescript
@@ -1604,8 +1665,22 @@ module even if the hints are wrong or missing.
 
 #### 1.2 Hoist computed/action/derive when useful (Priority: High)
 
-Continue to hoist inline callbacks when external references exist, because that
-reduces the complexity of runtime direct-callback verification.
+Continue to hoist only when the post-transform builder callback still depends on
+imports or module scope. Earlier closure-lowering passes already internalize
+many local captures, so this pass is specifically about remaining external
+references after normalization.
+
+The hoist target must be the builder factory:
+
+- `derive(inputSchema, outputSchema, params, fn)` hoists as
+  `lift(inputSchema, outputSchema, fn)` and leaves the `(params)` call in place
+- `handler(eventSchema, stateSchema, fn)(params)` hoists as
+  `handler(eventSchema, stateSchema, fn)` and leaves the `(params)` call in
+  place
+
+Generated `pattern(...)` forms for `*WithPattern(...)` and `patternTool(...)`
+remain inner-scope transforms in this phase rather than becoming module-level
+hoists.
 
 ### Phase 2: Trusted Runtime Verification at the AMD Module Boundary
 
