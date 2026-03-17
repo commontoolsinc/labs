@@ -340,7 +340,7 @@ Primary files:
 - [x] Bind prepare success to the acting principal + trust-context snapshot used
       for evaluation; if that snapshot changes before commit, invalidate
       preparation.
-- [ ] Enforce clause-local release semantics across confidentiality CNF; do not
+- [x] Enforce clause-local release semantics across confidentiality CNF; do not
       add any "any one authorizer unlocks all clauses" shortcut.
 - [x] Apply trusted flow-precision gate:
       less-restrictive claim labels require trust in concept
@@ -581,7 +581,7 @@ Primary test location:
 - [ ] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
 - [x] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
 - [x] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
-- [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
+- [x] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
 - [x] `cfc-trust-context-change-invalidates-prepare.test.ts`
 - [x] `cfc-flow-precision.test.ts` covers builtin trust resolution from the
       acting principal's trust context, including fail-closed behavior without a
@@ -676,7 +676,7 @@ Primary docs:
       boundary-evaluated and not serialized into stored labels.
 - [x] Confirm the same concrete evidence may satisfy concept guards for one
       acting principal and fail for another.
-- [ ] Confirm clause-local release semantics prevent `User(A)` rewrites from
+- [x] Confirm clause-local release semantics prevent `User(A)` rewrites from
       implicitly authorizing independent `User(B)` / owner clauses.
 - [x] Confirm flow-precision claims are trust-gated by concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision` with
