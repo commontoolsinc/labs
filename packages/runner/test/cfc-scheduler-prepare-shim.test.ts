@@ -155,7 +155,7 @@ describe("CFC scheduler prepare shim", () => {
     runtime.scheduler.disablePullMode();
 
     let tx = runtime.edit();
-    const sourceCell = runtime.getCell<number[]>(
+    let sourceCell = runtime.getCell<number[]>(
       space,
       "cfc-prepare-flow-source",
       undefined,
@@ -182,6 +182,11 @@ describe("CFC scheduler prepare shim", () => {
       "/1": { classification: ["confidential"] },
     });
     await tx.commit();
+    sourceCell = runtime.getCell<number[]>(
+      space,
+      "cfc-prepare-flow-source",
+      undefined,
+    );
     await sourceCell.pull();
 
     const mapIdentity = deriveImplementationIdentity(
@@ -637,7 +642,7 @@ describe("CFC scheduler prepare shim", () => {
       undefined,
       tx,
     );
-    const sourceCell = runtime.getCell<number>(
+    let sourceCell = runtime.getCell<number>(
       space,
       "cfc-prepare-terminal-exactcopy-source",
       undefined,
@@ -666,6 +671,12 @@ describe("CFC scheduler prepare shim", () => {
       },
     });
     await tx.commit();
+    sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-exactcopy-source",
+      undefined,
+    );
+    await sourceCell.pull();
 
     let attempts = 0;
     let callbackStatus: string | undefined;
@@ -676,11 +687,26 @@ describe("CFC scheduler prepare shim", () => {
       (handlerTx, _event) => {
         attempts++;
         const source = Number(
-          sourceCell.withTx(handlerTx).asSchema(ifcNumberSchema).get() ?? 0,
+          handlerTx.readValueOrThrow({
+            space,
+            id: sourceCell.getAsNormalizedFullLink().id,
+            type: "application/json",
+            path: [],
+          }) ?? 0,
         );
-        targetCell.withTx(handlerTx).asSchema(ifcExactCopyNumberSchema).set(
-          source + 1,
-        );
+        handlerTx.writeOrThrow({
+          space,
+          id: targetCell.getAsNormalizedFullLink().id,
+          type: "application/json",
+          path: [],
+        }, source + 1);
+        recordCfcWriteSchemaContext(handlerTx, {
+          space,
+          id: targetCell.getAsNormalizedFullLink().id,
+          type: "application/json",
+          path: [],
+        }, ifcExactCopyNumberSchema);
+        handlerTx.markCfcRelevant("ifc-write-schema");
       },
       eventCell.getAsNormalizedFullLink(),
     );
