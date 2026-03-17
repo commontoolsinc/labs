@@ -512,6 +512,16 @@ Primary file:
 - [x] Add tests covering matching retry/consume behavior and fail-closed
       binding mismatch cases.
 
+### 6.15 Fetch Authorization Placement Guard
+
+- [x] Add a conservative helper that only accepts auth when the token appears
+      in the `Authorization` header and nowhere else in the normalized fetch
+      request.
+- [x] Treat query-string, body, or non-Authorization-header reuse of the same
+      token as structural mismatch.
+- [x] Add tests covering header-only allow, query/body leakage rejection, and
+      duplicate/missing-header rejection.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -842,6 +852,8 @@ Primary docs:
       `fetchData` input model before adding intent-aware fetch execution.
 - [x] Step J.9: add a fetch-specific intent commit wrapper before wiring the
       live `fetchData` builtin to use it.
+- [x] Step J.10: add the conservative fetch auth placement guard that the sink
+      gate will need before live builtin wiring.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

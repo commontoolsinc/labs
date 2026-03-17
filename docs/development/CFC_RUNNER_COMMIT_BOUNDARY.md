@@ -123,6 +123,14 @@ There is now also a thin intent-aware fetch commit wrapper:
 3. On success it reuses the generic intent retry/consume helper; on mismatch it
    fails closed without starting the side effect.
 
+The fetch path also now has a conservative authorization-placement guard:
+
+1. The same auth token must appear in `Authorization` and nowhere else in the
+   normalized request.
+2. Query-string reuse, body reuse, or reuse in another header fails closed.
+3. This is intentionally only the structural half of the sink gate; it does not
+   yet mint `AuthorizedRequest` or perform full endpoint policy rewriting.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

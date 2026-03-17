@@ -29,10 +29,10 @@ export function commitCfcFetchIntentWithRetries<T>(
     endpoint: options.endpoint,
   });
   if (!semantics || !intentRequestSemanticsMatch(intent, semantics)) {
-    return {
+    return Promise.resolve({
       success: false,
       error: "intent_binding_mismatch",
-    };
+    });
   }
 
   return commitCfcIntentWithRetries(

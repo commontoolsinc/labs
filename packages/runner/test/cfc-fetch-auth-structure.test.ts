@@ -81,6 +81,8 @@ describe("CFC fetch auth structure", () => {
     expect(fetchAuthorizationHeaderPlacementAllowed(duplicated, token)).toBe(
       false,
     );
-    expect(fetchAuthorizationHeaderPlacementAllowed(missing, token)).toBe(false);
+    expect(fetchAuthorizationHeaderPlacementAllowed(missing, token)).toBe(
+      false,
+    );
   });
 });
