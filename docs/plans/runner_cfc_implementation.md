@@ -363,14 +363,14 @@ Primary file:
 - [x] Pass acting principal + trust-context snapshot into prepare evaluation.
 - [x] Keep existing commit retry loop behavior where applicable.
 - [x] On retryable commit failure, ensure fresh tx reruns action and prepare.
-- [ ] Ensure retryable reruns use a fresh trust-context snapshot.
+- [x] Ensure retryable reruns use a fresh trust-context snapshot.
 
 ### 6.2 Event Handler Path
 
 - [x] Insert prepare step before commit in event execution flow.
 - [x] Preserve existing requeue retry behavior for retryable failures.
 - [x] Ensure no stale prepare state survives into requeued attempt.
-- [ ] Re-evaluate concept guards using the requeued attempt's acting principal +
+- [x] Re-evaluate concept guards using the requeued attempt's acting principal +
       trust-context snapshot.
 
 ### 6.3 Error Classification
