@@ -4,7 +4,7 @@
 
 **Goal:** Make mounted FUSE `.handler` files and new `.tool` files first-class CLI entrypoints by adding `ct exec <file> ...`, shebang-backed readable/executable callable files, schema-derived flag parsing/help, and real pattern-tool execution.
 
-**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files with a kind (`handler` or `tool`), a mounted path, a generated shebang payload, and an exact backing cell. `ct exec` resolves the mounted path through persisted mount metadata, reads mounted piece metadata to recover the stable piece ID behind that path, introspects the backing cell with `asSchemaFromLinks()`, derives the effective command schema (`invoke` for handlers, `run` for tools), then dispatches through the existing piece/runtime stack. Use a generated exec shim rather than guessing the user’s `ct` invocation so mounted files are actually executable from the shell in this repo’s `deno task ct` world.
+**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files with a kind (`handler` or `tool`), a mounted path, a generated shebang payload, and an exact backing cell. `ct exec` resolves the mounted path through persisted mount metadata, reads mounted piece metadata to recover the stable piece ID behind that path, introspects the backing cell with `asSchemaFromLinks()`, derives the effective command schema (`invoke` for handlers, `run` for tools), then dispatches through the existing piece/runtime stack. Reuse extracted runner callable-execution helpers for pattern-tool completion/serialization instead of open-coding a second `runtime.run(...)` flow in the CLI. Use a generated exec shim rather than guessing the user’s `ct` invocation so mounted files are actually executable from the shell in this repo’s `deno task ct` world.
 
 **Tech Stack:** Deno 2, Cliffy, `@commontools/piece`, `@commontools/runner`, FUSE low-level bindings, existing CLI integration shell harnesses.
 
@@ -51,7 +51,7 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 4. Persist the mount identity as an absolute path. Relative `--identity` values are valid at mount time but would break later `ct exec` calls launched from a different cwd.
 5. The exact cell used for schema discovery is the callable child cell, not the piece root. Always call `childCell.asSchemaFromLinks()` before classifying or rendering help.
 6. Handler execution must stay semantically aligned with existing write-to-handler behavior: write the payload through the same piece property path the FUSE flush path uses, then wait for runtime/piece sync.
-7. Tool execution must stay semantically aligned with existing `patternTool(...)` runtime behavior: run the underlying pattern with `input + extraParams`, then print the resulting value.
+7. Tool execution must stay semantically aligned with existing `patternTool(...)` runtime behavior: run the underlying pattern with `input + extraParams`, wait for the result cell using the same completion semantics as the runner’s existing tool path, then serialize/print the resulting value with the same runner serializer.
 
 ### Boundaries to keep sharp
 
@@ -77,8 +77,12 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
   - Minimal deployed pattern exposing one handler and one pattern tool for integration coverage.
 - `packages/fuse/callables.ts`
   - Callable classification helpers for FUSE (`handler` vs `tool`), shebang payload generation, JSON sigil replacement.
+- `packages/runner/src/callable-execution.ts`
+  - Shared callable execution + serialization helpers reused by `ct exec` and `llm-dialog` so pattern-tool result waiting does not drift.
 - `packages/runner/src/tool-schema.ts`
   - Shared schema helpers reused by `ct exec` and `llm-dialog` for stripping injected fields, deriving tool input schema, and describing output schema heuristically.
+- `packages/runner/test/callable-execution.test.ts`
+  - Characterization tests for callable result waiting and serialization behavior.
 - `packages/runner/test/tool-schema.test.ts`
   - Characterization tests for tool-schema derivation and output-schema heuristics.
 
@@ -105,7 +109,9 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 - `packages/cli/test/fuse.test.ts`
   - Cover mount-state encoding/lookup and shim generation.
 - `packages/runner/src/builtins/llm-dialog.ts`
-  - Reuse the extracted shared tool-schema helpers instead of keeping a second divergent normalization path.
+  - Reuse the extracted shared callable helpers instead of keeping a second divergent normalization/execution path.
+- `packages/runner/src/index.ts`
+  - Export the new runner callable helpers for the CLI package.
 - `packages/fuse/README.md`
   - Document `.tool`, readable/executable callable files, and `ct exec`.
 - `docs/specs/fuse-filesystem/2-path-scheme.md`
@@ -272,6 +278,7 @@ Add cases covering:
 2. longest-prefix mount resolution for a mounted file path
 3. stored identities are absolute paths, even when the mount command was given a relative key path
 4. generated shim content is executable text pointing at `packages/cli/mod.ts`
+5. stale mount-state entries are ignored so `ct exec` cannot attach to a dead mount
 
 Run:
 
@@ -303,7 +310,7 @@ export async function findMountForPath(absPath: string)
 export async function ensureExecShim(...)
 ```
 
-Keep the mountpoint-hash filename behavior so state cleanup remains stable.
+Keep the mountpoint-hash filename behavior so state cleanup remains stable. `findMountForPath(...)` must reject stale entries before returning a match.
 
 - [ ] **Step 3: Wire `ct fuse mount` to always write mount-state entries**
 
@@ -428,14 +435,17 @@ git add packages/fuse/types.ts packages/fuse/tree.ts packages/fuse/tree-builder.
 git commit -m "feat: expose fuse callables for handlers and tools"
 ```
 
-## Task 3: Extract Shared Tool-Schema Introspection
+## Task 3: Extract Shared Callable Schema And Execution Helpers
 
 **Files:**
+- Create: `packages/runner/src/callable-execution.ts`
 - Create: `packages/runner/src/tool-schema.ts`
+- Create: `packages/runner/test/callable-execution.test.ts`
 - Create: `packages/runner/test/tool-schema.test.ts`
 - Modify: `packages/runner/src/builtins/llm-dialog.ts`
+- Modify: `packages/runner/src/index.ts`
 
-- [ ] **Step 1: Add failing tests for tool input derivation and output-schema heuristics**
+- [ ] **Step 1: Add failing runner tests for callable schema derivation and execution semantics**
 
 Cover:
 
@@ -443,17 +453,19 @@ Cover:
 2. subtracting bound `extraParams` keys from the visible tool input schema
 3. preserving handler input schemas unchanged
 4. unwrapping common async result wrappers for output help
+5. waiting for a pattern-tool result cell with the same timeout/completion behavior `llm-dialog` uses today
+6. serializing the completed result with the same runner serializer instead of ad-hoc `JSON.stringify`
 
 Run:
 
 ```bash
 cd packages/runner
-deno test test/tool-schema.test.ts
+deno test test/tool-schema.test.ts test/callable-execution.test.ts
 ```
 
-Expected: FAIL because the shared helper file does not exist yet.
+Expected: FAIL because the shared helper files do not exist yet.
 
-- [ ] **Step 2: Extract the shared logic into `packages/runner/src/tool-schema.ts`**
+- [ ] **Step 2: Extract the shared logic into `packages/runner/src/tool-schema.ts` and `packages/runner/src/callable-execution.ts`**
 
 Move or re-home the logic that currently lives inline in `llm-dialog`:
 
@@ -463,13 +475,16 @@ export function normalizeCallableInputSchema(schema: unknown): JSONSchema
 export function isPatternToolSchema(schema: JSONSchema | undefined): boolean
 export function derivePatternToolInputSchema(...)
 export function describePatternToolOutputSchema(...)
+export async function executeCallablePattern(...)
+export async function executeCallableHandler(...)
+export function serializeCallableResult(...)
 ```
 
-Keep this helper pure and reusable from the CLI package.
+`executeCallablePattern(...)` must factor the non-LLM-specific subset of the existing `handleInvoke(...)` path: merge `extraParams`, create the result cell, wait for a result value with timeout, and serialize the finished value with the current runner serializer. Do not let `ct exec` become a second, weaker implementation based on `runtime.idle()` plus `JSON.stringify`.
 
-- [ ] **Step 3: Switch `llm-dialog` to the shared helper**
+- [ ] **Step 3: Switch `llm-dialog` to the shared helpers and export them**
 
-Replace the inline normalization path in `buildToolCatalog(...)` so `llm-dialog` and `ct exec` cannot drift on which fields are exposed.
+Replace the inline normalization path in `buildToolCatalog(...)` and the callable execution path in `handleInvoke(...)` so `llm-dialog` and `ct exec` cannot drift on which fields are exposed, how tool results settle, or how results are serialized. Re-export the helper(s) from `packages/runner/src/index.ts` so the CLI can import them through `@commontools/runner`.
 
 - [ ] **Step 4: Re-run the focused runner tests**
 
@@ -477,7 +492,7 @@ Run:
 
 ```bash
 cd packages/runner
-deno test test/tool-schema.test.ts test/llm-dialog-helpers.test.ts test/schema-format.test.ts
+deno test test/tool-schema.test.ts test/callable-execution.test.ts test/llm-dialog-helpers.test.ts test/schema-format.test.ts
 ```
 
 Expected: PASS.
@@ -485,8 +500,8 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/runner/src/tool-schema.ts packages/runner/src/builtins/llm-dialog.ts packages/runner/test/tool-schema.test.ts
-git commit -m "refactor: share callable schema introspection"
+git add packages/runner/src/callable-execution.ts packages/runner/src/tool-schema.ts packages/runner/src/builtins/llm-dialog.ts packages/runner/src/index.ts packages/runner/test/callable-execution.test.ts packages/runner/test/tool-schema.test.ts
+git commit -m "refactor: share callable runner helpers"
 ```
 
 ## Task 4: Build Dynamic Schema Flags And Help For `ct exec`
@@ -588,6 +603,7 @@ Add focused cases for:
 4. resolving the backing piece and cell from a mounted `.handler` path
 5. resolving the backing piece and cell from a mounted `.tool` path
 6. explicit verb override still working
+7. tool execution delegates to the shared runner callable helper instead of a CLI-local `runtime.run(...)` path
 
 Keep these pure or lightly mocked; the real runtime path is covered in Task 6.
 
@@ -622,18 +638,17 @@ Handler:
 
 1. derive input from flags / `--json`
 2. invoke handlers by reusing the same piece-property write semantics as the FUSE flush path (`piece[cellProp].set(value, [cellKey])`)
-3. wait for `runtime.idle()` and `manager.synced()`
+3. wait for `manager.synced()` after the write path settles
 4. exit `0` with no stdout payload unless there is an intentional CLI message on stderr
 
 Tool:
 
 1. derive `pattern`, `extraParams`, and effective input schema
-2. create a temporary result cell in the same space
-3. `runtime.run(tx, pattern, { ...input, ...extraParams }, resultCell)`
-4. wait for idle
-5. print the serialized result JSON to stdout only
+2. dispatch through the shared runner callable helper extracted in Task 3
+3. wait for the result cell using the same timeout/completion semantics as the existing runner tool path
+4. print the shared-helper serialized JSON to stdout only
 
-Use the same serialization rules as the existing runtime tool path where practical.
+Do not reimplement this with `runtime.idle()` plus `JSON.stringify(...)`; that path is weaker than the runner behavior already in production.
 
 - [ ] **Step 4: Wire the command into `ct`**
 
@@ -686,11 +701,14 @@ The script should:
 3. mount FUSE
 4. assert `.handler` and `.tool` entries exist
 5. `cat` each file and assert the first line starts with `#!` and contains ` exec`
-6. execute the mounted handler file directly
-7. execute `ct exec` against the mounted tool file
-8. assert the handler changed piece state
-9. assert the tool printed the expected JSON
-10. verify legacy `echo '{}' > file.handler` still works
+6. assert both `ct exec <handler-file> --help` / `ct exec <tool-file> --help` and direct `<handler-file> --help` / `<tool-file> --help` show top-level help
+7. assert both `ct exec <tool-file> run --help` and direct `<tool-file> run --help` are passed through as the schema field, not intercepted as CLI help
+8. execute the mounted handler file directly
+9. execute the mounted tool file directly
+10. execute `ct exec` against both the handler and tool files with explicit verbs
+11. assert the handler changed piece state
+12. assert the tool printed the expected JSON
+13. verify legacy `echo '{}' > file.handler` still works
 
 Run:
 
@@ -703,7 +721,7 @@ Expected: FAIL until the end-to-end surface is complete.
 
 - [ ] **Step 2: Implement the fixture and integration assertions**
 
-Keep the fixture minimal and deterministic. Avoid LLM-backed tools or external HTTP in this test.
+Keep the fixture minimal and deterministic. Avoid LLM-backed tools or external HTTP in this test. Make the tool result visibly depend on the input `help` field so the script can prove the user’s `run --help` precedence rule end to end.
 
 - [ ] **Step 3: Update docs to match the shipped behavior**
 
@@ -727,7 +745,7 @@ Run:
 
 ```bash
 cd packages/runner
-deno test test/tool-schema.test.ts test/llm-dialog-helpers.test.ts test/schema-format.test.ts
+deno test test/tool-schema.test.ts test/callable-execution.test.ts test/llm-dialog-helpers.test.ts test/schema-format.test.ts
 ```
 
 Run:
@@ -756,9 +774,9 @@ git commit -m "docs: document exec-backed fuse callables"
 ## Final Verification
 
 - [ ] `ct exec` works with explicit and implicit verbs for both `.handler` and `.tool`.
-- [ ] Direct execution of mounted callable files works from the shell because the files are executable and their first line is the generated shebang.
+- [ ] Direct execution of mounted callable files works from the shell for both `.handler` and `.tool` because the files are executable and their first line is the generated shebang.
 - [ ] Handler write-through (`echo ... > file.handler`) still works unchanged.
 - [ ] `.tool` hides `pattern/extraParams` internals from the mounted tree.
 - [ ] Tool help uses the normalized argument schema minus bound `extraParams`.
-- [ ] Top-level help is always available, and post-verb `--help` becomes the schema field when `help` exists.
+- [ ] Top-level help is always available, and post-verb `--help` becomes the schema field when `help` exists, both in `ct exec` and through direct file execution.
 - [ ] Foreground mounts are discoverable by `ct exec`, not just background mounts.
