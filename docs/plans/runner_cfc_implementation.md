@@ -111,7 +111,7 @@ effects and deterministic schema binding.
 - [x] Boundary prepare/policy evaluation is acting-principal scoped: the same
       concrete integrity may satisfy a concept guard for one user and not for
       another.
-- [ ] Rewriting one confidentiality clause must not authorize unrelated clauses;
+- [x] Rewriting one confidentiality clause must not authorize unrelated clauses;
       in particular, releasing `User(A)` does not release independent
       `User(B)` / owner clauses without their own policy path.
 - [x] When a schema flow-precision claim would be less restrictive than
@@ -707,10 +707,10 @@ Primary docs:
 - [x] Step G: complete Section 10 (legacy cleanup).
 - [x] Step H: complete Section 11 (full test matrix).
 - [x] Step I: complete Section 12 and 13 (rollout/docs) for baseline CFC work.
-- [ ] Step J: complete acting-principal trust-closure + flow-precision
+- [x] Step J: complete acting-principal trust-closure + flow-precision
       additions in Sections 1, 3, 5, 6, 11, and 13.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
-- [ ] Step L: re-run Section 12 and 13 cross-check after Step J/K.
+- [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
 ## 15. Direct CAS + Dual-Path Safety (Chapter 17, Deferred)
 
@@ -766,8 +766,8 @@ Primary files:
 
 ## 16. Open Items Tracked Separately
 
-- [ ] Broader runner TODO: handlers and transaction lifecycle behavior when
+- [-] Broader runner TODO: handlers and transaction lifecycle behavior when
       transactions are later aborted (tracked independently from CFC project).
-- [ ] Runtime-trust domain enforcement phase:
+- [-] Runtime-trust domain enforcement phase:
       attestation evidence ingestion, principal-scoped trust-set evaluation,
       and domain-confinement policy checks (device-locked vs CC-locked data).
