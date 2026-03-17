@@ -45,7 +45,9 @@ import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
   resetAllCountBaselines,
+  resetAllLoggerCounts,
   resetAllTimingBaselines,
+  resetAllTimingStats,
 } from "@commonfabric/utils/logger";
 
 /**
@@ -494,8 +496,8 @@ function printStorageStats(elapsedMs: number, limit = 16): void {
 
   const g = globalThis as unknown as GlobalWithLoggers;
   const countEntries: StorageCountEntry[] = [];
-  if (g.commontools?.logger) {
-    for (const [name, logger] of Object.entries(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
       if (!isStorageLoggerName(name)) continue;
       const c = logger.counts;
       if (c.total > 0) {
@@ -530,8 +532,8 @@ function printStorageStats(elapsedMs: number, limit = 16): void {
   }
 
   const keyEntries: StorageCountKeyEntry[] = [];
-  if (g.commontools?.logger) {
-    for (const [loggerName, logger] of Object.entries(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const [loggerName, logger] of Object.entries(g.commonfabric.logger)) {
       if (!isStorageLoggerName(loggerName) || !logger.countsByKey) continue;
       for (const [key, counts] of Object.entries(logger.countsByKey)) {
         if (counts.total === 0) continue;
@@ -710,6 +712,8 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
+  resetAllLoggerCounts();
+  resetAllTimingStats();
 
   // Collect runtime errors via the scheduler's error handler
   const runtimeErrors: ErrorWithContext[] = [];
@@ -854,6 +858,7 @@ export async function runTestPattern(
         true;
 
     if (options.verbose) {
+      console.log(`  Storage backend: ${storageManager.memoryVersion}`);
       console.log(`  Found ${testsValue.length} test steps`);
       printLoggerStats(
         performance.now() - startTime,
