@@ -461,6 +461,17 @@ Primary file:
 - [x] Add tests for idempotency-key derivation, request-shape construction, and
       short-intent window verification.
 
+### 6.10 Intent Consumption Bookkeeping Helpers
+
+- [x] Add runner-internal deterministic ids for consumed-intent cells and
+      per-attempt cells keyed by `(intentOnceId)` and
+      `(intentOnceId, attemptNumber)`.
+- [x] Add helper claims for consumed/attempt cells that use ordinary tx writes
+      so duplicate consumption bookkeeping collapses to normal CAS/conflict
+      behavior.
+- [x] Add tests covering stable consumed/attempt ids, attempt-number
+      separation, and committed dedup of repeated attempt/consumption claims.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -780,6 +791,9 @@ Primary docs:
       machinery exists.
 - [x] Step J.4: add short `IntentOnce` structure helpers and deterministic
       request bindings before introducing commit-point execution.
+- [x] Step J.5: add consumed/attempt bookkeeping helpers so later commit-point
+      execution can use bounded retries and dedup without inventing a separate
+      token store.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

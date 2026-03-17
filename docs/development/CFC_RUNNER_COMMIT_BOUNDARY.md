@@ -83,6 +83,13 @@ commit points:
 3. Short-intent verification is currently limited to the spec's <=5s duration
    window and does not yet execute or consume the intent.
 
+Intent consumption bookkeeping is now also present as an internal helper layer:
+
+1. Consumed-intent cells are deterministic from `intentOnceId`.
+2. Attempt cells are deterministic from `(intentOnceId, attemptNumber)`.
+3. Both claim paths use ordinary tx writes, so later bounded-retry execution can
+   reuse normal CAS/conflict behavior instead of a separate intent token store.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
