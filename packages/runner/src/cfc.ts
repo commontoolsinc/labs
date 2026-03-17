@@ -5,6 +5,7 @@ import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
+import { decodeJsonPointer } from "./link-types.ts";
 
 const logger = getLogger("cfc");
 
@@ -450,9 +451,7 @@ export class ContextualFlowControl {
       return undefined;
     }
     // URI fragment schemaRefs are JSONPointers, so split and unescape
-    const pathToDef = schemaRef.split("/").map((p) =>
-      p.replace("~1", "/").replace("~0", "~")
-    );
+    const pathToDef = decodeJsonPointer(schemaRef);
     // We don't support anchors yet (e.g. `"$ref": "#address"`)
     if (pathToDef[0] !== "#") {
       logger.warn(
