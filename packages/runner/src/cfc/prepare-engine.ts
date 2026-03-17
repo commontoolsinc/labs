@@ -45,6 +45,7 @@ import {
   type CfcTrustContext,
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
+import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -57,6 +58,7 @@ export interface PrepareBoundaryCommitOptions {
   readonly implementationIdentity?: CfcImplementationIdentity;
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+  readonly trustEvaluator?: CfcImplementationTrustEvaluator;
 }
 
 function CfcPrepareSchemaUnavailableError(
@@ -2143,6 +2145,7 @@ function verifyOutputTransitionsForAttempt(
       options.implementationIdentity,
       options.actingPrincipal,
       options.trustContext,
+      options.trustEvaluator,
     );
     const effectiveConsumedReadLabels =
       flowPrecisionSelection.consumedReadLabels;

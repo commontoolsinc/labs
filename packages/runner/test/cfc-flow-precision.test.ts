@@ -13,12 +13,12 @@ import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 import {
+  type CfcImplementationTrustEvaluator,
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
 } from "../src/cfc/trust-lattice.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Labels, URI } from "../src/storage/interface.ts";
-import type { CfcIntegrityTrustOptions } from "../src/cfc/integrity-trust.ts";
 
 const signer = await Identity.fromPassphrase("cfc flow precision test");
 const space = signer.did();
@@ -147,11 +147,7 @@ describe("CFC flow precision", () => {
       readonly implementationIdentity?: CfcImplementationIdentity;
       readonly actingPrincipal?: string;
       readonly trustContext?: CfcTrustContext;
-      readonly trustEvaluator?: (
-        identity: CfcImplementationIdentity | undefined,
-        concept: string,
-        options: CfcIntegrityTrustOptions,
-      ) => boolean;
+      readonly trustEvaluator?: CfcImplementationTrustEvaluator;
     },
   ): Promise<unknown> {
     const tx = runtime.edit();

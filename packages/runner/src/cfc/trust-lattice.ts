@@ -10,6 +10,12 @@ import {
 export const FLOW_TAINT_PRECISION_CONCEPT =
   "https://commonfabric.org/cfc/concepts/flow-taint-precision";
 
+export type CfcImplementationTrustEvaluator = (
+  identity: CfcImplementationIdentity | undefined,
+  concept: string,
+  options?: CfcIntegrityTrustOptions,
+) => boolean;
+
 export function isImplementationTrustedForConcept(
   identity: CfcImplementationIdentity | undefined,
   concept: string,

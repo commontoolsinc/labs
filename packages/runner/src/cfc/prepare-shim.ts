@@ -7,12 +7,14 @@ import type {
   CfcPrepareScopeOverrides,
   CfcTrustContext,
 } from "./integrity-trust.ts";
+import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 
 export interface PrepareCfcCommitIfNeededOptions {
   readonly enforceBoundary?: boolean;
   readonly implementationIdentity?: CfcImplementationIdentity;
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+  readonly trustEvaluator?: CfcImplementationTrustEvaluator;
 }
 
 export function isCommitBearingAttempt(
@@ -57,5 +59,6 @@ export async function prepareCfcCommitIfNeeded(
     implementationIdentity: prepareScope.implementationIdentity,
     actingPrincipal: prepareScope.actingPrincipal,
     trustContext: prepareScope.trustContext,
+    trustEvaluator: options.trustEvaluator,
   });
 }

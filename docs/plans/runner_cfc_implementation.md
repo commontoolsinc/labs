@@ -399,7 +399,7 @@ Primary file:
       code modules as `CodeHash(<hash>)`, built-ins as `Builtin(<moduleRef>)`.
 - [x] Preserve builtin identity even for `module.type === "ref"` by carrying
       the registry ref through node instantiation metadata.
-- [ ] Extend `PrepareBoundaryCommitOptions` in
+- [x] Extend `PrepareBoundaryCommitOptions` in
       `packages/runner/src/cfc/prepare-engine.ts` to accept identity + trust
       evaluator callback, so trust checks are deterministic and testable.
 - [x] Add trust concept constant in runner CFC internals for

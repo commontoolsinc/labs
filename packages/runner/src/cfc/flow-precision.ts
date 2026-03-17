@@ -13,6 +13,7 @@ import type {
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 import type { CfcTrustContext } from "./integrity-trust.ts";
 import {
+  type CfcImplementationTrustEvaluator,
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
 } from "./trust-lattice.ts";
@@ -431,6 +432,7 @@ export function selectFlowPrecisionConsumedReads(
   implementationIdentity: CfcImplementationIdentity | undefined,
   actingPrincipal?: string,
   trustContext?: CfcTrustContext,
+  trustEvaluator?: CfcImplementationTrustEvaluator,
 ): FlowPrecisionSelection {
   if (!rootSchema || consumedReadLabels.length === 0) {
     return {
@@ -535,7 +537,7 @@ export function selectFlowPrecisionConsumedReads(
     cfc,
   );
   const trusted = !trustRequired ||
-    isImplementationTrustedForConcept(
+    (trustEvaluator ?? isImplementationTrustedForConcept)(
       implementationIdentity,
       FLOW_TAINT_PRECISION_CONCEPT,
       { actingPrincipal, trustContext },
