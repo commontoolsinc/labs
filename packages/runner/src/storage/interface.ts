@@ -255,7 +255,7 @@ export interface IStorageNotificationCapability {
    * }
    * storage.subscribe(log(5));
    * ```
-  */
+   */
   subscribe(subscription: IStorageNotification): void;
 
   /**
