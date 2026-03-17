@@ -1,6 +1,11 @@
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { toFileUrl } from "@std/path";
-import { Server } from "../v2/server.ts";
+import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   type GraphUpdateMessage,
   MEMORY_V2_PROTOCOL,
@@ -69,6 +74,22 @@ const createServer = (store: string) =>
     store: new URL(store),
     subscriptionRefreshDelayMs: TEST_REFRESH_DELAY_MS,
   });
+
+Deno.test("memory v2 session registry rejects reopening a session id on a different space", () => {
+  const sessions = new SessionRegistry();
+  sessions.open("did:key:z6Mk-space-one", { sessionId: "session:fixed" }, 0);
+
+  assertThrows(
+    () =>
+      sessions.open(
+        "did:key:z6Mk-space-two",
+        { sessionId: "session:fixed" },
+        0,
+      ),
+    Error,
+    "session session:fixed is already bound to did:key:z6Mk-space-one",
+  );
+});
 
 Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
   const server = createServer("memory://memory-v2-server");

@@ -119,6 +119,11 @@ export class SessionRegistry {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
     const existing = this.#sessions.get(sessionId);
+    if (existing !== undefined && existing.space !== space) {
+      throw new Error(
+        `session ${sessionId} is already bound to ${existing.space}`,
+      );
+    }
     const seenSeq = session.seenSeq ?? existing?.seenSeq ?? 0;
     const state = {
       id: sessionId,
