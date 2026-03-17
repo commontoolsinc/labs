@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current `UnsafeEval`-based authored-pattern execution path with a single verified SES runtime that preserves valid pattern behavior, rejects unsafe module-load code before execution, keeps one Compartment per loaded pattern, and preserves mapped authored stack traces.
 
-**Architecture:** Keep the existing TypeScript-to-AMD pipeline and `runtimeDeps` ABI, but add a dedicated SES-oriented transformer pass that emits a tiny canonical wrapper language plus hoists only post-closure-lowered callbacks that still depend on imports or module scope. On the runner side, add a new `packages/runner/src/sandbox/` subsystem that preflights bundles, verifies AMD factories with a minimal recognizer, executes verified bundles in SES Compartments, records verified function references, and feeds the runner frozen function objects rather than raw source strings. Preserve the current `Engine` / `PatternManager` surface where possible, but remove authored `eval` fallback from the runtime path entirely.
+**Architecture:** Keep the existing TypeScript-to-AMD pipeline and `runtimeDeps` ABI, but split the SES transformer work into two stages: a post-closure-lowering analysis/hoist stage that records what must move to module scope, followed by a final late canonicalization stage that emits the tiny wrapper language only after the existing capability/schema passes are done. On the runner side, add a new `packages/runner/src/sandbox/` subsystem that preflights bundles, verifies AMD factories with a minimal recognizer, executes verified bundles in SES Compartments, records verified function references, and feeds the runner frozen function objects rather than raw source strings. Preserve the current `Engine` / `PatternManager` surface where possible, but remove authored `eval` fallback, authored string rehydration, and compiler-injected untrusted preludes from the runtime path entirely.
 
 **Tech Stack:** TypeScript AST transforms, `@commontools/js-compiler` AMD bundling, SES Compartments (`npm:ses`), Deno test, existing runner and generated-pattern integration harnesses.
 
@@ -49,6 +49,7 @@ These are implementation invariants, not aspirational guidance. Every task below
 
 5. **No authored runtime path depends on `module.implementation` string source.**
    Live pattern/module objects must carry function objects and stable verified implementation IDs. Stringified authored code is allowed only as inert display/debug metadata, not as executable input.
+   Builtin/ref module identifiers such as `"map"` or `"fetchData"` remain allowed where they already represent trusted internal modules rather than authored JavaScript source.
 
 6. **Pattern/module serialization must not silently reintroduce eval.**
    If a serialized pattern/module crosses a persistence boundary, it must either:
@@ -109,15 +110,18 @@ Implement the transformer/runtime pipeline in this order:
 
 1. Existing validation passes
 2. Existing `computed()` rewrite and closure lowering
-3. **New SES module-scope canonicalization/hoisting pass**
+3. **New SES hoist-analysis/module-scope classification pass**
 4. Existing capability/schema passes
-5. TypeScript emit to AMD bundle
-6. Bundle preflight
-7. AMD factory verification
-8. SES Compartment evaluation + function/data hardening
-9. Runner execution using verified function refs
+5. **New SES final canonicalization/wrapper-emission pass**
+6. TypeScript emit to AMD bundle
+7. Bundle preflight
+8. AMD factory verification
+9. SES Compartment evaluation + function/data hardening
+10. Runner execution using verified function refs
 
-The new SES transformer must run after closure lowering, because the hoisting criterion is based on what references remain **after** existing closure extraction, not on the authored callback text.
+The hoist-analysis stage must run after closure lowering, because the hoisting criterion is based on what references remain **after** existing closure extraction, not on the authored callback text.
+
+The final wrapper-emission stage must run after capability/schema passes, because those passes currently reason about raw `pattern` / `lift` / `handler` / `derive` forms. Do not wrap builders so early that later transformers must learn the wrapper language.
 
 ## File Map
 
@@ -131,9 +135,9 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 ### Compiler / transformer
 
 - Modify: `packages/ts-transformers/src/ct-pipeline.ts`
-  Insert the SES module-scope pass after closure lowering and before later schema/capability passes.
+  Insert the SES hoist-analysis stage after closure lowering and the final SES canonicalization stage after capability/schema passes.
 - Create: `packages/ts-transformers/src/transformers/ses-module-scope.ts`
-  Canonicalize top-level wrappers, emit sentinels, and perform post-closure-lowering hoist decisions.
+  Export the SES hoist-analysis and final canonicalization transformers plus shared analysis state.
 - Create: `packages/ts-transformers/src/transformers/ses-wrapper-helpers.ts`
   Shared helper builders for wrapper calls, item IDs, sentinel comments, and metadata emission.
 - Modify: `packages/ts-transformers/src/closures/strategies/derive-strategy.ts`
@@ -162,6 +166,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 
 ### Runner sandbox subsystem
 
+- Create: `packages/runner/src/sandbox/abi.ts`
+  Shared ABI literals and metadata shapes for wrapper names, sentinel prefixes, and `implementationRef` tagging used by verifier/runtime/tests.
 - Create: `packages/runner/src/sandbox/types.ts`
   Public sandbox interfaces and branded metadata types.
 - Create: `packages/runner/src/sandbox/token-scanner.ts`
@@ -213,6 +219,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
   Route surfaced authored errors through sandbox error mapping/formatting.
 - Modify: `packages/runner/src/function-cache.ts`
   Either remove the string-eval-oriented cache path or key any remaining cache entries by stable `implementationRef` metadata.
+- Modify: `packages/runner/src/builder/factory.ts`
+  Keep exported pattern metadata attachment working after the switch to verified function refs and late wrapper evaluation.
 - Modify: `packages/runner/src/builder/types.ts`
   Add `implementationRef` metadata on `Module` and any branded function metadata types needed by the runner.
 - Modify: `packages/runner/src/builder/module.ts`
@@ -232,6 +240,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 - Modify: `packages/runner/test/pattern-manager.test.ts`
 - Modify: `packages/runner/test/runtime.test.ts`
 - Modify: `packages/runner/test/module.test.ts`
+- Modify: `packages/runner/test/pattern.test.ts`
+- Modify: `packages/runner/test/function-cache.test.ts`
 - Modify: `packages/runner/test/stack-trace.test.ts`
 - Modify: `packages/runner/test/stack-trace-patterns.test.ts`
 - Create: `packages/generated-patterns/integration/patterns/ses-sandbox-smoke.test.ts`
@@ -239,7 +249,7 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 
 ## Task Breakdown
 
-### Task 1: Add SES Module-Scope Canonicalization And Hoisting
+### Task 1: Add SES Hoist Analysis And Final Canonical Wrapper Emission
 
 **Files:**
 - Create: `packages/ts-transformers/src/transformers/ses-module-scope.ts`
@@ -262,6 +272,7 @@ Add focused tests that cover:
 - `derive(...)`/`computed(...)` hoisting to `lift(...)` only when post-closure-lowering external references remain
 - `action(...)` hoisting to `handler(...)` only when post-closure-lowering external references remain
 - `patternTool(...)` / `*WithPattern(...)` staying inline
+- later capability/schema passes still seeing raw builder calls before the final canonical wrapper emission stage
 
 - [ ] **Step 2: Run the transformer tests to verify they fail**
 
@@ -273,15 +284,16 @@ deno test --allow-read --allow-write --allow-env \
   packages/ts-transformers/test/validation.test.ts
 ```
 
-Expected: FAIL because the canonical wrapper pass and hoist logic do not exist yet.
+Expected: FAIL because the SES hoist-analysis stage and late canonicalization stage do not exist yet.
 
-- [ ] **Step 3: Implement the new SES module-scope transformer**
+- [ ] **Step 3: Implement the SES hoist-analysis stage and the late canonicalization stage**
 
 Implement:
 - stable top-level item IDs
 - sentinel comments
 - exact wrapper call emission
 - hoist criteria based on remaining free vars/import/module refs after closure lowering
+- hoist metadata that survives later capability/schema passes without forcing those passes to understand the wrapper language
 - normalization of top-level functions into wrapped `const` assignments
 - normalization of exports to local bindings plus simple export wiring
 
@@ -289,9 +301,10 @@ Do **not** make the verifier responsible for understanding arbitrary author synt
 
 - [ ] **Step 4: Insert the pass at the correct pipeline point**
 
-Wire the new pass into `CommonToolsTransformerPipeline` after closure lowering and before later capability/schema passes so:
+Wire the new SES stages into `CommonToolsTransformerPipeline` so:
 - closure extraction has already happened
-- hoisted builders still receive later schema/capability annotations
+- capability/schema transformers still see raw builder forms
+- only the final post-schema stage emits the canonical wrapper grammar
 - source maps still chain through one normal emit path
 
 - [ ] **Step 5: Tighten diagnostics around placement/direct-callback rules**
@@ -370,6 +383,7 @@ Change `bundle.ts` and `amd-loader.ts` so the trusted runtime can:
 - identify the exact untrusted source region
 - compare the trusted outer wrapper shape against expected boilerplate
 - pass internal AMD hooks (`__ctAmdHooks`) into the loader without changing the external `runtimeDeps` ABI
+- ensure no compiler-injected authored prelude remains inside the untrusted source region; trusted setup such as console wiring must move into the trusted wrapper or later Compartment globals, not sit alongside authored module text
 
 Keep the public bundle contract the same:
 
@@ -433,6 +447,7 @@ git commit -m "feat: verify SES bundles before execution"
 ### Task 3: Implement Plain-Data Validation And Runtime Wrapper Helpers
 
 **Files:**
+- Create: `packages/runner/src/sandbox/abi.ts`
 - Create: `packages/runner/src/sandbox/plain-data.ts`
 - Create: `packages/runner/src/sandbox/runtime-helpers.ts`
 - Create: `packages/runner/src/sandbox/types.ts`
@@ -507,6 +522,7 @@ Expected: PASS.
 
 ```bash
 git add packages/runner/src/sandbox/types.ts \
+  packages/runner/src/sandbox/abi.ts \
   packages/runner/src/sandbox/plain-data.ts \
   packages/runner/src/sandbox/runtime-helpers.ts \
   packages/runner/src/sandbox/mod.ts \
@@ -628,6 +644,7 @@ git commit -m "feat: add SES runtime and pattern compartments"
 - Modify: `packages/runner/src/runner.ts`
 - Modify: `packages/runner/src/pattern-manager.ts`
 - Modify: `packages/runner/src/function-cache.ts`
+- Modify: `packages/runner/src/builder/factory.ts`
 - Modify: `packages/runner/src/builder/module.ts`
 - Modify: `packages/runner/src/builder/pattern.ts`
 - Modify: `packages/runner/src/builder/json-utils.ts`
@@ -635,6 +652,8 @@ git commit -m "feat: add SES runtime and pattern compartments"
 - Test: `packages/runner/test/pattern-manager.test.ts`
 - Test: `packages/runner/test/runtime.test.ts`
 - Test: `packages/runner/test/module.test.ts`
+- Test: `packages/runner/test/pattern.test.ts`
+- Test: `packages/runner/test/function-cache.test.ts`
 - Test: `packages/runner/test/sandbox/security.test.ts`
 
 - [ ] **Step 1: Write failing cutover tests**
@@ -646,6 +665,8 @@ Cover:
 - serialized JavaScript modules carry `implementationRef` metadata instead of authored source strings
 - saved/reloaded patterns still execute after recompilation + verified ref rebinding
 - nested/passed-through patterns keep working
+- existing serialization-oriented tests stop asserting authored function strings and instead assert the new `implementationRef` / preview contract
+- any remaining function cache behavior is keyed by stable verified identity rather than `JSON.stringify(module)`
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -658,17 +679,23 @@ ENV=test deno test --allow-ffi --allow-env --allow-read \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
+  packages/runner/test/pattern.test.ts \
+  packages/runner/test/function-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
 Expected: FAIL because the runtime still depends on `module.implementation` strings and `getInvocation()`.
 
-- [ ] **Step 3: Remove authored `getInvocation()` from the main runtime contract**
+- [ ] **Step 3: Remove authored `getInvocation()` and injected untrusted compile preludes from the main runtime contract**
 
 Update `Harness` and `Engine` so authored pattern execution flows only through:
 - compile
 - verified SES evaluate/load
 - direct invocation of frozen function objects
+
+At the same time:
+- stop injecting console shim source into compiled authored bundles
+- provide sandboxed `console` through trusted Compartment globals instead
 
 If a trusted internal eval helper still needs to exist, move it behind the sandbox subsystem and keep it out of authored code paths.
 
@@ -677,6 +704,7 @@ If a trusted internal eval helper still needs to exist, move it behind the sandb
 Change builder/pattern construction so:
 - live runtime objects retain function implementations
 - `implementationRef` metadata is copied onto modules
+- exported pattern metadata attachment in `builder/factory.ts` still works after evaluate/load no longer returns raw eval-originated functions
 - `toJSON()` remains explicit and separate from the live execution representation
 
 Do **not** eagerly stringify authored functions into `pattern.nodes`.
@@ -703,6 +731,8 @@ ENV=test deno test --allow-ffi --allow-env --allow-read \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
+  packages/runner/test/pattern.test.ts \
+  packages/runner/test/function-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
@@ -717,6 +747,7 @@ git add packages/runner/src/harness/types.ts \
   packages/runner/src/runner.ts \
   packages/runner/src/pattern-manager.ts \
   packages/runner/src/function-cache.ts \
+  packages/runner/src/builder/factory.ts \
   packages/runner/src/builder/module.ts \
   packages/runner/src/builder/pattern.ts \
   packages/runner/src/builder/json-utils.ts \
@@ -724,6 +755,8 @@ git add packages/runner/src/harness/types.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
+  packages/runner/test/pattern.test.ts \
+  packages/runner/test/function-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 git commit -m "feat: replace authored eval with verified function refs"
 ```
@@ -879,6 +912,7 @@ git commit -m "feat: land verified SES sandbox runtime"
 Before declaring the implementation done, verify all of the following:
 
 - [ ] No authored bundle reaches `compartment.evaluate(...)` before bundle preflight.
+- [ ] Real compiled bundles no longer contain compiler-injected authored preludes outside the trusted wrapper / top-level `define(...)` region.
 - [ ] No authored module factory reaches execution before verifier approval.
 - [ ] `import()` is rejected in v1.
 - [ ] Ambient authored globals do not include `fetch`, `Temporal`, randomness helpers, or other host-effectful objects.
