@@ -103,6 +103,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 | 4       | [04-protocol.md](./04-protocol.md)         | WebSocket transport, Message format, Commands (transact/query.subscribe/graph.query/branch), UCAN auth, Client API                                  |
 | 5       | [05-queries.md](./05-queries.md)           | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Entity references, Reactivity boundaries (classification deferred in phase 1) |
 | 6       | [06-branching.md](./06-branching.md)       | Branch lifecycle, Isolation, Merging, Conflict resolution, Point-in-time on branches, Branch diff, Depth limits                                     |
+| 7       | [07-op-views-and-annotations.md](./07-op-views-and-annotations.md) | Future work for collaborative field projections, storage-derived label side-data on materialized reads, and user-level anchored annotations          |
 
 ## Implementation Materials
 
