@@ -1,0 +1,28 @@
+import { Command } from "@cliffy/command";
+import { resolve } from "@std/path";
+import { executeMountedCallableFile } from "../lib/exec.ts";
+
+export const exec = new Command()
+  .name("exec")
+  .description("Execute a mounted callable file from a ct FUSE mount.")
+  .example(
+    "ct exec /tmp/ct/home/pieces/notes/result/add.handler invoke --query milk",
+    "Invoke a mounted handler with schema-derived flags.",
+  )
+  .example(
+    "ct exec /tmp/ct/home/pieces/notes/result/search.tool --query milk",
+    "Run a mounted tool using its default verb.",
+  )
+  .stopEarly()
+  .useRawArgs()
+  .arguments("<mountedFile:string> [tail...:string]")
+  .action(async (_options, mountedFile, ...tail) => {
+    const result = await executeMountedCallableFile(resolve(mountedFile), tail);
+    if (result.helpText) {
+      console.log(result.helpText);
+      return;
+    }
+    if (result.outputText) {
+      console.log(result.outputText);
+    }
+  });
