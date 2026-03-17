@@ -20,11 +20,10 @@ const initializeRuntime = async () => {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
     // Construct server-side compilation cache if enabled.
-    // Fingerprint is derived from git state; returns undefined when not
-    // in a git repo (e.g. Docker), which also disables the cache.
+    // Fingerprint priority: TOOLSHED_GIT_SHA > live git repo > disabled.
     let cachedCompiler: CachedCompiler | undefined;
     if (env.COMPILATION_CACHE_SERVER) {
-      const fingerprint = await computeGitFingerprint();
+      const fingerprint = await computeGitFingerprint(env.TOOLSHED_GIT_SHA);
       if (fingerprint) {
         cachedCompiler = new CachedCompiler(
           new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),

@@ -212,6 +212,10 @@ const EnvSchema = z.object({
   COMPILATION_CACHE_CLIENT: z.string().default("true").transform((
     v,
   ) => v === "true"),
+  // Git SHA to use as the compilation cache fingerprint.  Set at deploy time
+  // to the deployed commit.  Takes priority over live git auto-detection, so
+  // in local dev leave this unset to get dirty-file tracking.
+  TOOLSHED_GIT_SHA: z.string().optional(),
   // Directory for the server-side filesystem compilation cache.
   // Must be writable. In multi-process environments (e.g. common-cluster),
   // use distinct directories per process to avoid conflicts.

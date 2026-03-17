@@ -1,17 +1,28 @@
 /**
- * Compute a fingerprint from the current git state.
- * Used for server-side compilation cache invalidation.
+ * Compute a fingerprint for server-side compilation cache invalidation.
  *
- * **Server-only.** Requires Deno APIs and `git` on PATH. In the browser,
- * use `InitializationData.buildHash` (the worker bundle hash) instead.
+ * **Server-only.** Requires Deno APIs. In the browser, use
+ * `InitializationData.buildHash` (the worker bundle hash) instead.
  *
- * Returns undefined when not in a git repository (e.g., Docker deployment).
- * In that case, the compilation cache should be disabled — without git
- * we have no way to detect code changes.
+ * Priority:
+ * 1. `explicitSha` (e.g. `TOOLSHED_GIT_SHA` env var) — authoritative when set.
+ *    Used in Docker / binary deployments where the operator declares the
+ *    deployed commit. Hashed as `sha256(sha)`.
+ * 2. Live git repo (HEAD + dirty files) — auto-detected fallback for local dev.
+ *    Captures uncommitted changes so the cache invalidates during editing.
+ * 3. Returns `undefined` — no fingerprint available, cache should be disabled.
  *
  * See docs/specs/compilation-cache.md for design rationale.
  */
-export async function computeGitFingerprint(): Promise<string | undefined> {
+export async function computeGitFingerprint(
+  explicitSha?: string,
+): Promise<string | undefined> {
+  // Explicit SHA takes priority — the operator knows what's deployed.
+  if (explicitSha) {
+    return sha256(explicitSha);
+  }
+
+  // Fall back to live git state for local dev.
   try {
     // Resolve repo root so dirty file reads work regardless of CWD
     const repoRoot = await exec("git", ["rev-parse", "--show-toplevel"]);
@@ -45,7 +56,7 @@ export async function computeGitFingerprint(): Promise<string | undefined> {
 
     return sha256(head + contentHash);
   } catch {
-    // Not in a git repository — cache disabled
+    // Not in a git repository and no explicit SHA — cache disabled
     return undefined;
   }
 }

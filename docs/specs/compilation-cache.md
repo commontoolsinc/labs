@@ -205,15 +205,30 @@ This covers:
 Computed once at process startup. Cost is negligible: one `git` invocation plus
 reading a handful of dirty files (typically 0-5 in practice).
 
-If git is not available (e.g., Docker deployment with no `.git` directory),
-`computeGitFingerprint()` returns `undefined`. No fallback — the cache is
-simply disabled for that process. This is the correct behavior: without git
-we have no way to detect code changes, so we shouldn't serve cached output.
+`computeGitFingerprint()` accepts an optional explicit SHA (from the
+`TOOLSHED_GIT_SHA` environment variable). The priority is:
+
+1. **Explicit SHA** (`TOOLSHED_GIT_SHA`) — authoritative when set. Used in
+   Docker / binary deployments where the operator declares the deployed commit.
+   Hashed as `sha256(sha)`.
+2. **Live git repo** (HEAD + dirty files) — auto-detected fallback for local
+   dev. Captures uncommitted changes so the cache invalidates during editing.
+3. **`undefined`** — no fingerprint available, cache is disabled.
+
+The explicit SHA takes priority because when set, the operator is declaring the
+code identity. In Docker images built from a clean checkout, the commit SHA
+alone is sufficient — there are no dirty files to account for.
 
 ```typescript
 // Server fingerprint computation (Deno)
-// Returns undefined when not in a git repository.
-async function computeGitFingerprint(): Promise<string | undefined> {
+// Priority: explicit SHA (TOOLSHED_GIT_SHA) > live git > undefined.
+async function computeGitFingerprint(
+  explicitSha?: string,
+): Promise<string | undefined> {
+  // Explicit SHA takes priority — the operator knows what's deployed.
+  if (explicitSha) return sha256(explicitSha);
+
+  // Fall back to live git state for local dev.
   try {
     const head = await exec("git rev-parse HEAD");
     const dirty = await exec("git diff --name-only HEAD");
@@ -238,7 +253,7 @@ async function computeGitFingerprint(): Promise<string | undefined> {
     }
     return sha256(head + contentHash);
   } catch {
-    // Not in a git repository — cache disabled
+    // Not in a git repository and no explicit SHA — cache disabled
     return undefined;
   }
 }
@@ -431,8 +446,9 @@ const cachedCompiler = data.buildHash
   : undefined;
 
 // Server (in toolshed startup):
-// Only constructed when COMPILATION_CACHE_SERVER=true AND git fingerprint available.
-const fingerprint = await computeGitFingerprint();
+// Only constructed when COMPILATION_CACHE_SERVER=true AND a fingerprint is available.
+// Fingerprint priority: TOOLSHED_GIT_SHA > live git repo > disabled.
+const fingerprint = await computeGitFingerprint(env.TOOLSHED_GIT_SHA);
 const cachedCompiler = fingerprint
   ? new CachedCompiler(
       new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),
