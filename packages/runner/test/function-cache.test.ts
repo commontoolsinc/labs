@@ -4,11 +4,11 @@ import { FunctionCache } from "../src/function-cache.ts";
 import type { Module } from "../src/builder/types.ts";
 
 describe("FunctionCache", () => {
-  it("should cache and retrieve functions by module", () => {
+  it("should cache and retrieve functions by implementationRef", () => {
     const cache = new FunctionCache();
     const module: Module = {
       type: "javascript",
-      implementation: "() => 42",
+      implementationRef: "module:42",
     };
     const fn = () => 42;
 
@@ -18,27 +18,27 @@ describe("FunctionCache", () => {
     expect(cache.size).toBe(1);
   });
 
-  it("should use JSON.stringify for cache keys", () => {
+  it("should use implementationRef for cache keys", () => {
     const cache = new FunctionCache();
     const module1: Module = {
       type: "javascript",
-      implementation: "() => 1",
+      implementationRef: "module:1",
     };
     const module2: Module = {
       type: "javascript",
-      implementation: "() => 1", // Same content
+      implementationRef: "module:1",
     };
     const fn = () => 1;
 
     cache.set(module1, fn);
-    expect(cache.get(module2)).toBe(fn); // Should retrieve the same function
+    expect(cache.get(module2)).toBe(fn);
   });
 
   it("should overwrite functions with the same module key", () => {
     const cache = new FunctionCache();
     const module: Module = {
       type: "javascript",
-      implementation: "() => 1",
+      implementationRef: "module:1",
     };
     const fn1 = () => 1;
     const fn2 = () => 2;
@@ -55,12 +55,11 @@ describe("FunctionCache", () => {
     const cache = new FunctionCache();
     const module1: Module = {
       type: "javascript",
-      implementation: "() => 1",
+      implementationRef: "module:1",
     };
     const module2: Module = {
       type: "javascript",
-      implementation: "() => 1",
-      wrapper: "handler",
+      implementationRef: "module:2",
     };
     const fn1 = () => 1;
     const fn2 = () => 2;
@@ -77,11 +76,11 @@ describe("FunctionCache", () => {
     const cache = new FunctionCache();
     const module1: Module = {
       type: "javascript",
-      implementation: "() => 1",
+      implementationRef: "module:1",
     };
     const module2: Module = {
       type: "javascript",
-      implementation: "() => 2",
+      implementationRef: "module:2",
     };
 
     cache.set(module1, () => 1);
@@ -98,7 +97,7 @@ describe("FunctionCache", () => {
     const cache = new FunctionCache();
     const module: Module = {
       type: "javascript",
-      implementation: "() => 1",
+      implementationRef: "module:1",
     };
 
     expect(cache.get(module)).toBeUndefined();

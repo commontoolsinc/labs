@@ -25,6 +25,18 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
     assertThrows(() => verifyBundlePreflight(malicious));
     assertEquals((globalThis as { __sideEffect?: boolean }).__sideEffect, undefined);
   });
+
+  await t.step("rejects statements after the trusted AMD wrapper", () => {
+    const malicious = `${validBundle}globalThis.__after = true;`;
+    assertThrows(() => verifyBundlePreflight(malicious));
+    assertEquals((globalThis as { __after?: boolean }).__after, undefined);
+  });
+
+  await t.step("allows console use inside verified factories", () => {
+    const withConsole =
+      `((runtimeDeps={}) => {const { define, require } = ((hooks)=>({define:hooks.define,require:hooks.require}))({define(){},require(){}});define("main",["exports"],function(exports){console.log("loaded");/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ct_builder("lift","main.tsx#000:lifted",function(value){return value+1;});exports.default=lifted;});return require("main");});`;
+    verifyBundlePreflight(withConsole);
+  });
 });
 
 Deno.test("AMD factory verifier enforces canonical wrappers and dependency policy", async (t) => {
@@ -48,6 +60,28 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
           `function(exports){const lifted=suspicious("lift", function(value){return value+1;});exports.default=lifted;}`,
       })
     );
+  });
+
+  await t.step("rejects unexpected module-load statements even with a sentinel", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);globalThis.pwned = true;exports.default=value;}`,
+      })
+    );
+  });
+
+  await t.step("allows console module-load side effects while rejecting other globals", () => {
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["exports"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource:
+        `function(exports){console.log("allowed");/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
+    });
   });
 
   await t.step("rejects non-trusted imports and AMD async require", async () => {

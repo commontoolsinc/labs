@@ -996,6 +996,7 @@ export class Runner {
         // Cache JavaScript functions that are already function objects
         if (
           typeof module.implementation === "function" &&
+          module.implementationRef &&
           !this.functionCache.has(module)
         ) {
           this.functionCache.set(module, module.implementation);
@@ -1170,20 +1171,25 @@ export class Runner {
 
     let fn: (inputs: any) => any;
 
-    if (typeof module.implementation === "string") {
-      // Try to get from cache first
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached as (inputs: any) => any;
-      } else {
-        // Fall back to evaluating and cache it
-        fn = this.runtime.harness.getInvocation(module.implementation) as (
-          inputs: any,
-        ) => any;
+    if (typeof module.implementation === "function") {
+      fn = module.implementation as (inputs: any) => any;
+      if (module.implementationRef && !this.functionCache.has(module)) {
         this.functionCache.set(module, fn);
       }
+    } else if (module.implementationRef) {
+      const cached = this.functionCache.get(module);
+      if (!cached) {
+        throw new Error(
+          `Unknown verified implementationRef: ${module.implementationRef}`,
+        );
+      }
+      fn = cached as (inputs: any) => any;
+    } else if (typeof module.implementation === "string") {
+      throw new Error(
+        "Cannot execute a string-backed authored javascript module",
+      );
     } else {
-      fn = module.implementation as (inputs: any) => any;
+      throw new Error("JavaScript module is missing an executable implementation");
     }
 
     // Prefer .src (backup) over .name since name can be finicky

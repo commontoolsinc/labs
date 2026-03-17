@@ -63,6 +63,4 @@ export interface Harness extends EventTarget {
   ): Promise<Program>;
 
   invoke(fn: () => any): any;
-
-  getInvocation(source: string): HarnessedFunction;
 }

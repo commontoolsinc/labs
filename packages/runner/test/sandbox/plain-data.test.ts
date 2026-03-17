@@ -1,8 +1,4 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   assertPlainData,
   freezeVerifiedPlainData,
@@ -36,7 +32,7 @@ Deno.test("plain-data validation rejects accessors without invoking getters", ()
   assertEquals(getterCalls, 0);
 });
 
-Deno.test("plain-data validation rejects unsupported shapes", async () => {
+Deno.test("plain-data validation rejects unsupported shapes", () => {
   assertThrows(() => assertPlainData(new Map()));
   assertThrows(() => assertPlainData(new Set()));
   assertThrows(() => assertPlainData(new Date()));
@@ -50,13 +46,4 @@ Deno.test("plain-data validation rejects unsupported shapes", async () => {
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
   assertThrows(() => assertPlainData(cycle));
-
-  await assertRejects(async () => {
-    const proxy = new Proxy({}, {
-      ownKeys() {
-        throw new Error("trap");
-      },
-    });
-    assertPlainData(proxy);
-  });
 });

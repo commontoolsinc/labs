@@ -3,7 +3,6 @@ import {
   type CompileResult,
   type Exports,
   Harness,
-  HarnessedFunction,
   RuntimeProgram,
   TypeScriptHarnessProcessOptions,
 } from "./types.ts";
@@ -221,10 +220,6 @@ export class Engine extends EventTarget implements Harness {
       return fn();
     }
     return this.internals.isolate.value(fn).invoke().inner();
-  }
-
-  getInvocation(source: string): HarnessedFunction {
-    return eval(source);
   }
 
   // Map a single position to its original source location.

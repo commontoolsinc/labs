@@ -220,6 +220,33 @@ describe("runPattern", () => {
     expect(ran).toBe(true);
   });
 
+  it("rejects authored string-backed javascript modules", async () => {
+    const mockPattern: Pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: { result: { $alias: { path: ["internal", "result"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: "(value) => value * 2",
+          },
+          inputs: { $alias: { path: ["argument", "value"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects authored string-backed javascript modules",
+    );
+
+    await expect(
+      runtime.runSynced(resultCell, mockPattern, { value: 1 }),
+    ).rejects.toThrow(/string-backed authored javascript module/i);
+  });
+
   it("should handle incorrect inputs gracefully", async () => {
     let ran = false;
 

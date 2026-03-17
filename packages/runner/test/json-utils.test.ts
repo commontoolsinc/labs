@@ -6,6 +6,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import {
   createJsonSchema,
+  moduleToJSON,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -421,5 +422,30 @@ describe("createJsonSchema", () => {
         schema: false,
       },
     });
+  });
+});
+
+describe("moduleToJSON", () => {
+  it("serializes javascript modules by implementationRef instead of executable source", () => {
+    const implementation = Object.assign(
+      (value: number) => value * 2,
+      {
+        preview: "(value) => value * 2",
+        src: "main.tsx:1:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "javascript",
+      implementation,
+      implementationRef: "main.tsx#000:doubled",
+    });
+
+    expect(serialized).toMatchObject({
+      type: "javascript",
+      implementationRef: "main.tsx#000:doubled",
+      preview: "(value) => value * 2",
+      location: "main.tsx:1:1",
+    });
+    expect("implementation" in serialized).toBe(false);
   });
 });

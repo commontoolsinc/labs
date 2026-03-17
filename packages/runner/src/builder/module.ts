@@ -22,26 +22,25 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
+import { createRef } from "../create-ref.ts";
+import {
+  CT_CAPTURE_IDS,
+  CT_IMPLEMENTATION_REF,
+  CT_ITEM_ID,
+  CT_WRAPPER_KIND,
+  type VerifiedMetadataCarrier,
+  type VerifiedWrapperKind,
+} from "../sandbox/types.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    const location = getExternalSourceLocation();
-    if (location) {
-      Object.defineProperty(moduleSpec.implementation, "name", {
-        value: location,
-        configurable: true,
-      });
-      // Also set .src as backup (name can be finicky)
-      (moduleSpec.implementation as { src?: string }).src = location;
-    }
-    // Store function body preview for hover tooltips
-    const fnStr = moduleSpec.implementation.toString();
-    (moduleSpec.implementation as { preview?: string }).preview = fnStr.slice(
-      0,
-      200,
+    annotateImplementation(moduleSpec.implementation);
+    moduleSpec.implementationRef ??= ensureImplementationRef(
+      moduleSpec.implementation,
+      "fn",
     );
   }
 
@@ -132,6 +131,56 @@ function getExternalSourceLocation(): string | null {
   return null;
 }
 
+function annotateImplementation(implementation: Function): void {
+  const location = getExternalSourceLocation();
+  if (location) {
+    Object.defineProperty(implementation, "name", {
+      value: location,
+      configurable: true,
+    });
+    (implementation as { src?: string }).src = location;
+  }
+  const fnStr = implementation.toString();
+  (implementation as { preview?: string }).preview = fnStr.slice(0, 200);
+}
+
+function ensureImplementationRef(
+  implementation: Function,
+  kind: VerifiedWrapperKind,
+): string {
+  const metadata = implementation as Function & VerifiedMetadataCarrier;
+  const existing = metadata[CT_IMPLEMENTATION_REF];
+  if (existing) {
+    return existing;
+  }
+
+  const src = (implementation as { src?: string }).src ?? implementation.name;
+  const implementationRef = createRef({
+    kind,
+    source: src,
+    preview: implementation.toString(),
+  }, "verified implementation").toString();
+
+  defineMetadata(implementation, CT_IMPLEMENTATION_REF, implementationRef);
+  defineMetadata(implementation, CT_ITEM_ID, implementationRef);
+  defineMetadata(implementation, CT_WRAPPER_KIND, kind);
+  defineMetadata(implementation, CT_CAPTURE_IDS, Object.freeze([]));
+  return implementationRef;
+}
+
+function defineMetadata<T>(
+  target: object,
+  key: symbol,
+  value: T,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
 /** Declare a module
  *
  * @param implementation A function that takes an input and returns a result
@@ -205,32 +254,18 @@ function handlerInternal<E, T>(
     }
   }
 
-  // Attach source location and preview to handler function for debugging
-  if (typeof handler === "function") {
-    const location = getExternalSourceLocation();
-    if (location) {
-      Object.defineProperty(handler, "name", {
-        value: location,
-        configurable: true,
-      });
-      // Also set .src as backup (name can be finicky)
-      (handler as { src?: string }).src = location;
-    }
-    // Store function body preview for hover tooltips
-    const fnStr = handler.toString();
-    (handler as { preview?: string }).preview = fnStr.slice(0, 200);
-  }
-
   const schema = generateHandlerSchema(
     eventSchema,
     stateSchema as JSONSchema | undefined,
   );
 
+  annotateImplementation(handler!);
   const module: Handler<T, E> & toJSON & {
     bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
+    implementationRef: ensureImplementationRef(handler!, "handler"),
     wrapper: "handler",
     with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
@@ -294,6 +329,40 @@ export function handler<E, T>(
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
   return handlerInternal(eventSchema, stateSchema, handler);
+}
+
+export function createVerifiedHandlerFactory<E, T>(
+  implementation: (event: E, props: T) => any,
+): HandlerFactory<T, E> {
+  annotateImplementation(implementation);
+
+  const module: Handler<T, E> & toJSON & {
+    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
+  } = {
+    type: "javascript",
+    implementation,
+    implementationRef: ensureImplementationRef(implementation, "handler"),
+    wrapper: "handler",
+    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    toJSON: () => moduleToJSON(module),
+  };
+
+  const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
+    const eventStream = stream<E>(true as JSONSchema);
+    const node: NodeRef = {
+      module,
+      inputs: { $ctx: props, $event: eventStream },
+      outputs: {},
+      frame: getTopFrame(),
+    };
+
+    connectInputAndOutputs(node);
+
+    return eventStream;
+  }, module);
+
+  return factory;
 }
 
 export function derive<

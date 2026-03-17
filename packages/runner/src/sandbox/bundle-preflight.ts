@@ -1,50 +1,113 @@
-import { findBalancedRegion } from "./token-scanner.ts";
+import {
+  findBalancedRegion,
+  splitTopLevelStatements,
+} from "./token-scanner.ts";
 
 const AMD_LOADER_MARKER = "const { define, require } =";
 const DEFINE_MARKER = "define(";
+const BUNDLE_PREFIX = "((runtimeDeps={}) => {";
+const BUNDLE_SUFFIX = "});";
 
 export function extractBundleRegion(bundleSource: string): string {
-  const loaderIndex = bundleSource.indexOf(AMD_LOADER_MARKER);
-  if (loaderIndex < 0) {
-    throw new Error("Bundle is missing the trusted AMD loader prelude");
+  const normalizedSource = normalizeBundleSource(bundleSource);
+  if (!normalizedSource.startsWith(BUNDLE_PREFIX)) {
+    throw new Error("Bundle is missing the trusted AMD wrapper prelude");
   }
-  const firstDefineIndex = bundleSource.indexOf(DEFINE_MARKER, loaderIndex);
+  if (!normalizedSource.endsWith(BUNDLE_SUFFIX)) {
+    throw new Error("Bundle is missing the trusted AMD wrapper suffix");
+  }
+
+  const body = normalizedSource.slice(
+    BUNDLE_PREFIX.length,
+    normalizedSource.length - BUNDLE_SUFFIX.length,
+  );
+  const statements = splitTopLevelStatements(body);
+  const firstDefineIndex = statements.findIndex((statement) =>
+    stripTrailingSemicolon(statement).startsWith(DEFINE_MARKER)
+  );
   if (firstDefineIndex < 0) {
     throw new Error("Bundle does not register any AMD modules");
   }
-  const returnIndex = bundleSource.lastIndexOf("return require(");
+
+  const prelude = statements.slice(0, firstDefineIndex);
+  if (!prelude.some((statement) => statement.includes(AMD_LOADER_MARKER))) {
+    throw new Error("Bundle is missing the trusted AMD loader prelude");
+  }
+
+  const returnIndex = statements.findIndex((statement) =>
+    stripTrailingSemicolon(statement).startsWith("return require(")
+  );
   if (returnIndex < 0 || returnIndex < firstDefineIndex) {
     throw new Error("Bundle is missing the trusted return wrapper");
   }
 
-  const prefixRegion = bundleSource.slice(0, firstDefineIndex);
-  if (/(globalThis|window|document|console\.)/.test(prefixRegion)) {
-    throw new Error("Bundle contains untrusted code before the first define() call");
-  }
-
-  const region = bundleSource.slice(firstDefineIndex, returnIndex);
-  return region;
+  return statements.slice(firstDefineIndex, returnIndex).join("");
 }
 
 export function verifyBundlePreflight(bundleSource: string): void {
-  extractBundleRegion(bundleSource);
-  const region = extractTrustedRegion(bundleSource);
-  const trimmed = region.trim();
-  if (!trimmed.startsWith("define(")) {
-    throw new Error("Bundle region must start with define()");
+  const normalizedSource = normalizeBundleSource(bundleSource);
+  if (!normalizedSource.startsWith(BUNDLE_PREFIX) || !normalizedSource.endsWith(BUNDLE_SUFFIX)) {
+    throw new Error("Bundle is missing the trusted AMD wrapper structure");
   }
-  if (/(globalThis|window|document|console\.)/.test(region)) {
-    throw new Error("Bundle region contains untrusted top-level side effects");
+  const body = normalizedSource.slice(
+    BUNDLE_PREFIX.length,
+    normalizedSource.length - BUNDLE_SUFFIX.length,
+  );
+  const statements = splitTopLevelStatements(body);
+  let seenDefine = false;
+  let seenReturn = false;
+
+  for (const statement of statements) {
+    const normalized = stripTrailingSemicolon(statement);
+    if (normalized.startsWith(DEFINE_MARKER)) {
+      if (seenReturn) {
+        throw new Error("Bundle registers modules after the trusted return");
+      }
+      seenDefine = true;
+      continue;
+    }
+    if (normalized.startsWith("return require(")) {
+      seenReturn = true;
+      continue;
+    }
+    if (!seenDefine && isAllowedPreludeStatement(normalized)) {
+      continue;
+    }
+    if (seenDefine && !seenReturn) {
+      throw new Error("Bundle region contains untrusted top-level side effects");
+    }
+    throw new Error("Bundle contains untrusted wrapper epilogue code");
+  }
+
+  if (!seenDefine) {
+    throw new Error("Bundle does not register any AMD modules");
+  }
+  if (!seenReturn) {
+    throw new Error("Bundle is missing the trusted return wrapper");
   }
 }
 
-function extractTrustedRegion(bundleSource: string): string {
-  const firstDefineIndex = bundleSource.indexOf(DEFINE_MARKER);
-  const returnIndex = bundleSource.lastIndexOf("return require(");
-  if (firstDefineIndex < 0 || returnIndex < 0) {
-    throw new Error("Bundle is missing the expected AMD wrapper structure");
-  }
-  return bundleSource.slice(firstDefineIndex, returnIndex);
+function normalizeBundleSource(bundleSource: string): string {
+  return bundleSource
+    .split("\n")
+    .filter((line) =>
+      !line.startsWith("//# sourceMappingURL=") &&
+      !line.startsWith("//# sourceURL=")
+    )
+    .join("\n")
+    .trim();
+}
+
+function isAllowedPreludeStatement(statement: string): boolean {
+  return statement.startsWith("const __ctAmdHooks =") ||
+    statement.startsWith(AMD_LOADER_MARKER) ||
+    statement.startsWith("for (const [name, dep] of Object.entries(runtimeDeps))");
+}
+
+function stripTrailingSemicolon(statement: string): string {
+  return statement.endsWith(";")
+    ? statement.slice(0, -1).trim()
+    : statement.trim();
 }
 
 export function extractFirstFactoryBody(defineSource: string): string {

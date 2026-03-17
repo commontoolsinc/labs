@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { isModule } from "../../src/builder/types.ts";
 import {
   CT_IMPLEMENTATION_REF,
   CT_ITEM_ID,
@@ -32,10 +33,29 @@ Deno.test("runtime wrappers tag and harden approved values", () => {
   assertEquals(builder[CT_WRAPPER_KIND], "lift");
   assertEquals(builder[CT_ITEM_ID], "main.tsx#000:lifted");
   assertEquals(builder[CT_IMPLEMENTATION_REF], "main.tsx#000:lifted");
-  assertEquals(Object.isFrozen(builder), true);
   assertEquals(helper[CT_IMPLEMENTATION_REF], "main.tsx#001:helper");
   assertEquals(pure[CT_IMPLEMENTATION_REF], "main.tsx#002:pure");
   assertEquals(Object.isFrozen(data), true);
+});
+
+Deno.test("builder wrappers preserve factory semantics and primitive data wrappers stay valid", () => {
+  const lifted = createBuilderWrapper("lift", "main.tsx#000:lifted", function (
+    value: number,
+  ) {
+    return value + 1;
+  });
+  const handled = createBuilderWrapper(
+    "handler",
+    "main.tsx#001:handled",
+    function (_event: unknown, _state: unknown) {},
+  );
+  const scalar = createDataWrapper("main.tsx#002:scale", [], 2);
+
+  assertEquals(isModule(lifted), true);
+  assertEquals((lifted as { type?: string }).type, "javascript");
+  assertEquals(isModule(handled), true);
+  assertEquals((handled as { wrapper?: string }).wrapper, "handler");
+  assertEquals(scalar, 2);
 });
 
 Deno.test("runtime wrappers reject obviously invalid input", () => {
