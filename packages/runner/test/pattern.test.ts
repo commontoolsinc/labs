@@ -284,7 +284,7 @@ describe("pattern", () => {
         $alias: {
           path: ["internal", "__#1", "double"],
           schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
+            ifc: { classification: [["confidential"]] },
           },
         },
       },
@@ -298,7 +298,10 @@ describe("pattern", () => {
       x: {
         $alias: {
           path: ["argument", "x"],
-          schema: ArgumentSchema.properties?.x,
+          schema: {
+            ...ArgumentSchema.properties?.x,
+            ifc: { classification: [["confidential"]] },
+          },
         },
       },
     });
@@ -306,7 +309,7 @@ describe("pattern", () => {
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
         path: ["internal", "__#0"],
-        schema: { ifc: ArgumentSchema.properties.x.ifc },
+        schema: { ifc: { classification: [["confidential"]] } },
       },
     });
     expect(nodes[1].inputs).toMatchObject({
@@ -314,7 +317,7 @@ describe("pattern", () => {
         $alias: {
           path: ["internal", "__#0", "double"],
           schema: {
-            ifc: ArgumentSchema.properties.x.ifc,
+            ifc: { classification: [["confidential"]] },
           },
         },
       },
@@ -323,7 +326,7 @@ describe("pattern", () => {
       $alias: {
         path: ["internal", "__#1"],
         schema: {
-          ifc: ArgumentSchema.properties.x.ifc,
+          ifc: { classification: [["confidential"]] },
         },
       },
     });
@@ -399,19 +402,19 @@ describe("pattern", () => {
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
       path: ["internal", "__#0"],
-      schema: { ifc: { classification: ["confidential"] } },
+      schema: { ifc: { classification: [["confidential"]] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
           path: ["internal", "__#0", "capitalized"],
-          schema: { ifc: { classification: ["confidential"] } },
+          schema: { ifc: { classification: [["confidential"]] } },
         },
       },
     });
     expect(resultSchema).toMatchObject({
       ...ResultSchema,
-      ...{ ifc: { classification: ["confidential"] } },
+      ...{ ifc: { classification: [["confidential"]] } },
     });
 
     // Perhaps I should handle a similar pattern that only accesses the name

@@ -39,6 +39,7 @@ export interface FlowPrecisionSelection {
   readonly consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[];
   readonly outputPatternPath?: string;
   readonly sourcePath?: string;
+  readonly sourceEntityKey?: string;
   readonly usedClaim: boolean;
   readonly trusted: boolean;
   readonly mode?: "pointwise" | "elementLocalExpansion";
@@ -515,6 +516,7 @@ export function selectFlowPrecisionConsumedReads(
       consumedReadLabels,
       outputPatternPath: claim.outputPatternPath,
       sourcePath: claimSourcePath,
+      sourceEntityKey,
       usedClaim: false,
       trusted: false,
     };
@@ -542,6 +544,7 @@ export function selectFlowPrecisionConsumedReads(
       consumedReadLabels,
       outputPatternPath: claim.outputPatternPath,
       sourcePath: claimSourcePath,
+      sourceEntityKey,
       usedClaim: false,
       trusted: false,
     };
@@ -551,6 +554,7 @@ export function selectFlowPrecisionConsumedReads(
     consumedReadLabels: claimedConsumedReadLabels,
     outputPatternPath: claim.outputPatternPath,
     sourcePath: claimSourcePath,
+    sourceEntityKey,
     usedClaim: true,
     trusted,
     mode: pointwise ? "pointwise" : "elementLocalExpansion",

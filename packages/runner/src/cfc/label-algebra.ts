@@ -184,10 +184,14 @@ export function confidentialityDominates(
     return false;
   }
 
-  const actualKeys = new Set(actual.map((clause) => canonicalKey(clause as JSONValue)));
-  return minimum.every((clause) =>
-    actualKeys.has(canonicalKey(clause as JSONValue))
-  );
+  return minimum.every((minimumClause) => {
+    const minimumKeys = new Set(
+      minimumClause.map((atom) => canonicalKey(atom)),
+    );
+    return actual.some((actualClause) =>
+      actualClause.every((atom) => minimumKeys.has(canonicalKey(atom)))
+    );
+  });
 }
 
 export function confidentialitySatisfiesMax(

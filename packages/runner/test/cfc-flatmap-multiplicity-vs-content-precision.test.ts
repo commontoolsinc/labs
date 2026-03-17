@@ -215,8 +215,8 @@ describe("CFC flatMap multiplicity vs content precision", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.labels).toEqual({
-      "/": { classification: ["secret"] },
-      "/*": { classification: ["confidential"] },
+      "/": { classification: [["secret"]] },
+      "/*": { classification: [["confidential"]] },
     });
   });
 

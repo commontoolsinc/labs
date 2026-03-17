@@ -1,4 +1,8 @@
 import type { JSONSchema } from "../builder/types.ts";
+import {
+  normalizeConfidentialityLabel,
+  normalizeIntegrityLabel,
+} from "./label-algebra.ts";
 import { toHex } from "./shared.ts";
 
 const CFC_SCHEMA_HASH_VERSION = "cfc-schema-v1";
@@ -41,9 +45,14 @@ function canonicalizeSchemaValue(
     const record = value as Record<string, unknown>;
     const canonical: Record<string, CanonicalValue> = {};
     for (const key of Object.keys(record).sort()) {
-      const nextValue = record[key];
+      let nextValue = record[key];
       if (nextValue === undefined) {
         continue;
+      }
+      if (key === "classification") {
+        nextValue = normalizeConfidentialityLabel(nextValue) ?? nextValue;
+      } else if (key === "integrity") {
+        nextValue = normalizeIntegrityLabel(nextValue) ?? nextValue;
       }
       canonical[key] = canonicalizeSchemaValue(nextValue, visited);
     }

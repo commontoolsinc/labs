@@ -943,6 +943,23 @@ function strongestConsumedClassification(
   return consumed;
 }
 
+function strongestContainerStructuralClassification(
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  sourceEntityKey: string | undefined,
+  sourcePath: string | undefined,
+): CfcConfidentialityLabel | undefined {
+  if (!sourceEntityKey || !sourcePath) {
+    return strongestConsumedClassification(consumedReadLabels);
+  }
+
+  return strongestConsumedClassification(
+    consumedReadLabels.filter((consumed) =>
+      consumedReadEntityKey(consumed.read) !== sourceEntityKey ||
+      !isSameOrDescendantCanonicalPath(sourcePath, consumed.read.path)
+    ),
+  );
+}
+
 function fromCanonicalPath(path: string): string[] {
   if (path === "/" || path.length === 0) {
     return [];
@@ -2202,8 +2219,10 @@ function verifyOutputTransitionsForAttempt(
       collectDynamicWriteIntegrity(effectiveConsumedReadLabels),
     );
     if (flowPrecisionSelection.mode === "elementLocalExpansion") {
-      const conservativeClassification = strongestConsumedClassification(
+      const conservativeClassification = strongestContainerStructuralClassification(
         consumedReadLabels,
+        flowPrecisionSelection.sourceEntityKey,
+        flowPrecisionSelection.sourcePath,
       );
       if (
         !classificationDominates(

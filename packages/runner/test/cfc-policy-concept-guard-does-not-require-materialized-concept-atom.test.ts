@@ -133,12 +133,12 @@ describe("CFC policy concept guard trust closure", () => {
       path: ["cfc", "labels"],
     }) as {
       "/": {
-        classification?: readonly string[];
+        classification?: readonly (readonly string[])[];
         integrity?: readonly string[];
       };
     };
 
-    expect(labels["/"]?.classification).toEqual(["confidential"]);
+    expect(labels["/"]?.classification).toEqual([["confidential"]]);
     expect(labels["/"]?.integrity).toEqual(["runtime-attested-source"]);
     expect(labels["/"]?.integrity?.includes(conceptRequiredIntegrity)).toBe(
       false,

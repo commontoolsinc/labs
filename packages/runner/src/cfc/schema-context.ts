@@ -6,6 +6,14 @@ import type {
 } from "../storage/interface.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { cfcEntityKey } from "./shared.ts";
+import {
+  joinConfidentialityLabels,
+  joinIntegrityLabels,
+  type CfcConfidentialityLabel,
+  type CfcConfidentialityLabelInput,
+  type CfcIntegrityLabel,
+  type CfcIntegrityLabelInput,
+} from "./label-algebra.ts";
 
 type SchemaContextEntry = {
   schema: JSONSchema;
@@ -74,43 +82,37 @@ function mergeIfcAnnotations(
     return { ifc: leftIfc };
   }
 
-  const leftClassification = Array.isArray(leftIfc.classification)
-    ? leftIfc.classification.filter((v: unknown): v is string =>
-      typeof v === "string"
-    )
-    : [];
-  const rightClassification = Array.isArray(rightIfc.classification)
-    ? rightIfc.classification.filter((v: unknown): v is string =>
-      typeof v === "string"
-    )
-    : [];
-  const leftIntegrity = Array.isArray(leftIfc.integrity)
-    ? leftIfc.integrity.filter((v: unknown): v is string =>
-      typeof v === "string"
-    )
-    : [];
-  const rightIntegrity = Array.isArray(rightIfc.integrity)
-    ? rightIfc.integrity.filter((v: unknown): v is string =>
-      typeof v === "string"
-    )
-    : [];
-
-  const mergedClassification = [
-    ...new Set([...leftClassification, ...rightClassification]),
-  ].sort();
-  const mergedIntegrity = [
-    ...new Set([...leftIntegrity, ...rightIntegrity]),
-  ].sort();
+  const mergedClassification = joinConfidentialityLabels(
+    leftIfc.classification as
+      | CfcConfidentialityLabel
+      | CfcConfidentialityLabelInput
+      | undefined,
+    rightIfc.classification as
+      | CfcConfidentialityLabel
+      | CfcConfidentialityLabelInput
+      | undefined,
+  );
+  const mergedIntegrity = joinIntegrityLabels(
+    leftIfc.integrity as CfcIntegrityLabel | CfcIntegrityLabelInput | undefined,
+    rightIfc.integrity as
+      | CfcIntegrityLabel
+      | CfcIntegrityLabelInput
+      | undefined,
+  );
 
   const mergedIfc: Record<string, unknown> = {
     ...leftIfc,
     ...rightIfc,
   };
-  if (mergedClassification.length > 0) {
+  if (mergedClassification) {
     mergedIfc.classification = mergedClassification;
+  } else {
+    delete mergedIfc.classification;
   }
-  if (mergedIntegrity.length > 0) {
+  if (mergedIntegrity) {
     mergedIfc.integrity = mergedIntegrity;
+  } else {
+    delete mergedIfc.integrity;
   }
 
   return { ifc: mergedIfc };
@@ -233,18 +235,15 @@ export function recordCfcWriteSchemaContext(
   const pathLength = address.path.length;
   const projectedSchema = projectSchemaToEntityRoot(schema, address.path);
 
-  // Keep the shortest-path schema we saw for this entity in the attempt.
-  if (!existing || pathLength < existing.pathLength) {
+  if (!existing) {
     context.set(key, { schema: projectedSchema, pathLength });
     return;
   }
 
-  if (pathLength === existing.pathLength) {
-    context.set(key, {
-      schema: mergeProjectedSchemas(existing.schema, projectedSchema),
-      pathLength,
-    });
-  }
+  context.set(key, {
+    schema: mergeProjectedSchemas(existing.schema, projectedSchema),
+    pathLength: Math.min(pathLength, existing.pathLength),
+  });
 }
 
 export function getCfcWriteSchemaContext(

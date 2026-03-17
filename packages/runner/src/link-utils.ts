@@ -473,6 +473,18 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
   context: SanitizeContext,
   depth: number,
 ): any {
+  if (Array.isArray(schema)) {
+    return schema.map((item) =>
+      typeof item === "object" && item !== null
+        ? recursiveStripAsCellStreamOrOpaqueFromSchema(
+          item,
+          context,
+          depth + 1,
+        )
+        : item
+    );
+  }
+
   // Handle null/undefined/boolean schemas
   if (
     schema === null ||

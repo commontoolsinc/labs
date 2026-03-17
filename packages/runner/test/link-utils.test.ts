@@ -995,6 +995,19 @@ describe("link-utils", () => {
       const resultKept = sanitizeSchemaForLinks(schema, { keepAsOpaque: true });
       expect((resultKept as any).asOpaque).toBe(true);
     });
+
+    it("preserves nested CNF classification arrays inside IFC metadata", () => {
+      const schema = {
+        type: "number",
+        ifc: {
+          classification: [["secret"]],
+        },
+      } as const;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual(schema);
+    });
   });
 
   describe("createDataCellURI", () => {

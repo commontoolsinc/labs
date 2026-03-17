@@ -125,7 +125,7 @@ export {
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
-export { Classification, ContextualFlowControl } from "./cfc.ts";
+export { ContextualFlowControl } from "./cfc.ts";
 export type { Mutable } from "@commontools/utils/types";
 export {
   RuntimeTelemetry,

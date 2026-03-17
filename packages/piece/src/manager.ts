@@ -1,6 +1,5 @@
 import {
   type Cell,
-  Classification,
   EntityId,
   getEntityId,
   isCell,
@@ -225,7 +224,7 @@ export class PieceManager {
     // this bit to work, so we elevate this request.
     const privilegedSchema = {
       ...pieceListSchema,
-      ifc: { classification: [Classification.Secret] },
+      ifc: { classification: ["secret"] },
     } as const satisfies JSONSchema;
     return cell.asSchema(privilegedSchema).sync();
   }

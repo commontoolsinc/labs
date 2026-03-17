@@ -5,7 +5,9 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
+import { markCfcRelevantForSchema } from "../src/cfc/relevance.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
+import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { URI } from "../src/storage/interface.ts";
 
@@ -214,10 +216,10 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/": {
-        classification: ["secret"],
+        classification: [["secret"]],
       },
       "/count": {
-        classification: ["secret"],
+        classification: [["secret"]],
       },
     });
   });
@@ -246,16 +248,16 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/": {
-        classification: ["confidential"],
+        classification: [["confidential"]],
       },
       "/public": {
-        classification: ["confidential"],
+        classification: [["confidential"]],
       },
       "/secret": {
-        classification: ["secret"],
+        classification: [["confidential"], ["secret"]],
       },
       "/signed": {
-        classification: ["confidential"],
+        classification: [["confidential"]],
         integrity: ["trusted-source"],
       },
     });
@@ -284,10 +286,10 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/variant": {
-        classification: ["secret"],
+        classification: [["secret"]],
       },
       "/mirrored": {
-        classification: ["confidential"],
+        classification: [["confidential"]],
       },
     });
   });
@@ -595,14 +597,28 @@ describe("CFC prepare schema hash", () => {
     expect(commit.error).toBeUndefined();
 
     tx = runtime.edit();
-    const sameCell = runtime.getCell<{ a: number; b: string }>(
+    const address = {
       space,
-      "cfc-prepare-schemahash-sibling-context-merge",
-      siblingIfcObjectSchema,
-      tx,
-    );
-    sameCell.key("a").set(2);
-    sameCell.key("b").set("two");
+      id: link.id,
+      type: "application/json" as const,
+    };
+    markCfcRelevantForSchema(tx, siblingIfcObjectSchema, "test-sibling-context");
+    recordCfcWriteSchemaContext(tx, {
+      ...address,
+      path: ["a"],
+    }, siblingIfcObjectSchema);
+    recordCfcWriteSchemaContext(tx, {
+      ...address,
+      path: ["b"],
+    }, siblingIfcObjectSchema);
+    tx.writeOrThrow({
+      ...address,
+      path: ["a"],
+    }, 2);
+    tx.writeOrThrow({
+      ...address,
+      path: ["b"],
+    }, "two");
 
     await prepareCfcCommitIfNeeded(tx);
     commit = await tx.commit();

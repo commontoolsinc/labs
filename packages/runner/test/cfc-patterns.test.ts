@@ -180,7 +180,7 @@ describe("CFC pattern integration", () => {
     expect(
       ((metadata.labelsByPath as Record<string, Labels>)["/result"] ?? {})
         .classification,
-    ).toContain("secret");
+    ).toContainEqual(["secret"]);
     expect(getCfcDebugCounters().cfcPreparedTx).toBeGreaterThan(0);
   });
 

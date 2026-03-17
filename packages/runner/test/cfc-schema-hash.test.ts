@@ -44,4 +44,31 @@ describe("computeCfcSchemaHash", () => {
     const hashB = await computeCfcSchemaHash(schemaB);
     expect(hashA).not.toBe(hashB);
   });
+
+  it("treats legacy and normalized IFC label encodings as the same schema", async () => {
+    const legacySchema: JSONSchema = {
+      type: "object",
+      properties: {
+        value: {
+          type: "number",
+          ifc: { classification: ["secret"] },
+        },
+      },
+      ifc: { classification: ["secret"] },
+    };
+    const normalizedSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        value: {
+          type: "number",
+          ifc: { classification: [["secret"]] },
+        },
+      },
+      ifc: { classification: [["secret"]] },
+    };
+
+    const legacyHash = await computeCfcSchemaHash(legacySchema);
+    const normalizedHash = await computeCfcSchemaHash(normalizedSchema);
+    expect(legacyHash).toBe(normalizedHash);
+  });
 });

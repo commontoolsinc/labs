@@ -93,4 +93,16 @@ describe("CFC label algebra", () => {
     expect(confidentialitySatisfiesMax(actual, max)).toBe(true);
     expect(confidentialitySatisfiesMax(max, actual)).toBe(false);
   });
+
+  it("treats fewer alternatives within a clause as more restrictive", () => {
+    const weaker = normalizeConfidentialityLabel([
+      ["confidential", "secret"],
+    ])!;
+    const stronger = normalizeConfidentialityLabel([
+      ["confidential"],
+    ])!;
+
+    expect(confidentialityDominates(stronger, weaker)).toBe(true);
+    expect(confidentialityDominates(weaker, stronger)).toBe(false);
+  });
 });
