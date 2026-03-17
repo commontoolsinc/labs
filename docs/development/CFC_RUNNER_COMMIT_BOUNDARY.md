@@ -89,6 +89,9 @@ Intent consumption bookkeeping is now also present as an internal helper layer:
 2. Attempt cells are deterministic from `(intentOnceId, attemptNumber)`.
 3. Both claim paths use ordinary tx writes, so later bounded-retry execution can
    reuse normal CAS/conflict behavior instead of a separate intent token store.
+4. Consumed markers can carry committed-result metadata, which lets later
+   deduplicated executions return the already-committed result without
+   performing the side effect again.
 
 These pieces now compose through a runner-internal refiner helper:
 

@@ -4,6 +4,7 @@ import {
   type CfcIntentLifecycleClaimMarker,
   claimCfcIntentAttempt,
   claimCfcIntentConsumed,
+  readCfcIntentConsumedRecord,
 } from "./intent-consumption.ts";
 import type { CfcIntentOnce } from "./intent-refinement.ts";
 
@@ -12,6 +13,7 @@ export interface CfcIntentCommitResult {
   readonly deduplicated?: boolean;
   readonly error?: string;
   readonly attemptNumber?: number;
+  readonly result?: unknown;
 }
 
 export interface CommitCfcIntentWithRetriesOptions {
@@ -42,6 +44,23 @@ export async function commitCfcIntentWithRetries<T>(
   const now = options.now ?? (() => Date.now());
   if (now() > intent.exp) {
     return { success: false, error: "intent_expired" };
+  }
+
+  const consumedReadTx = runtime.edit();
+  const consumedRecord = readCfcIntentConsumedRecord(
+    runtime,
+    consumedReadTx,
+    space,
+    intent.id,
+  );
+  await consumedReadTx.abort();
+  if (consumedRecord) {
+    return {
+      success: true,
+      deduplicated: true,
+      result: (consumedRecord.committedResult as CfcIntentCommitResult | undefined)
+        ?.result,
+    };
   }
 
   for (let attempt = 1; attempt <= intent.maxAttempts; attempt++) {
@@ -78,13 +97,18 @@ export async function commitCfcIntentWithRetries<T>(
       consumeTx,
       space,
       intent.id,
+      {
+        committedResult: result,
+      },
     );
     if (consumedClaim.alreadyClaimed) {
       await consumeTx.abort();
       return {
         success: true,
         deduplicated: true,
-        attemptNumber: attempt,
+        result:
+          (consumedClaim.record as { committedResult?: CfcIntentCommitResult } | undefined)
+            ?.committedResult?.result,
       };
     }
 
@@ -99,7 +123,9 @@ export async function commitCfcIntentWithRetries<T>(
         return {
           success: true,
           deduplicated: true,
-          attemptNumber: attempt,
+          result:
+            (consumedClaim.record as { committedResult?: CfcIntentCommitResult } | undefined)
+              ?.committedResult?.result,
         };
       }
       return {
@@ -112,6 +138,7 @@ export async function commitCfcIntentWithRetries<T>(
     return {
       success: true,
       attemptNumber: attempt,
+      result: result.result,
     };
   }
 

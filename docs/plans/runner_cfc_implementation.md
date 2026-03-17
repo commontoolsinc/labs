@@ -469,6 +469,9 @@ Primary file:
 - [x] Add helper claims for consumed/attempt cells that use ordinary tx writes
       so duplicate consumption bookkeeping collapses to normal CAS/conflict
       behavior.
+- [x] Persist committed-result metadata on consumed intent markers so later
+      deduplicated executions can return the already-committed result without
+      re-running the side effect.
 - [x] Add tests covering stable consumed/attempt ids, attempt-number
       separation, and committed dedup of repeated attempt/consumption claims.
 

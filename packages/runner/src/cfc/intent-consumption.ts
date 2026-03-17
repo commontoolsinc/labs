@@ -21,6 +21,11 @@ export interface CfcIntentLifecycleClaimMarker {
   readonly space: MemorySpace;
 }
 
+export interface CfcIntentConsumedRecord {
+  readonly intentOnceId: string;
+  readonly committedResult?: unknown;
+}
+
 function deriveIntentLifecycleId(kind: string, value: unknown): string {
   const hash = canonicalHash(
     storableFromNativeValue({
@@ -61,17 +66,20 @@ function claimCfcIntentLifecycleCell(
 ): {
   readonly alreadyClaimed: boolean;
   readonly marker: CfcIntentLifecycleClaimMarker;
+  readonly record?: unknown;
 } {
   const cell = runtime.getCell(space, id, undefined, tx);
   const marker = {
     id: cell.getAsNormalizedFullLink().id,
     space,
   } satisfies CfcIntentLifecycleClaimMarker;
+  const existing = cell.withTx(tx).get();
 
-  if (cell.withTx(tx).get() !== undefined) {
+  if (existing !== undefined) {
     return {
       alreadyClaimed: true,
       marker,
+      record: existing,
     };
   }
 
@@ -91,6 +99,7 @@ export function claimCfcIntentAttempt(
 ): {
   readonly alreadyClaimed: boolean;
   readonly marker: CfcIntentLifecycleClaimMarker;
+  readonly record?: unknown;
 } {
   return claimCfcIntentLifecycleCell(
     runtime,
@@ -112,9 +121,11 @@ export function claimCfcIntentConsumed(
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   intentOnceId: string,
+  record: Omit<CfcIntentConsumedRecord, "intentOnceId"> = {},
 ): {
   readonly alreadyClaimed: boolean;
   readonly marker: CfcIntentLifecycleClaimMarker;
+  readonly record?: unknown;
 } {
   return claimCfcIntentLifecycleCell(
     runtime,
@@ -125,6 +136,23 @@ export function claimCfcIntentConsumed(
     }),
     {
       intentOnceId,
+      ...record,
     },
   );
+}
+
+export function readCfcIntentConsumedRecord(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  intentOnceId: string,
+): CfcIntentConsumedRecord | undefined {
+  return runtime.getCell(
+    space,
+    deriveCfcIntentConsumedId({
+      intentOnceId,
+    }),
+    undefined,
+    tx,
+  ).withTx(tx).get() as CfcIntentConsumedRecord | undefined;
 }
