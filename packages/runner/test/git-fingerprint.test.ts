@@ -9,7 +9,8 @@ describe("computeGitFingerprint", () => {
     // We're running inside a git repo, so this should succeed
     expect(fingerprint).toBeDefined();
     expect(typeof fingerprint).toBe("string");
-    expect(fingerprint!.length).toBe(64); // SHA-256 hex
+    // Clean tree → raw HEAD SHA (40 hex chars), dirty → sha256 (64 hex chars)
+    expect(fingerprint!.length).toBeGreaterThanOrEqual(40);
   });
 
   it("returns the same value on consecutive calls (clean tree)", async () => {
@@ -19,13 +20,19 @@ describe("computeGitFingerprint", () => {
     expect(first).toBe(second);
   });
 
+  it("explicit SHA is returned as-is", async () => {
+    const sha = "abc123def456";
+    const fingerprint = await computeGitFingerprint(sha);
+
+    expect(fingerprint).toBe(sha);
+  });
+
   it("explicit SHA takes priority over git", async () => {
     const fromGit = await computeGitFingerprint();
     const fromExplicit = await computeGitFingerprint("abc123");
 
     // We're in a git repo, but explicit SHA should still win
-    expect(fromExplicit).toBeDefined();
-    expect(fromExplicit!.length).toBe(64);
+    expect(fromExplicit).toBe("abc123");
     expect(fromExplicit).not.toBe(fromGit);
   });
 
@@ -46,11 +53,10 @@ describe("computeGitFingerprint", () => {
   it("returns undefined with no git and no explicit SHA", async () => {
     // Can't easily remove git from the test environment, but we can
     // verify the contract: no explicitSha + git failure → undefined.
-    // We test this indirectly via the implementation: the function
-    // returns sha256(explicitSha) when set, tries git, then undefined.
     // The "returns a string in a git repository" test proves the git
-    // path works; this test proves the explicit path works above.
-    // The undefined path is the catch block — tested by the toolshed
-    // integration (Docker deploys without .git or TOOLSHED_GIT_SHA).
+    // path works; the "explicit SHA is returned as-is" test proves
+    // the explicit path works. The undefined path is the catch block
+    // when both are absent — exercised in Docker deploys without
+    // .git or TOOLSHED_GIT_SHA.
   });
 });

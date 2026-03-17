@@ -208,25 +208,26 @@ reading a handful of dirty files (typically 0-5 in practice).
 `computeGitFingerprint()` accepts an optional explicit SHA (from the
 `TOOLSHED_GIT_SHA` environment variable). The priority is:
 
-1. **Explicit SHA** (`TOOLSHED_GIT_SHA`) — authoritative when set. Used in
-   Docker / binary deployments where the operator declares the deployed commit.
-   Hashed as `sha256(sha)`.
-2. **Live git repo** (HEAD + dirty files) — auto-detected fallback for local
-   dev. Captures uncommitted changes so the cache invalidates during editing.
-3. **`undefined`** — no fingerprint available, cache is disabled.
+1. **Explicit SHA** (`TOOLSHED_GIT_SHA`) — returned as-is. Used in Docker /
+   binary deployments where the operator declares the deployed commit.
+2. **Clean git repo** — returns HEAD SHA as-is.
+3. **Dirty git repo** — returns `sha256(head + contentHash)` (opaque, since it
+   combines HEAD with dirty file contents).
+4. **`undefined`** — no fingerprint available, cache is disabled.
 
 The explicit SHA takes priority because when set, the operator is declaring the
-code identity. In Docker images built from a clean checkout, the commit SHA
-alone is sufficient — there are no dirty files to account for.
+code identity. In production and clean-tree scenarios (1, 2), the fingerprint
+is a recognizable commit SHA — useful for tracing which server version compiled
+a cached entry. Only during active local editing (3) is it an opaque hash.
 
 ```typescript
 // Server fingerprint computation (Deno)
-// Priority: explicit SHA (TOOLSHED_GIT_SHA) > live git > undefined.
+// Priority: explicit SHA (TOOLSHED_GIT_SHA) > clean git > dirty git > undefined.
 async function computeGitFingerprint(
   explicitSha?: string,
 ): Promise<string | undefined> {
   // Explicit SHA takes priority — the operator knows what's deployed.
-  if (explicitSha) return sha256(explicitSha);
+  if (explicitSha) return explicitSha;
 
   // Fall back to live git state for local dev.
   try {
@@ -238,20 +239,18 @@ async function computeGitFingerprint(
     const dirtyFiles = [...dirty.split("\n"), ...untracked.split("\n")]
       .filter((f) => f.length > 0)
       .sort();
-    let contentHash = "";
-    if (dirtyFiles.length > 0) {
-      const parts: string[] = [];
-      for (const f of dirtyFiles) {
-        try {
-          parts.push(f + ":" + await Deno.readTextFile(f));
-        } catch {
-          // File was deleted — include path so deletion changes the hash
-          parts.push(f + ":DELETED");
-        }
+    // Clean tree — return HEAD SHA directly for traceability.
+    if (dirtyFiles.length === 0) return head;
+    // Dirty tree — hash HEAD + file contents into an opaque fingerprint.
+    const parts: string[] = [];
+    for (const f of dirtyFiles) {
+      try {
+        parts.push(f + ":" + await Deno.readTextFile(f));
+      } catch {
+        parts.push(f + ":DELETED");
       }
-      contentHash = await sha256(parts.join("\n"));
     }
-    return sha256(head + contentHash);
+    return sha256(head + await sha256(parts.join("\n")));
   } catch {
     // Not in a git repository — cache disabled
     return undefined;
