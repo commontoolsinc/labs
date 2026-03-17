@@ -8,7 +8,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import {
   builtinImplementationIdentity,
   deriveImplementationIdentity,
-  encodeImplementationIdentity,
+  encodeAnnotatedImplementationIdentity,
 } from "../src/cfc/implementation-identity.ts";
 import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
 import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
@@ -73,6 +73,9 @@ const flowPrecisionNumberSchema = {
 } as const satisfies JSONSchema;
 
 function createFlowPrecisionTrustContext(delegator: string): CfcTrustContext {
+  const annotatedMapAction = {
+    cfcImplementationIdentity: builtinImplementationIdentity("map"),
+  };
   return {
     delegations: [{
       delegator,
@@ -83,9 +86,7 @@ function createFlowPrecisionTrustContext(delegator: string): CfcTrustContext {
     }],
     statements: [{
       verifier: "did:key:cfc-scheduler-flow-precision-verifier",
-      concrete: encodeImplementationIdentity(
-        builtinImplementationIdentity("map"),
-      ),
+      concrete: encodeAnnotatedImplementationIdentity(annotatedMapAction),
       concept: FLOW_TAINT_PRECISION_CONCEPT,
     }],
   };

@@ -56,7 +56,10 @@ import {
   prepareCfcCommitIfNeeded,
   type PrepareCfcCommitIfNeededOptions,
 } from "./cfc/prepare-shim.ts";
-import type { CfcImplementationIdentity } from "./cfc/implementation-identity.ts";
+import {
+  type CfcImplementationIdentity,
+  getAnnotatedImplementationIdentity,
+} from "./cfc/implementation-identity.ts";
 import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
 import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import type {
@@ -3488,13 +3491,6 @@ function transactionAbortedFromError(
 
 function shouldRetryCommitError(error: CommitError): boolean {
   return !isCfcCommitError(error);
-}
-
-function getAnnotatedImplementationIdentity(
-  action: Action | EventHandler,
-): CfcImplementationIdentity | undefined {
-  const annotated = action as Partial<TelemetryAnnotations>;
-  return annotated.cfcImplementationIdentity;
 }
 
 function getRuntimePrepareOptions(

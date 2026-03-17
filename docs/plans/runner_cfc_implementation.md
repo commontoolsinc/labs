@@ -405,7 +405,7 @@ Primary file:
 - [x] Add trust concept constant in runner CFC internals for
       `https://commonfabric.org/cfc/concepts/flow-taint-precision` and use it
       in both enforcement code and tests.
-- [ ] Add helper in `packages/runner/src/cfc/` for deriving identity strings
+- [x] Add helper in `packages/runner/src/cfc/` for deriving identity strings
       from wrapped action metadata so prepare and tests share identical
       `CodeHash(...)` / `Builtin(...)` encoding rules.
 

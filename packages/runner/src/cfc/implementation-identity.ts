@@ -22,6 +22,10 @@ export type CfcImplementationIdentity =
     readonly kind: "unknown";
   };
 
+export interface CfcImplementationIdentityAnnotated {
+  readonly cfcImplementationIdentity?: CfcImplementationIdentity;
+}
+
 export function unknownImplementationIdentity(): CfcImplementationIdentity {
   return { kind: "unknown" };
 }
@@ -48,6 +52,27 @@ export function encodeImplementationIdentity(
     return `Builtin(${identity.name})`;
   }
   return `CodeHash(${identity.hash})`;
+}
+
+export function getAnnotatedImplementationIdentity(
+  annotated: unknown,
+): CfcImplementationIdentity | undefined {
+  if (
+    !annotated ||
+    (typeof annotated !== "object" && typeof annotated !== "function")
+  ) {
+    return undefined;
+  }
+  return (annotated as CfcImplementationIdentityAnnotated)
+    .cfcImplementationIdentity;
+}
+
+export function encodeAnnotatedImplementationIdentity(
+  annotated: unknown,
+): string {
+  return encodeImplementationIdentity(
+    getAnnotatedImplementationIdentity(annotated),
+  );
 }
 
 export function markBuiltinModule(
