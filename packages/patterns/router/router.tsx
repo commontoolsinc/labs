@@ -58,8 +58,10 @@ function parseQuery(queryString: string): Record<string, string> {
   if (!queryString) return {};
   const query: Record<string, string> = {};
   for (const pair of queryString.split("&")) {
-    const [key, value] = pair.split("=");
-    if (key) query[decodeURIComponent(key)] = decodeURIComponent(value ?? "");
+    const eqIndex = pair.indexOf("=");
+    const key = eqIndex === -1 ? pair : pair.slice(0, eqIndex);
+    const value = eqIndex === -1 ? "" : pair.slice(eqIndex + 1);
+    if (key) query[decodeURIComponent(key)] = decodeURIComponent(value);
   }
   return query;
 }

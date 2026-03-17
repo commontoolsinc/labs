@@ -6,12 +6,19 @@ export class CTLink extends BaseElement {
   @property({ type: String })
   declare to: string;
 
+  private onClick = (e: Event) => {
+    e.preventDefault();
+    this.emit("ct-route-change", { to: this.to });
+  };
+
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("click", (e: Event) => {
-      e.preventDefault();
-      this.emit("ct-route-change", { to: this.to });
-    });
+    this.addEventListener("click", this.onClick);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this.removeEventListener("click", this.onClick);
   }
 
   override render() {

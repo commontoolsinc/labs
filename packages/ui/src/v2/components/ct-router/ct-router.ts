@@ -13,7 +13,7 @@ export class CTRouter extends BaseElement {
   }
 
   onRouteChange = (e: Event) => {
-    e.stopImmediatePropagation();
+    e.stopPropagation();
     const { to } = (e as CustomEvent<{ to: string }>).detail;
     if (isCellHandle(this.path)) {
       this.path.set(to);
