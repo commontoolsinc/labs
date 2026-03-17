@@ -90,6 +90,13 @@ Intent consumption bookkeeping is now also present as an internal helper layer:
 3. Both claim paths use ordinary tx writes, so later bounded-retry execution can
    reuse normal CAS/conflict behavior instead of a separate intent token store.
 
+These pieces now compose through a runner-internal refiner helper:
+
+1. Handler code can take the current semantic event, claim refinement once,
+   and build a short `IntentOnce` value in the same transaction.
+2. If the same semantic event is processed again without scheduler-level dedup,
+   the helper returns `null` once the refinement claim already exists.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

@@ -209,3 +209,23 @@ export function claimCfcIntentRefinement(
     }),
   };
 }
+
+export function refineCfcIntentEventOnce<T>(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  sourceIntent: CfcEventEnvelope<CfcIntentEventPayload>,
+  options: CreateCfcIntentOnceOptions<T>,
+): CfcIntentOnce<T> | null {
+  const claim = claimCfcIntentRefinement(
+    runtime,
+    tx,
+    space,
+    sourceIntent.id,
+    options.refinerHash,
+  );
+  if (claim.alreadyRefined) {
+    return null;
+  }
+  return createCfcIntentOnce(sourceIntent, options);
+}

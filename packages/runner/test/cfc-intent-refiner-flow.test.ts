@@ -49,8 +49,9 @@ describe("CFC intent refiner flow", () => {
     runtime.scheduler.addEventHandler(
       (tx) => {
         handlerRuns++;
-        const sourceIntent =
-          tx.currentCfcEvent as CfcEventEnvelope<CfcIntentEventPayload>;
+        const sourceIntent = tx.currentCfcEvent as CfcEventEnvelope<
+          CfcIntentEventPayload
+        >;
         const intentOnce = refineCfcIntentEventOnce(
           runtime,
           tx,
@@ -89,8 +90,16 @@ describe("CFC intent refiner flow", () => {
       ],
     });
 
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), intentEvent, 0);
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), intentEvent, 0);
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      intentEvent,
+      0,
+    );
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      intentEvent,
+      0,
+    );
 
     await runtime.scheduler.idle();
     await runtime.scheduler.idle();

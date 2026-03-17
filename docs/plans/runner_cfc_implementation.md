@@ -472,6 +472,14 @@ Primary file:
 - [x] Add tests covering stable consumed/attempt ids, attempt-number
       separation, and committed dedup of repeated attempt/consumption claims.
 
+### 6.11 Idempotent Refiner Composition Helper
+
+- [x] Add a runner-internal helper that combines refinement claiming with
+      `IntentOnce` creation and returns `null` on duplicate refinement.
+- [x] Add an integration-style test that queues the same semantic event twice
+      with scheduler delivery left non-deduplicating and confirms only one
+      stored short intent is produced.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -794,6 +802,8 @@ Primary docs:
 - [x] Step J.5: add consumed/attempt bookkeeping helpers so later commit-point
       execution can use bounded retries and dedup without inventing a separate
       token store.
+- [x] Step J.6: prove the event/refinement/consumption helpers compose in a
+      handler flow before attaching any sink execution path.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
