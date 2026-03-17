@@ -424,6 +424,19 @@ Primary file:
 - [x] Treat handled-marker conflicts as benign dedup for scheduler event
       delivery instead of retryable failure.
 
+### 6.7 Semantic Intent Event Helpers
+
+- [x] Add a runner-internal helper for deriving stable semantic `IntentEvent`
+      ids from `(sourceGestureId, conditionHash, parameters)` using canonical
+      hashing.
+- [x] Add a runner-internal helper for building semantic intent-event
+      envelopes with explicit integrity/evidence and default
+      `once-per-handler` delivery.
+- [x] Keep semantic intent-event helpers layered on the existing envelope path
+      instead of creating a parallel scheduler event mechanism.
+- [x] Add tests for stable id derivation, event-envelope construction, and
+      dedup of repeated semantic intent events queued to the same handler.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -735,6 +748,9 @@ Primary docs:
 - [x] Step J.1: add event-envelope + once-claim foundation for later
       `IntentEvent` / `IntentOnce` work without yet introducing sink commit
       points.
+- [x] Step J.2: add semantic `IntentEvent` helpers on top of event envelopes
+      so later trusted UI/runtime code can mint stable intent events without
+      further scheduler changes.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

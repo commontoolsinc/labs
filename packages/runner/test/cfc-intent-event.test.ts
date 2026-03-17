@@ -149,8 +149,16 @@ describe("CFC intent events", () => {
       integrity: [{ type: "GestureProvenance" }],
     });
 
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), intentEvent, 0);
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), intentEvent, 0);
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      intentEvent,
+      0,
+    );
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      intentEvent,
+      0,
+    );
 
     await runtime.scheduler.idle();
     await runtime.scheduler.idle();

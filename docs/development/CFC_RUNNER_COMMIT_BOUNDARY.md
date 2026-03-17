@@ -54,6 +54,16 @@ This is the runner foundation for later `IntentEvent` / `IntentOnce` work:
 event consumption is expressed through ordinary tx conflict/CAS on derived
 entities instead of a separate token store.
 
+Runner internals now also expose a semantic `IntentEvent` helper layer:
+
+1. Semantic intent ids are derived deterministically from
+   `(sourceGestureId, conditionHash, parameters)`.
+2. Semantic intent envelopes carry explicit integrity/evidence and default to
+   `once-per-handler` delivery.
+3. These helpers reuse the same scheduler envelope path, so later trusted UI
+   or runtime code can mint semantic events without adding a second event
+   mechanism.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
