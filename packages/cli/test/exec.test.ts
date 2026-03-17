@@ -383,7 +383,7 @@ describe("renderExecHelp", () => {
       { invocationStyle: "direct" },
     );
 
-    expect(help).toContain("./legacyWrite.handler [invoke]");
+    expect(help).toContain("./legacyWrite.handler invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );

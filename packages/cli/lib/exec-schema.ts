@@ -515,6 +515,13 @@ function usageLine(
     .map(([key, propertySchema]) =>
       primaryFlagUsage(flagNameForKey(key), propertySchema)
     );
+  if (
+    spec.callableKind === "handler" &&
+    handlerAllowsInvokeWithoutInputs(spec.inputSchema) &&
+    requiredUsages.length === 0
+  ) {
+    return `${prefix} ${spec.defaultVerb}`;
+  }
   const suffix = requiredUsages.length > 0
     ? ` ${requiredUsages.join(" ")}`
     : "";
