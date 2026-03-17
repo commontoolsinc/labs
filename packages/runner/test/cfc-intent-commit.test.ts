@@ -4,8 +4,8 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
-  commitCfcIntentWithRetries,
   type CfcIntentCommitResult,
+  commitCfcIntentWithRetries,
 } from "../src/cfc/intent-commit.ts";
 import { claimCfcIntentConsumed } from "../src/cfc/intent-consumption.ts";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
@@ -70,12 +70,12 @@ describe("CFC intent commit helper", () => {
       runtime,
       space,
       intent,
-      async (attemptNumber: number) => {
+      (attemptNumber: number) => {
         seenAttempts.push(attemptNumber);
-        return {
+        return Promise.resolve({
           success: attemptNumber === 3,
           error: attemptNumber === 3 ? undefined : "temporary_failure",
-        } satisfies CfcIntentCommitResult;
+        } satisfies CfcIntentCommitResult);
       },
       { now: () => now },
     );
@@ -110,9 +110,9 @@ describe("CFC intent commit helper", () => {
       runtime,
       space,
       intent,
-      async () => {
+      () => {
         executions++;
-        return { success: true } satisfies CfcIntentCommitResult;
+        return Promise.resolve({ success: true } satisfies CfcIntentCommitResult);
       },
       { now: () => now },
     );
@@ -134,9 +134,9 @@ describe("CFC intent commit helper", () => {
       runtime,
       space,
       intent,
-      async () => {
+      () => {
         executions++;
-        return { success: true } satisfies CfcIntentCommitResult;
+        return Promise.resolve({ success: true } satisfies CfcIntentCommitResult);
       },
       { now: () => now },
     );

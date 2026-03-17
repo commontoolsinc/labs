@@ -480,6 +480,15 @@ Primary file:
       with scheduler delivery left non-deduplicating and confirms only one
       stored short intent is produced.
 
+### 6.12 Intent-to-Request Binding Predicate
+
+- [x] Add a runner-internal predicate for checking whether concrete request
+      semantics match a bound short `IntentOnce`.
+- [x] Fail closed on missing or mismatched `audience`, `endpoint`,
+      `payloadDigest`, or `idempotencyKey`.
+- [x] Add tests covering exact match, audience/endpoint mismatch, payload/key
+      mismatch, and missing required fields.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -804,6 +813,8 @@ Primary docs:
       token store.
 - [x] Step J.6: prove the event/refinement/consumption helpers compose in a
       handler flow before attaching any sink execution path.
+- [x] Step J.7: add the request-binding predicate a future sink adapter will
+      need before touching `fetchData` or other commit points.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

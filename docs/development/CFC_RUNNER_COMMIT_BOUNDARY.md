@@ -97,6 +97,14 @@ These pieces now compose through a runner-internal refiner helper:
 2. If the same semantic event is processed again without scheduler-level dedup,
    the helper returns `null` once the refinement claim already exists.
 
+There is now also a request-binding predicate for future sink adapters:
+
+1. A short `IntentOnce` can be checked against concrete request semantics using
+   exact matching on `audience`, `endpoint`, `payloadDigest`, and
+   `idempotencyKey`.
+2. The predicate fails closed when any of those bindings are missing or
+   mismatched.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
