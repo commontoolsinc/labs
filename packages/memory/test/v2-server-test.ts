@@ -677,7 +677,7 @@ Deno.test("memory v2 server cancels scheduled refresh when the last connection c
   takeResponse(messages, "tx-2");
 
   connection.close();
-  await sleep(30);
+  await sleep(100);
   assertEquals(flushCalls, 0);
   assertEquals(
     messages.filter((message) => message.type === "graph.update").length,
