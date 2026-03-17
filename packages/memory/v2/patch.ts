@@ -3,6 +3,7 @@ import type { PatchOp } from "../v2.ts";
 
 type JSONObject = Record<string, JSONValue>;
 type JSONContainer = JSONObject | JSONValue[];
+const MAX_ARRAY_INDEX = 2 ** 32 - 2;
 
 export const applyPatch = (state: JSONValue, ops: PatchOp[]): JSONValue => {
   // Clone once up front, then mutate the working copy per op.
@@ -136,7 +137,7 @@ const getAtPath = (root: JSONValue, path: string[]): JSONValue => {
   let current: JSONValue = root;
   for (const segment of path) {
     if (Array.isArray(current)) {
-      current = current[parseArrayIndex(segment)];
+      current = current[requireExistingArrayIndex(current, segment, path)];
     } else if (isObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
@@ -155,7 +156,7 @@ const getExistingParent = (
 
   for (const segment of path.slice(0, -1)) {
     if (Array.isArray(current)) {
-      current = current[parseArrayIndex(segment)];
+      current = current[requireExistingArrayIndex(current, segment, path)];
     } else if (isObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
@@ -172,7 +173,7 @@ const getExistingParent = (
   }
 
   if (Array.isArray(current)) {
-    parseArrayIndex(key);
+    requireExistingArrayIndex(current, key, path);
   }
 
   return { parent: current, key };
@@ -190,15 +191,7 @@ const getCreatableParent = (
     const next = path[index + 1]!;
 
     if (Array.isArray(current)) {
-      const slot = segment === "-"
-        ? current.length
-        : parseArrayInsertIndex(segment, current.length);
-      if (slot === current.length) {
-        current.push(createContainer(next));
-      } else if (current[slot] === undefined) {
-        current[slot] = createContainer(next);
-      }
-      current = current[slot];
+      current = current[requireExistingArrayIndex(current, segment, path)];
     } else if (isObject(current)) {
       if (!Object.hasOwn(current, segment)) {
         current[segment] = createContainer(next);
@@ -249,13 +242,29 @@ const parseArrayIndex = (segment: string): number => {
   if (!isArraySegment(segment)) {
     throw new Error(`invalid array index: ${segment}`);
   }
-  return Number(segment);
+  const index = Number(segment);
+  if (index > MAX_ARRAY_INDEX) {
+    throw new Error(`array index out of bounds: ${segment}`);
+  }
+  return index;
 };
 
 const parseArrayInsertIndex = (segment: string, length: number): number => {
   const index = parseArrayIndex(segment);
   if (index > length) {
     throw new Error(`array index out of bounds: ${segment}`);
+  }
+  return index;
+};
+
+const requireExistingArrayIndex = (
+  array: JSONValue[],
+  segment: string,
+  path: string[],
+): number => {
+  const index = parseArrayIndex(segment);
+  if (!Object.hasOwn(array, index)) {
+    throw new Error(`missing path ${encodePointer(path)}`);
   }
   return index;
 };
@@ -267,7 +276,8 @@ const isStrictPrefixPath = (
   prefix.length < path.length &&
   prefix.every((segment, index) => path[index] === segment);
 
-const isArraySegment = (segment: string): boolean => /^\d+$/.test(segment);
+const isArraySegment = (segment: string): boolean =>
+  /^(0|[1-9]\d*)$/.test(segment);
 
 const isObject = (value: JSONValue): value is JSONObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);

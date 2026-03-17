@@ -316,7 +316,10 @@ export class SpaceSession {
 
     const applied = await pending.promise;
     await this.#flushing;
-    await this.client.restoreConnection();
+    // The commit is already durably applied once pending.promise resolves.
+    // Keep the background reconnect attempt, but don't let a later close or
+    // transport failure mask a successful commit result.
+    void this.client.restoreConnection().catch(() => undefined);
     return applied;
   }
 

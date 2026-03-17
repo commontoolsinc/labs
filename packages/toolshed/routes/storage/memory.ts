@@ -3,6 +3,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
+import { resolveMemoryV2StoreRootUrl } from "./memory-path.ts";
 
 // Determine store URL: DB_PATH (single-file mode) or MEMORY_DIR (directory mode)
 let storeUrl: URL;
@@ -29,21 +30,12 @@ if (result.error) {
   throw result.error;
 }
 
-const storePath = Path.fromFileUrl(storeUrl);
-const memoryV2RootPath = Path.extname(storePath) === ""
-  ? Path.join(storePath, "v2-engine")
-  : Path.join(
-    Path.dirname(storePath),
-    `${Path.basename(storePath, Path.extname(storePath))}.v2-engine`,
-  );
-const memoryV2StoreUrl = Path.toFileUrl(`${memoryV2RootPath}/`);
-await FS.ensureDir(
-  env.DB_PATH ? memoryV2RootPath : new URL("./v2/", memoryV2StoreUrl),
-);
+const memoryV2StoreUrl = resolveMemoryV2StoreRootUrl(storeUrl);
+await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
 
 export const memory = result.ok;
 export const memoryV2Server = new Memory.V2Server.Server({
-  store: env.DB_PATH ? storeUrl : memoryV2StoreUrl,
+  store: memoryV2StoreUrl,
 });
 console.log("Memory: Provider initialized successfully");
 

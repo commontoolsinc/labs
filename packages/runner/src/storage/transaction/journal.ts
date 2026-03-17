@@ -109,13 +109,17 @@ export const read = (
   if (error) {
     return { error };
   } else {
-    const loaded = branch.load({ id: address.id, type: address.type }) as {
-      since?: number;
-    };
-    const meta = {
-      ...(options?.meta ?? {}),
-      ...(typeof loaded.since === "number" ? { seq: loaded.since } : {}),
-    };
+    const meta = options?.trackReadWithoutLoad === true
+      ? { ...(options?.meta ?? {}) }
+      : (() => {
+        const loaded = branch.load({ id: address.id, type: address.type }) as {
+          since?: number;
+        };
+        return {
+          ...(options?.meta ?? {}),
+          ...(typeof loaded.since === "number" ? { seq: loaded.since } : {}),
+        };
+      })();
 
     // Track read activity with metadata
     journal.state.activity.push({

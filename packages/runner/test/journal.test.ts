@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import * as Journal from "../src/storage/transaction/journal.ts";
@@ -1011,6 +1012,38 @@ describe("Journal", () => {
       });
       // No load means no history invariant captured.
       expect([...freshJournal.history(space)]).toHaveLength(0);
+    });
+
+    it("does not consult the replica when only tracking the read", async () => {
+      const replica = storage.open(space).replica;
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:track-without-load-no-replica-read",
+            is: { present: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const getSpy = spy(replica, "get");
+      try {
+        const freshJournal = Journal.open(storage);
+        const { ok: reader } = freshJournal.reader(space);
+        const address = {
+          id: "test:track-without-load-no-replica-read",
+          type: "application/json",
+          path: [],
+        } as const;
+
+        const result = reader!.read(address, { trackReadWithoutLoad: true });
+        expect(result.error).toBeUndefined();
+        expect(result.ok?.value).toBeUndefined();
+        assertSpyCalls(getSpy, 0);
+      } finally {
+        getSpy.restore();
+      }
     });
   });
 

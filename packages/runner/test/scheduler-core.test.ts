@@ -330,6 +330,24 @@ describe("scheduler", () => {
       entityId: expect.stringMatching(/^of:/),
       path: [],
     });
+
+  it("falls back to value-path write details for non-JSON diagnostics", () => {
+    const scheduler = runtime.scheduler as any;
+    const write = {
+      space,
+      id: "scheduler-non-json-value-fallback",
+      type: "text/plain",
+      path: ["body"],
+    };
+    const details = new Map<string, unknown>([[
+      scheduler.makeAddressKey({
+        ...write,
+        path: ["value", "body"],
+      }),
+      "hello",
+    ]]);
+
+    expect(scheduler.lookupComparableWriteValue(details, write)).toBe("hello");
   });
 
   it("should remove actions", async () => {

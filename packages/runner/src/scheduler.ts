@@ -605,14 +605,12 @@ export class Scheduler {
     if (details.has(exactKey)) {
       return details.get(exactKey);
     }
-    if (write.type === "application/json") {
-      const valueKey = this.makeAddressKey({
-        ...write,
-        path: ["value", ...write.path],
-      });
-      if (details.has(valueKey)) {
-        return details.get(valueKey);
-      }
+    const valueKey = this.makeAddressKey({
+      ...write,
+      path: ["value", ...write.path],
+    });
+    if (details.has(valueKey)) {
+      return details.get(valueKey);
     }
     return undefined;
   }

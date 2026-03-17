@@ -82,3 +82,45 @@ Deno.test("memory v2 patch rejects moves into a descendant path", () => {
     a: { child: { keep: true } },
   });
 });
+
+Deno.test("memory v2 patch rejects invalid array indices", () => {
+  const original = {
+    items: ["a"],
+  };
+
+  for (const path of ["/items/01", "/items/4294967295"]) {
+    let error: Error | null = null;
+    try {
+      applyPatch(original, [
+        { op: "replace", path, value: "b" },
+      ]);
+    } catch (caught) {
+      error = caught as Error;
+    }
+
+    assertEquals(error instanceof Error, true);
+    assertEquals(original, {
+      items: ["a"],
+    });
+  }
+});
+
+Deno.test("memory v2 patch rejects missing array indices in parent traversal", () => {
+  const original = {
+    items: [{}],
+  };
+
+  let error: Error | null = null;
+  try {
+    applyPatch(original, [
+      { op: "add", path: "/items/1/name", value: "missing" },
+    ]);
+  } catch (caught) {
+    error = caught as Error;
+  }
+
+  assertEquals(error?.message, "missing path /items/1/name");
+  assertEquals(original, {
+    items: [{}],
+  });
+});

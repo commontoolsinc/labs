@@ -164,10 +164,10 @@ class ReconnectableLoopbackTransport implements Transport {
       type?: string;
       query?: { subscribe?: boolean };
     };
+    await this.connection().receive(payload);
     if (message.type === "graph.query" && message.query?.subscribe === true) {
       this.subscriptionQueryCount++;
     }
-    await this.connection().receive(payload);
   }
 
   close(): Promise<void> {
@@ -405,6 +405,67 @@ class CloseOnSessionOpenTransport implements Transport {
 
   close(): Promise<void> {
     this.#connected = false;
+    return Promise.resolve();
+  }
+}
+
+class CloseOnAppliedCommitTransport implements Transport {
+  onCommitApplied?: () => void;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      commit?: { localSeq?: number };
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#receiver(JSON.stringify({
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+        }));
+        return Promise.resolve();
+      case "session.open":
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:close-on-applied-commit",
+            serverSeq: 0,
+          },
+        }));
+        return Promise.resolve();
+      case "transact":
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            seq: message.commit?.localSeq ?? 0,
+            hash: "commit:close-on-applied",
+            branch: "",
+            facts: [],
+          },
+        }));
+        this.onCommitApplied?.();
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled close-on-commit message: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    this.#closeReceiver(new Error("close"));
     return Promise.resolve();
   }
 }
@@ -682,4 +743,35 @@ Deno.test("memory v2 client wraps close errors with read-only names", async () =
 
   await client.close();
   throw new Error("Expected mount() to fail");
+});
+
+Deno.test("memory v2 client returns an applied commit even if the client closes right after the response", async () => {
+  const transport = new CloseOnAppliedCommitTransport();
+  const client = await connect({ transport });
+  const space = await client.mount("did:key:z6Mk-memory-v2-close-after-commit");
+  let closePromise: Promise<void> | null = null;
+  transport.onCommitApplied = () => {
+    closePromise ??= client.close();
+  };
+
+  try {
+    const applied = await space.transact({
+      localSeq: 7,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:close-after-commit",
+        value: {
+          value: {
+            hello: "world",
+          },
+        },
+      }],
+    });
+
+    assertEquals(applied.seq, 7);
+    await closePromise;
+  } finally {
+    await (closePromise ?? client.close());
+  }
 });
