@@ -578,7 +578,7 @@ Primary test location:
       through scheduler prepare.
 - [x] `cfc-flow-precision.test.ts` covers untrusted custom builtin-name
       overrides falling back conservative.
-- [ ] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
+- [x] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
 - [x] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
 - [x] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
 - [x] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
