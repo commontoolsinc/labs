@@ -55,9 +55,7 @@ export async function main(args: string[]) {
     if (e instanceof TransformerError || e instanceof CompilerError) {
       console.error(e.message);
     } else if (e instanceof Error) {
-      // For other errors, print stack trace (which includes the message)
-      // or just the message if no stack is available
-      console.error(e.stack ?? e.message);
+      console.error(e.message);
     } else {
       console.error(e);
     }

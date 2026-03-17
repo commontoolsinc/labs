@@ -17,12 +17,21 @@ export const exec = new Command()
   .useRawArgs()
   .arguments("<mountedFile:string> [tail...:string]")
   .action(async (_options, mountedFile, ...tail) => {
-    const result = await executeMountedCallableFile(resolve(mountedFile), tail);
-    if (result.helpText) {
-      console.log(result.helpText);
-      return;
-    }
-    if (result.outputText) {
-      console.log(result.outputText);
+    try {
+      const result = await executeMountedCallableFile(
+        resolve(mountedFile),
+        tail,
+      );
+      if (result.helpText) {
+        console.log(result.helpText);
+        return;
+      }
+      if (result.outputText) {
+        console.log(result.outputText);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      Deno.exit(1);
     }
   });

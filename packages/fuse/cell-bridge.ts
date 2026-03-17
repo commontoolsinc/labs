@@ -548,11 +548,6 @@ export class CellBridge {
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
-    console.log(
-      `[${spaceName}] Piece children ${name}:`,
-      this.tree.getChildren(pieceIno).map(([childName]) => childName),
-    );
-
     return name;
   }
 
@@ -706,7 +701,30 @@ export class CellBridge {
       )
     ) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
-      const callableKind = classifyCallableEntry(candidate, childCell.schema);
+      let resolvedCandidate = candidate;
+      try {
+        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ?? candidate;
+      } catch {
+        resolvedCandidate = candidate;
+      }
+
+      let callableKind =
+        classifyCallableEntry(candidate, childCell.schema) ??
+        classifyCallableEntry(resolvedCandidate, childCell.schema);
+
+      if (!callableKind) {
+        try {
+          const pattern = childCell.key("pattern").getRaw?.() ??
+            childCell.key("pattern").get?.();
+          const extraParams = childCell.key("extraParams").get?.();
+          if (pattern !== undefined && extraParams !== undefined) {
+            callableKind = "tool";
+          }
+        } catch {
+          // Not a pattern tool-shaped child cell.
+        }
+      }
+
       if (!callableKind) continue;
 
       callables.push({ key, callableKind });
@@ -815,10 +833,6 @@ export class CellBridge {
 
               console.log(
                 `[${spaceName}] Updated ${pieceName}/${propName}`,
-              );
-              console.log(
-                `[${spaceName}] Piece children ${pieceName}:`,
-                this.tree.getChildren(pieceIno).map(([childName]) => childName),
               );
             } catch (e) {
               console.error(

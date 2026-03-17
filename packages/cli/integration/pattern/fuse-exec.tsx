@@ -4,8 +4,9 @@ import {
   NAME,
   pattern,
   patternTool,
-  type PatternToolResult,
   schema,
+  str,
+  type PatternToolResult,
   type Stream,
 } from "commontools";
 import "commontools/schema";
@@ -85,7 +86,7 @@ const searchTool = pattern(
       query,
       help: helpValue,
       source,
-      summary: `${source}:${query}:${helpValue}`,
+      summary: str`${source}:${query}:${helpValue}`,
     };
   },
   {

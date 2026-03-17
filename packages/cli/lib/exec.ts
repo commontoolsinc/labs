@@ -121,7 +121,7 @@ function callableCommandSpec(
 }
 
 async function defaultLoadPiece(manager: any, pieceId: string) {
-  return await new PiecesController(manager).get(pieceId, false);
+  return await new PiecesController(manager).get(pieceId, true);
 }
 
 async function readMountedPieceMeta(
@@ -282,7 +282,7 @@ export async function executeMountedCallableFile(
   const extraParams = resolved.callableCell.key("extraParams").get() ?? {};
   const tx = resolved.manager.runtime.edit();
   const resultCell = resolved.manager.runtime.getCell(
-    resolved.callablePath.spaceName,
+    resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
     deps.uuid?.() ?? crypto.randomUUID(),
     pattern?.resultSchema,
     tx,

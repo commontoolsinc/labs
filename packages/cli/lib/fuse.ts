@@ -35,6 +35,11 @@ function cliMod(importMetaUrl: string): string {
   return resolve(cliLibDir, "../mod.ts");
 }
 
+function repoRoot(importMetaUrl: string): string {
+  const cliLibDir = dirname(fromFileUrl(importMetaUrl));
+  return resolve(cliLibDir, "../../..");
+}
+
 /** Hex hash of absolute mountpoint path, used as state filename. */
 export async function mountpointHash(mountpoint: string): Promise<string> {
   const data = new TextEncoder().encode(resolve(mountpoint));
@@ -158,15 +163,15 @@ export async function ensureExecShim(
   stateDir = defaultStateDir(),
   importMetaUrl = import.meta.url,
 ): Promise<string> {
-  await Deno.mkdir(stateDir, { recursive: true });
-
-  const shimPath = join(resolve(stateDir), "ct-exec");
+  const shimPath = join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
   const denoPath = Deno.execPath();
   const modPath = cliMod(importMetaUrl);
   const script = `#!/usr/bin/env bash
 exec ${denoPath} run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${modPath}" "$@"
 `;
 
+  await Deno.mkdir(stateDir, { recursive: true });
+  await Deno.mkdir(dirname(shimPath), { recursive: true });
   await Deno.writeTextFile(shimPath, script);
   await Deno.chmod(shimPath, 0o755);
   return shimPath;

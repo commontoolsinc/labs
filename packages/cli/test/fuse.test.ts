@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join, resolve } from "@std/path";
-import { fuse } from "../commands/fuse.ts";
+import { join, resolve, toFileUrl } from "@std/path";
+import { awaitForegroundMountExit, fuse } from "../commands/fuse.ts";
 import {
   buildDenoArgs,
   ensureExecShim,
@@ -209,15 +209,48 @@ describe("mount state operations", () => {
     await expect(Deno.stat(stalePath)).rejects.toThrow();
   });
 
-  it("ensureExecShim creates a shim that targets packages/cli/mod.ts", async () => {
-    const shimPath = await ensureExecShim(tmpDir);
+  it("ensureExecShim creates a repo-rooted shim that targets packages/cli/mod.ts", async () => {
+    const stateDir = join(tmpDir, "state");
+    const repoRoot = join(tmpDir, "repo");
+    const importMetaUrl = toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
+      .href;
+    const shimPath = await ensureExecShim(stateDir, importMetaUrl);
     const shim = await Deno.readTextFile(shimPath);
 
-    expect(shimPath).toContain(tmpDir);
+    expect(shimPath).toBe(join(repoRoot, ".ct", "fuse", "ct-exec"));
+    expect(shimPath).not.toBe(join(stateDir, "ct-exec"));
     expect(shim).toContain("#!/usr/bin/env bash");
     expect(shim).toContain("deno run");
-    expect(shim).toContain("/packages/cli/mod.ts");
+    expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain("\"$@\"");
+  });
+
+  it("always removes foreground mount state files before exiting", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+
+    await expect(
+      awaitForegroundMountExit(
+        {
+          status: Promise.resolve({
+            success: false,
+            code: 23,
+            signal: "SIGTERM",
+          }),
+        },
+        statePath,
+        (code: number) => {
+          throw new Error(`exit:${code}`);
+        },
+      ),
+    ).rejects.toThrow(/exit:23/);
+
+    await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 });
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commontools/api";
+import { PiecesController } from "@commontools/piece/ops";
 import {
   type ExecCommandSpec,
   parseExecArgs,
@@ -12,6 +13,7 @@ import {
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
+import { ct } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -271,6 +273,39 @@ describe("renderExecHelp", () => {
   });
 });
 
+describe("exec command user-facing errors", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await Deno.makeTempDir({ prefix: "ct-exec-cli-test-" });
+  });
+
+  afterEach(async () => {
+    await Deno.remove(tmpDir, { recursive: true });
+  });
+
+  it("prints readable errors without a raw stack trace", async () => {
+    const missingPath = join(tmpDir, "missing.handler");
+    const { code, stdout, stderr } = await ct(`exec ${missingPath}`);
+
+    expect(code).toBe(1);
+    expect(stdout).toEqual([]);
+
+    const relevantStderr = stderr.filter((line) =>
+      !line.includes("deno run ") &&
+      !line.includes("experimentalDecorators compiler option")
+    );
+
+    expect(relevantStderr).toEqual([
+      `Path is not within a mounted ct fuse filesystem: ${missingPath}`,
+    ]);
+    expect(relevantStderr.join("\n")).not.toMatch(/\n\s*at\s+/);
+    expect(relevantStderr.join("\n")).not.toMatch(
+      /executeMountedCallableFile|resolveMountedCallableFile/,
+    );
+  });
+});
+
 describe("mounted callable resolution and execution", () => {
   let tmpDir: string;
   let stateDir: string;
@@ -492,6 +527,50 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.asSchemaFromLinksCalls).toBeGreaterThan(0);
   });
 
+  it("starts the piece before dispatching a mounted handler", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const originalGet = PiecesController.prototype.get;
+    const runItArgs: boolean[] = [];
+    PiecesController.prototype.get = function (
+      pieceId: string,
+      runIt?: boolean,
+      _schema?: JSONSchema,
+    ) {
+      runItArgs.push(runIt ?? false);
+      expect(pieceId).toBe("of:piece-123");
+      return Promise.resolve(harness.piece as never);
+    };
+
+    try {
+      await executeMountedCallableFile(filePath, ["invoke", "--query", "milk"], {
+        stateDir,
+        loadManager: async () => harness.manager,
+      });
+    } finally {
+      PiecesController.prototype.get = originalGet;
+    }
+
+    expect(runItArgs).toEqual([true]);
+  });
+
   it("dispatches handlers through the same piece-property path used by FUSE writes", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -614,6 +693,61 @@ describe("mounted callable resolution and execution", () => {
       source: "bound-source",
     });
   });
+
+  it("allocates tool result cells in the resolved space DID", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      managerSpace: "did:key:resolved-space",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+      toolResult: {
+        echoed: "tea",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      ["run", "--query", "tea"],
+      {
+        stateDir,
+        loadManager: async () => harness.manager,
+        loadPiece: async () => harness.piece,
+        uuid: () => "tool-result-id",
+      },
+    );
+
+    expect(harness.tracker.toolResultSpace).toBe("did:key:resolved-space");
+  });
 });
 
 async function writeLiveMountState(
@@ -658,6 +792,7 @@ function createExecHarness(options: {
   cellProp: "input" | "result";
   cellKey: string;
   pieceId: string;
+  managerSpace?: string;
   inputSchema: JSONSchema;
   pattern?: {
     argumentSchema: JSONSchema;
@@ -674,6 +809,7 @@ function createExecHarness(options: {
       value: unknown;
     }>,
     toolRunInput: undefined as unknown,
+    toolResultSpace: undefined as string | undefined,
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
@@ -730,18 +866,21 @@ function createExecHarness(options: {
   };
 
   const manager = {
-    getSpace: () => "home",
+    getSpace: () => options.managerSpace ?? "home",
     synced: async () => {},
     runtime: {
       edit: () => ({
         commit: async () => {},
       }),
       getCell: (
-        _space: string,
+        space: string,
         _id: string,
         _schema: JSONSchema | undefined,
         _tx: unknown,
-      ) => resultCell,
+      ) => {
+        tracker.toolResultSpace = space;
+        return resultCell;
+      },
       run: (
         _tx: unknown,
         _pattern: unknown,

@@ -53,6 +53,16 @@ FILESYSTEM LAYOUT:
 
 Requires FUSE-T (preferred) or macFUSE on macOS.`;
 
+export async function awaitForegroundMountExit(
+  child: { status: Promise<Deno.CommandStatus> },
+  statePath: string,
+  exit: (code: number) => never | void = Deno.exit,
+): Promise<void> {
+  const status = await child.status;
+  await removeMountStateFile(statePath);
+  exit(status.code);
+}
+
 export const fuse = new Command()
   .name("fuse")
   .description(fuseDescription)
@@ -150,11 +160,7 @@ export const fuse = new Command()
         startedAt: new Date().toISOString(),
       });
 
-      const status = await child.status;
-      if (status.success) {
-        await removeMountStateFile(statePath);
-      }
-      Deno.exit(status.code);
+      await awaitForegroundMountExit(child, statePath);
     }
   })
   .reset()

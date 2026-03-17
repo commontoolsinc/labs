@@ -132,22 +132,12 @@ ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --backgr
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
-PIECE_DIR=""
-for _ in $(seq 1 100); do
-  PIECE_DIR=$(find "$MOUNTPOINT/$SPACE/pieces" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)
-  if [ -n "$PIECE_DIR" ]; then
-    break
-  fi
-  sleep 0.1
-done
-
-if [ -z "$PIECE_DIR" ]; then
-  error "Mounted piece directory was not created."
-fi
-
+PIECE_NAME="Fuse Exec Fixture"
+PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
 RESULT_DIR="$PIECE_DIR/result"
 RESULT_JSON="$PIECE_DIR/result.json"
 META_JSON="$PIECE_DIR/meta.json"
+wait_for_path "$PIECE_DIR"
 wait_for_path "$RESULT_DIR"
 wait_for_path "$RESULT_JSON"
 wait_for_path "$META_JSON"
@@ -173,9 +163,9 @@ wait_for_path "$TOOL_FILE"
 wait_for_path "$ENTITY_HANDLER_FILE"
 wait_for_path "$ENTITY_TOOL_FILE"
 
-ls "$RESULT_DIR" | grep -q '^recordMessage.handler$' || error "recordMessage.handler was not mounted."
-ls "$RESULT_DIR" | grep -q '^legacyWrite.handler$' || error "legacyWrite.handler was not mounted."
-ls "$RESULT_DIR" | grep -q '^search.tool$' || error "search.tool was not mounted."
+test -e "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
+test -e "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
+test -e "$TOOL_FILE" || error "search.tool was not mounted."
 success "Mounted callable entries exist"
 
 assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."

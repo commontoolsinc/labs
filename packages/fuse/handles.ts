@@ -6,6 +6,7 @@ export interface HandleState {
   ino: bigint;
   flags: number;
   dirty: boolean;
+  flushing: boolean;
   buffer: Uint8Array;
 }
 
@@ -21,6 +22,7 @@ export class HandleMap {
       ino,
       flags,
       dirty: false,
+      flushing: false,
       buffer: isWritable ? new Uint8Array(content ?? []) : new Uint8Array(0),
     });
     return fh;
