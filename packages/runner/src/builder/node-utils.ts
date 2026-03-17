@@ -1,6 +1,11 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import {
+  joinConfidentialityLabels,
+  normalizeConfidentialityLabel,
+  type CfcConfidentialityLabel,
+} from "../cfc/label-algebra.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
   getCellOrThrow,
@@ -29,16 +34,93 @@ export function connectInputAndOutputs(node: NodeRef) {
   applyInputIfcToOutput(node.inputs, node.outputs);
 }
 
+function collectSchemaConfidentiality(
+  schema: JSONSchema | undefined,
+  fullSchema: JSONSchema = schema ?? true,
+  cycleTracker: Set<string> = new Set(),
+): CfcConfidentialityLabel | undefined {
+  if (schema === undefined || typeof schema === "boolean") {
+    return undefined;
+  }
+
+  const key = JSON.stringify(schema);
+  if (cycleTracker.has(key)) {
+    return undefined;
+  }
+  cycleTracker.add(key);
+
+  let classification = normalizeConfidentialityLabel(schema.ifc?.classification);
+
+  const joinChild = (child: JSONSchema | undefined) => {
+    classification = joinConfidentialityLabels(
+      classification,
+      collectSchemaConfidentiality(child, fullSchema, cycleTracker),
+    );
+  };
+
+  if (schema.properties && typeof schema.properties === "object") {
+    for (const child of Object.values(schema.properties)) {
+      joinChild(child);
+    }
+  }
+  if (
+    schema.additionalProperties &&
+    typeof schema.additionalProperties === "object"
+  ) {
+    joinChild(schema.additionalProperties);
+  }
+  if (schema.items && typeof schema.items === "object") {
+    joinChild(schema.items);
+  }
+  if (Array.isArray(schema.prefixItems)) {
+    for (const child of schema.prefixItems) {
+      joinChild(child);
+    }
+  }
+  for (const composed of [schema.anyOf, schema.oneOf, schema.allOf]) {
+    if (!Array.isArray(composed)) {
+      continue;
+    }
+    for (const child of composed) {
+      joinChild(child);
+    }
+  }
+  if (schema.$ref) {
+    const resolved = ContextualFlowControl.resolveSchemaRefs(schema, fullSchema);
+    if (resolved && resolved !== schema) {
+      joinChild(resolved);
+    }
+  }
+
+  return classification;
+}
+
+function schemaWithClassification(
+  schema: JSONSchema,
+  classification: CfcConfidentialityLabel,
+): JSONSchema {
+  const schemaObj = ContextualFlowControl.toSchemaObj(schema);
+  const joined = joinConfidentialityLabels(
+    classification,
+    schemaObj.ifc?.classification,
+  );
+  if (!joined) {
+    return schema;
+  }
+  return {
+    ...schemaObj,
+    ifc: { ...(schemaObj.ifc ?? {}), classification: joined },
+  };
+}
+
 export function applyArgumentIfcToResult(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
-    const cfc = new ContextualFlowControl();
-    const joined = new Set<string>();
-    ContextualFlowControl.joinSchema(joined, argumentSchema);
-    return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
+    const joined = collectSchemaConfidentiality(argumentSchema);
+    return joined
+      ? schemaWithClassification(resultSchema ?? true, joined)
       : resultSchema;
   }
   return resultSchema;
@@ -49,18 +131,20 @@ export function applyInputIfcToOutput<T, R>(
   inputs: Opaque<T>,
   outputs: Opaque<R>,
 ) {
-  const collectedClassifications = new Set<string>();
-  const cfc = new ContextualFlowControl();
+  let collectedClassification: CfcConfidentialityLabel | undefined;
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
       const { schema: inputSchema } = item.export();
       if (inputSchema !== undefined) {
-        ContextualFlowControl.joinSchema(collectedClassifications, inputSchema);
+        collectedClassification = joinConfidentialityLabels(
+          collectedClassification,
+          collectSchemaConfidentiality(inputSchema),
+        );
       }
     }
   });
-  if (collectedClassifications.size !== 0) {
-    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
+  if (collectedClassification) {
+    attachCfcToOutputs(outputs, collectedClassification);
   }
 }
 
@@ -69,28 +153,15 @@ export function applyInputIfcToOutput<T, R>(
 // TODO(@ubik2) Investigate: can we have cycles here?
 function attachCfcToOutputs<T, R>(
   outputs: Opaque<R>,
-  cfc: ContextualFlowControl,
-  lubClassification: string,
+  propagatedClassification: CfcConfidentialityLabel,
 ) {
   if (isCell(outputs)) {
     const exported = outputs.export();
     const outputSchema = exported.schema ?? true;
-    // we may have fields in the output schema, so incorporate those
-    const joined = new Set<string>([lubClassification]);
-    ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isObject(outputSchema) && outputSchema.ifc !== undefined)
-      ? { ...outputSchema.ifc }
-      : {};
-    ifc.classification = [cfc.lub(joined)];
-    const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
-      ? {}
-      : outputSchema === false
-      ? { not: true }
-      : outputSchema;
-    const cfcSchema: JSONSchema = {
-      ...outpuSchemaObj,
-      ifc,
-    };
+    const cfcSchema = schemaWithClassification(
+      outputSchema,
+      propagatedClassification,
+    );
     try {
       outputs.setSchema(cfcSchema);
     } catch {
@@ -101,7 +172,7 @@ function attachCfcToOutputs<T, R>(
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
     for (const [_, value] of Object.entries(outputs)) {
-      attachCfcToOutputs(value, cfc, lubClassification);
+      attachCfcToOutputs(value, propagatedClassification);
     }
   }
 }

@@ -15,6 +15,10 @@ const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
 };
 
+function isLegacyClassificationAtom(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
 // up to implementation.
@@ -201,7 +205,9 @@ export class ContextualFlowControl {
     if (schema.ifc) {
       if (schema.ifc?.classification) {
         for (const classification of schema.ifc.classification) {
-          joined.add(classification);
+          if (isLegacyClassificationAtom(classification)) {
+            joined.add(classification);
+          }
         }
       }
     }
@@ -278,7 +284,9 @@ export class ContextualFlowControl {
     if (isObject(schema) && schema.ifc !== undefined) {
       if (schema.ifc.classification !== undefined) {
         for (const item of schema.ifc.classification) {
-          joined.add(item);
+          if (isLegacyClassificationAtom(item)) {
+            joined.add(item);
+          }
         }
       }
     }
@@ -712,7 +720,9 @@ export class ContextualFlowControl {
       } else if (cursor.type === "object") {
         if (cursor.ifc !== undefined && cursor.ifc.classification) {
           for (const classification of cursor.ifc.classification) {
-            joined.add(classification);
+            if (isLegacyClassificationAtom(classification)) {
+              joined.add(classification);
+            }
           }
         }
         if (cursor.properties && part in cursor.properties) {
@@ -726,7 +736,9 @@ export class ContextualFlowControl {
               cursor.ifc.classification !== undefined
             ) {
               for (const classification of cursor.ifc.classification) {
-                joined.add(classification);
+                if (isLegacyClassificationAtom(classification)) {
+                  joined.add(classification);
+                }
               }
             }
           }
@@ -770,7 +782,9 @@ export class ContextualFlowControl {
       cursor.ifc?.classification !== undefined
     ) {
       for (const classification of cursor.ifc.classification!) {
-        joined.add(classification);
+        if (isLegacyClassificationAtom(classification)) {
+          joined.add(classification);
+        }
       }
     }
     if (typeof cursor === "boolean") {
