@@ -3,7 +3,7 @@ import { fromDigest } from "merkle-reference";
 import { refer } from "../reference.ts";
 import type { JSONValue } from "../interface.ts";
 import { sha256 } from "../hash-impl.ts";
-import { applyPatch } from "./patch.ts";
+import { applyPatch, parsePointer } from "./patch.ts";
 import {
   type Blob,
   type BranchName,
@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS fact (
 CREATE INDEX IF NOT EXISTS idx_fact_seq ON fact (seq);
 CREATE INDEX IF NOT EXISTS idx_fact_id ON fact (id);
 CREATE INDEX IF NOT EXISTS idx_fact_id_seq ON fact (id, seq);
+CREATE INDEX IF NOT EXISTS idx_fact_branch_id_seq ON fact (branch, id, seq);
 CREATE INDEX IF NOT EXISTS idx_fact_commit ON fact (commit_seq);
 CREATE INDEX IF NOT EXISTS idx_fact_branch ON fact (branch);
 
@@ -329,14 +330,26 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
-const SELECT_LATEST_CONFLICT = `
-SELECT seq, fact_type, data
+const SELECT_SET_DELETE_CONFLICT = `
+SELECT seq
 FROM fact
-JOIN value ON value.hash = fact.value_ref
 WHERE branch = :branch
   AND id = :id
   AND seq > :after_seq
+  AND fact_type IN ('set', 'delete')
 ORDER BY seq DESC
+LIMIT 1
+`;
+
+const SELECT_PATCH_CONFLICTS = `
+SELECT f.seq, v.data
+FROM fact f
+JOIN value v ON v.hash = f.value_ref
+WHERE f.branch = :branch
+  AND id = :id
+  AND f.seq > :after_seq
+  AND f.fact_type = 'patch'
+ORDER BY f.seq DESC
 `;
 
 const SELECT_PENDING_RESOLUTION = `
@@ -403,12 +416,13 @@ interface PreparedStatements {
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
-  selectLatestConflict: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
   selectNextSeq: PreparedStatement;
+  selectPatchConflicts: PreparedStatement;
   selectPatchCount: PreparedStatement;
   selectPatches: PreparedStatement;
   selectPendingResolution: PreparedStatement;
+  selectSetDeleteConflict: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
@@ -549,12 +563,13 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
-  selectLatestConflict: database.prepare(SELECT_LATEST_CONFLICT),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
+  selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
   selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
   selectPatches: database.prepare(SELECT_PATCHES),
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
+  selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
@@ -805,43 +820,58 @@ const validateConfirmedReads = (
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureActiveBranch(engine, readBranch);
-    const conflicts = engine.statements.selectLatestConflict.all({
-      branch: readBranch,
-      id: read.id,
-      after_seq: read.seq,
-    }) as Array<{
-      seq: number;
-      fact_type: Operation["op"];
-      data: string | null;
-    }>;
-    const conflict = conflicts.find((candidate) =>
-      factOverlapsRead(candidate, read.path)
+    const conflictSeq = findConflictSeq(
+      engine,
+      readBranch,
+      read.id,
+      read.seq,
+      read.path,
     );
-    if (conflict !== undefined) {
+    if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflict.seq}`,
+        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
       );
     }
   }
 };
 
-const factOverlapsRead = (
-  fact: {
-    fact_type: Operation["op"];
-    data: string | null;
-  },
+const findConflictSeq = (
+  engine: Engine,
+  branch: BranchName,
+  id: EntityId,
+  afterSeq: number,
   readPath: readonly string[],
-): boolean => {
-  switch (fact.fact_type) {
-    case "set":
-    case "delete":
-      return true;
-    case "patch":
-      return patchOverlapsRead(
-        JSON.parse(fact.data ?? "[]") as PatchOp[],
-        readPath,
-      );
+): number | null => {
+  const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
+    branch,
+    id,
+    after_seq: afterSeq,
+  }) as { seq: number } | undefined;
+  if (setOrDeleteConflict !== undefined) {
+    return setOrDeleteConflict.seq;
   }
+
+  for (
+    const conflict of engine.statements.selectPatchConflicts.iter({
+      branch,
+      id,
+      after_seq: afterSeq,
+    }) as Iterable<{
+      seq: number;
+      data: string | null;
+    }>
+  ) {
+    if (
+      patchOverlapsRead(
+        JSON.parse(conflict.data ?? "[]") as PatchOp[],
+        readPath,
+      )
+    ) {
+      return conflict.seq;
+    }
+  }
+
+  return null;
 };
 
 const patchOverlapsRead = (
@@ -891,18 +921,6 @@ const parentPath = (path: readonly string[]): string[] => {
   return path.length === 0 ? [] : [...path.slice(0, -1)];
 };
 
-const parsePointer = (path: string): string[] => {
-  if (path === "") {
-    return [];
-  }
-  if (!path.startsWith("/")) {
-    throw new Error(`invalid JSON pointer: ${path}`);
-  }
-  return path.slice(1).split("/").map((segment) =>
-    segment.replaceAll("~1", "/").replaceAll("~0", "~")
-  );
-};
-
 const resolvePendingReads = (
   engine: Engine,
   sessionId: SessionId,
@@ -934,21 +952,16 @@ const resolvePendingReads = (
       resolutions.set(read.localSeq, resolution);
     }
 
-    const conflicts = engine.statements.selectLatestConflict.all({
+    const conflictSeq = findConflictSeq(
+      engine,
       branch,
-      id: read.id,
-      after_seq: resolution.seq,
-    }) as Array<{
-      seq: number;
-      fact_type: Operation["op"];
-      data: string | null;
-    }>;
-    const conflict = conflicts.find((candidate) =>
-      factOverlapsRead(candidate, read.path)
+      read.id,
+      resolution.seq,
+      read.path,
     );
-    if (conflict !== undefined) {
+    if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflict.seq}`,
+        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
       );
     }
   }

@@ -101,6 +101,9 @@ const moveValue = (
   if (from.length === 0) {
     throw new Error("cannot move the root value");
   }
+  if (isStrictPrefixPath(from, path)) {
+    throw new Error("cannot move a value into its own descendant");
+  }
 
   const extracted = structuredClone(getAtPath(root, from));
   removeAtPath(root, from);
@@ -221,7 +224,7 @@ const createContainer = (nextSegment: string): JSONContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
 };
 
-const parsePointer = (path: string): string[] => {
+export const parsePointer = (path: string): string[] => {
   if (path === "") {
     return [];
   }
@@ -256,6 +259,13 @@ const parseArrayInsertIndex = (segment: string, length: number): number => {
   }
   return index;
 };
+
+const isStrictPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length < path.length &&
+  prefix.every((segment, index) => path[index] === segment);
 
 const isArraySegment = (segment: string): boolean => /^\d+$/.test(segment);
 

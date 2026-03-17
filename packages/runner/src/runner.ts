@@ -595,6 +595,9 @@ export class Runner {
     resultCell: Cell<T>,
     seenCells: Set<Cell> = new Set(),
   ): Promise<boolean> {
+    // `synced === true` means this cell was rehydrated from storage rather than
+    // assembled purely from writes in the current runtime, so start() may need
+    // to await dependency sync before process startup.
     const wasSyncedAtEntry =
       (resultCell as Cell<any> & { synced?: boolean }).synced === true;
 
