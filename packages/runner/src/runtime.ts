@@ -430,7 +430,10 @@ export class Runtime {
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
-    return new ExtendedStorageTransaction(tx);
+    return new ExtendedStorageTransaction(tx, () => ({
+      actingPrincipal: this.userIdentityDID,
+      trustContext: this.getCfcTrustContextSnapshot(),
+    }));
   }
 
   /**

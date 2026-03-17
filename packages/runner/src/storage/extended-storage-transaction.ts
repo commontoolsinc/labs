@@ -44,6 +44,10 @@ import {
   recordCfcPreparedTx,
   recordCfcRelevantTx,
 } from "../cfc/debug-counters.ts";
+import type {
+  CfcPrepareScope,
+  CfcPrepareScopeOverrides,
+} from "../cfc/integrity-trust.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -72,7 +76,11 @@ type CfcTxState = {
   preparedActivityDigest: string | undefined;
   reasons: string[];
   outbox: Array<() => void>;
+  prepareScopeOverrides: CfcPrepareScopeOverrides;
 };
+
+type CfcPrepareScopeResolver = () => CfcPrepareScope | undefined;
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<CommitCallback>();
   private cfcState: CfcTxState = {
@@ -81,9 +89,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     preparedActivityDigest: undefined,
     reasons: [],
     outbox: [],
+    prepareScopeOverrides: {},
   };
 
-  constructor(public tx: IStorageTransaction) {}
+  constructor(
+    public tx: IStorageTransaction,
+    private cfcPrepareScopeResolver?: CfcPrepareScopeResolver,
+  ) {}
 
   get cfcRelevant(): boolean {
     return this.cfcState.relevant;
@@ -287,6 +299,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  resolveCfcPrepareScopeSnapshot(): CfcPrepareScope {
+    const ambientScope = this.cfcPrepareScopeResolver?.() ?? {};
+    return {
+      implementationIdentity:
+        this.cfcState.prepareScopeOverrides.implementationIdentity ??
+          ambientScope.implementationIdentity,
+      actingPrincipal: this.cfcState.prepareScopeOverrides.actingPrincipal ??
+        ambientScope.actingPrincipal,
+      trustContext: this.cfcState.prepareScopeOverrides.trustContext ??
+        ambientScope.trustContext,
+    };
+  }
+
+  setCfcPrepareScopeOverrides(overrides: CfcPrepareScopeOverrides): void {
+    if (Object.keys(overrides).length === 0) {
+      return;
+    }
+
+    this.cfcState.prepareScopeOverrides = {
+      ...this.cfcState.prepareScopeOverrides,
+      ...overrides,
+      ...("trustContext" in overrides
+        ? { trustContext: structuredClone(overrides.trustContext) }
+        : {}),
+    };
+    this.invalidateCfcPreparation();
+  }
+
   markCfcPrepared(digest: string): void {
     if (!this.cfcState.prepared) {
       recordCfcPreparedTx();
@@ -367,6 +407,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const actualDigest = computeCfcActivityDigest(
       this.journal.activity(),
+      this.resolveCfcPrepareScopeSnapshot(),
     );
     if (actualDigest !== this.cfcState.preparedActivityDigest) {
       const error = CfcPreparedDigestMismatchError(
@@ -566,6 +607,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   markCfcRelevant(reason: string): void {
     return this.wrapped.markCfcRelevant(reason);
+  }
+
+  resolveCfcPrepareScopeSnapshot(): CfcPrepareScope {
+    return this.wrapped.resolveCfcPrepareScopeSnapshot();
+  }
+
+  setCfcPrepareScopeOverrides(overrides: CfcPrepareScopeOverrides): void {
+    return this.wrapped.setCfcPrepareScopeOverrides(overrides);
   }
 
   markCfcPrepared(digest: string): void {

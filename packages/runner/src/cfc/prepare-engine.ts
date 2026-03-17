@@ -2286,6 +2286,10 @@ export async function prepareBoundaryCommit(
     }
   }
 
-  const digest = computeCfcActivityDigest(tx.journal.activity());
+  const digest = computeCfcActivityDigest(tx.journal.activity(), {
+    implementationIdentity: options.implementationIdentity,
+    actingPrincipal: options.actingPrincipal,
+    trustContext: options.trustContext,
+  });
   tx.markCfcPrepared(digest);
 }

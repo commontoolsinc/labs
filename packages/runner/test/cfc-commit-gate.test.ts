@@ -78,7 +78,10 @@ describe("CFC commit gate", () => {
     expect(writeResult.error).toBeUndefined();
 
     tx.markCfcRelevant("prepared-unchanged");
-    const digest = await computeCfcActivityDigest(tx.journal.activity());
+    const digest = await computeCfcActivityDigest(
+      tx.journal.activity(),
+      tx.resolveCfcPrepareScopeSnapshot(),
+    );
     tx.markCfcPrepared(digest);
 
     const { error } = await tx.commit();
@@ -98,6 +101,7 @@ describe("CFC commit gate", () => {
     tx.markCfcRelevant("prepared-mismatch");
     const preparedDigest = await computeCfcActivityDigest(
       tx.journal.activity(),
+      tx.resolveCfcPrepareScopeSnapshot(),
     );
     tx.markCfcPrepared(preparedDigest);
 
@@ -261,5 +265,25 @@ describe("computeCfcActivityDigest", () => {
 
     expect(digestA1).toBe(digestA2);
     expect(digestA1).not.toBe(digestB);
+  });
+
+  it("includes prepare scope in the digest", () => {
+    const activity: Activity[] = [{
+      write: {
+        space: "did:key:test-space",
+        id: "of:test-doc",
+        type: "application/json",
+        path: ["value", "field"],
+      },
+    }];
+
+    const digestA = computeCfcActivityDigest(activity, {
+      actingPrincipal: "did:key:alpha",
+    });
+    const digestB = computeCfcActivityDigest(activity, {
+      actingPrincipal: "did:key:beta",
+    });
+
+    expect(digestA).not.toBe(digestB);
   });
 });

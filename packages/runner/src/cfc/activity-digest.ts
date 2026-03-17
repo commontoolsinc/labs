@@ -11,6 +11,11 @@ import {
 } from "../storage/read-metadata.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { activityWriteChangedFlag, toHex } from "./shared.ts";
+import {
+  type CfcPrepareScope,
+  computeCfcTrustContextHash,
+} from "./integrity-trust.ts";
+import { encodeImplementationIdentity } from "./implementation-identity.ts";
 
 interface NormalizedReadMetadata {
   readonly ignoreReadForScheduling: boolean;
@@ -43,6 +48,12 @@ type NormalizedWriteActivity = {
 };
 
 type NormalizedActivity = NormalizedReadActivity | NormalizedWriteActivity;
+
+interface NormalizedDigestScope {
+  readonly implementationIdentity: string;
+  readonly actingPrincipal: string | null;
+  readonly trustContextHash: string;
+}
 
 function normalizeReadMetadata(
   meta: Metadata | undefined,
@@ -98,9 +109,28 @@ function normalizeActivity(
   return normalized;
 }
 
+function normalizeDigestScope(
+  scope: CfcPrepareScope | undefined,
+): NormalizedDigestScope {
+  return {
+    implementationIdentity: encodeImplementationIdentity(
+      scope?.implementationIdentity,
+    ),
+    actingPrincipal: scope?.actingPrincipal ?? null,
+    trustContextHash: computeCfcTrustContextHash(
+      scope?.actingPrincipal,
+      scope?.trustContext,
+    ),
+  };
+}
+
 export function computeCfcActivityDigest(
   activity: Iterable<Activity>,
+  scope?: CfcPrepareScope,
 ): string {
-  const storable = storableFromNativeValue(normalizeActivity(activity));
+  const storable = storableFromNativeValue({
+    activity: normalizeActivity(activity),
+    scope: normalizeDigestScope(scope),
+  });
   return toHex(canonicalHash(storable).hash);
 }

@@ -25,6 +25,10 @@ import type {
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
 import type { ICfcReadAnnotations, Metadata } from "./read-metadata.ts";
+import type {
+  CfcPrepareScope,
+  CfcPrepareScopeOverrides,
+} from "../cfc/integrity-trust.ts";
 
 export {
   ignoreReadForSchedulingMarker,
@@ -601,6 +605,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   markCfcRelevant(reason: string): void;
+
+  resolveCfcPrepareScopeSnapshot(): CfcPrepareScope;
+
+  setCfcPrepareScopeOverrides(overrides: CfcPrepareScopeOverrides): void;
 
   markCfcPrepared(digest: string): void;
 

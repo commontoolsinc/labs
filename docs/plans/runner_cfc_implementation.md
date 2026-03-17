@@ -85,7 +85,7 @@ effects and deterministic schema binding.
 - [x] Define `PreparedDigestInput` and stable hash strategy.
 - [x] Define implementation-identity derivation for trust gates:
       `CodeHash` for code modules and `Builtin(name)` for runtime built-ins.
-- [ ] Define `TrustContextSnapshot` / stable trust-context hash used by
+- [x] Define `TrustContextSnapshot` / stable trust-context hash used by
       boundary evaluation (verifier delegations, trusted statements, optional
       concept-order edges) for the acting principal.
 - [x] Define integrity-guard matcher semantics: concept requirements are
@@ -200,7 +200,7 @@ Primary files:
       canonical reads, attempted writes, internal flags.
 - [x] Exclude unstable fields (timestamps/non-deterministic IDs unless needed).
 - [x] Use stable serialization before hashing.
-- [ ] Include tx identity scope and trust-context snapshot in digest input used
+- [x] Include tx identity scope and trust-context snapshot in digest input used
       for flow-precision trust decisions (`CodeHash` / `Builtin(name)` identity
       + acting-principal trust-context hash).
 
@@ -334,7 +334,7 @@ Primary files:
       evaluation and reject boundary attempt on that signal.
 - [x] Match concept-valued integrity preconditions against available concrete
       integrity using the acting principal's trust closure.
-- [ ] Bind prepare success to the acting principal + trust-context snapshot used
+- [x] Bind prepare success to the acting principal + trust-context snapshot used
       for evaluation; if that snapshot changes before commit, invalidate
       preparation.
 - [ ] Enforce clause-local release semantics across confidentiality CNF; do not
@@ -579,7 +579,7 @@ Primary test location:
 - [x] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
 - [ ] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
 - [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
-- [ ] `cfc-trust-context-change-invalidates-prepare.test.ts`
+- [x] `cfc-trust-context-change-invalidates-prepare.test.ts`
 - [ ] `cfc-flow-precision-builtin-trust-resolution.test.ts`
 - [ ] `cfc-filter-membership-vs-order-precision.test.ts`
 - [ ] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`

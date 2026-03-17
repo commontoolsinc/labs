@@ -3504,8 +3504,6 @@ function getRuntimePrepareOptions(
   return {
     enforceBoundary: runtime.experimental.cfcBoundaryEnforcement,
     implementationIdentity,
-    actingPrincipal: runtime.userIdentityDID,
-    trustContext: runtime.getCfcTrustContextSnapshot(),
   };
 }
 

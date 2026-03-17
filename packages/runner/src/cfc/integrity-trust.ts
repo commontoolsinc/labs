@@ -1,3 +1,8 @@
+import { canonicalHash } from "@commontools/memory/canonical-hash";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import { toHex } from "./shared.ts";
+import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+
 export interface CfcVerifierDelegation {
   readonly delegator: string;
   readonly verifier: string;
@@ -23,6 +28,32 @@ export interface CfcTrustContext {
   readonly conceptEdges?: readonly CfcTrustConceptEdge[];
 }
 
+export interface CfcTrustContextSnapshot {
+  readonly actingPrincipal: string | null;
+  readonly delegations: readonly {
+    readonly delegator: string;
+    readonly verifier: string;
+    readonly concepts: readonly string[];
+  }[];
+  readonly statements: readonly {
+    readonly verifier: string;
+    readonly concrete: string;
+    readonly concept: string;
+  }[];
+  readonly conceptEdges: readonly {
+    readonly from: string;
+    readonly to: string;
+  }[];
+}
+
+export interface CfcPrepareScope {
+  readonly implementationIdentity?: CfcImplementationIdentity;
+  readonly actingPrincipal?: string;
+  readonly trustContext?: CfcTrustContext;
+}
+
+export type CfcPrepareScopeOverrides = Partial<CfcPrepareScope>;
+
 export type CfcTrustContextSource =
   | CfcTrustContext
   | (() => CfcTrustContext | undefined);
@@ -40,6 +71,71 @@ export function resolveCfcTrustContextSnapshot(
     return undefined;
   }
   return structuredClone(trustContext);
+}
+
+export function snapshotCfcTrustContext(
+  actingPrincipal: string | undefined,
+  trustContext: CfcTrustContext | undefined,
+): CfcTrustContextSnapshot {
+  if (!actingPrincipal) {
+    return {
+      actingPrincipal: null,
+      delegations: [],
+      statements: [],
+      conceptEdges: [],
+    };
+  }
+
+  const delegations = [...(trustContext?.delegations ?? [])]
+    .filter((delegation) => delegation.delegator === actingPrincipal)
+    .map((delegation) => ({
+      delegator: delegation.delegator,
+      verifier: delegation.verifier,
+      concepts: [...(delegation.scope?.concepts ?? [])].sort(),
+    }))
+    .sort((a, b) =>
+      a.delegator.localeCompare(b.delegator) ||
+      a.verifier.localeCompare(b.verifier) ||
+      a.concepts.join("\u0000").localeCompare(b.concepts.join("\u0000"))
+    );
+
+  const statements = [...(trustContext?.statements ?? [])]
+    .map((statement) => ({
+      verifier: statement.verifier,
+      concrete: statement.concrete,
+      concept: statement.concept,
+    }))
+    .sort((a, b) =>
+      a.verifier.localeCompare(b.verifier) ||
+      a.concrete.localeCompare(b.concrete) ||
+      a.concept.localeCompare(b.concept)
+    );
+
+  const conceptEdges = [...(trustContext?.conceptEdges ?? [])]
+    .map((edge) => ({
+      from: edge.from,
+      to: edge.to,
+    }))
+    .sort((a, b) =>
+      a.from.localeCompare(b.from) ||
+      a.to.localeCompare(b.to)
+    );
+
+  return {
+    actingPrincipal,
+    delegations,
+    statements,
+    conceptEdges,
+  };
+}
+
+export function computeCfcTrustContextHash(
+  actingPrincipal: string | undefined,
+  trustContext: CfcTrustContext | undefined,
+): string {
+  const snapshot = snapshotCfcTrustContext(actingPrincipal, trustContext);
+  const storable = storableFromNativeValue(snapshot);
+  return toHex(canonicalHash(storable).hash);
 }
 
 function delegationAllowsConcept(
