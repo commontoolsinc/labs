@@ -125,7 +125,7 @@ export default pattern((state) => {
                             type: "number"
                         }
                     },
-                    required: ["items"]
+                    required: ["items", "threshold"]
                 }
             },
             required: ["state"]
@@ -296,7 +296,7 @@ export default pattern((state) => {
                             type: "number"
                         }
                     },
-                    required: ["items"]
+                    required: ["items", "start", "end"]
                 }
             },
             required: ["state"]
@@ -638,7 +638,7 @@ export default pattern((state) => {
                             type: "number"
                         }
                     },
-                    required: ["users"]
+                    required: ["users", "minAge"]
                 }
             },
             required: ["state"]
