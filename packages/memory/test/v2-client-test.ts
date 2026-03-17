@@ -770,6 +770,9 @@ Deno.test("memory v2 client returns an applied commit even if the client closes 
     });
 
     assertEquals(applied.seq, 7);
+    if (closePromise === null) {
+      throw new Error("Expected onCommitApplied to close the client");
+    }
     await closePromise;
   } finally {
     await (closePromise ?? client.close());

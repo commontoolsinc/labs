@@ -30,7 +30,9 @@ if (result.error) {
   throw result.error;
 }
 
-const memoryV2StoreUrl = resolveMemoryV2StoreRootUrl(storeUrl);
+const memoryV2StoreUrl = resolveMemoryV2StoreRootUrl(storeUrl, {
+  singleFileMode: env.DB_PATH !== undefined,
+});
 await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
 
 export const memory = result.ok;
