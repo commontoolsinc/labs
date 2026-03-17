@@ -269,6 +269,58 @@ describe("mount state operations", () => {
     expect(result!.entry.mountpoint).toBe(resolve(aliasMount));
   });
 
+  it("readMountState prefers a live compatible state entry over a stale canonical one", async () => {
+    const realRoot = join(tmpDir, "real");
+    const realMount = join(realRoot, "mount");
+    const aliasRoot = join(tmpDir, "alias");
+    const aliasMount = join(aliasRoot, "mount");
+    await Deno.mkdir(realMount, { recursive: true });
+    await Deno.symlink(realRoot, aliasRoot);
+
+    const canonicalPath = join(
+      tmpDir,
+      `${await mountpointHash(aliasMount)}.json`,
+    );
+    await Deno.writeTextFile(
+      canonicalPath,
+      JSON.stringify({
+        pid: 1073741824,
+        mountpoint: realMount,
+        apiUrl: "http://localhost:8001",
+        identity: "/tmp/stale.pem",
+        startedAt: "2026-02-24T00:00:00.000Z",
+      }),
+    );
+
+    const legacyKey = new TextEncoder().encode(resolve(aliasMount));
+    const legacyHash = await crypto.subtle.digest("SHA-256", legacyKey);
+    const legacyPath = join(
+      tmpDir,
+      `${
+        Array.from(new Uint8Array(legacyHash)).map((byte) =>
+          byte.toString(16).padStart(2, "0")
+        ).join("").slice(0, 16)
+      }.json`,
+    );
+    await Deno.writeTextFile(
+      legacyPath,
+      JSON.stringify({
+        pid: Deno.pid,
+        mountpoint: aliasMount,
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/live.pem",
+        startedAt: "2026-02-24T00:00:00.000Z",
+      }),
+    );
+
+    const result = await readMountState(tmpDir, aliasMount);
+
+    expect(result).not.toBeNull();
+    expect(result!.path).toBe(legacyPath);
+    expect(result!.entry.pid).toBe(Deno.pid);
+    expect(result!.entry.apiUrl).toBe("http://localhost:8000");
+  });
+
   it("ensureExecShim creates a repo-rooted shim that targets packages/cli/mod.ts", async () => {
     const stateDir = join(tmpDir, "state");
     const repoRoot = join(tmpDir, "repo");

@@ -134,6 +134,9 @@ cleanup() {
   if [ -n "${IDENTITY:-}" ]; then
     rm -f "$IDENTITY"
   fi
+  if [ -n "${NO_ARG_HANDLER_ERR:-}" ]; then
+    rm -f "$NO_ARG_HANDLER_ERR"
+  fi
 }
 
 trap cleanup EXIT
@@ -227,13 +230,16 @@ TOOL_HELP=$(ct exec "$TOOL_FILE" --help)
 TOOL_HELP_JSON=$(ct exec "$TOOL_FILE" --help --json)
 DIRECT_HANDLER_HELP=$("$HANDLER_FILE" --help)
 assert_contains "$HANDLER_HELP" "ct exec" "ct exec help should describe the ct exec call form."
+assert_contains "$HANDLER_HELP" "[invoke] --message <string>" "Handler help should show the optional invoke verb."
 assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
 assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
 assert_contains "$HANDLER_HELP" "No output on success." "Handler help should describe handler output."
 assert_contains "$HANDLER_HELP" "Alternatively, write JSON to this file to invoke the handler." "Handler help should mention write-through invocation."
+assert_contains "$TOOL_HELP" "[run] --query <string>" "Tool help should show the optional run verb."
 assert_contains "$TOOL_HELP" "--query <string>" "Tool help should expand schema-derived flags."
 assert_contains "$TOOL_HELP" "JSON on success:" "Tool help should show JSON output."
 assert_contains "$TOOL_HELP" "--help --json" "Tool help should mention machine-readable schema help."
+assert_contains "$DIRECT_HANDLER_HELP" "[invoke] --message <string>" "Direct help should show the optional invoke verb."
 assert_contains "$DIRECT_HANDLER_HELP" "$HANDLER_FILE" "Direct help should mention the mounted file path."
 assert_contains "$DIRECT_HANDLER_HELP" "--message <string>" "Direct help should show the mounted file call form."
 if [[ "$DIRECT_HANDLER_HELP" == *"ct exec $HANDLER_FILE"* ]]; then
@@ -301,6 +307,18 @@ assert_json_eq \
   '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
   "Implicit tool execution returned unexpected JSON"
 success "ct exec runs mounted tools without an explicit verb"
+
+LEGACY_COUNT_BEFORE_EXEC=$(read_piece_value_or_default "legacyCount" "0")
+NO_ARG_HANDLER_ERR=$(mktemp)
+if ct exec "$LEGACY_HANDLER_FILE" >/dev/null 2>"$NO_ARG_HANDLER_ERR"; then
+  error "Handlers without inputs should require invoke for no-arg execution."
+fi
+NO_ARG_HANDLER_ERROR=$(cat "$NO_ARG_HANDLER_ERR")
+rm -f "$NO_ARG_HANDLER_ERR"
+assert_contains "$NO_ARG_HANDLER_ERROR" "use invoke to call it without inputs" "No-arg handler error should explain the explicit invoke requirement."
+ct exec "$LEGACY_HANDLER_FILE" invoke
+wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 1))"
+success "No-arg handlers require invoke, and invoke alone still works for optional-input handlers"
 
 COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
 ct exec "$HANDLER_FILE" --message "shared-message"

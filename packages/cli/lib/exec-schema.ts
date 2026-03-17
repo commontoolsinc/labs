@@ -384,6 +384,9 @@ function primaryFlagUsage(flagName: string, schema: JSONSchema): string {
 
 function fullFlagUsage(flagName: string, schema: JSONSchema): string {
   const type = schemaType(schema);
+  if (flagName === "help" && type === "boolean") {
+    return "--help=<boolean> | --no-help";
+  }
   if (type === "boolean") {
     return `--${flagName} | --no-${flagName}`;
   }
@@ -409,7 +412,9 @@ function specificFlagLines(schema: JSONSchema): string[] {
         parts.push(required.has(key) ? "Required." : "Optional.");
       }
       const type = schemaType(propertySchema);
-      if (type === "boolean") {
+      if (key === "help" && type === "boolean") {
+        parts.push("Boolean. Use --help=true or --no-help.");
+      } else if (type === "boolean") {
         parts.push(
           `Boolean. Use --${flagName} for true or --no-${flagName} for false.`,
         );
@@ -487,16 +492,21 @@ function usageCommandPrefix(
     : `ct exec ${displayedPath}`;
 }
 
+function optionalVerbUsage(spec: ExecCommandSpec): string {
+  return `[${spec.defaultVerb}]`;
+}
+
 function usageLine(
   mountedFilePath: string,
   spec: ExecCommandSpec,
   invocationStyle: "ct" | "direct",
 ): string {
   const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  const verb = optionalVerbUsage(spec);
   const properties = objectProperties(spec.inputSchema);
 
   if (!properties) {
-    return `${prefix} --value ${valuePlaceholder(spec.inputSchema)}`;
+    return `${prefix} ${verb} --value ${valuePlaceholder(spec.inputSchema)}`;
   }
 
   const required = requiredFlags(spec.inputSchema);
@@ -508,7 +518,7 @@ function usageLine(
   const suffix = requiredUsages.length > 0
     ? ` ${requiredUsages.join(" ")}`
     : "";
-  return `${prefix}${suffix}`;
+  return `${prefix} ${verb}${suffix}`;
 }
 
 function helpUsageLines(
@@ -517,12 +527,18 @@ function helpUsageLines(
   invocationStyle: "ct" | "direct",
 ): string[] {
   const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  const verb = optionalVerbUsage(spec);
   return [
     `  ${usageLine(mountedFilePath, spec, invocationStyle)}`,
-    `  ${prefix} --json`,
-    `  ${prefix} --help`,
-    `  ${prefix} --help --json`,
+    `  ${prefix} ${verb} --json`,
+    `  ${prefix} ${verb} --help`,
+    `  ${prefix} ${verb} --help --json`,
   ];
+}
+
+function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
+  const properties = objectProperties(schema);
+  return properties !== null && requiredFlags(schema).size === 0;
 }
 
 export function parseExecArgs(
@@ -532,6 +548,7 @@ export function parseExecArgs(
   const args = [...rawArgs];
   let verb = spec.defaultVerb;
   const helpField = hasHelpField(spec.inputSchema);
+  let explicitVerb = false;
 
   if (rawArgs[0] === "--help") {
     if (rawArgs.length === 1) {
@@ -566,6 +583,7 @@ export function parseExecArgs(
       );
     }
     verb = args.shift() as "invoke" | "run";
+    explicitVerb = true;
   }
 
   if (args[0] === "--help") {
@@ -590,6 +608,12 @@ export function parseExecArgs(
     if (!helpField) {
       throw new Error("Unknown flag --help");
     }
+  }
+
+  if (spec.callableKind === "handler" && !explicitVerb && args.length === 0) {
+    throw new Error(
+      "Refusing to invoke handler with no inputs; use invoke to call it without inputs",
+    );
   }
 
   const properties = objectProperties(spec.inputSchema);
@@ -644,6 +668,9 @@ export function renderExecHelp(
     lines.push("  No output on success.");
     lines.push("");
     lines.push("Alternatively, write JSON to this file to invoke the handler.");
+    if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
+      lines.push("Invoke alone will call the handler without any inputs.");
+    }
   } else if (spec.outputSchemaSummary !== undefined) {
     lines.push("");
     lines.push("Output:");

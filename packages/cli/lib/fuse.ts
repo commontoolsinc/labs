@@ -113,18 +113,20 @@ export async function readMountState(
     candidatePaths.push(legacyPath);
   }
 
+  const matches: { entry: MountStateEntry; path: string }[] = [];
   for (const path of candidatePaths) {
     try {
       const text = await Deno.readTextFile(path);
-      return {
+      matches.push({
         entry: normalizeMountStateEntry(JSON.parse(text) as MountStateEntry),
         path,
-      };
+      });
     } catch {
       // Try the next compatible state filename.
     }
   }
-  return null;
+
+  return matches.find(({ entry }) => isAlive(entry.pid)) ?? matches[0] ?? null;
 }
 
 export async function readAllMountStates(

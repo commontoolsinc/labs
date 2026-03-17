@@ -222,37 +222,6 @@ async function defaultReadJsonInput(): Promise<unknown> {
   }
 }
 
-function coerceJsonInputForSchema(
-  value: unknown,
-  schema: JSONSchema,
-): unknown {
-  const isObjectSchema = typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema) &&
-    (schema.type === "object" || "properties" in schema);
-  if (!isObjectSchema) {
-    return value;
-  }
-
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Invalid JSON for --json: expected object");
-  }
-
-  const required = Array.isArray((schema as { required?: unknown }).required)
-    ? (schema as { required: string[] }).required
-    : [];
-  for (const key of required) {
-    if (!(key in (value as Record<string, unknown>))) {
-      throw new Error(
-        `Missing required flag --${
-          key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()
-        }`,
-      );
-    }
-  }
-
-  return value;
-}
-
 export async function resolveMountedCallableFile(
   filePath: string,
   deps: ExecDependencies = {},
@@ -324,10 +293,7 @@ export async function executeMountedCallableFile(
   }
 
   const input = parsed.readJsonFromStdin
-    ? coerceJsonInputForSchema(
-      await (deps.readJsonInput ?? defaultReadJsonInput)(),
-      resolved.commandSpec.inputSchema,
-    )
+    ? await (deps.readJsonInput ?? defaultReadJsonInput)()
     : parsed.input;
 
   if (resolved.callablePath.callableKind === "handler") {

@@ -30,7 +30,7 @@ function makeSpec(
 }
 
 describe("parseExecArgs", () => {
-  it("defaults handlers to invoke and tools to run", () => {
+  it("defaults handlers to invoke and tools to run when flags are provided", () => {
     const handler = parseExecArgs(
       makeSpec("handler", {
         type: "object",
@@ -243,10 +243,39 @@ describe("parseExecArgs", () => {
   it("preserves omitted non-object inputs as undefined", () => {
     const primitive = parseExecArgs(
       makeSpec("handler", { type: "number" }),
-      [],
+      ["invoke"],
     );
 
     expect(primitive.input).toBeUndefined();
+  });
+
+  it("rejects invoking handlers with no arguments unless invoke is explicit", () => {
+    expect(() =>
+      parseExecArgs(
+        makeSpec("handler", {
+          type: "object",
+          properties: {},
+        }),
+        [],
+      )
+    ).toThrow(
+      /Refusing to invoke handler with no inputs; use invoke to call it without inputs/i,
+    );
+  });
+
+  it("allows invoke alone for handlers whose inputs are all optional", () => {
+    const result = parseExecArgs(
+      makeSpec("handler", {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+      }),
+      ["invoke"],
+    );
+
+    expect(result.verb).toBe("invoke");
+    expect(result.input).toEqual({});
   });
 
   it("rejects mixed --json and generated flags", () => {
@@ -308,9 +337,9 @@ describe("renderExecHelp", () => {
     );
 
     expect(help).toContain("Usage:");
-    expect(help).toContain("ct exec /tmp/search.tool --query <string>");
-    expect(help).toContain("ct exec /tmp/search.tool --json");
-    expect(help).toContain("ct exec /tmp/search.tool --help --json");
+    expect(help).toContain("ct exec /tmp/search.tool [run] --query <string>");
+    expect(help).toContain("ct exec /tmp/search.tool [run] --json");
+    expect(help).toContain("ct exec /tmp/search.tool [run] --help --json");
     expect(help).toContain("--query <string>");
     expect(help).toContain('Optional input field named "help".');
     expect(help).toContain("Read the full input object from stdin.");
@@ -335,12 +364,28 @@ describe("renderExecHelp", () => {
       { invocationStyle: "direct" },
     );
 
-    expect(help).toContain("./legacyWrite.handler --message <string>");
-    expect(help).toContain("./legacyWrite.handler --help");
+    expect(help).toContain("./legacyWrite.handler [invoke] --message <string>");
+    expect(help).toContain("./legacyWrite.handler [invoke] --help");
     expect(help).not.toContain("ct exec ./legacyWrite.handler");
     expect(help).toContain("No output on success.");
     expect(help).toContain(
       "Alternatively, write JSON to this file to invoke the handler.",
+    );
+  });
+
+  it("mentions explicit invoke for handlers whose inputs are all optional", () => {
+    const help = renderExecHelp(
+      "./legacyWrite.handler",
+      makeSpec("handler", {
+        type: "object",
+        properties: {},
+      }),
+      { invocationStyle: "direct" },
+    );
+
+    expect(help).toContain("./legacyWrite.handler [invoke]");
+    expect(help).toContain(
+      "Invoke alone will call the handler without any inputs.",
     );
   });
 
@@ -358,9 +403,9 @@ describe("renderExecHelp", () => {
     );
 
     expect(help).toContain(
-      "'/tmp/Fuse Exec Fixture/search.tool' --query <string>",
+      "'/tmp/Fuse Exec Fixture/search.tool' [run] --query <string>",
     );
-    expect(help).toContain("'/tmp/Fuse Exec Fixture/search.tool' --help");
+    expect(help).toContain("'/tmp/Fuse Exec Fixture/search.tool' [run] --help");
   });
 
   it("renders primitive callable flags through --value and --json", () => {
@@ -369,10 +414,27 @@ describe("renderExecHelp", () => {
       makeSpec("handler", { type: "number" }),
     );
 
-    expect(help).toContain("ct exec /tmp/number.handler --value <number>");
-    expect(help).toContain("ct exec /tmp/number.handler --json");
+    expect(help).toContain(
+      "ct exec /tmp/number.handler [invoke] --value <number>",
+    );
+    expect(help).toContain("ct exec /tmp/number.handler [invoke] --json");
     expect(help).toContain("--value <number>");
     expect(help).toContain("Read the full input value as JSON from stdin.");
+  });
+
+  it("renders boolean help fields without colliding with command help", () => {
+    const help = renderExecHelp(
+      "/tmp/search.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          help: { type: "boolean" },
+        },
+      }),
+    );
+
+    expect(help).toContain("--help=<boolean> | --no-help");
+    expect(help).toContain("Boolean. Use --help=true or --no-help.");
   });
 });
 
@@ -959,6 +1021,46 @@ describe("mounted callable resolution and execution", () => {
         cellProp: "result",
         path: ["add"],
         value: { query: "milk" },
+      },
+    ]);
+  });
+
+  it("parses stdin JSON for --json without enforcing the linked schema in the CLI", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      ["--json"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readJsonInput: () => Promise.resolve(["not-an-object"]),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["add"],
+        value: ["not-an-object"],
       },
     ]);
   });
