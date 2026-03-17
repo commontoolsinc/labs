@@ -25,6 +25,7 @@ Locked decisions from the spec and user discussion:
 - Static imports are allowed only from trusted `runtimeDeps` modules and other modules in the same verified compiled bundle.
 - Top-level non-builder values must be a versioned inert subset of `StorableValue`; v1 allows only `null`, `undefined`, `boolean`, `number`, `string`, `bigint`, arrays, and plain records.
 - `console` is the only tolerated authored module-load side effect.
+- V1 must not expose `Proxy` to authored module-load code. The plain-data validator must stay descriptor-safe and must not rely on triggering proxy traps to discover that a value is unsafe.
 - The compiler may help, but the runtime verifier must be able to reject incorrect or malicious compiler output.
 
 ## Critical Contracts And Invariants
@@ -63,6 +64,12 @@ These are implementation invariants, not aspirational guidance. Every task below
 8. **Valid existing patterns keep their observable behavior.**
    The generated-pattern integration harness and runner tests are the primary evidence here, not unit tests that only validate internal bookkeeping.
 
+9. **Verifier sentinels must survive real JS emit.**
+   If the verifier depends on top-level sentinel comments, the compiler emit path must preserve them explicitly. Do not assume the current `removeComments` settings already do this.
+
+10. **Verified-function registries cannot assume a `patternId` exists at evaluation time.**
+   `Engine.evaluate()` runs before `PatternManager.registerPattern()`. Key registry entries by compile/evaluation identity plus `implementationRef`, then associate loaded exports with `patternId` later.
+
 ## Canonical Wrapper ABI
 
 Use these exact helper names so the transformer, verifier, and runtime share one contract:
@@ -88,6 +95,7 @@ const myLift = __ct_builder("lift", "main.tsx#003:myLift", function (input) {
 ```
 
 The verifier may rely on these sentinels for fast top-level splitting, but it must still reject malformed delimiter structure or wrapper forms.
+Because the current compiler strips comments by default, preserving these sentinels is an explicit part of the implementation work, not an incidental property of emit.
 
 ## Verified Implementation Reference Contract
 
@@ -100,6 +108,7 @@ Adopt this steady-state contract:
 - `__ct_builder(...)`, `__ct_fn(...)`, and `__ct_pure_fn(...)` tag returned functions with the same `implementationRef` metadata.
 - `createNodeFactory()` / `handlerInternal()` copy the function tag onto the produced `Module`.
 - `moduleToJSON()` serializes `implementationRef` and preview/location metadata for authored JavaScript modules; it does **not** stringify authored code for later execution.
+- The SES runtime records verified functions under a compile/evaluation-scoped registry keyed by `{compileId|compartmentId, implementationRef}` and later associates loaded exports/modules with the eventual `patternId`.
 - The runner resolves `implementationRef` through the SES sandbox’s verified-function registry whenever it receives a serialized JavaScript module without a live function object.
 
 This is the cutover that actually removes authored string-eval. Do not leave it for a later cleanup.
@@ -155,6 +164,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 
 ### JS compiler / bundling
 
+- Modify: `packages/js-compiler/typescript/options.ts`
+  Preserve verifier sentinel comments in emitted authored output, or add an equivalent targeted preservation mechanism wired through the compiler options.
 - Modify: `packages/js-compiler/typescript/bundler/bundle.ts`
   Emit explicit trusted source-region markers and pass internal AMD hooks into the loader without changing the external bundle ABI.
 - Modify: `packages/js-compiler/typescript/bundler/amd-loader.ts`
@@ -272,6 +283,8 @@ Add focused tests that cover:
 - `derive(...)`/`computed(...)` hoisting to `lift(...)` only when post-closure-lowering external references remain
 - `action(...)` hoisting to `handler(...)` only when post-closure-lowering external references remain
 - `patternTool(...)` / `*WithPattern(...)` staying inline
+- compile-time rejection of authored `import()` before AMD emit
+- compile-time rejection of non-trusted external static imports
 - later capability/schema passes still seeing raw builder calls before the final canonical wrapper emission stage
 
 - [ ] **Step 2: Run the transformer tests to verify they fail**
@@ -312,6 +325,8 @@ Wire the new SES stages into `CommonToolsTransformerPipeline` so:
 Extend validation so authored code gets clear compile-time diagnostics for:
 - inline `lift()` / `handler()` placement
 - non-direct builder callbacks
+- authored `import()` in v1
+- non-trusted external static imports
 - disallowed top-level forms that cannot be canonicalized
 
 - [ ] **Step 6: Re-run the targeted tests and then the full transformer suite**
@@ -345,6 +360,7 @@ git commit -m "feat: canonicalize SES module scope output"
 ### Task 2: Add Trusted Bundle Preflight And AMD Verification Hooks
 
 **Files:**
+- Modify: `packages/js-compiler/typescript/options.ts`
 - Modify: `packages/js-compiler/typescript/bundler/bundle.ts`
 - Modify: `packages/js-compiler/typescript/bundler/amd-loader.ts`
 - Modify: `packages/js-compiler/typescript/compiler.ts`
@@ -359,7 +375,7 @@ git commit -m "feat: canonicalize SES module scope output"
 Cover:
 - rejection of statements outside top-level `define(...)` calls
 - rejection of malformed bundle pre/post scaffolding
-- rejection of dynamic `import()`
+- rejection of AMD-emitted async `require(...)` / Promise helper shapes that correspond to authored dynamic import
 - rejection of non-trusted static imports
 - acceptance of trusted `runtimeDeps` imports and same-bundle transformed local imports
 - rejection of malformed wrapper forms
@@ -383,7 +399,8 @@ Change `bundle.ts` and `amd-loader.ts` so the trusted runtime can:
 - identify the exact untrusted source region
 - compare the trusted outer wrapper shape against expected boilerplate
 - pass internal AMD hooks (`__ctAmdHooks`) into the loader without changing the external `runtimeDeps` ABI
-- ensure no compiler-injected authored prelude remains inside the untrusted source region; trusted setup such as console wiring must move into the trusted wrapper or later Compartment globals, not sit alongside authored module text
+- preserve verifier sentinels through real JS emit; do not leave comment preservation as an implicit compiler default
+- ensure the verifier never has to accept the legacy injected console prelude as part of the untrusted source region; actual authored-path prelude removal lands in Task 4 together with trusted Compartment globals
 
 Keep the public bundle contract the same:
 
@@ -407,12 +424,12 @@ Keep the public bundle contract the same:
   - reject everything else
 - verify canonical wrappers and sentinels
 - enforce direct callback / direct function / data-safe helper / plain-data forms
-- reject `import()`
+- reject AMD output patterns that represent authored dynamic import after TypeScript AMD lowering; do not look only for raw `import()` tokens that no longer exist post-emit
 - maintain a top-level approved-binding table as it walks the module body
 
 - [ ] **Step 5: Keep source maps intact through the bundler change**
 
-Update js-compiler tests so wrapper markers and AMD hook injection do not break line/column mapping back to authored code.
+Update js-compiler tests so wrapper markers, preserved sentinels, and AMD hook injection do not break line/column mapping back to authored code.
 
 - [ ] **Step 6: Re-run targeted tests and the js-compiler suite**
 
@@ -433,7 +450,8 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/js-compiler/typescript/bundler/bundle.ts \
+git add packages/js-compiler/typescript/options.ts \
+  packages/js-compiler/typescript/bundler/bundle.ts \
   packages/js-compiler/typescript/bundler/amd-loader.ts \
   packages/js-compiler/typescript/compiler.ts \
   packages/js-compiler/test/source-map.test.ts \
@@ -462,7 +480,7 @@ Cover:
 - allowed v1 values, including `bigint`
 - rejection of accessors without invoking getters
 - rejection of symbol keys, custom prototypes, sparse arrays, cycles, reserved keys
-- rejection of `Map`, `Set`, `Date`, `Promise`, `Error`, functions, proxies
+- rejection of `Map`, `Set`, `Date`, `Promise`, `Error`, functions, and descriptor-introspection failures
 - helper tagging/hardening behavior for `__ct_builder`, `__ct_fn`, `__ct_pure_fn`, `__ct_data`
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -484,6 +502,7 @@ Expected: FAIL because the plain-data validator and wrapper helpers do not exist
 - walk arrays/objects without triggering getters
 - track visited objects and reject cycles in v1
 - enforce exact prototype/key rules
+- treat descriptor-introspection failures as rejection, not as a signal to keep probing
 - explicitly pin the allowed subset instead of delegating to all of `StorableValue`
 
 Keep the validator versioned in code so future widening is explicit.
@@ -539,6 +558,7 @@ git commit -m "feat: add SES plain-data validation helpers"
 - Create: `packages/runner/src/sandbox/compartment-globals.ts`
 - Create: `packages/runner/src/sandbox/runtime-modules.ts`
 - Create: `packages/runner/src/sandbox/ses-runtime.ts`
+- Modify: `packages/runner/src/harness/engine.ts`
 - Modify: `packages/runner/src/harness/eval-runtime.ts`
 - Modify: `packages/runner/src/harness/runtime-modules.ts`
 - Modify: `packages/runner/src/runtime.ts`
@@ -554,7 +574,7 @@ Cover:
 - different patterns get different Compartments
 - minimal globals only
 - trusted runtime modules available through `runtimeDeps`
-- no ambient `fetch`, `Temporal`, randomness, or host objects at module load
+- no ambient `fetch`, `Temporal`, randomness, `Proxy`, or host objects at module load
 - no low-level unsafe-eval helper remains in the direct runtime/test helper path
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -578,7 +598,7 @@ Expected: FAIL because the SES runtime path does not exist yet.
 - construct pattern-scoped Compartments
 - call bundle preflight before `compartment.evaluate(...)`
 - feed `__ctAmdHooks`, runtime helper bindings, and trusted runtime modules into the execution path
-- maintain a verified-function registry and export registry keyed by pattern ID and `implementationRef`
+- maintain a verified-function registry and export registry keyed by compile/evaluation identity plus `implementationRef`, then expose the association hooks PatternManager/Engine need to bind those refs to pattern IDs later
 - register source maps for later stack mapping
 
 Also make the SES dependency plumbing explicit here:
@@ -587,9 +607,14 @@ Also make the SES dependency plumbing explicit here:
 
 Do not leave dependency resolution implicit.
 
-- [ ] **Step 4: Migrate runtime modules to the sandbox subsystem**
+- [ ] **Step 4: Migrate runtime modules and trusted module-load globals to the sandbox subsystem**
 
 Move the trusted runtime-module surface out of `harness/runtime-modules.ts` into `sandbox/runtime-modules.ts`, then keep the harness file as a compatibility shim or re-export.
+
+At the same time:
+- stop passing `injectedScript` console preludes for authored bundles through `Engine.compile()`
+- provide sandboxed `console` and wrapper helpers through trusted Compartment globals instead
+- explicitly shadow `Proxy` out of authored module-load globals in v1 so plain-data validation does not depend on proxy-trap execution
 
 Do not broaden the capability surface during the move.
 
@@ -623,6 +648,7 @@ Expected: PASS.
 
 ```bash
 git add deno.json \
+  packages/runner/src/harness/engine.ts \
   packages/runner/src/harness/eval-runtime.ts \
   packages/runner/src/sandbox/compartment-globals.ts \
   packages/runner/src/sandbox/runtime-modules.ts \
@@ -686,16 +712,12 @@ ENV=test deno test --allow-ffi --allow-env --allow-read \
 
 Expected: FAIL because the runtime still depends on `module.implementation` strings and `getInvocation()`.
 
-- [ ] **Step 3: Remove authored `getInvocation()` and injected untrusted compile preludes from the main runtime contract**
+- [ ] **Step 3: Remove authored `getInvocation()` from the main runtime contract**
 
 Update `Harness` and `Engine` so authored pattern execution flows only through:
 - compile
 - verified SES evaluate/load
 - direct invocation of frozen function objects
-
-At the same time:
-- stop injecting console shim source into compiled authored bundles
-- provide sandboxed `console` through trusted Compartment globals instead
 
 If a trusted internal eval helper still needs to exist, move it behind the sandbox subsystem and keep it out of authored code paths.
 
@@ -705,6 +727,7 @@ Change builder/pattern construction so:
 - live runtime objects retain function implementations
 - `implementationRef` metadata is copied onto modules
 - exported pattern metadata attachment in `builder/factory.ts` still works after evaluate/load no longer returns raw eval-originated functions
+- exported values/modules are associated back to the compile/evaluation-scoped verified-function registry before `patternId` assignment happens
 - `toJSON()` remains explicit and separate from the live execution representation
 
 Do **not** eagerly stringify authored functions into `pattern.nodes`.
