@@ -52,11 +52,15 @@ interface CalendarAvailabilityArgs {
   blocked: Default<SlotInput[], []>;
 }
 
-const slotOrder = new Map<string, number>(
-  slotCatalog.map((slot, index) => [slot, index]),
-);
-
-const slotSet = new Set<string>(slotCatalog);
+const slotOrder: Record<SlotId, number> = {
+  "09:00-10:00": 0,
+  "10:00-11:00": 1,
+  "11:00-12:00": 2,
+  "13:00-14:00": 3,
+  "14:00-15:00": 4,
+  "15:00-16:00": 5,
+  "16:00-17:00": 6,
+};
 const emptySlotFallback: readonly SlotId[] = [] as const;
 
 const defaultParticipants: ParticipantAvailability[] = [
@@ -88,7 +92,7 @@ const parseSlotString = (value: string): SlotId | null => {
   const start = `${String(startHour).padStart(2, "0")}:${match[2]}`;
   const end = `${String(endHour).padStart(2, "0")}:${match[4]}`;
   const candidate = `${start}-${end}`;
-  return slotSet.has(candidate) ? candidate as SlotId : null;
+  return slotCatalog.includes(candidate as SlotId) ? candidate as SlotId : null;
 };
 
 const normalizeSlot = (input: SlotInput | undefined): SlotId | null => {
@@ -118,8 +122,8 @@ const sanitizeSlotList = (
     return [...fallback];
   }
   sanitized.sort((left, right) => {
-    const leftIndex = slotOrder.get(left) ?? slotCatalog.length;
-    const rightIndex = slotOrder.get(right) ?? slotCatalog.length;
+    const leftIndex = slotOrder[left] ?? slotCatalog.length;
+    const rightIndex = slotOrder[right] ?? slotCatalog.length;
     return leftIndex - rightIndex;
   });
   return sanitized;

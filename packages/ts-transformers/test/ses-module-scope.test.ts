@@ -179,14 +179,16 @@ export default pattern<{ count: number }>(({ count }) => {
   );
 });
 
-Deno.test("SES module-scope encodes top-level Set and Map data wrappers as plain data", async () => {
+Deno.test("SES module-scope keeps the v1 plain-data subset inside canonical data wrappers", async () => {
   const source = `/// <cts-enable />
 const VALUES = ["a", "b"] as const;
-const LOOKUP = new Set(VALUES);
-const INDEX = new Map(VALUES.map((value, index) => [value, index] as const));
-const IDENTIFIER = /^[a-z]+$/i;
+const CONFIG = {
+  flags: VALUES,
+  retries: 2,
+  enabled: true,
+} as const;
 
-export default { LOOKUP, INDEX, IDENTIFIER };
+export default { VALUES, CONFIG };
 `;
 
   const output = await transformSource(source, {
@@ -194,12 +196,9 @@ export default { LOOKUP, INDEX, IDENTIFIER };
     sesMode: true,
   });
 
-  assertStringIncludes(output, '__ctDataKind: "Set"');
-  assertStringIncludes(output, '__ctDataKind: "Map"');
-  assertStringIncludes(output, '__ctDataKind: "RegExp"');
-  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[[^\]]*\],\s*\{\s*__ctDataKind: "Set"/);
-  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[[^\]]*\],\s*\{\s*__ctDataKind: "Map"/);
-  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[[^\]]*\],\s*\{\s*__ctDataKind: "RegExp"/);
+  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[[^\]]*\],\s*\[/);
+  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[[^\]]*\],\s*\{/);
+  assertEquals(output.includes("__ctDataKind"), false);
 });
 
 Deno.test("SES module-scope does not hoist callbacks that rely on cell methods", async () => {

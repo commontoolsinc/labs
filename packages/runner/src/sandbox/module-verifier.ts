@@ -334,7 +334,12 @@ function isValidDataWrapper(args: string[]): boolean {
   if (args.length !== 3) {
     return false;
   }
-  return isTrustedItemId(args[0]!) && isTrustedCaptureManifest(args[1]!);
+  const captureIds = parseTrustedCaptureManifest(args[1]!);
+  if (!captureIds) {
+    return false;
+  }
+  return isTrustedItemId(args[0]!) &&
+    isTrustedDataExpression(args[2]!, new Set(captureIds));
 }
 
 function isTrustedItemId(source: string): boolean {
@@ -343,17 +348,23 @@ function isTrustedItemId(source: string): boolean {
 }
 
 function isTrustedCaptureManifest(source: string): boolean {
+  return parseTrustedCaptureManifest(source) !== null;
+}
+
+function parseTrustedCaptureManifest(source: string): string[] | null {
   const trimmed = source.trim();
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return false;
+    return null;
   }
   const entriesSource = trimmed.slice(1, -1).trim();
   if (!entriesSource) {
-    return true;
+    return [];
   }
-  return splitTopLevelCommaList(entriesSource).every((entry) =>
-    STRING_LITERAL_PATTERN.test(entry.trim())
-  );
+  const entries = splitTopLevelCommaList(entriesSource);
+  if (!entries.every((entry) => STRING_LITERAL_PATTERN.test(entry.trim()))) {
+    return null;
+  }
+  return entries.map((entry) => stripStringLiteralQuotes(entry.trim()));
 }
 
 function isTrustedFunctionExpression(source: string): boolean {
@@ -391,4 +402,153 @@ function hasFunctionExpressionShape(source: string): boolean {
     return false;
   }
   return true;
+}
+
+function isTrustedDataExpression(
+  source: string,
+  captureIds: ReadonlySet<string>,
+): boolean {
+  const trimmed = stripTrustedParens(source.trim());
+  if (!trimmed) {
+    return false;
+  }
+
+  if (
+    STRING_LITERAL_PATTERN.test(trimmed) ||
+    /^`(?:[^`\\]|\\.)*`$/.test(trimmed) ||
+    /^(?:null|undefined|true|false|void 0)$/.test(trimmed) ||
+    /^[+-]?\d+(?:\.\d+)?n?$/.test(trimmed)
+  ) {
+    return true;
+  }
+
+  if (/^[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(trimmed)) {
+    const [root] = trimmed.split(".", 1);
+    return root === "undefined" || captureIds.has(root!);
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    const entriesSource = trimmed.slice(1, -1).trim();
+    if (!entriesSource) {
+      return true;
+    }
+    return splitTopLevelCommaList(entriesSource).every((entry) =>
+      isTrustedDataExpression(entry, captureIds)
+    );
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const entriesSource = trimmed.slice(1, -1).trim();
+    if (!entriesSource) {
+      return true;
+    }
+    return splitTopLevelCommaList(entriesSource).every((entry) =>
+      isTrustedObjectProperty(entry, captureIds)
+    );
+  }
+
+  return false;
+}
+
+function isTrustedObjectProperty(
+  source: string,
+  captureIds: ReadonlySet<string>,
+): boolean {
+  const trimmed = source.trim();
+  if (!trimmed || trimmed.startsWith("...")) {
+    return false;
+  }
+
+  const colonIndex = findTopLevelPropertyColon(trimmed);
+  if (colonIndex < 0) {
+    return /^[$A-Z_a-z][\w$]*$/.test(trimmed) && captureIds.has(trimmed);
+  }
+
+  const key = trimmed.slice(0, colonIndex).trim();
+  const value = trimmed.slice(colonIndex + 1).trim();
+  return isTrustedObjectKey(key) && isTrustedDataExpression(value, captureIds);
+}
+
+function isTrustedObjectKey(source: string): boolean {
+  const trimmed = source.trim();
+  return /^[$A-Z_a-z][\w$]*$/.test(trimmed) ||
+    STRING_LITERAL_PATTERN.test(trimmed) ||
+    /^[+-]?\d+(?:\.\d+)?$/.test(trimmed);
+}
+
+function findTopLevelPropertyColon(source: string): number {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index++) {
+    const current = source[index]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (inSingle) {
+      if (current === "\\") escaped = true;
+      else if (current === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (current === "\\") escaped = true;
+      else if (current === "\"") inDouble = false;
+      continue;
+    }
+    if (inTemplate) {
+      if (current === "\\") escaped = true;
+      else if (current === "`") inTemplate = false;
+      continue;
+    }
+
+    if (current === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (current === "\"") {
+      inDouble = true;
+      continue;
+    }
+    if (current === "`") {
+      inTemplate = true;
+      continue;
+    }
+    if (current === "(") parenDepth++;
+    else if (current === ")") parenDepth--;
+    else if (current === "{") braceDepth++;
+    else if (current === "}") braceDepth--;
+    else if (current === "[") bracketDepth++;
+    else if (current === "]") bracketDepth--;
+    else if (
+      current === ":" && parenDepth === 0 && braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function stripTrustedParens(source: string): string {
+  let current = source.trim();
+  while (current.startsWith("(") && current.endsWith(")")) {
+    const region = findBalancedRegion(current, 0, "(", ")");
+    if (region.end !== current.length - 1) {
+      break;
+    }
+    current = current.slice(1, -1).trim();
+  }
+  return current;
+}
+
+function stripStringLiteralQuotes(source: string): string {
+  return source.slice(1, -1);
 }

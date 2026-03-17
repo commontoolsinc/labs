@@ -8,10 +8,6 @@ export const SES_WRAPPER_HELPERS = [
 export const SES_SENTINEL_PREFIX = "/*__CT_TOPLEVEL__:";
 
 export const IMPLEMENTATION_REF_FIELD = "implementationRef";
-export const ENCODED_DATA_KIND_FIELD = "__ctDataKind";
-export const ENCODED_SET_KIND = "Set";
-export const ENCODED_MAP_KIND = "Map";
-export const ENCODED_REGEXP_KIND = "RegExp";
 
 export const TRUSTED_RUNTIME_MODULES = new Set([
   "commontools",

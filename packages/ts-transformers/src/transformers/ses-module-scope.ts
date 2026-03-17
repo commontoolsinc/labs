@@ -13,10 +13,6 @@ import {
   toDirectFunctionExpression,
 } from "./ses-wrapper-helpers.ts";
 import {
-  ENCODED_DATA_KIND_FIELD,
-  ENCODED_MAP_KIND,
-  ENCODED_REGEXP_KIND,
-  ENCODED_SET_KIND,
 } from "../../../runner/src/sandbox/abi.ts";
 
 const HOISTABLE_BUILDERS = new Set(["derive", "lift", "handler", "action"]);
@@ -497,11 +493,7 @@ function createCanonicalBindingStatements(options: {
               factory.createArrayLiteralExpression(
                 captureIds.map((name) => factory.createStringLiteral(name)),
               ),
-              encodeStructuredDataInitializer(
-                factory,
-                initializer,
-                sourceFile,
-              ),
+              encodeStructuredDataInitializer(initializer),
             ],
           ),
         ),
@@ -573,65 +565,25 @@ function isCompilerGeneratedHoistedBuilder(localName: string): boolean {
 }
 
 function encodeStructuredDataInitializer(
-  factory: ts.NodeFactory,
   initializer: ts.Expression,
-  sourceFile: ts.SourceFile,
 ): ts.Expression {
-  if (ts.isRegularExpressionLiteral(initializer)) {
-    const text = initializer.getText(sourceFile);
-    const match = text.match(/^\/(.*)\/([a-z]*)$/i);
-    if (!match) {
-      return initializer;
-    }
+  return initializer;
+}
 
-    return factory.createObjectLiteralExpression([
-      factory.createPropertyAssignment(
-        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
-        factory.createStringLiteral(ENCODED_REGEXP_KIND),
-      ),
-      factory.createPropertyAssignment(
-        factory.createIdentifier("source"),
-        factory.createStringLiteral(match[1]!),
-      ),
-      factory.createPropertyAssignment(
-        factory.createIdentifier("flags"),
-        factory.createStringLiteral(match[2]!),
-      ),
-    ]);
+export function isDisallowedModuleScopeDataInitializer(
+  initializer: ts.Expression,
+): boolean {
+  if (ts.isRegularExpressionLiteral(initializer)) {
+    return true;
   }
 
   if (!ts.isNewExpression(initializer) || !ts.isIdentifier(initializer.expression)) {
-    return initializer;
+    return false;
   }
 
-  const args = initializer.arguments ?? [];
-  if (initializer.expression.text === "Set") {
-    return factory.createObjectLiteralExpression([
-      factory.createPropertyAssignment(
-        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
-        factory.createStringLiteral(ENCODED_SET_KIND),
-      ),
-      factory.createPropertyAssignment(
-        factory.createIdentifier("values"),
-        args[0] ?? factory.createArrayLiteralExpression(),
-      ),
-    ]);
-  }
-
-  if (initializer.expression.text === "Map") {
-    return factory.createObjectLiteralExpression([
-      factory.createPropertyAssignment(
-        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
-        factory.createStringLiteral(ENCODED_MAP_KIND),
-      ),
-      factory.createPropertyAssignment(
-        factory.createIdentifier("entries"),
-        args[0] ?? factory.createArrayLiteralExpression(),
-      ),
-    ]);
-  }
-
-  return initializer;
+  return initializer.expression.text === "Set" ||
+    initializer.expression.text === "Map" ||
+    initializer.expression.text === "RegExp";
 }
 
 function createAssignment(

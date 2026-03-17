@@ -395,7 +395,7 @@ export class Runtime {
       this.defaultFrame = undefined;
     }
 
-    // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
+    // Dispose the Engine (clears compiler/runtime state, source maps, console hook)
     this.harness.dispose();
 
     // Reset experimental fabric config to defaults

@@ -7,9 +7,9 @@ import {
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
 } from "@commontools/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commontools/static";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import { LegacyEvalRuntime } from "./support/legacy-eval-runtime.ts";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -58,9 +58,9 @@ function execute(
   bundled: JsScript,
 ): {
   main: Record<string, unknown>;
-  runtime: UnsafeEvalRuntime;
+  runtime: LegacyEvalRuntime;
 } {
-  const runtime = new UnsafeEvalRuntime();
+  const runtime = new LegacyEvalRuntime();
   const isolate = runtime.getIsolate("");
   const evaledBundle = isolate.execute(bundled);
   const result = evaledBundle.invoke().inner();
@@ -251,7 +251,7 @@ describe("Stack trace source mapping", () => {
   });
 
   it("returns stack unchanged when no source map is loaded", () => {
-    const runtime = new UnsafeEvalRuntime();
+    const runtime = new LegacyEvalRuntime();
 
     const stack = `Error: something broke
     at someFunction (unknown-file.js:10:5)

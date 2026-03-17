@@ -3,10 +3,10 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
 import type { RuntimeProgram } from "../../src/harness/types.ts";
-import { UnsafeEvalRuntime } from "../../src/harness/eval-runtime.ts";
 import * as RuntimeModules from "../../src/harness/runtime-modules.ts";
 import type { JsScript } from "@commontools/js-compiler";
 import type { Pattern } from "../../src/builder/types.ts";
+import { LegacyEvalRuntime } from "./legacy-eval-runtime.ts";
 
 export async function compareExports(program: RuntimeProgram): Promise<void> {
   const signer = await Identity.fromPassphrase("runtime-compare exports");
@@ -116,12 +116,163 @@ export async function comparePatternResult<TArgument>(
   }
 }
 
+export interface RuntimeCompareEvent {
+  stream: string;
+  payload: unknown;
+}
+
+export interface RuntimeCompareStep {
+  events?: RuntimeCompareEvent[];
+  observe: string[];
+}
+
+export async function comparePatternScenario<TArgument>(
+  program: RuntimeProgram,
+  argument: TArgument,
+  steps: RuntimeCompareStep[],
+): Promise<void> {
+  const sesSigner = await Identity.fromPassphrase("runtime-compare ses scenario");
+  const sesStorageManager = StorageManager.emulate({ as: sesSigner });
+  const sesRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: sesStorageManager,
+  });
+
+  const legacySigner = await Identity.fromPassphrase("runtime-compare legacy scenario");
+  const legacyStorageManager = StorageManager.emulate({ as: legacySigner });
+  const legacyRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: legacyStorageManager,
+  });
+
+  try {
+    const { id, jsScript } = await sesRuntime.harness.compile(program);
+    const ses = await sesRuntime.harness.evaluate(id, jsScript, program.files);
+    const legacy = await executeLegacy(jsScript);
+    const exportName = program.mainExport ?? "default";
+    const sesPattern = ses.main?.[exportName] as Pattern;
+    const legacyPattern = legacy.main[exportName] as Pattern;
+
+    const sesResultCell = sesRuntime.getCell(
+      sesSigner.did(),
+      { compare: "ses-pattern-scenario" },
+      sesPattern.resultSchema,
+    );
+    const legacyResultCell = legacyRuntime.getCell(
+      legacySigner.did(),
+      { compare: "legacy-pattern-scenario" },
+      legacyPattern.resultSchema,
+    );
+
+    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const legacyResult = await legacyRuntime.runSynced(
+      legacyResultCell,
+      legacyPattern,
+      argument,
+    );
+
+    for (const step of steps) {
+      if (step.events) {
+        for (const event of step.events) {
+          await sendRuntimeEvent(sesRuntime, sesResult, event);
+          await sendRuntimeEvent(legacyRuntime, legacyResult, event);
+        }
+        await sesRuntime.idle();
+        await legacyRuntime.idle();
+      }
+
+      for (const path of step.observe) {
+        const sesValue = await readResultPath(sesResult, path);
+        const legacyValue = await readResultPath(legacyResult, path);
+        assertEquals(normalizeValue(sesValue), normalizeValue(legacyValue));
+      }
+    }
+  } finally {
+    await sesRuntime.dispose();
+    await legacyRuntime.dispose();
+    await sesStorageManager.close();
+    await legacyStorageManager.close();
+  }
+}
+
+export async function comparePatternMappedError<TArgument>(
+  program: RuntimeProgram,
+  argument: TArgument,
+  event: RuntimeCompareEvent,
+): Promise<void> {
+  const sesErrors: Error[] = [];
+  const legacyErrors: Error[] = [];
+  const sesSigner = await Identity.fromPassphrase("runtime-compare ses error");
+  const sesStorageManager = StorageManager.emulate({ as: sesSigner });
+  const sesRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: sesStorageManager,
+    errorHandlers: [(error) => sesErrors.push(error)],
+  });
+
+  const legacySigner = await Identity.fromPassphrase("runtime-compare legacy error");
+  const legacyStorageManager = StorageManager.emulate({ as: legacySigner });
+  const legacyRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: legacyStorageManager,
+    errorHandlers: [(error) => legacyErrors.push(error)],
+  });
+
+  try {
+    const { id, jsScript } = await sesRuntime.harness.compile(program);
+    const ses = await sesRuntime.harness.evaluate(id, jsScript, program.files);
+    const legacy = await executeLegacy(jsScript);
+    const exportName = program.mainExport ?? "default";
+    const sesPattern = ses.main?.[exportName] as Pattern;
+    const legacyPattern = legacy.main[exportName] as Pattern;
+
+    const sesResultCell = sesRuntime.getCell(
+      sesSigner.did(),
+      { compare: "ses-pattern-error" },
+      sesPattern.resultSchema,
+    );
+    const legacyResultCell = legacyRuntime.getCell(
+      legacySigner.did(),
+      { compare: "legacy-pattern-error" },
+      legacyPattern.resultSchema,
+    );
+
+    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const legacyResult = await legacyRuntime.runSynced(
+      legacyResultCell,
+      legacyPattern,
+      argument,
+    );
+
+    await sendRuntimeEvent(sesRuntime, sesResult, event);
+    await sendRuntimeEvent(legacyRuntime, legacyResult, event);
+    await sesRuntime.idle();
+    await legacyRuntime.idle();
+
+    const sesError = sesErrors[0];
+    const legacyError = legacyErrors[0];
+    if (!sesError || !legacyError) {
+      throw new Error("Expected both runtimes to surface a handler error");
+    }
+
+    assertEquals(
+      normalizeStack(sesRuntime.harness.parseStack(sesError.stack ?? "")),
+      normalizeStack(legacy.runtime.parseStack(legacyError.stack ?? "")),
+    );
+  } finally {
+    await sesRuntime.dispose();
+    await legacyRuntime.dispose();
+    await sesStorageManager.close();
+    await legacyStorageManager.close();
+  }
+}
+
 async function executeLegacy(jsScript: JsScript): Promise<{
   main: Record<string, unknown>;
   exportMap: Record<string, Record<string, unknown>>;
-  runtime: UnsafeEvalRuntime;
+  runtime: LegacyEvalRuntime;
 }> {
-  const runtime = new UnsafeEvalRuntime();
+  const runtime = new LegacyEvalRuntime();
   const isolate = runtime.getIsolate("");
   const { runtimeExports } = await RuntimeModules.getExports();
   const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
@@ -154,6 +305,34 @@ function normalizeValue(value: unknown): unknown {
     );
   }
   return value;
+}
+
+async function sendRuntimeEvent(
+  runtime: Runtime,
+  result: any,
+  event: RuntimeCompareEvent,
+): Promise<void> {
+  const targetCell = getResultPath(result, event.stream);
+  await runtime.editWithRetry((tx) => targetCell.withTx(tx).send(event.payload));
+}
+
+async function readResultPath(result: any, path: string): Promise<unknown> {
+  return await getResultPath(result, path).pull();
+}
+
+function getResultPath(result: any, path: string): any {
+  return splitPath(path).reduce((cell, segment) => cell.key(segment), result);
+}
+
+function splitPath(path: string): Array<string | number> {
+  return path.split(".")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => {
+      const index = Number(segment);
+      return Number.isInteger(index) && index.toString() === segment
+        ? index
+        : segment;
+    });
 }
 
 function captureError(callback: () => unknown): Error {

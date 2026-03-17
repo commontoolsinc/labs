@@ -48,7 +48,7 @@ interface MarkDoseEvent {
   takenAt?: string;
 }
 
-const timePattern = /^\d{2}:\d{2}$/;
+const isTimeString = (value: string): boolean => /^\d{2}:\d{2}$/.test(value);
 
 const toHoursMinutes = (value: Date): string => {
   const hours = value.getUTCHours().toString().padStart(2, "0");
@@ -59,7 +59,7 @@ const toHoursMinutes = (value: Date): string => {
 const sanitizeTime = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (timePattern.test(trimmed)) {
+    if (isTimeString(trimmed)) {
       return trimmed;
     }
     const attempt = new Date(trimmed);

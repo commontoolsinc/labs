@@ -10,12 +10,12 @@ import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   JsScript,
+  MappedPosition,
   Program,
   ProgramResolver,
   Source,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import { MappedPosition } from "./eval-runtime.ts";
 import {
   CommonToolsTransformerPipeline,
   OpaqueRefErrorTransformer,

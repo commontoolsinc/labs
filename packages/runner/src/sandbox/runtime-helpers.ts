@@ -7,12 +7,6 @@ import type {
   JSONSchema,
   Pattern,
 } from "../builder/types.ts";
-import {
-  ENCODED_DATA_KIND_FIELD,
-  ENCODED_MAP_KIND,
-  ENCODED_REGEXP_KIND,
-  ENCODED_SET_KIND,
-} from "./abi.ts";
 import { ensureSESLockdown } from "./compartment-globals.ts";
 import { freezeVerifiedPlainData } from "./plain-data.ts";
 import {
@@ -73,11 +67,6 @@ export function createDataWrapper<T>(
   captureIds: readonly string[],
   value: T,
 ): T & VerifiedMetadataCarrier {
-  const encoded = decodeStructuredData(value);
-  if (encoded !== undefined) {
-    return encoded as T & VerifiedMetadataCarrier;
-  }
-
   if (value === null || (typeof value !== "object" && typeof value !== "function")) {
     return freezeVerifiedPlainData(value) as T & VerifiedMetadataCarrier;
   }
@@ -139,30 +128,6 @@ function assertCallable(value: unknown): asserts value is Function {
   if (typeof value !== "function") {
     throw new Error("Expected a callable wrapper target");
   }
-}
-
-function decodeStructuredData<T>(value: T): T | undefined {
-  if (!isRecord(value) || !(ENCODED_DATA_KIND_FIELD in value)) {
-    return undefined;
-  }
-
-  const encodedKind = value[ENCODED_DATA_KIND_FIELD];
-  ensureSESLockdown();
-  if (encodedKind === ENCODED_SET_KIND) {
-    const entries = Array.isArray(value.values) ? value.values : [];
-    return harden(new Set(entries)) as T;
-  }
-  if (encodedKind === ENCODED_MAP_KIND) {
-    const entries = Array.isArray(value.entries) ? value.entries : [];
-    return harden(new Map(entries as Iterable<readonly [unknown, unknown]>)) as T;
-  }
-  if (encodedKind === ENCODED_REGEXP_KIND) {
-    const source = typeof value.source === "string" ? value.source : "";
-    const flags = typeof value.flags === "string" ? value.flags : "";
-    return harden(new RegExp(source, flags)) as T;
-  }
-
-  return undefined;
 }
 
 function installPatternResultSchemaNormalizer(

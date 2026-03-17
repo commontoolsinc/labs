@@ -45,7 +45,10 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
-import { isTrustedRuntimeImport } from "./ses-module-scope.ts";
+import {
+  isDisallowedModuleScopeDataInitializer,
+  isTrustedRuntimeImport,
+} from "./ses-module-scope.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
@@ -62,6 +65,10 @@ export class PatternContextValidationTransformer extends Transformer {
     const visit = (node: ts.Node): ts.Node => {
       if (ts.isImportDeclaration(node)) {
         this.validateImportDeclaration(node, context);
+      }
+
+      if (ts.isVariableDeclaration(node)) {
+        this.validateModuleScopeDataInitializer(node, context, checker);
       }
 
       // Skip JSX - OpaqueRefJSXTransformer handles those
@@ -170,6 +177,36 @@ export class PatternContextValidationTransformer extends Transformer {
       expr.name.text === "get" &&
       node.arguments.length === 0
     );
+  }
+
+  private validateModuleScopeDataInitializer(
+    node: ts.VariableDeclaration,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!context.options.sesMode || !node.initializer) {
+      return;
+    }
+    if (!this.isAtModuleScope(node)) {
+      return;
+    }
+    if (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) {
+      return;
+    }
+    if (ts.isCallExpression(node.initializer) && detectCallKind(node.initializer, checker)) {
+      return;
+    }
+    if (!isDisallowedModuleScopeDataInitializer(node.initializer)) {
+      return;
+    }
+
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:module-scope-data",
+      message:
+        "Top-level non-builder values must stay within the SES v1 inert plain-data subset.",
+      node: node.initializer,
+    });
   }
 
   /**

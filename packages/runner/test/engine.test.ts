@@ -431,10 +431,12 @@ describe("Engine compile + evaluate", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "export const proxyType = typeof Proxy;",
-            "export const fetchType = typeof fetch;",
-            "const summary = `${proxyType}:${fetchType}`;",
-            "export default summary;",
+            "export function readGlobalSurface() {",
+            "  const proxyType = typeof Proxy;",
+            "  const fetchType = typeof fetch;",
+            "  return `${proxyType}:${fetchType}`;",
+            "}",
+            "export default readGlobalSurface;",
           ].join("\n"),
         },
       ],
@@ -444,7 +446,8 @@ describe("Engine compile + evaluate", () => {
     const { main } = await engine.evaluate(id, jsScript, program.files);
 
     expect(main).toBeDefined();
-    expect(main!["default"]).toBe("undefined:undefined");
+    expect(typeof main!["default"]).toBe("function");
+    expect((main!["default"] as () => string)()).toBe("undefined:undefined");
   });
 
   it("normalizes returned internal cells to value schemas on SES-evaluated patterns", async () => {

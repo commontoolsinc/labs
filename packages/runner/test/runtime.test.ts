@@ -6,8 +6,8 @@ import {
   JsScript,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commontools/static";
+import { LegacyEvalRuntime } from "./support/legacy-eval-runtime.ts";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -127,7 +127,7 @@ function execute(
   main: Record<string, unknown>;
   exportMap: Record<string, Record<string, unknown>>;
 } {
-  const runtime = new UnsafeEvalRuntime();
+  const runtime = new LegacyEvalRuntime();
   const isolate = runtime.getIsolate("");
   const evaledBundle = isolate.execute(bundled);
   const result = rtBundle !== undefined

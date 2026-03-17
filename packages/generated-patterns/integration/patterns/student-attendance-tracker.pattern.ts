@@ -71,7 +71,7 @@ interface StudentAttendanceTrackerArgs {
   roster: Default<StudentSeed[], []>;
 }
 
-const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const isIsoDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 const sanitizeStudentName = (
   value: unknown,
@@ -129,7 +129,7 @@ const sanitizeRoster = (
 const sanitizeDate = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (isoDatePattern.test(trimmed)) {
+    if (isIsoDate(trimmed)) {
       return trimmed;
     }
     const parsed = new Date(trimmed);

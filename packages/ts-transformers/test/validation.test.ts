@@ -267,6 +267,22 @@ Deno.test("SES module-scope validation", async (t) => {
     assertEquals(errors[0]!.type, "pattern-context:external-import");
   });
 
+  await t.step("errors on top-level data outside the v1 inert subset", async () => {
+    const source = `/// <cts-enable />
+      const lookup = new Set(["alpha", "beta"]);
+      const matcher = /^[a-z]+$/i;
+      export default { lookup, matcher };
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics).filter((error) =>
+      error.type === "pattern-context:module-scope-data"
+    );
+    assertGreater(errors.length, 0, "Expected inert-subset diagnostics");
+  });
+
   await t.step("errors when lift callback is not a direct function", async () => {
     const source = `/// <cts-enable />
       import { lift } from "commontools";

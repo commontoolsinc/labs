@@ -1,7 +1,9 @@
 import {
   compareExports,
   compareMappedError,
+  comparePatternMappedError,
   comparePatternResult,
+  comparePatternScenario,
 } from "../support/runtime-compare.ts";
 
 Deno.test("SES runtime matches legacy exports for valid authored programs", async () => {
@@ -76,6 +78,43 @@ Deno.test("SES runtime matches legacy pattern outputs for hoisted lift and local
   );
 });
 
+Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and inline derive/computed flows", async () => {
+  await comparePatternScenario(
+    {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { Cell, computed, derive, handler, lift, pattern } from 'commontools';",
+            "const scale = 2;",
+            "const double = lift((value: number) => value * scale);",
+            "const increment = handler((event: { amount?: number } | undefined, context: { value: Cell<number> }) => {",
+            "  const amount = typeof event?.amount === 'number' ? event.amount : 1;",
+            "  context.value.set((context.value.get() ?? 0) + amount);",
+            "});",
+            "export default pattern<{ value: number }>(({ value }) => {",
+            "  const doubled = double(value);",
+            "  const label = derive(doubled, (current) => `value:${current}`);",
+            "  const isEven = computed(() => ((value ?? 0) % 2) === 0);",
+            "  return { value, doubled, label, isEven, increment: increment({ value }) };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    },
+    { value: 2 },
+    [
+      { observe: ["value", "doubled", "label", "isEven"] },
+      {
+        events: [{ stream: "increment", payload: { amount: 3 } }],
+        observe: ["value", "doubled", "label", "isEven"],
+      },
+    ],
+  );
+});
+
 Deno.test("SES runtime matches legacy mapped named-export helper failures", async () => {
   await compareMappedError(
     {
@@ -94,5 +133,31 @@ Deno.test("SES runtime matches legacy mapped named-export helper failures", asyn
       ],
     },
     (main) => (main.fail as (event: { value: string }) => never)({ value: "x" }),
+  );
+});
+
+Deno.test("SES runtime preserves mapped hoisted handler failures against legacy eval", async () => {
+  await comparePatternMappedError(
+    {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { Cell, handler, pattern } from 'commontools';",
+            "const explode = handler((_event: unknown, context: { value: Cell<number> }) => {",
+            "  throw new Error(`boom:${context.value.get() ?? 0}`);",
+            "});",
+            "export default pattern<{ value: number }>(({ value }) => ({",
+            "  value,",
+            "  explode: explode({ value }),",
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    },
+    { value: 7 },
+    { stream: "explode", payload: {} },
   );
 });

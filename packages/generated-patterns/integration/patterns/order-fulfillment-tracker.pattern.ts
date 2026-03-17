@@ -97,14 +97,12 @@ const statusLabels: Record<FulfillmentStatus, string> = {
   cancelled: "Cancelled",
 };
 
-const fulfillmentStatusSet = new Set<FulfillmentStatus>(fulfillmentStatuses);
-
-const inFlightStatuses = new Set<FulfillmentStatus>([
+const inFlightStatuses: readonly FulfillmentStatus[] = [
   "pending",
   "picking",
   "packed",
   "shipped",
-]);
+] as const;
 
 const fulfillmentFlow: readonly FulfillmentStatus[] = [
   "pending",
@@ -160,7 +158,7 @@ const sanitizeStatus = (
 ): FulfillmentStatus => {
   if (typeof value !== "string") return fallback;
   const normalized = value.trim().toLowerCase();
-  if (fulfillmentStatusSet.has(normalized as FulfillmentStatus)) {
+  if (fulfillmentStatuses.includes(normalized as FulfillmentStatus)) {
     return normalized as FulfillmentStatus;
   }
   return fallback;
@@ -368,7 +366,7 @@ const liftStatusBuckets = lift(
 
 const liftInFlightOrderIds = lift((entries: OrderRecord[]) =>
   entries
-    .filter((entry) => inFlightStatuses.has(entry.status))
+    .filter((entry) => inFlightStatuses.includes(entry.status))
     .map((entry) => entry.id)
 );
 

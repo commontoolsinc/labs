@@ -181,7 +181,9 @@ function buildTemplateCards(
   return cards;
 }
 
-const sanitizedDefaultTemplates = buildTemplateCards(defaultTemplateSeeds);
+function cloneDefaultTemplateCards(): TemplateCard[] {
+  return cloneCards(buildTemplateCards(defaultTemplateSeeds));
+}
 
 function cloneCards(entries: readonly TemplateCard[]): TemplateCard[] {
   return entries.map((entry) => ({
@@ -194,10 +196,10 @@ function sanitizeTemplateList(
   value: readonly TemplateSeed[] | undefined,
 ): TemplateCard[] {
   if (!Array.isArray(value) || value.length === 0) {
-    return cloneCards(sanitizedDefaultTemplates);
+    return cloneDefaultTemplateCards();
   }
   const cards = buildTemplateCards(value);
-  return cards.length > 0 ? cards : cloneCards(sanitizedDefaultTemplates);
+  return cards.length > 0 ? cards : cloneDefaultTemplateCards();
 }
 
 function buildCategoryFilters(

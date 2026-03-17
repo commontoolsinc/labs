@@ -1,5 +1,6 @@
 import {
   assertEquals,
+  assertRejects,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
@@ -94,6 +95,19 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
           `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){globalThis.__pwned = true;return 1;});exports.default=fn;}`,
       })
     );
+  });
+
+  await t.step("rejects non-inert __ct_data third arguments before evaluation", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { globalThis.__pwned = true; return 1; })());exports.default=value;}`,
+      })
+    );
+    assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
   });
 
   await t.step("allows console module-load side effects while rejecting other globals", () => {
@@ -259,6 +273,41 @@ Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing help
         extractFirstFactoryBody(defineSource)
       }}`,
     });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("engine evaluation rejects non-inert top-level data initializers before module-load execution", async () => {
+  const signer = await Identity.fromPassphrase("bundle-preflight malicious data");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'const value = (() => { throw new Error("module-load executed"); })();',
+            "export default value;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { id, jsScript } = await runtime.harness.compile(program);
+    await assertRejects(
+      () => runtime.harness.evaluate(id, jsScript, program.files),
+      Error,
+      "non-canonical top-level statement",
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();

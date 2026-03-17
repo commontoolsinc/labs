@@ -5,7 +5,6 @@ import {
   SourceMapParser,
 } from "@commontools/js-compiler";
 
-// A reference to a runtime value from a `JsIsolate`.
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
   inner(): unknown;
@@ -13,43 +12,43 @@ export interface JsValue {
   isObject(): boolean;
 }
 
-// A JS runtime context.
 export interface JsIsolate {
-  // Execute `js` within this `JsIsolate`, returning the value.
   execute(js: string | JsScript): JsValue;
 }
 
-// A `JsRuntime` can host several `JsIsolate`s, capable
-// of executing JavaScript.
 export interface JsRuntime extends EventTarget {
-  // Get `JsIsolate` by `key`.
   getIsolate(key: string): JsIsolate;
 }
 
-export class UnsafeEvalJsValue {
+export class LegacyEvalJsValue {
   private internals: IsolateInternals;
   private value: unknown;
+
   constructor(internals: IsolateInternals, value: unknown) {
     this.internals = internals;
     this.value = value;
   }
-  invoke(...args: unknown[]): UnsafeEvalJsValue {
+
+  invoke(...args: unknown[]): LegacyEvalJsValue {
     if (typeof this.value !== "function") {
       throw new Error("Cannot invoke non function");
     }
     const func = this.value as (...args: unknown[]) => unknown;
     const result = this.internals.exec(() => func.apply(null, args));
-    return new UnsafeEvalJsValue(this.internals, result);
+    return new LegacyEvalJsValue(this.internals, result);
   }
+
   inner(): unknown {
     return this.value;
   }
+
   asObject(): object {
     if (!this.isObject()) {
       throw new Error("Value is not an object");
     }
     return this.value as object;
   }
+
   isObject(): boolean {
     return !!(this.value && typeof this.value === "object");
   }
@@ -83,26 +82,21 @@ class IsolateInternals {
     return this.sourceMaps.mapPosition(filename, line, column);
   }
 
-  /**
-   * Parse an error stack trace, mapping all positions back to original sources.
-   */
   parseStack(stack: string): string {
     return this.sourceMaps.parse(stack);
   }
 
-  /**
-   * Clear accumulated source maps to release memory.
-   */
   clear(): void {
     this.sourceMaps.clear();
   }
 }
 
-export class UnsafeEvalIsolate implements JsIsolate {
+export class LegacyEvalIsolate implements JsIsolate {
   private internals = new IsolateInternals();
+
   execute(
     input: string | JsScript,
-  ): UnsafeEvalJsValue {
+  ): LegacyEvalJsValue {
     const { js, filename, sourceMap } = typeof input === "string"
       ? { js: input, filename: "NO-NAME.js" }
       : input;
@@ -112,13 +106,11 @@ export class UnsafeEvalIsolate implements JsIsolate {
     }
 
     const result = this.internals.exec(() => eval(js));
-    return new UnsafeEvalJsValue(this.internals, result);
+    return new LegacyEvalJsValue(this.internals, result);
   }
 
-  // Make a new `UnsafeEvalJsValue` for this isolate from input.
-  // Does not verify the providence of input.
   value<T>(value: T) {
-    return new UnsafeEvalJsValue(this.internals, value);
+    return new LegacyEvalJsValue(this.internals, value);
   }
 
   mapPosition(
@@ -129,29 +121,19 @@ export class UnsafeEvalIsolate implements JsIsolate {
     return this.internals.mapPosition(filename, line, column);
   }
 
-  /**
-   * Parse an error stack trace, mapping all positions back to original sources.
-   */
   parseStack(stack: string): string {
     return this.internals.parseStack(stack);
   }
 
-  /**
-   * Clear accumulated source maps and other state.
-   * Call this when disposing the runtime to prevent memory leaks.
-   */
   clear(): void {
     this.internals.clear();
   }
 }
 
-export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
-  private isolateSingleton = new UnsafeEvalIsolate();
-  constructor() {
-    super();
-  }
+export class LegacyEvalRuntime extends EventTarget implements JsRuntime {
+  private isolateSingleton = new LegacyEvalIsolate();
 
-  getIsolate(_key: string): UnsafeEvalIsolate {
+  getIsolate(_key: string): LegacyEvalIsolate {
     return this.isolateSingleton;
   }
 
@@ -163,16 +145,10 @@ export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
     return this.isolateSingleton.mapPosition(filename, line, column);
   }
 
-  /**
-   * Parse an error stack trace, mapping all positions back to original sources.
-   */
   parseStack(stack: string): string {
     return this.isolateSingleton.parseStack(stack);
   }
 
-  /**
-   * Clear all isolate state. Call on dispose to release memory.
-   */
   clear(): void {
     this.isolateSingleton.clear();
   }

@@ -47,7 +47,7 @@ const planCatalog: Record<PlanId, PlanDefinition> = {
   },
 };
 
-const knownPlans = new Set<PlanId>(["starter", "growth", "enterprise"]);
+const knownPlans: readonly PlanId[] = ["starter", "growth", "enterprise"];
 
 const formatCurrency = (amount: number): string => {
   return `$${amount.toFixed(2)}`;
@@ -66,7 +66,7 @@ const formatIsoDate = (date: Date): string => {
 const sanitizePlanId = (value: unknown): PlanId => {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
-    if (knownPlans.has(normalized as PlanId)) {
+    if (knownPlans.includes(normalized as PlanId)) {
       return normalized as PlanId;
     }
   }
