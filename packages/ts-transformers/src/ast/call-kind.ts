@@ -112,17 +112,6 @@ const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
   "wish",
 ]);
 
-const REACTIVE_ORIGIN_CALL_NAMES = new Set([
-  "compileAndRun",
-  "fetchData",
-  "fetchProgram",
-  "generateText",
-  "llm",
-  "llmDialog",
-  "navigateTo",
-  "streamData",
-]);
-
 export function detectCallKind(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -135,12 +124,7 @@ export function isReactiveOriginCall(
   checker: ts.TypeChecker,
 ): boolean {
   const callKind = detectCallKind(call, checker);
-  if (callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind)) {
-    return true;
-  }
-
-  const calleeName = getDirectCalleeName(call.expression);
-  return calleeName !== undefined && REACTIVE_ORIGIN_CALL_NAMES.has(calleeName);
+  return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
 }
 
 function resolveExpressionKind(
@@ -275,17 +259,6 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
   }
 
   return current;
-}
-
-function getDirectCalleeName(expression: ts.Expression): string | undefined {
-  const target = stripWrappers(expression);
-  if (ts.isIdentifier(target)) {
-    return target.text;
-  }
-  if (ts.isPropertyAccessExpression(target)) {
-    return target.name.text;
-  }
-  return undefined;
 }
 
 function resolveSymbolKind(

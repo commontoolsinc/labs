@@ -1200,6 +1200,31 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       assertEquals(errors[0]!.type, "opaque-get:invalid-call");
     },
   );
+
+  await t.step(
+    "does not report opaque-get on same-named local helper result",
+    async () => {
+      const source = `/// <cts-enable />
+      function generateText() {
+        return { get: () => "hi" };
+      }
+
+      const text = generateText();
+      const value = text.get();
+
+      export default value;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.some((error) => error.type === "opaque-get:invalid-call"),
+        false,
+        "local helpers should not be classified as reactive origins by name",
+      );
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
