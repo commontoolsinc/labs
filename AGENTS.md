@@ -25,8 +25,9 @@ Common Tools product.
 ## Pattern Development
 
 If you are developing patterns, use the repo-local `pattern-dev` skill at
-`skills/pattern-dev/SKILL.md`. Claude compatibility paths under
-`.claude/skills/` still exist, but `skills/` is the canonical source.
+`skills/pattern-dev/SKILL.md`. `skills/` is the canonical authored source. Codex
+discovers the repo-local skill mirror through `.agents/skills/`, and Claude
+compatibility continues to use `.claude/skills/`.
 
 ### Useful Pattern documentation
 

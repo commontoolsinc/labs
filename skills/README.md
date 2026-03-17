@@ -11,7 +11,9 @@ Each skill lives in `skills/<name>/` and may include:
 
 Compatibility surfaces:
 
+- `/.agents/skills/` exposes the skills through Codex's documented repo-local
+  discovery path
 - `/.claude/skills/` preserves the existing Claude-facing skill paths
 
 When a skill is conceptually referenced in docs, prefer `skills/<name>/` unless
-the reference is specifically about Claude adapter behavior.
+the reference is specifically about Claude or Codex runtime behavior.

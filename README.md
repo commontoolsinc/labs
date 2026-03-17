@@ -69,8 +69,8 @@ components, and handlers.
 
 ### AI Skills & Commands
 
-This repository includes repo-local skills plus Claude compatibility commands
-for common workflows:
+This repository includes repo-local skills plus runtime-specific discovery
+surfaces and Claude compatibility commands for common workflows:
 
 - `skills/pattern-dev/` - Develop patterns with LLM assistance
 - `skills/pattern-test/` - Write and run pattern tests
@@ -80,8 +80,10 @@ for common workflows:
 - `/fix-issue` - Fix a specific issue
 - `/oracle` - Investigate how things actually work
 
-Claude compatibility preserves the existing `/pattern-dev`, `/pattern-test`, and
-related skill names through `/.claude/skills/`.
+`skills/` is the canonical authored source. Codex discovers repo-local skills
+through `/.agents/skills/`, while Claude compatibility preserves the existing
+`/pattern-dev`, `/pattern-test`, and related skill names through
+`/.claude/skills/`.
 
 ### Dependencies & Integrations
 
