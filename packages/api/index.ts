@@ -1231,10 +1231,13 @@ export type JSONSchemaObj = {
   readonly asOpaque?: boolean;
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
-  // temporarily used to assign labels like "confidential"
+  // Confidentiality is CNF: a list of clauses, each clause a list of atoms.
+  // Legacy single-clause arrays remain accepted for migration.
   readonly ifc?: {
-    readonly classification?: readonly string[];
-    readonly integrity?: readonly string[];
+    readonly classification?:
+      | readonly ImmutableJSONValue[]
+      | readonly (readonly ImmutableJSONValue[])[];
+    readonly integrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly string[];
     readonly requiredIntegrity?: readonly string[];
     readonly exactCopyOf?: string;
