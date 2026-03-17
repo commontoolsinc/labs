@@ -1648,12 +1648,19 @@ function policyRuleConfidentialityMatches(
 function policyRuleIntegrityMatches(
   label: PolicyLabelState,
   rule: PolicyRewriteRule,
+  options: PrepareBoundaryCommitOptions = {},
 ): boolean {
   if (rule.integrityPre.length === 0) {
     return true;
   }
-  const integrity = new Set(label.integrity);
-  return rule.integrityPre.every((required) => integrity.has(required));
+  return integritySatisfiesRequiredIntegrity(
+    label.integrity,
+    rule.integrityPre,
+    {
+      actingPrincipal: options.actingPrincipal,
+      trustContext: options.trustContext,
+    },
+  );
 }
 
 function evaluatePolicyReleaseCondition(
@@ -1726,8 +1733,9 @@ function applyPolicyRuleOnce(
   tx: IExtendedStorageTransaction,
   entity: EntityAddress,
   writePath: string,
+  options: PrepareBoundaryCommitOptions = {},
 ): { readonly changed: boolean; readonly label: PolicyLabelState } {
-  if (!policyRuleIntegrityMatches(label, rule)) {
+  if (!policyRuleIntegrityMatches(label, rule, options)) {
     return { changed: false, label };
   }
   if (
@@ -1815,6 +1823,7 @@ function evaluatePolicyOnce(
   entity: EntityAddress,
   writePath: string,
   remainingFuel: number,
+  options: PrepareBoundaryCommitOptions = {},
 ): {
   readonly changed: boolean;
   readonly label: PolicyLabelState;
@@ -1828,7 +1837,14 @@ function evaluatePolicyOnce(
       if (fuel <= 0 && changed) {
         return { changed: true, label: current, remainingFuel: 0 };
       }
-      const applied = applyPolicyRuleOnce(current, rule, tx, entity, writePath);
+      const applied = applyPolicyRuleOnce(
+        current,
+        rule,
+        tx,
+        entity,
+        writePath,
+        options,
+      );
       if (!applied.changed) {
         break;
       }
@@ -1846,6 +1862,7 @@ function evaluatePolicyFixpoint(
   tx: IExtendedStorageTransaction,
   entity: EntityAddress,
   writePath: string,
+  options: PrepareBoundaryCommitOptions = {},
 ): PolicyFixpointResult {
   let current = label;
   let remainingFuel = config.fuel;
@@ -1858,6 +1875,7 @@ function evaluatePolicyFixpoint(
       entity,
       writePath,
       remainingFuel,
+      options,
     );
     if (!next.changed) {
       return { nonConverged: false, label: current, fuel: config.fuel };
@@ -1891,6 +1909,7 @@ function evaluatePolicyDowngradeDecision(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   outputClassification: string,
   cfc: ContextualFlowControl,
+  options: PrepareBoundaryCommitOptions = {},
 ): PolicyDowngradeDecision {
   const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
   if (!policyConfig) {
@@ -1903,6 +1922,7 @@ function evaluatePolicyDowngradeDecision(
     tx,
     entity,
     writePath,
+    options,
   );
   if (policyResult.nonConverged) {
     return { allowed: false, nonConverged: true, fuel: policyResult.fuel };
@@ -1985,6 +2005,7 @@ function verifyOutputTransitionsForAttempt(
         effectiveConsumedReadLabels,
         actualClassification,
         cfc,
+        options,
       );
       if (decision.nonConverged) {
         throw CfcPolicyNonConvergenceError(entity, write.path, decision.fuel);

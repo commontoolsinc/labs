@@ -577,7 +577,7 @@ Primary test location:
       overrides falling back conservative.
 - [ ] `cfc-required-integrity-concept-satisfied-via-trust-closure.test.ts`
 - [x] `cfc-required-integrity-concept-differs-by-acting-user.test.ts`
-- [ ] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
+- [x] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
 - [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
 - [x] `cfc-trust-context-change-invalidates-prepare.test.ts`
 - [ ] `cfc-flow-precision-builtin-trust-resolution.test.ts`
