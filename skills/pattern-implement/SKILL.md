@@ -56,10 +56,10 @@ const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
 
 ```tsx
 // ✅ Correct
-{items.map((item) => ItemPattern({ item, allItems: items }))}
+return <>{items.map((item) => ItemPattern({ item, allItems: items }))}</>;
 
 // ❌ Wrong - JSX fails with typed Output
-{items.map((item) => <ItemPattern item={item} />)}
+return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 ```
 
 ## Done When

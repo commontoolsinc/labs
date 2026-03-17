@@ -86,8 +86,8 @@ export default pattern<Input>(({ deck }) => ({
 
 ```typescript
 // Both are valid - ternaries auto-transform to ifElse()
-{showDetails ? <div>Details content</div> : null}
-{ifElse(showDetails, <div>Details content</div>, null)}
+return <>{showDetails ? <div>Details content</div> : null}</>;
+return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
 ```
 
 ### Correct Style Syntax

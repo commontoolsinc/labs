@@ -62,5 +62,8 @@ Phase skills consult as needed:
 - Actions/handlers: `docs/common/concepts/action.md`,
   `docs/common/concepts/handler.md`
 - Testing: `docs/common/workflows/pattern-testing.md`
-- Components: `packages/patterns/catalog/catalog.tsx` — the authoritative, type-checked component catalog. Story files in `packages/patterns/catalog/stories/` show live usage for each component. Also see `docs/common/components/COMPONENTS.md` for narrative docs.
+- Components: `packages/patterns/catalog/catalog.tsx` — the authoritative,
+  type-checked component catalog. Story files in
+  `packages/patterns/catalog/stories/` show live usage for each component. Also
+  see `docs/common/components/COMPONENTS.md` for narrative docs.
 - Debugging: `docs/development/debugging/`
