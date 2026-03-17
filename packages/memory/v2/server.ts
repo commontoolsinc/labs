@@ -1144,6 +1144,11 @@ export class Server {
         ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
         : new URL(`memory:///${encodeURIComponent(space)}`),
     });
+    opened.catch(() => {
+      if (this.#engines.get(space) === opened) {
+        this.#engines.delete(space);
+      }
+    });
     this.#engines.set(space, opened);
     return opened;
   }

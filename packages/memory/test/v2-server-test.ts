@@ -1,4 +1,5 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { toFileUrl } from "@std/path";
 import { Server } from "../v2/server.ts";
 import {
   type GraphUpdateMessage,
@@ -158,6 +159,51 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
   );
 
   await server.close();
+});
+
+Deno.test("memory v2 server retries a failed engine open once the store path exists", async () => {
+  const root = await Deno.makeTempDir();
+  const store = new URL("./missing/", toFileUrl(`${root}/`));
+  const server = new Server({ store });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-retry";
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "hello.ok",
+      protocol: MEMORY_V2_PROTOCOL,
+    });
+
+    await assertRejects(() =>
+      connection.receive(JSON.stringify({
+        type: "session.open",
+        requestId: "open-1",
+        space,
+        session: {},
+      }))
+    );
+
+    await Deno.mkdir(new URL("./v2/", store), { recursive: true });
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-2",
+      space,
+      session: {},
+    }));
+
+    const reopened = assertResponse(shiftMessage(messages));
+    assertEquals(reopened.requestId, "open-2");
+    assertExists(reopened.ok);
+  } finally {
+    await server.close().catch(() => undefined);
+    await Deno.remove(root, { recursive: true });
+  }
 });
 
 Deno.test("memory v2 server graph.query subscriptions expand to previously existing hidden nodes", async () => {

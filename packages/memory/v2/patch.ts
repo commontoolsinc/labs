@@ -5,6 +5,7 @@ type JSONObject = Record<string, JSONValue>;
 type JSONContainer = JSONObject | JSONValue[];
 
 export const applyPatch = (state: JSONValue, ops: PatchOp[]): JSONValue => {
+  // Clone once up front, then mutate the working copy per op.
   let current = structuredClone(state);
   for (const op of ops) {
     current = applyOp(current, op);
@@ -42,15 +43,14 @@ const replaceAtPath = (
     return structuredClone(value);
   }
 
-  const clone = structuredClone(root);
-  const { parent, key } = getExistingParent(clone, path);
+  const { parent, key } = getExistingParent(root, path);
   if (Array.isArray(parent)) {
     const index = parseArrayIndex(key);
     parent[index] = structuredClone(value);
   } else {
     parent[key] = structuredClone(value);
   }
-  return clone;
+  return root;
 };
 
 const addAtPath = (
@@ -62,8 +62,7 @@ const addAtPath = (
     return structuredClone(value);
   }
 
-  const clone = structuredClone(root);
-  const { parent, key } = getCreatableParent(clone, path);
+  const { parent, key } = getCreatableParent(root, path);
   if (Array.isArray(parent)) {
     if (key === "-") {
       parent.push(structuredClone(value));
@@ -74,7 +73,7 @@ const addAtPath = (
   } else {
     parent[key] = structuredClone(value);
   }
-  return clone;
+  return root;
 };
 
 const removeAtPath = (root: JSONValue, path: string[]): JSONValue => {
@@ -82,8 +81,7 @@ const removeAtPath = (root: JSONValue, path: string[]): JSONValue => {
     throw new Error("root remove must be represented as a delete operation");
   }
 
-  const clone = structuredClone(root);
-  const { parent, key } = getExistingParent(clone, path);
+  const { parent, key } = getExistingParent(root, path);
   if (Array.isArray(parent)) {
     const index = parseArrayIndex(key);
     parent.splice(index, 1);
@@ -92,7 +90,7 @@ const removeAtPath = (root: JSONValue, path: string[]): JSONValue => {
   } else {
     throw new Error(`missing object key at ${encodePointer(path)}`);
   }
-  return clone;
+  return root;
 };
 
 const moveValue = (
@@ -105,8 +103,8 @@ const moveValue = (
   }
 
   const extracted = structuredClone(getAtPath(root, from));
-  const removed = removeAtPath(root, from);
-  return addAtPath(removed, path, extracted);
+  removeAtPath(root, from);
+  return addAtPath(root, path, extracted);
 };
 
 const spliceAtPath = (
@@ -116,8 +114,7 @@ const spliceAtPath = (
   remove: number,
   add: JSONValue[],
 ): JSONValue => {
-  const clone = structuredClone(root);
-  const target = path.length === 0 ? clone : getAtPath(clone, path);
+  const target = path.length === 0 ? root : getAtPath(root, path);
   if (!Array.isArray(target)) {
     throw new Error(`splice target is not an array at ${encodePointer(path)}`);
   }
@@ -129,7 +126,7 @@ const spliceAtPath = (
     remove,
     ...add.map((value) => structuredClone(value)),
   );
-  return clone;
+  return root;
 };
 
 const getAtPath = (root: JSONValue, path: string[]): JSONValue => {

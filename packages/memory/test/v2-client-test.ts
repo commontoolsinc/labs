@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { Server } from "../v2/server.ts";
 import { MEMORY_V2_PROTOCOL } from "../v2.ts";
 import { connect, loopback, type Transport } from "../v2/client.ts";
@@ -287,6 +288,72 @@ class ScriptedReconnectTransport implements Transport {
   }
 }
 
+class ControlledReconnectTransport implements Transport {
+  helloCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #allowHello = true;
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  blockHello(): void {
+    this.#allowHello = false;
+  }
+
+  allowHello(): void {
+    this.#allowHello = true;
+  }
+
+  disconnect(): void {
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.helloCount += 1;
+        if (!this.#allowHello) {
+          queueMicrotask(() => this.#closeReceiver(new Error("offline")));
+          return Promise.resolve();
+        }
+        this.#receiver(JSON.stringify({
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+        }));
+        return Promise.resolve();
+      case "session.open":
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:controlled",
+            serverSeq: 0,
+          },
+        }));
+        return Promise.resolve();
+      default:
+        throw new Error(
+          `Unhandled controlled reconnect message: ${message.type}`,
+        );
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 class CloseOnSessionOpenTransport implements Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -495,6 +562,45 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
     assertEquals(applied2.seq, 2);
   } finally {
     await client.close();
+  }
+});
+
+Deno.test("memory v2 client backs off reconnect attempts exponentially", async () => {
+  const time = new FakeTime();
+  const transport = new ControlledReconnectTransport();
+  const client = await connect({ transport });
+  const originalRandom = Math.random;
+  Math.random = () => 0;
+
+  try {
+    transport.blockHello();
+    transport.disconnect();
+    await time.runMicrotasks();
+
+    assertEquals(transport.helloCount, 2);
+
+    await time.tickAsync(24);
+    assertEquals(transport.helloCount, 2);
+
+    await time.tickAsync(1);
+    assertEquals(transport.helloCount, 3);
+
+    await time.tickAsync(49);
+    assertEquals(transport.helloCount, 3);
+
+    await time.tickAsync(1);
+    assertEquals(transport.helloCount, 4);
+
+    transport.allowHello();
+    await time.tickAsync(101);
+    await time.runMicrotasks();
+
+    assertEquals(client.isConnected(), true);
+    assertEquals(transport.helloCount, 5);
+  } finally {
+    Math.random = originalRandom;
+    await client.close();
+    time.restore();
   }
 });
 

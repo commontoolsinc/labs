@@ -27,6 +27,24 @@ export interface MountOptions {
   seenSeq?: number;
 }
 
+const RECONNECT_BASE_DELAY_MS = 25;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const RECONNECT_JITTER_RATIO = 0.2;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const reconnectDelayMs = (attempt: number): number => {
+  const baseDelay = Math.min(
+    RECONNECT_MAX_DELAY_MS,
+    RECONNECT_BASE_DELAY_MS * 2 ** attempt,
+  );
+  return Math.min(
+    RECONNECT_MAX_DELAY_MS,
+    Math.floor(baseDelay * (1 + Math.random() * RECONNECT_JITTER_RATIO)),
+  );
+};
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #subscriptions = new Map<string, {
@@ -189,7 +207,7 @@ export class Client {
     }
     this.#connected = false;
     this.rejectPending(toConnectionError(error));
-    void this.reconnect();
+    void this.reconnect().catch(() => undefined);
   }
 
   private async reconnect(): Promise<void> {
@@ -200,6 +218,7 @@ export class Client {
       return await this.#reconnecting;
     }
     this.#reconnecting = (async () => {
+      let attempt = 0;
       while (!this.#closed) {
         try {
           await this.hello();
@@ -212,7 +231,8 @@ export class Client {
           this.rejectPending(
             error instanceof Error ? error : new Error(String(error)),
           );
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          await sleep(reconnectDelayMs(attempt));
+          attempt += 1;
         }
       }
     })();

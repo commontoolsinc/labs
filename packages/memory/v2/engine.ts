@@ -1188,22 +1188,29 @@ const maybeMaterializeSnapshot = (
   branch: BranchName,
   id: EntityId,
 ): void => {
-  const state = readState(engine, { id, branch });
-  if (state === null || state.document === null || state.factType !== "patch") {
+  const current = engine.statements.selectCurrent.get({ branch, id }) as
+    | ReadRow
+    | undefined;
+  if (current === undefined || current.fact_type !== "patch") {
     return;
   }
 
-  const baseSeq = latestMaterializationSeq(engine, branch, id, state.seq);
+  const baseSeq = latestMaterializationSeq(engine, branch, id, current.seq);
   const patchCount = (
     engine.statements.selectPatchCount.get({
       branch,
       id,
       after_seq: baseSeq,
-      seq: state.seq,
+      seq: current.seq,
     }) as { count: number }
   ).count;
 
   if (patchCount < engine.snapshotInterval) {
+    return;
+  }
+
+  const state = readState(engine, { id, branch, seq: current.seq });
+  if (state === null || state.document === null || state.factType !== "patch") {
     return;
   }
 
