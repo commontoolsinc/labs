@@ -279,6 +279,147 @@ describe("pull-based scheduling", () => {
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
   });
 
+  it("should collect shared dirty dependencies consistently across effect seeds", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-shared-seeds-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const intermediate = runtime.getCell<number>(
+      space,
+      "pull-shared-seeds-intermediate",
+      undefined,
+      tx,
+    );
+    intermediate.set(0);
+    const leftResult = runtime.getCell<number>(
+      space,
+      "pull-shared-seeds-left-result",
+      undefined,
+      tx,
+    );
+    leftResult.set(0);
+    const rightResult = runtime.getCell<number>(
+      space,
+      "pull-shared-seeds-right-result",
+      undefined,
+      tx,
+    );
+    rightResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    let leftEffectRuns = 0;
+    let rightEffectRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      const value = source.withTx(actionTx).get();
+      intermediate.withTx(actionTx).send(value * 10);
+    };
+
+    const leftEffect: Action = (actionTx) => {
+      leftEffectRuns++;
+      const value = intermediate.withTx(actionTx).get();
+      leftResult.withTx(actionTx).send(value + 1);
+    };
+
+    const rightEffect: Action = (actionTx) => {
+      rightEffectRuns++;
+      const value = intermediate.withTx(actionTx).get();
+      rightResult.withTx(actionTx).send(value + 2);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [intermediate.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    runtime.scheduler.subscribe(
+      leftEffect,
+      {
+        reads: [intermediate.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [leftResult.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+
+    runtime.scheduler.subscribe(
+      rightEffect,
+      {
+        reads: [intermediate.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [rightResult.getAsNormalizedFullLink()],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(leftResult.get()).toBe(11);
+    expect(rightResult.get()).toBe(12);
+    expect(computationRuns).toBe(1);
+    expect(leftEffectRuns).toBe(1);
+    expect(rightEffectRuns).toBe(1);
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(2);
+    await updateTx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(leftResult.get()).toBe(21);
+    expect(rightResult.get()).toBe(22);
+    expect(computationRuns).toBe(2);
+    expect(leftEffectRuns).toBe(2);
+    expect(rightEffectRuns).toBe(2);
+
+    const schedulerInternal = runtime.scheduler as unknown as {
+      collectDirtyDependencies: (
+        action: Action,
+        workSet: Set<Action>,
+        memo?: Map<Action, boolean>,
+      ) => boolean;
+      markDirty: (action: Action) => void;
+      scheduleAffectedEffects: (action: Action) => void;
+    };
+
+    const collectWorkSet = (seeds: Action[]) => {
+      const workSet = new Set<Action>(seeds);
+      const memo = new Map<Action, boolean>();
+      for (const seed of seeds) {
+        schedulerInternal.collectDirtyDependencies(seed, workSet, memo);
+      }
+      return { workSet, memo };
+    };
+
+    schedulerInternal.markDirty(computation);
+    schedulerInternal.scheduleAffectedEffects(computation);
+
+    const forward = collectWorkSet([leftEffect, rightEffect]);
+    const reverse = collectWorkSet([rightEffect, leftEffect]);
+
+    expect(forward.workSet.has(computation)).toBe(true);
+    expect(reverse.workSet.has(computation)).toBe(true);
+    expect(forward.memo.get(computation)).toBe(true);
+    expect(reverse.memo.get(computation)).toBe(true);
+    expect(forward.memo.get(leftEffect)).toBe(true);
+    expect(forward.memo.get(rightEffect)).toBe(true);
+    expect(reverse.memo.get(leftEffect)).toBe(true);
+    expect(reverse.memo.get(rightEffect)).toBe(true);
+  });
+
   it("should recompute multi-hop chains before running effects in pull mode", async () => {
     runtime.scheduler.enablePullMode();
 
