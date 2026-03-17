@@ -55,7 +55,18 @@ export function getTypeAtLocationWithFallback(
   }
 
   try {
-    return checker.getTypeAtLocation(node);
+    const type = checker.getTypeAtLocation(node);
+    if (shouldUseInitializerTypeFallback(type, node)) {
+      const initializerType = getInitializerTypeFallback(
+        node,
+        checker,
+        typeRegistry,
+      );
+      if (initializerType) {
+        return initializerType;
+      }
+    }
+    return type;
   } catch (error) {
     if (logger) {
       // Use getExpressionText to safely handle both regular and synthetic nodes
@@ -66,6 +77,67 @@ export function getTypeAtLocationWithFallback(
     }
     return undefined;
   }
+}
+
+function shouldUseInitializerTypeFallback(
+  type: ts.Type | undefined,
+  node: ts.Node,
+): node is ts.Identifier {
+  if (!type || !ts.isIdentifier(node)) {
+    return false;
+  }
+  return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+}
+
+function getInitializerTypeFallback(
+  node: ts.Identifier,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  const symbol = checker.getSymbolAtLocation(node);
+  let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
+    const shorthandValueSymbol = checker.getShorthandAssignmentValueSymbol(
+      declaration,
+    );
+    declaration = shorthandValueSymbol?.valueDeclaration ??
+      shorthandValueSymbol?.declarations?.[0];
+  }
+
+  if (!declaration || !ts.isVariableDeclaration(declaration)) {
+    return undefined;
+  }
+
+  // Respect explicit annotations, even if they widen to any/unknown.
+  if (declaration.type || !declaration.initializer) {
+    return undefined;
+  }
+
+  const initializer = declaration.initializer;
+  const originalInitializer = ts.getOriginalNode(initializer);
+  const registryType = typeRegistry?.get(initializer) ??
+    (originalInitializer !== initializer
+      ? typeRegistry?.get(originalInitializer)
+      : undefined);
+  if (
+    registryType &&
+    (registryType.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0
+  ) {
+    return registryType;
+  }
+
+  try {
+    const initializerType = checker.getTypeAtLocation(initializer);
+    if (
+      (initializerType.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0
+    ) {
+      return initializerType;
+    }
+  } catch {
+    // Fall through to undefined
+  }
+
+  return undefined;
 }
 
 /**
