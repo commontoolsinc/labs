@@ -900,7 +900,9 @@ export type SchemaQueryArgs = {
   since?: number;
   subscribe?: boolean; // set to true to be notified of changes to any reachable entities
   excludeSent?: boolean; // set to true to remove entities already sent in this session
-  classification?: string[]; // classifications to claim for access
+  classification?:
+    | readonly JSONValue[]
+    | readonly (readonly JSONValue[])[]; // classification claims for access
 };
 
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<

@@ -6,6 +6,7 @@ import { NoCache, Replica } from "../src/storage/cache.ts";
 import type { IStorageSubscription } from "../src/storage/interface.ts";
 import type { SchemaQueryArgs } from "@commontools/memory/interface";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
+import { normalizeConfidentialityLabel } from "../src/cfc/label-algebra.ts";
 
 const signer = await Identity.fromPassphrase("cfc storage query test");
 const space = signer.did();
@@ -69,12 +70,14 @@ describe("CFC storage query classification", () => {
     ]]);
 
     expect(captured).toHaveLength(1);
-    expect(captured[0].classification).toEqual([
-      [{
-        type: "https://commonfabric.org/cfc/atom/User",
-        subject: "did:key:alice",
-      }],
-      ["https://commonfabric.org/cfc/atom/EmailSecret"],
-    ]);
+    expect(normalizeConfidentialityLabel(captured[0].classification)).toEqual(
+      normalizeConfidentialityLabel([
+        [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: "did:key:alice",
+        }],
+        ["https://commonfabric.org/cfc/atom/EmailSecret"],
+      ]),
+    );
   });
 });

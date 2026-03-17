@@ -33,6 +33,8 @@ import { isBrowser } from "@commontools/utils/env";
 import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { joinConfidentialityLabels } from "../cfc/label-algebra.ts";
+import { collectSchemaConfidentiality } from "../cfc/schema-labels.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { BaseMemoryAddress, MapSet, stableStringify } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
@@ -51,8 +53,6 @@ import type {
   IStoreError,
   ITransaction,
   PullError,
-  Retract,
-  PushError,
   StorageValue,
   URI,
 } from "./interface.ts";
@@ -733,7 +733,7 @@ export class Replica {
     const schemaSelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
-    const classifications = new Set<string>();
+    let classification: SchemaQueryArgs["classification"];
     // Patch to have a valid selector for each entry
     const defaultSelector = { path: [], schema: false };
     const schemaEntries: [BaseMemoryAddress, SchemaPathSelector][] = entries
@@ -772,7 +772,10 @@ export class Replica {
       // Since we're accessing the entire document, we should base our
       // classification on the fullSchema
       const fullSchema = selector.schema ?? false;
-      ContextualFlowControl.joinSchema(classifications, fullSchema);
+      classification = joinConfidentialityLabels(
+        classification,
+        collectSchemaConfidentiality(fullSchema),
+      );
     }
 
     // We provided schema for the top level fact that we selected, but we
@@ -783,9 +786,8 @@ export class Replica {
       excludeSent: true,
     };
     if (Object.entries(schemaSelector).length > 0) {
-      if (classifications.size > 0) {
-        const lubClassification = this.cfc.lub(classifications);
-        queryArgs.classification = [lubClassification];
+      if (classification) {
+        queryArgs.classification = classification;
       }
       // TODO(@ubik2) we're not actually handling the data from this
       // subscription properly. We get the data through the commit changes,

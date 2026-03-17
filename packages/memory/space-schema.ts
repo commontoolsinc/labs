@@ -3,6 +3,11 @@ import {
   type JSONObject,
   type JSONSchema,
 } from "@commontools/runner";
+import {
+  confidentialityDominates,
+  normalizeConfidentialityLabel,
+  type CfcConfidentialityLabel,
+} from "../runner/src/cfc/label-algebra.ts";
 import type { StorableDatum } from "./interface.ts";
 import {
   type BaseMemoryAddress,
@@ -86,7 +91,7 @@ export class ServerObjectManager implements ObjectStorageManager {
 
   constructor(
     private session: SpaceStoreSession<MemorySpace>,
-    private providedClassifications: Set<string>,
+    private providedClassifications: CfcConfidentialityLabel | undefined,
   ) {
   }
 
@@ -135,7 +140,12 @@ export class ServerObjectManager implements ObjectStorageManager {
           is: labelEntry.is,
           since: labelEntry.since,
         });
-        if (!requiredClassifications.isSubsetOf(this.providedClassifications)) {
+        if (
+          !confidentialityDominates(
+            this.providedClassifications,
+            requiredClassifications,
+          )
+        ) {
           logger.info(
             "classification-skip",
             () => ["Skipping inclusion of", fact.of, "due to classification"],
@@ -203,7 +213,7 @@ export const selectSchema = <Space extends MemorySpace>(
 ): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
 
-  const providedClassifications = new Set<string>(classification);
+  const providedClassifications = normalizeConfidentialityLabel(classification);
   // Track any docs loaded while traversing the factSelection.
   // If a shared manager is provided, reuse it so SQLite read cache is shared
   // across multiple selectSchema calls on the same provider/connection.
@@ -289,7 +299,9 @@ export const selectSchema = <Space extends MemorySpace>(
   // We want to collect the classification tags on our included facts
   const labelFacts = getLabels(session, includedFacts);
   const requiredClassifications = collectClassifications(labelFacts);
-  if (!requiredClassifications.isSubsetOf(providedClassifications)) {
+  if (
+    !confidentialityDominates(providedClassifications, requiredClassifications)
+  ) {
     throw new TheAuthorizationError("Insufficient access");
   }
 
@@ -389,7 +401,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   address: { space: MemorySpace; id: Entity; type: MIME },
   schemaSelector: SchemaPathSelector,
-  classification: string[],
+  classification: SchemaQuery["args"]["classification"],
   schemaTracker: MapSet<string, SchemaPathSelector>,
   sharedManager?: ServerObjectManager,
   sharedMemo?: SchemaMemo,
@@ -397,7 +409,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   const manager = sharedManager ??
     new ServerObjectManager(
       session,
-      new Set<string>(classification),
+      normalizeConfidentialityLabel(classification),
     );
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,

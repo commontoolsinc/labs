@@ -10,6 +10,11 @@ import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
 import { type ContentId, fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
+import {
+  joinConfidentialityLabels,
+  normalizeConfidentialityLabel,
+  type CfcConfidentialityLabel,
+} from "../runner/src/cfc/label-algebra.ts";
 import type {
   Assert,
   Assertion,
@@ -1289,16 +1294,19 @@ export function getLabel<Space extends MemorySpace>(
 export function collectClassifications(
   labels: OfTheCause<FactSelectionValue>,
 ) {
-  const classifications = new Set<string>();
+  let classifications: CfcConfidentialityLabel | undefined;
   for (const fact of iterate(labels)) {
-    getClassifications(fact.value, classifications);
+    classifications = joinConfidentialityLabels(
+      classifications,
+      getClassifications(fact.value),
+    );
   }
   return classifications;
 }
 
 export function getClassifications(
   fact: FactSelectionValue,
-  classifications = new Set<string>(),
+  classifications: CfcConfidentialityLabel | undefined = undefined,
 ) {
   if (
     fact === undefined || !isObject(fact.is) ||
@@ -1306,11 +1314,10 @@ export function getClassifications(
   ) {
     return classifications;
   }
-  const labels = fact.is["classification"] as string[];
-  for (const label of labels) {
-    classifications.add(label);
-  }
-  return classifications;
+  return joinConfidentialityLabels(
+    classifications,
+    normalizeConfidentialityLabel(fact.is["classification"]),
+  );
 }
 
 /**

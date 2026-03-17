@@ -36,6 +36,7 @@ import {
 } from "./interface.ts";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
+import { normalizeConfidentialityLabel } from "../runner/src/cfc/label-algebra.ts";
 import {
   type ContentId,
   fromString as causeFromString,
@@ -1370,7 +1371,7 @@ class MemoryProviderSession<
     // so SQLite reads from one doc traversal can be reused by the next.
     const sharedManager = new ServerObjectManager(
       spaceSession,
-      new Set<string>(classification),
+      normalizeConfidentialityLabel(classification),
     );
     // Share one SchemaMemo so traversal results from one doc are reused
     // when traversing linked docs that overlap across affected documents.
