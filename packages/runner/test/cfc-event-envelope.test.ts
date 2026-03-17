@@ -93,8 +93,16 @@ describe("CFC event envelopes", () => {
       delivery: "once-per-handler",
     });
 
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), event, 0);
-    runtime.scheduler.queueEvent(triggerStream.getAsNormalizedFullLink(), event, 0);
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      event,
+      0,
+    );
+    runtime.scheduler.queueEvent(
+      triggerStream.getAsNormalizedFullLink(),
+      event,
+      0,
+    );
 
     await runtime.scheduler.idle();
     await runtime.scheduler.idle();

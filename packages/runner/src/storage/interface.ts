@@ -34,6 +34,7 @@ import type {
   CfcConfidentialityLabelInput,
   CfcIntegrityLabel,
 } from "../cfc/label-algebra.ts";
+import type { CfcEventEnvelope } from "../cfc/event-envelope.ts";
 
 export {
   ignoreReadForSchedulingMarker,
@@ -544,6 +545,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readonly preparedActivityDigest?: string;
   readonly cfcReasons: readonly string[];
   readonly cfcOutboxSize: number;
+  readonly currentCfcEvent?: CfcEventEnvelope;
 
   /**
    * Add a callback to be called when the transaction commit completes.
@@ -620,6 +622,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   invalidateCfcPreparation(): void;
 
   enqueueCfcSideEffect(effect: () => void): void;
+
+  setCurrentCfcEvent(event?: CfcEventEnvelope): void;
+
+  clearCurrentCfcEvent(): void;
 }
 
 export interface ITransactionReader {

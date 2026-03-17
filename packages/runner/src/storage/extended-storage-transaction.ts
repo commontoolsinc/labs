@@ -44,6 +44,7 @@ import {
   recordCfcPreparedTx,
   recordCfcRelevantTx,
 } from "../cfc/debug-counters.ts";
+import type { CfcEventEnvelope } from "../cfc/event-envelope.ts";
 import type {
   CfcPrepareScope,
   CfcPrepareScopeOverrides,
@@ -77,6 +78,7 @@ type CfcTxState = {
   reasons: string[];
   outbox: Array<() => void>;
   prepareScopeOverrides: CfcPrepareScopeOverrides;
+  currentEvent: CfcEventEnvelope | undefined;
 };
 
 type CfcPrepareScopeResolver = () => CfcPrepareScope | undefined;
@@ -90,6 +92,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     reasons: [],
     outbox: [],
     prepareScopeOverrides: {},
+    currentEvent: undefined,
   };
 
   constructor(
@@ -115,6 +118,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   get cfcOutboxSize(): number {
     return this.cfcState.outbox.length;
+  }
+
+  get currentCfcEvent(): CfcEventEnvelope | undefined {
+    return this.cfcState.currentEvent;
   }
 
   get journal(): ITransactionJournal {
@@ -344,6 +351,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   enqueueCfcSideEffect(effect: () => void): void {
     this.cfcState.outbox.push(effect);
     this.invalidateCfcPreparation();
+  }
+
+  setCurrentCfcEvent(event?: CfcEventEnvelope): void {
+    this.cfcState.currentEvent = event;
+  }
+
+  clearCurrentCfcEvent(): void {
+    this.cfcState.currentEvent = undefined;
   }
 
   private isCommitBearingAttempt(): boolean {
@@ -627,6 +642,18 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   enqueueCfcSideEffect(effect: () => void): void {
     return this.wrapped.enqueueCfcSideEffect(effect);
+  }
+
+  get currentCfcEvent(): CfcEventEnvelope | undefined {
+    return this.wrapped.currentCfcEvent;
+  }
+
+  setCurrentCfcEvent(event?: CfcEventEnvelope): void {
+    return this.wrapped.setCurrentCfcEvent(event);
+  }
+
+  clearCurrentCfcEvent(): void {
+    return this.wrapped.clearCurrentCfcEvent();
   }
 }
 

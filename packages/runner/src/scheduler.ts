@@ -62,6 +62,15 @@ import {
 } from "./cfc/implementation-identity.ts";
 import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
 import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
+import {
+  type CfcEventEnvelope,
+  normalizeCfcEventEnvelope,
+} from "./cfc/event-envelope.ts";
+import {
+  type CfcHandledEventClaimMarker,
+  isHandledEventClaimConflict,
+  tryClaimHandledEvent,
+} from "./cfc/event-claim.ts";
 import type {
   ActionStats,
   CycleReport,
@@ -182,6 +191,8 @@ export class Scheduler {
     action: Action;
     handler: EventHandler;
     event: any;
+    eventEnvelope: CfcEventEnvelope;
+    eventLink: NormalizedFullLink;
     retriesLeft: number;
     onCommit?: CommitCallback;
   }[] = [];
@@ -1065,6 +1076,7 @@ export class Scheduler {
     onCommit?: CommitCallback,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
+    const eventEnvelope = normalizeCfcEventEnvelope(event);
     let handlerFound = false;
 
     for (const [link, handler] of this.eventHandlers) {
@@ -1072,9 +1084,12 @@ export class Scheduler {
         handlerFound = true;
         this.queueExecution();
         this.eventQueue.push({
-          action: (tx: IExtendedStorageTransaction) => handler(tx, event),
+          action: (tx: IExtendedStorageTransaction) =>
+            handler(tx, eventEnvelope.payload),
           handler,
-          event,
+          event: eventEnvelope.payload,
+          eventEnvelope,
+          eventLink,
           retriesLeft: retries,
           onCommit,
         });
@@ -2720,8 +2735,15 @@ export class Scheduler {
     // Process next event from the event queue.
     const queuedEvent = this.eventQueue.shift();
     if (queuedEvent) {
-      const { action, handler, event: eventValue, retriesLeft, onCommit } =
-        queuedEvent;
+      const {
+        action,
+        handler,
+        event: eventValue,
+        eventEnvelope,
+        eventLink,
+        retriesLeft,
+        onCommit,
+      } = queuedEvent;
       const handlerId = this.getActionId(handler);
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
@@ -2733,8 +2755,10 @@ export class Scheduler {
       if (this.pullMode && handler.populateDependencies) {
         // Get the handler's dependencies (read-only, just capturing what will be read)
         const depTx = this.runtime.edit();
+        depTx.setCurrentCfcEvent(eventEnvelope);
         handler.populateDependencies(depTx, eventValue);
         const deps = txToReactivityLog(depTx);
+        depTx.clearCurrentCfcEvent();
         // Commit even though we only read - the tx has no writes so this is safe
         depTx.commit();
 
@@ -2778,15 +2802,21 @@ export class Scheduler {
         // Continue to process pending actions
         // The event will be processed in the next execute() cycle
       } else {
+        let handledEventMarker: CfcHandledEventClaimMarker | undefined;
         const finalize = async (error?: unknown): Promise<void> => {
           try {
             if (error) this.handleError(error as Error, action);
           } finally {
-            const { error: commitError } = await commitWithCfcPrepare(
-              tx,
-              this.runtime,
-              getAnnotatedImplementationIdentity(handler),
-            );
+            let commitError = (
+              await commitWithCfcPrepare(
+                tx,
+                this.runtime,
+                getAnnotatedImplementationIdentity(handler),
+              )
+            ).error;
+            if (isHandledEventClaimConflict(commitError, handledEventMarker)) {
+              commitError = undefined;
+            }
             // If the transaction failed, and we have retries left, queue the
             // event again at the beginning of the queue. This isn't guaranteed
             // to be the same order as the original event, but it's close
@@ -2806,6 +2836,8 @@ export class Scheduler {
                 action,
                 handler,
                 event: eventValue,
+                eventEnvelope,
+                eventLink,
                 retriesLeft: retriesLeft - 1,
                 onCommit,
               });
@@ -2850,26 +2882,46 @@ export class Scheduler {
         tx.tx.immediate = true;
         markCfcHandlerTransaction(tx);
         const actionId = this.getActionId(action);
+        const handlerIdForClaim = this.getActionId(handler);
 
         try {
           const actionStartTime = performance.now();
-          this.runningPromise = Promise.resolve(
-            this.runtime.harness.invoke(() => action(tx)),
-          ).then(() => {
-            const duration = (performance.now() - actionStartTime) / 1000;
-            if (duration > 10) {
-              console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+          tx.setCurrentCfcEvent(eventEnvelope);
+          let shouldRunAction = true;
+          if (eventEnvelope.delivery === "once-per-handler") {
+            const claimResult = tryClaimHandledEvent(
+              this.runtime,
+              tx,
+              eventLink.space,
+              eventEnvelope.id,
+              handlerIdForClaim,
+            );
+            handledEventMarker = claimResult.marker;
+            if (claimResult.alreadyHandled) {
+              shouldRunAction = false;
             }
-            logger.debug("action-timing", () => {
-              return [
-                `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-              ];
-            });
-            return finalize();
-          }).catch((error) => finalize(error));
+          }
+          this.runningPromise = shouldRunAction
+            ? Promise.resolve(
+              this.runtime.harness.invoke(() => action(tx)),
+            ).then(() => {
+              const duration = (performance.now() - actionStartTime) / 1000;
+              if (duration > 10) {
+                console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+              }
+              logger.debug("action-timing", () => {
+                return [
+                  `Action ${actionId} completed in ${duration.toFixed(3)}s`,
+                ];
+              });
+              return finalize();
+            }).catch((error) => finalize(error))
+            : finalize();
           await this.runningPromise;
         } catch (error) {
           await finalize(error);
+        } finally {
+          tx.clearCurrentCfcEvent();
         }
       } // Close else block for shouldSkipEvent
     }

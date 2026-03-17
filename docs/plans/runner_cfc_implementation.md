@@ -409,6 +409,21 @@ Primary file:
       from wrapped action metadata so prepare and tests share identical
       `CodeHash(...)` / `Builtin(...)` encoding rules.
 
+### 6.6 Event Envelope + Once-Claim Foundation
+
+- [x] Normalize queued scheduler events to an internal event envelope carrying
+      stable `id`, raw `payload`, integrity evidence, and delivery mode.
+- [x] Preserve backward compatibility by wrapping legacy raw events with fresh
+      ephemeral ids instead of changing their delivery semantics.
+- [x] Thread the current event envelope through handler transactions so trusted
+      internals can derive prepare/claim behavior from event identity and
+      integrity later.
+- [x] Add once-per-handler delivery mode that derives a deterministic handled
+      marker from `(eventId, handlerId)` and writes it through the normal
+      transaction path.
+- [x] Treat handled-marker conflicts as benign dedup for scheduler event
+      delivery instead of retryable failure.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -595,6 +610,8 @@ Primary test location:
 - [x] `cfc-event-emitted-after-successful-commit.test.ts`
 - [x] `cfc-event-order-preserved.test.ts`
 - [x] `cfc-retry-emits-once.test.ts`
+- [x] `cfc-event-envelope.test.ts` covers current-event tx context, explicit
+      once-per-handler dedup, and unchanged legacy raw-event behavior.
 
 ### 11.6 Schema Hash Tests
 
@@ -656,6 +673,8 @@ Primary docs:
 - [x] Add runner-internal design note for prepare-before-commit.
 - [x] Add lifecycle doc for tx outbox and flush behavior.
 - [x] Document internal verifier read marker.
+- [x] Document internal event envelope and once-claim lifecycle for
+      event-handler transactions.
 
 ### 13.2 Spec Cross-Check
 
@@ -688,6 +707,10 @@ Primary docs:
 - [x] Confirm builtin modules can make trusted flow-precision claims via
       `Builtin(name)` identity and share the same trust gate semantics as
       `CodeHash`.
+- [x] Confirm internal semantic events carry stable ids and integrity metadata
+      without changing legacy raw scheduler event semantics.
+- [x] Confirm once-per-handler event consumption can be expressed as ordinary
+      tx conflict/CAS on a derived handled marker.
 - [-] Confirm direct CAS writes append boundary-computed effective labels only.
 - [-] Confirm direct CAS reads require exact `expectedLabel` match plus
       principal readability.
@@ -709,6 +732,9 @@ Primary docs:
 - [x] Step I: complete Section 12 and 13 (rollout/docs) for baseline CFC work.
 - [x] Step J: complete acting-principal trust-closure + flow-precision
       additions in Sections 1, 3, 5, 6, 11, and 13.
+- [x] Step J.1: add event-envelope + once-claim foundation for later
+      `IntentEvent` / `IntentOnce` work without yet introducing sink commit
+      points.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

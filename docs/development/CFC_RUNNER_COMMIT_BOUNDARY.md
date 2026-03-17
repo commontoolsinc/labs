@@ -28,6 +28,32 @@ Handler-side stream sends are commit-gated through transaction outbox:
 
 This guarantees no pre-commit side effects are emitted from failed attempts.
 
+## Event Envelope and Once-Claims
+
+Scheduler events now normalize to an internal envelope before handler delivery:
+
+1. Every queued event has a stable internal `id`, raw `payload`, integrity
+   array, and delivery mode.
+2. Legacy raw events are wrapped with a fresh ephemeral id so existing delivery
+   semantics stay unchanged.
+3. The current envelope is attached to the handler transaction for the duration
+   of execution (`tx.currentCfcEvent`).
+
+Explicit semantic events may request `once-per-handler` delivery:
+
+1. Before running the handler, scheduler derives a handled marker from
+   `(eventId, handlerId)` in the event stream's space.
+2. If the marker already exists locally, scheduler skips handler execution and
+   treats the event as already handled.
+3. Otherwise the marker write is added to the transaction and committed with the
+   rest of the handler's writes.
+4. If commit conflicts on that marker, scheduler treats the result as deduped
+   success rather than retrying.
+
+This is the runner foundation for later `IntentEvent` / `IntentOnce` work:
+event consumption is expressed through ordinary tx conflict/CAS on derived
+entities instead of a separate token store.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
