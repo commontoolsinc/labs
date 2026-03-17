@@ -60,7 +60,6 @@ const logger = getLogger("validateAndTransform", {
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
-  filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
   // We don't use ContextualFlowControl.isTrueSchema here, since we want to
@@ -81,20 +80,6 @@ export function resolveSchema(
       return undefined;
     }
     resolvedSchema = resolved;
-  }
-
-  // Remove asCell flag from schema, so it's describing the destination
-  // schema. That means we can't describe a schema that points to top-level
-  // references, but that's on purpose.
-  if (schema.asCell && resolvedSchema?.asCell && filterAsCell) {
-    resolvedSchema = { ...resolvedSchema };
-    delete (resolvedSchema as any).asCell;
-  }
-
-  // Same for asStream
-  if (schema.asStream && resolvedSchema?.asStream && filterAsCell) {
-    resolvedSchema = { ...resolvedSchema };
-    delete (resolvedSchema as any).asStream;
   }
 
   // Return no schema if all it said is that this was a reference or an
