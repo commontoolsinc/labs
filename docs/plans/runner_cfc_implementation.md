@@ -120,7 +120,7 @@ effects and deterministic schema binding.
       otherwise fail closed to conservative labels.
 - [x] Legacy `KeyLocalShapePreserved` / `KeyLocalWriteDependency` map
       precision is trust-gated and fail-closed when untrusted.
-- [ ] Align flow-precision claim handling to spec
+- [x] Align flow-precision claim handling to spec
       `PointwisePresencePreserved` / `PointwiseWriteDependency`.
 - [-] Direct CAS reads must be label-gated (`hash + expectedLabel` + caller
       readability), not hash-knowledge gated.
@@ -285,7 +285,7 @@ Primary files:
       otherwise use `L_default`.
 - [x] Validate legacy map-like claim semantics (`KeyLocalShapePreserved`,
       `KeyLocalWriteDependency`) before applying claim-derived precision.
-- [ ] Rename and align claim parsing/validation to
+- [x] Rename and align claim parsing/validation to
       `PointwisePresencePreserved` / `PointwiseWriteDependency`.
 - [ ] Extend collection-structure handling for prefix-sensitive built-ins
       (`filter`, `flatMap`) so membership/domain, order/offset, and
@@ -567,10 +567,10 @@ Primary test location:
       claims using claimed precision.
 - [x] `cfc-flow-precision.test.ts` covers not-less-restrictive claims without
       trust.
-- [ ] Add explicit `PointwisePresencePreserved` regression coverage.
+- [x] Add explicit `PointwisePresencePreserved` regression coverage.
 - [x] `cfc-flow-precision.test.ts` covers malformed/missing
       `KeyLocalWriteDependency` fallback.
-- [ ] Add explicit `PointwiseWriteDependency` regression coverage.
+- [x] Add explicit `PointwiseWriteDependency` regression coverage.
 - [x] `cfc-scheduler-prepare-shim.test.ts` covers builtin identity propagation
       through scheduler prepare.
 - [x] `cfc-flow-precision.test.ts` covers untrusted custom builtin-name
@@ -676,7 +676,7 @@ Primary docs:
 - [x] Confirm flow-precision claims are trust-gated by concept
       `https://commonfabric.org/cfc/concepts/flow-taint-precision` with
       conservative fallback when untrusted.
-- [ ] Confirm spec-aligned `PointwisePresencePreserved` /
+- [x] Confirm spec-aligned `PointwisePresencePreserved` /
       `PointwiseWriteDependency` replace legacy `KeyLocal*` claim parsing.
 - [ ] Confirm prefix-sensitive built-ins (`filter`, `flatMap`) taint
       membership/domain independently from order/offset/multiplicity.

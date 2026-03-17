@@ -60,8 +60,8 @@ const flowPrecisionNumberSchema = {
       concept: FLOW_TAINT_PRECISION_CONCEPT,
       sourceCollection: "/",
       claims: [
-        { type: "KeyLocalShapePreserved" },
-        { type: "KeyLocalWriteDependency" },
+        { type: "PointwisePresencePreserved" },
+        { type: "PointwiseWriteDependency" },
       ],
     },
   },

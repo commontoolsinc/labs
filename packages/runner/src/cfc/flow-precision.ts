@@ -9,8 +9,8 @@ import {
 } from "./trust-lattice.ts";
 
 type FlowPrecisionClaimType =
-  | "KeyLocalShapePreserved"
-  | "KeyLocalWriteDependency";
+  | "PointwisePresencePreserved"
+  | "PointwiseWriteDependency";
 
 export interface FlowPrecisionClaimSpec {
   readonly concept: string;
@@ -92,8 +92,23 @@ function classificationDominates(
 function isFlowPrecisionClaimType(
   value: unknown,
 ): value is FlowPrecisionClaimType {
-  return value === "KeyLocalShapePreserved" ||
-    value === "KeyLocalWriteDependency";
+  return value === "PointwisePresencePreserved" ||
+    value === "PointwiseWriteDependency";
+}
+
+function normalizeFlowPrecisionClaimType(
+  value: unknown,
+): FlowPrecisionClaimType | undefined {
+  if (isFlowPrecisionClaimType(value)) {
+    return value;
+  }
+  if (value === "KeyLocalShapePreserved") {
+    return "PointwisePresencePreserved";
+  }
+  if (value === "KeyLocalWriteDependency") {
+    return "PointwiseWriteDependency";
+  }
+  return undefined;
 }
 
 function readFlowPrecisionClaim(
@@ -127,15 +142,15 @@ function readFlowPrecisionClaim(
   const claims = rawClaims
     .map((entry) =>
       entry && typeof entry === "object" && !Array.isArray(entry)
-        ? (entry as { type?: unknown }).type
+        ? normalizeFlowPrecisionClaimType((entry as { type?: unknown }).type)
         : undefined
     )
     .filter(isFlowPrecisionClaimType);
 
   if (
     claims.length === 0 ||
-    !claims.includes("KeyLocalShapePreserved") ||
-    !claims.includes("KeyLocalWriteDependency")
+    !claims.includes("PointwisePresencePreserved") ||
+    !claims.includes("PointwiseWriteDependency")
   ) {
     return undefined;
   }
