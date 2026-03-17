@@ -15,11 +15,7 @@ import {
   Source,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import {
-  MappedPosition,
-  UnsafeEvalIsolate,
-  UnsafeEvalRuntime,
-} from "./eval-runtime.ts";
+import { MappedPosition } from "./eval-runtime.ts";
 import {
   CommonToolsTransformerPipeline,
   OpaqueRefErrorTransformer,
@@ -29,14 +25,7 @@ import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commontools/data-model/value-hash";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
-
-const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
-const INJECTED_SCRIPT =
-  `const console = globalThis.${RUNTIME_ENGINE_CONSOLE_HOOK};`;
-
-declare global {
-  var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
-}
+import { SESRuntime } from "../sandbox/ses-runtime.ts";
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -82,8 +71,8 @@ export class EngineProgramResolver extends InMemoryProgram {
 
 interface Internals {
   compiler: TypeScriptCompiler;
-  runtime: UnsafeEvalRuntime;
-  isolate: UnsafeEvalIsolate;
+  runtime: SESRuntime;
+  console: Console;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
@@ -98,9 +87,6 @@ export class Engine extends EventTarget implements Harness {
   constructor(ctRuntime: Runtime) {
     super();
     this.ctRuntime = ctRuntime;
-    // We install our console shim globally so that it can be referenced
-    // by the eval script scope.
-    globalThis[RUNTIME_ENGINE_CONSOLE_HOOK] = new Console(this);
   }
 
   async initialize() {
@@ -108,11 +94,11 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    const runtime = new UnsafeEvalRuntime();
-    const isolate = runtime.getIsolate("");
+    const runtime = new SESRuntime();
+    const console = new Console(this);
     const { runtimeExports, exportsCallback } = await RuntimeModules
       .getExports();
-    return { compiler, runtime, isolate, runtimeExports, exportsCallback };
+    return { compiler, runtime, console, runtimeExports, exportsCallback };
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
@@ -146,13 +132,12 @@ export class Engine extends EventTarget implements Harness {
     const jsScript = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
-      injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,
       diagnosticMessageTransformer,
       beforeTransformers: (program) => {
-        const pipeline = new CommonToolsTransformerPipeline();
+        const pipeline = new CommonToolsTransformerPipeline({ sesMode: true });
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
@@ -171,10 +156,13 @@ export class Engine extends EventTarget implements Harness {
     jsScript: JsScript,
     files: Source[],
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
-    const { isolate, runtimeExports, exportsCallback } = await this
+    const { runtime, console, runtimeExports, exportsCallback } = await this
       .getInternals();
 
-    const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
+    const result = runtime.evaluateBundle(id, jsScript, {
+      console,
+      runtimeExports: runtimeExports ?? {},
+    });
     if (
       result && typeof result === "object" && "main" in result &&
       "exportMap" in result
@@ -219,7 +207,7 @@ export class Engine extends EventTarget implements Harness {
     if (!this.internals) {
       return fn();
     }
-    return this.internals.isolate.value(fn).invoke().inner();
+    return this.internals.runtime.invoke(fn);
   }
 
   // Map a single position to its original source location.
@@ -230,7 +218,7 @@ export class Engine extends EventTarget implements Harness {
     column: number,
   ): MappedPosition | null {
     if (!this.internals) return null;
-    return this.internals.isolate.mapPosition(filename, line, column);
+    return this.internals.runtime.mapPosition(filename, line, column);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
@@ -239,7 +227,7 @@ export class Engine extends EventTarget implements Harness {
     if (!this.internals) {
       return stack;
     }
-    return this.internals.isolate.parseStack(stack);
+    return this.internals.runtime.parseStack(stack);
   }
 
   // Returns a map of runtime module types.
@@ -267,18 +255,8 @@ export class Engine extends EventTarget implements Harness {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    // Clear global console hook to prevent memory leak via the Engine reference
-    // @ts-ignore: Dynamic property access for cleanup - globalThis doesn't have this symbol typed
-    if (globalThis[RUNTIME_ENGINE_CONSOLE_HOOK]) {
-      // @ts-ignore: Dynamic property deletion - TypeScript doesn't understand symbol-keyed globalThis properties
-      delete globalThis[RUNTIME_ENGINE_CONSOLE_HOOK];
-    }
-
     if (this.internals) {
-      // Clear the UnsafeEvalRuntime which holds accumulated source maps
       this.internals.runtime.clear();
-
-      // Clear references to allow GC
       this.internals = undefined;
     }
   }

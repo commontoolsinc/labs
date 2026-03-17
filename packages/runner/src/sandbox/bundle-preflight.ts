@@ -1,90 +1,132 @@
+import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
 import {
   findBalancedRegion,
   splitTopLevelStatements,
 } from "./token-scanner.ts";
 
-const AMD_LOADER_MARKER = "const { define, require } =";
-const DEFINE_MARKER = "define(";
 const BUNDLE_PREFIX = "((runtimeDeps={}) => {";
 const BUNDLE_SUFFIX = "});";
 
+const TRUSTED_PRELUDE_STATEMENTS = [
+  stripNewLines("const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};"),
+  stripNewLines(
+    `const { define, require } = (${getAMDLoader.toString()})(__ctAmdHooks);`,
+  ),
+  stripNewLines(
+    `for (const [name, dep] of Object.entries(runtimeDeps)) {
+      if (name === "__ctAmdHooks") continue;
+      define(name, ["exports"], exports => Object.assign(exports, dep));
+    }`,
+  ),
+];
+
+const DEFINE_PATTERN = /^define\("([^"]+)",\s*\[/;
+const RETURN_MAIN_PATTERN = /^const main = require\("([^"]+)"\)$/;
+const EXPORT_MAP_INIT_PATTERN = /^const exportMap = Object\.create\(null\)$/;
+const EXPORT_MAP_ASSIGNMENT_PATTERN =
+  /^exportMap\["[^"]+"\] = require\("([^"]+)"\)$/;
+const RETURN_OBJECT_PATTERN = /^return \{\s*main,\s*exportMap\s*\}$/;
+const RETURN_REQUIRE_PATTERN = /^return require\("([^"]+)"\)$/;
+const TS_HELPER_PATTERN =
+  /^var __[A-Za-z_$][\w$]* = \(this && this\.__[A-Za-z_$][\w$]*\) \|\| /;
+
 export function extractBundleRegion(bundleSource: string): string {
-  const normalizedSource = normalizeBundleSource(bundleSource);
-  if (!normalizedSource.startsWith(BUNDLE_PREFIX)) {
-    throw new Error("Bundle is missing the trusted AMD wrapper prelude");
-  }
-  if (!normalizedSource.endsWith(BUNDLE_SUFFIX)) {
-    throw new Error("Bundle is missing the trusted AMD wrapper suffix");
-  }
+  return parseBundle(bundleSource).defineStatements.join("");
+}
 
-  const body = normalizedSource.slice(
-    BUNDLE_PREFIX.length,
-    normalizedSource.length - BUNDLE_SUFFIX.length,
-  );
-  const statements = splitTopLevelStatements(body);
-  const firstDefineIndex = statements.findIndex((statement) =>
-    stripTrailingSemicolon(statement).startsWith(DEFINE_MARKER)
-  );
-  if (firstDefineIndex < 0) {
-    throw new Error("Bundle does not register any AMD modules");
-  }
-
-  const prelude = statements.slice(0, firstDefineIndex);
-  if (!prelude.some((statement) => statement.includes(AMD_LOADER_MARKER))) {
-    throw new Error("Bundle is missing the trusted AMD loader prelude");
-  }
-
-  const returnIndex = statements.findIndex((statement) =>
-    stripTrailingSemicolon(statement).startsWith("return require(")
-  );
-  if (returnIndex < 0 || returnIndex < firstDefineIndex) {
-    throw new Error("Bundle is missing the trusted return wrapper");
-  }
-
-  return statements.slice(firstDefineIndex, returnIndex).join("");
+export function extractDefinedModuleIds(bundleSource: string): string[] {
+  return parseBundle(bundleSource).defineStatements.map((statement) => {
+    const match = stripTrailingSemicolon(statement).match(DEFINE_PATTERN);
+    if (!match) {
+      throw new Error("Bundle contains a malformed define() registration");
+    }
+    return match[1]!;
+  });
 }
 
 export function verifyBundlePreflight(bundleSource: string): void {
+  parseBundle(bundleSource);
+}
+
+function parseBundle(bundleSource: string): { defineStatements: string[] } {
   const normalizedSource = normalizeBundleSource(bundleSource);
   if (!normalizedSource.startsWith(BUNDLE_PREFIX) || !normalizedSource.endsWith(BUNDLE_SUFFIX)) {
     throw new Error("Bundle is missing the trusted AMD wrapper structure");
   }
+
   const body = normalizedSource.slice(
     BUNDLE_PREFIX.length,
     normalizedSource.length - BUNDLE_SUFFIX.length,
   );
   const statements = splitTopLevelStatements(body);
-  let seenDefine = false;
-  let seenReturn = false;
 
-  for (const statement of statements) {
-    const normalized = stripTrailingSemicolon(statement);
-    if (normalized.startsWith(DEFINE_MARKER)) {
-      if (seenReturn) {
-        throw new Error("Bundle registers modules after the trusted return");
-      }
-      seenDefine = true;
-      continue;
-    }
-    if (normalized.startsWith("return require(")) {
-      seenReturn = true;
-      continue;
-    }
-    if (!seenDefine && isAllowedPreludeStatement(normalized)) {
-      continue;
-    }
-    if (seenDefine && !seenReturn) {
-      throw new Error("Bundle region contains untrusted top-level side effects");
-    }
-    throw new Error("Bundle contains untrusted wrapper epilogue code");
+  if (statements.length < TRUSTED_PRELUDE_STATEMENTS.length + 2) {
+    throw new Error("Bundle is missing the trusted AMD wrapper structure");
   }
 
-  if (!seenDefine) {
+  for (let index = 0; index < TRUSTED_PRELUDE_STATEMENTS.length; index++) {
+    if (
+      normalizeTrustedStatement(statements[index]!) !==
+        normalizeTrustedStatement(TRUSTED_PRELUDE_STATEMENTS[index]!)
+    ) {
+      throw new Error("Bundle is missing the trusted AMD wrapper prelude");
+    }
+  }
+
+  const remainingStatements = statements.slice(TRUSTED_PRELUDE_STATEMENTS.length);
+  let helperIndex = 0;
+  while (
+    helperIndex < remainingStatements.length &&
+    isTrustedTSHelperStatement(remainingStatements[helperIndex]!)
+  ) {
+    helperIndex++;
+  }
+
+  const statementsAfterHelpers = remainingStatements.slice(helperIndex);
+  const defineStatements: string[] = [];
+  let index = 0;
+  while (
+    index < statementsAfterHelpers.length &&
+    DEFINE_PATTERN.test(stripTrailingSemicolon(statementsAfterHelpers[index]!))
+  ) {
+    defineStatements.push(statementsAfterHelpers[index]!);
+    index++;
+  }
+
+  if (defineStatements.length === 0) {
     throw new Error("Bundle does not register any AMD modules");
   }
-  if (!seenReturn) {
+
+  const returnStatements = statementsAfterHelpers.slice(index).map(stripTrailingSemicolon);
+  if (!isTrustedReturnWrapper(returnStatements)) {
     throw new Error("Bundle is missing the trusted return wrapper");
   }
+
+  return { defineStatements };
+}
+
+function isTrustedReturnWrapper(statements: string[]): boolean {
+  if (statements.length === 1) {
+    return RETURN_REQUIRE_PATTERN.test(statements[0]!);
+  }
+  if (statements.length < 3) {
+    return false;
+  }
+  if (
+    !RETURN_MAIN_PATTERN.test(statements[0]!) ||
+    !EXPORT_MAP_INIT_PATTERN.test(statements[1]!)
+  ) {
+    return false;
+  }
+
+  const middleStatements = statements.slice(2, -1);
+  if (middleStatements.length === 0) {
+    return false;
+  }
+  if (!middleStatements.every((statement) => EXPORT_MAP_ASSIGNMENT_PATTERN.test(statement))) {
+    return false;
+  }
+  return RETURN_OBJECT_PATTERN.test(statements.at(-1)!);
 }
 
 function normalizeBundleSource(bundleSource: string): string {
@@ -98,16 +140,24 @@ function normalizeBundleSource(bundleSource: string): string {
     .trim();
 }
 
-function isAllowedPreludeStatement(statement: string): boolean {
-  return statement.startsWith("const __ctAmdHooks =") ||
-    statement.startsWith(AMD_LOADER_MARKER) ||
-    statement.startsWith("for (const [name, dep] of Object.entries(runtimeDeps))");
-}
-
 function stripTrailingSemicolon(statement: string): string {
   return statement.endsWith(";")
     ? statement.slice(0, -1).trim()
     : statement.trim();
+}
+
+function stripNewLines(input: string): string {
+  return input.replace(/\n/g, "");
+}
+
+function isTrustedTSHelperStatement(statement: string): boolean {
+  const normalized = stripTrailingSemicolon(statement);
+  return TS_HELPER_PATTERN.test(normalized) &&
+    !/(?:^|[^\w$.])(?:globalThis|window|document)\b/.test(normalized);
+}
+
+function normalizeTrustedStatement(statement: string): string {
+  return stripTrailingSemicolon(statement).replace(/\s+/g, " ").trim();
 }
 
 export function extractFirstFactoryBody(defineSource: string): string {

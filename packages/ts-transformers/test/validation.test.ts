@@ -282,6 +282,24 @@ Deno.test("SES module-scope validation", async (t) => {
     assertGreater(errors.length, 0, "Expected at least one error");
     assertEquals(errors[0]!.type, "pattern-context:non-direct-builder-callback");
   });
+
+  await t.step("allows module-scope function references as builder callbacks", async () => {
+    const source = `/// <cts-enable />
+      import { lift } from "commontools";
+
+      function sanitize(value: number) {
+        return value + 1;
+      }
+
+      export const lifted = lift(sanitize);
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0);
+  });
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {

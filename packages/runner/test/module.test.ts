@@ -153,7 +153,8 @@ describe("module", () => {
       const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
-      expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
+      expect(isModule([...nodes][0].module)).toBe(true);
+      expect((([...nodes][0].module) as Module).wrapper).toBe("handler");
       expect([...nodes][0].inputs.$event).toBe(stream);
     });
 
@@ -244,7 +245,8 @@ describe("module", () => {
       const { value, nodes } = (stream as any).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
-      expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
+      expect(isModule([...nodes][0].module)).toBe(true);
+      expect((([...nodes][0].module) as Module).wrapper).toBe("handler");
       expect([...nodes][0].inputs.$event).toBe(stream);
     });
   });
@@ -330,6 +332,12 @@ describe("module", () => {
 
       // derive calls lift internally, should still track the original function
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
+    });
+
+    it("does not throw when annotating frozen implementations", () => {
+      const fn = Object.freeze((x: number) => x * 2);
+
+      expect(() => lift(fn)).not.toThrow();
     });
   });
 

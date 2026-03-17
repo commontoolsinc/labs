@@ -47,3 +47,22 @@ Deno.test("plain-data validation rejects unsupported shapes", () => {
   cycle.self = cycle;
   assertThrows(() => assertPlainData(cycle));
 });
+
+Deno.test("plain-data validation rejects proxies without invoking traps", () => {
+  let getPrototypeOfCalls = 0;
+  let ownKeysCalls = 0;
+  const value = new Proxy({}, {
+    getPrototypeOf() {
+      getPrototypeOfCalls++;
+      return Object.prototype;
+    },
+    ownKeys() {
+      ownKeysCalls++;
+      return [];
+    },
+  });
+
+  assertThrows(() => assertPlainData(value));
+  assertEquals(getPrototypeOfCalls, 0);
+  assertEquals(ownKeysCalls, 0);
+});

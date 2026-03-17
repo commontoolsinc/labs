@@ -10,7 +10,7 @@ const BUNDLE_PRE = stripNewLines(`
   for (const [name, dep] of Object.entries(runtimeDeps)) {
     if (name === "__ctAmdHooks") continue;
     define(name, ["exports"], exports => Object.assign(exports, dep));
-  }`);
+  };`);
 const BUNDLE_POST = stripNewLines(`});`);
 
 export interface BundleAMDOutputConfig {

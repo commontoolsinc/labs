@@ -6,17 +6,26 @@ import { isRecord } from "@commontools/utils/types";
  * Strips all symbol properties from an object recursively
  */
 export function stripSymbols(obj: unknown): unknown {
+  return stripSymbolsInternal(obj, new WeakSet<object>());
+}
+
+function stripSymbolsInternal(
+  obj: unknown,
+  seen: WeakSet<object>,
+): unknown {
   if (!isRecord(obj)) return obj;
+  if (seen.has(obj)) return "[Circular]";
+  seen.add(obj);
 
   // Handle arrays
   if (Array.isArray(obj)) {
-    return obj.map(stripSymbols);
+    return obj.map((item) => stripSymbolsInternal(item, seen));
   }
 
   // Handle plain objects
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj)) {
-    result[key] = stripSymbols(obj[key]);
+    result[key] = stripSymbolsInternal(obj[key], seen);
   }
   return result;
 }

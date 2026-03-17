@@ -33,7 +33,12 @@ describe("Engine.compile()", () => {
       files: [
         {
           name: "/main.tsx",
-          contents: "export default 42;",
+          contents: [
+            "/// <cts-enable />",
+            "import { lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default doubled;",
+          ].join("\n"),
         },
       ],
     };
@@ -45,6 +50,7 @@ describe("Engine.compile()", () => {
     expect(typeof result.jsScript.js).toBe("string");
     expect(result.jsScript.js.length).toBeGreaterThan(0);
     expect(result.id).toBeDefined();
+    expect(result.jsScript.js).toContain("__ctHelpers.__ct_");
   });
 
   it("compiles a multi-file program", async () => {
@@ -53,12 +59,19 @@ describe("Engine.compile()", () => {
       files: [
         {
           name: "/utils.ts",
-          contents: "export const double = (x: number) => x * 2;",
+          contents: [
+            "/// <cts-enable />",
+            "export const double = (x: number) => x * 2;",
+            "export const answer = 42;",
+          ].join("\n"),
         },
         {
           name: "/main.tsx",
-          contents:
-            "import { double } from './utils.ts'; export default double(21);",
+          contents: [
+            "/// <cts-enable />",
+            "import { answer } from './utils.ts';",
+            "export default answer;",
+          ].join("\n"),
         },
       ],
     };
@@ -164,13 +177,20 @@ describe("Engine.evaluate()", () => {
       files: [
         {
           name: "/utils.ts",
-          contents:
-            "export const double = (x: number) => x * 2; export const triple = (x: number) => x * 3;",
+          contents: [
+            "/// <cts-enable />",
+            "export const double = (x: number) => x * 2;",
+            "export const triple = (x: number) => x * 3;",
+            "export const answer = 42;",
+          ].join("\n"),
         },
         {
           name: "/main.tsx",
-          contents:
-            "import { double } from './utils.ts'; export default double(21);",
+          contents: [
+            "/// <cts-enable />",
+            "import { answer } from './utils.ts';",
+            "export default answer;",
+          ].join("\n"),
         },
       ],
     };
@@ -222,11 +242,13 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
+            "/// <cts-enable />",
             "import { pattern, lift } from 'commontools';",
             "const double = lift<number>((x) => x * 2);",
-            "export default pattern<{ value: number }>(({ value }) => {",
+            "const mainPattern = pattern<{ value: number }>(({ value }) => {",
             "  return { result: double(value) };",
             "});",
+            "export default mainPattern;",
           ].join("\n"),
         },
       ],
@@ -266,8 +288,10 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
+            "/// <cts-enable />",
             "import { pattern } from 'commontools';",
-            "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
+            "const defaultPattern = pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
+            "export default defaultPattern;",
           ].join("\n"),
         },
       ],
@@ -308,6 +332,7 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
+            "/// <cts-enable />",
             "import { pattern } from 'commontools';",
             "export const myPattern = pattern<{ x: number }>(({ x }) => ({ x }));",
           ].join("\n"),
@@ -321,5 +346,107 @@ describe("Engine compile + evaluate", () => {
     expect(main).toBeDefined();
     expect(main!["myPattern"]).toBeDefined();
     expect(main!["myPattern"].nodes).toBeDefined();
+  });
+
+  it("evaluates with the SES module-load global surface", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "export const proxyType = typeof Proxy;",
+            "export const fetchType = typeof fetch;",
+            "const summary = `${proxyType}:${fetchType}`;",
+            "export default summary;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main).toBeDefined();
+    expect(main!["default"]).toBe("undefined:undefined");
+  });
+
+  it("normalizes returned internal cells to value schemas on SES-evaluated patterns", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { cell, pattern } from 'commontools';",
+            "const mainPattern = pattern(() => {",
+            "  const audit = cell({ updates: 0, checksum: 0 });",
+            "  return { audit };",
+            "});",
+            "export default mainPattern;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const auditSchema = (main!["default"] as {
+      resultSchema?: { properties?: Record<string, Record<string, unknown>> };
+    }).resultSchema?.properties?.audit;
+
+    expect(auditSchema).toBeDefined();
+    expect(auditSchema?.["asCell"]).toBeUndefined();
+    expect(auditSchema?.["asOpaque"]).toBe(true);
+  });
+
+  it("preserves computed helper behavior for SES-hoisted internal lifts without opaque unknown schemas", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { computed, pattern, str } from 'commontools';",
+            "const defaults = [{ title: 'Launch Announcement' }];",
+            "const normalizeDrafts = (drafts: readonly { title: string }[] | undefined) =>",
+            "  Array.isArray(drafts) && drafts.length > 0 ? drafts : defaults;",
+            "const countDrafts = (drafts: readonly { title: string }[]) => drafts.length;",
+            "const mainPattern = pattern<{ drafts?: { title: string }[] }>(({ drafts }) => {",
+            "  const queue = computed(() => normalizeDrafts(drafts));",
+            "  const count = computed(() => countDrafts(queue));",
+            "  const label = str`${count} drafts awaiting`;",
+            "  return { queue, label };",
+            "});",
+            "export default mainPattern;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const patternFactory = await runtime.patternManager.compilePattern(program);
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<{ label: string }>(
+      signer.did(),
+      { scenario: "hoisted-lifts" },
+      patternFactory.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, patternFactory, {}, resultCell);
+    tx.commit();
+    const cancel = result.sink(() => {});
+    await runtime.idle();
+
+    try {
+      expect(await result.key("label").pull()).toBe("1 drafts awaiting");
+      expect(await result.key("queue").key(0).key("title").pull()).toBe(
+        "Launch Announcement",
+      );
+    } finally {
+      cancel();
+    }
   });
 });

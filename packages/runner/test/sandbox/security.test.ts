@@ -55,7 +55,31 @@ Deno.test("builder wrappers preserve factory semantics and primitive data wrappe
   assertEquals((lifted as { type?: string }).type, "javascript");
   assertEquals(isModule(handled), true);
   assertEquals((handled as { wrapper?: string }).wrapper, "handler");
+  assertEquals((handled as { writableProxy?: boolean }).writableProxy, true);
   assertEquals(scalar, 2);
+});
+
+Deno.test("runtime data wrappers decode encoded Set and Map helpers", () => {
+  const lookup = createDataWrapper("main.tsx#003:lookup", [], {
+    __ctDataKind: "Set",
+    values: ["alpha", "beta"],
+  }) as unknown as Set<string>;
+  const index = createDataWrapper("main.tsx#004:index", [], {
+    __ctDataKind: "Map",
+    entries: [["alpha", 1], ["beta", 2]],
+  }) as unknown as Map<string, number>;
+  const matcher = createDataWrapper("main.tsx#005:matcher", [], {
+    __ctDataKind: "RegExp",
+    source: "^[a-z]+$",
+    flags: "i",
+  }) as unknown as RegExp;
+
+  assertEquals(lookup instanceof Set, true);
+  assertEquals(lookup.has("beta"), true);
+  assertEquals(index instanceof Map, true);
+  assertEquals(index.get("alpha"), 1);
+  assertEquals(matcher instanceof RegExp, true);
+  assertEquals(matcher.test("Alpha"), true);
 });
 
 Deno.test("runtime wrappers reject obviously invalid input", () => {

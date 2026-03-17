@@ -1,6 +1,13 @@
 import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
+import {
+  createBuilderWrapper,
+  createDataWrapper,
+  createFunctionWrapper,
+  createPureFunctionWrapper,
+} from "../sandbox/runtime-helpers.ts";
+import { generateHandlerSchema } from "../schema.ts";
 
 export type RuntimeModuleIdentifier =
   | "commontools"
@@ -54,17 +61,28 @@ export const getTypes = (() => {
 
 export function getExports() {
   const { commontools, exportsCallback } = createBuilder();
+  const sesHelpers = {
+    __ct_builder: createBuilderWrapper,
+    __ct_fn: createFunctionWrapper,
+    __ct_pure_fn: createPureFunctionWrapper,
+    __ct_data: createDataWrapper,
+    generateHandlerSchema,
+  };
+  const runtimeBuilderExports = {
+    ...commontools,
+    ...sesHelpers,
+  };
   return {
     runtimeExports: {
-      "commontools": commontools,
+      "commontools": runtimeBuilderExports,
       // commontools/schema only exports types, no runtime values needed
       "commontools/schema": {},
       // __esModule lets this load in the AMD loader
       // when finding the "default"
       "turndown": { default: turndown, __esModule: true },
-      "@commontools/html": commontools,
-      "@commontools/builder": commontools,
-      "@commontools/runner": commontools,
+      "@commontools/html": runtimeBuilderExports,
+      "@commontools/builder": runtimeBuilderExports,
+      "@commontools/runner": runtimeBuilderExports,
     },
     exportsCallback,
   };

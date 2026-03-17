@@ -1,3 +1,4 @@
+import { isProxy } from "node:util/types";
 import {
   CT_CAPTURE_IDS,
   CT_IMPLEMENTATION_REF,
@@ -37,6 +38,10 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
 
   if (typeof value !== "object") {
     throw new Error("Unsupported plain-data primitive");
+  }
+
+  if (isProxy(value)) {
+    throw new Error("Proxy values are not allowed in verified plain data");
   }
 
   if (seen.has(value)) {

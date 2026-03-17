@@ -14,7 +14,7 @@ import { toURI } from "./uri-utils.ts";
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
 
-// Cache of target objects to their proxies, scoped by ReactivityLog
+// Cache of target objects to their proxies, scoped by ReactivityLog.
 const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
   WeakMap<object, any>
@@ -146,9 +146,7 @@ export function createQueryResultProxy<T>(
   }
 
   // Check if we already have a proxy for this target in the cache.
-  // The cache key is the original `value` (not the stub), ensuring that
-  // the same frozen object always maps to the same proxy instance.
-  const existingProxy = txCache?.get(value);
+  const existingProxy = txCache.get(value);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(proxyTarget as object, {

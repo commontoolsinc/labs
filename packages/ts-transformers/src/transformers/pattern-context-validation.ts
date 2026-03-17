@@ -460,7 +460,7 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!callback || isInsideSafeCallbackWrapper(callback, checker, context)) {
       return;
     }
-    if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+    if (resolveBuilderCallbackReference(callback, checker)) {
       return;
     }
     context.reportDiagnostic({
@@ -858,4 +858,52 @@ export class PatternContextValidationTransformer extends Transformer {
 
     return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
   }
+}
+
+function resolveBuilderCallbackReference(
+  callback: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.FunctionLikeDeclarationBase | undefined {
+  if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+    return callback;
+  }
+  if (!ts.isIdentifier(callback)) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(callback);
+  const declarations = symbol?.getDeclarations() ?? [];
+  for (const declaration of declarations) {
+    if (
+      ts.isFunctionDeclaration(declaration) && declaration.body &&
+      isDeclarationAtModuleScope(declaration)
+    ) {
+      return declaration;
+    }
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      ts.isIdentifier(declaration.name) &&
+      declaration.initializer &&
+      (ts.isArrowFunction(declaration.initializer) ||
+        ts.isFunctionExpression(declaration.initializer)) &&
+      isDeclarationAtModuleScope(declaration)
+    ) {
+      return declaration.initializer;
+    }
+  }
+  return undefined;
+}
+
+function isDeclarationAtModuleScope(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isSourceFile(current)) {
+      return true;
+    }
+    if (ts.isFunctionLike(current)) {
+      return false;
+    }
+    current = current.parent;
+  }
+  return false;
 }

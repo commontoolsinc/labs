@@ -5,13 +5,20 @@ import {
 } from "@std/assert";
 import {
   extractBundleRegion,
+  extractFirstFactoryBody,
   verifyBundlePreflight,
 } from "../../src/sandbox/bundle-preflight.ts";
 import { verifyAMDFactory } from "../../src/sandbox/module-verifier.ts";
+import { Identity } from "@commontools/identity";
+import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
+import { splitTopLevelStatements } from "../../src/sandbox/token-scanner.ts";
+import { StorageManager } from "../../src/storage/cache.deno.ts";
+import { Runtime } from "../../src/runtime.ts";
 
 Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side effects", async (t) => {
-  const validBundle =
-    `((runtimeDeps={}) => {const { define, require } = ((hooks)=>({define:hooks.define,require:hooks.require}))({define(){},require(){}});define("main",["exports"],function(exports){/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ct_builder("lift","main.tsx#000:lifted",function(value){return value+1;});exports.default=lifted;});return require("main");});`;
+  const validBundle = createTrustedBundle(
+    `define("main",["exports"],function(exports){/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ct_builder("lift","main.tsx#000:lifted",function(value){return value+1;});exports.default=lifted;});return require("main");`,
+  );
 
   await t.step("extracts the untrusted define region", () => {
     const region = extractBundleRegion(validBundle);
@@ -21,7 +28,9 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
 
   await t.step("rejects statements before define()", async () => {
     const malicious =
-      `((runtimeDeps={}) => {globalThis.__sideEffect = true;const { define, require } = ((hooks)=>({define:hooks.define,require:hooks.require}))({define(){},require(){}});define("main",["exports"],function(exports){});return require("main");});`;
+      createTrustedBundle(
+        `globalThis.__sideEffect = true;define("main",["exports"],function(exports){});return require("main");`,
+      );
     assertThrows(() => verifyBundlePreflight(malicious));
     assertEquals((globalThis as { __sideEffect?: boolean }).__sideEffect, undefined);
   });
@@ -33,8 +42,9 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
   });
 
   await t.step("allows console use inside verified factories", () => {
-    const withConsole =
-      `((runtimeDeps={}) => {const { define, require } = ((hooks)=>({define:hooks.define,require:hooks.require}))({define(){},require(){}});define("main",["exports"],function(exports){console.log("loaded");/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ct_builder("lift","main.tsx#000:lifted",function(value){return value+1;});exports.default=lifted;});return require("main");});`;
+    const withConsole = createTrustedBundle(
+      `define("main",["exports"],function(exports){console.log("loaded");/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ct_builder("lift","main.tsx#000:lifted",function(value){return value+1;});exports.default=lifted;});return require("main");`,
+    );
     verifyBundlePreflight(withConsole);
   });
 });
@@ -96,3 +106,165 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     );
   });
 });
+
+Deno.test("AMD factory verifier accepts real compiler output from the SES engine path", async () => {
+  const signer = await Identity.fromPassphrase("bundle-preflight verifier");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default doubled;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript } = await runtime.harness.compile(program);
+    const region = extractBundleRegion(jsScript.js);
+    const defineSource = splitTopLevelStatements(region).find((statement) =>
+      statement.includes("__CT_TOPLEVEL__")
+    );
+    if (!defineSource) {
+      throw new Error("Expected a define(...) region in the compiled bundle");
+    }
+
+    verifyBundlePreflight(jsScript.js);
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["require", "exports", "commontools"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource: `function(require, exports, __ctHelpers){${
+        extractFirstFactoryBody(defineSource)
+      }}`,
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("AMD factory verifier accepts real compiler output for direct default-export builders", async () => {
+  const signer = await Identity.fromPassphrase("bundle-preflight default export");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern } from 'commontools';",
+            "export default pattern<{ count: number }>(({ count }) => ({ count }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript } = await runtime.harness.compile(program);
+    verifyBundlePreflight(jsScript.js);
+
+    const region = extractBundleRegion(jsScript.js);
+    const defineSource = splitTopLevelStatements(region).find((statement) =>
+      statement.includes("__CT_TOPLEVEL__")
+    );
+    if (!defineSource) {
+      throw new Error("Expected a define(...) region in the compiled bundle");
+    }
+
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["require", "exports", "commontools"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource: `function(require, exports, __ctHelpers){${
+        extractFirstFactoryBody(defineSource)
+      }}`,
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing helper callbacks", async () => {
+  const signer = await Identity.fromPassphrase("bundle-preflight regex bundle");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { lift } from 'commontools';",
+            "const sanitize = (value: string) => value.replace(/[^a-z0-9-]+/gi, '-');",
+            "const normalized = lift((value: string) => sanitize(value));",
+            "export default normalized;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript } = await runtime.harness.compile(program);
+    verifyBundlePreflight(jsScript.js);
+
+    const region = extractBundleRegion(jsScript.js);
+    const defineSource = splitTopLevelStatements(region).find((statement) =>
+      statement.includes("__CT_TOPLEVEL__")
+    );
+    if (!defineSource) {
+      throw new Error("Expected a define(...) region in the compiled bundle");
+    }
+
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["require", "exports", "commontools"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource: `function(require, exports, __ctHelpers){${
+        extractFirstFactoryBody(defineSource)
+      }}`,
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+function createTrustedBundle(body: string): string {
+  return stripNewLines(`((runtimeDeps={}) => {
+    const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
+    const { define, require } = (${getAMDLoader.toString()})(__ctAmdHooks);
+    for (const [name, dep] of Object.entries(runtimeDeps)) {
+      if (name === "__ctAmdHooks") continue;
+      define(name, ["exports"], exports => Object.assign(exports, dep));
+    };
+    ${body}
+  });`);
+}
+
+function stripNewLines(input: string): string {
+  return input.replace(/\n/g, "");
+}

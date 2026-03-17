@@ -3,6 +3,17 @@ import {
   lift,
 } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
+import type {
+  JSONSchema,
+  Pattern,
+} from "../builder/types.ts";
+import {
+  ENCODED_DATA_KIND_FIELD,
+  ENCODED_MAP_KIND,
+  ENCODED_REGEXP_KIND,
+  ENCODED_SET_KIND,
+} from "./abi.ts";
+import { ensureSESLockdown } from "./compartment-globals.ts";
 import { freezeVerifiedPlainData } from "./plain-data.ts";
 import {
   CT_CAPTURE_IDS,
@@ -28,6 +39,11 @@ export function createBuilderWrapper<T extends Function>(
       props: unknown,
     ) => unknown)
     : pattern(callback as unknown as (input: unknown) => unknown);
+  if (kind === "pattern" || kind === "recipe") {
+    installPatternResultSchemaNormalizer(
+      wrapped as unknown as Pattern & { resultSchema?: JSONSchema },
+    );
+  }
   return tagMetadata(
     wrapped as unknown as T & VerifiedMetadataCarrier,
     itemId,
@@ -57,6 +73,11 @@ export function createDataWrapper<T>(
   captureIds: readonly string[],
   value: T,
 ): T & VerifiedMetadataCarrier {
+  const encoded = decodeStructuredData(value);
+  if (encoded !== undefined) {
+    return encoded as T & VerifiedMetadataCarrier;
+  }
+
   if (value === null || (typeof value !== "object" && typeof value !== "function")) {
     return freezeVerifiedPlainData(value) as T & VerifiedMetadataCarrier;
   }
@@ -118,4 +139,103 @@ function assertCallable(value: unknown): asserts value is Function {
   if (typeof value !== "function") {
     throw new Error("Expected a callable wrapper target");
   }
+}
+
+function decodeStructuredData<T>(value: T): T | undefined {
+  if (!isRecord(value) || !(ENCODED_DATA_KIND_FIELD in value)) {
+    return undefined;
+  }
+
+  const encodedKind = value[ENCODED_DATA_KIND_FIELD];
+  ensureSESLockdown();
+  if (encodedKind === ENCODED_SET_KIND) {
+    const entries = Array.isArray(value.values) ? value.values : [];
+    return harden(new Set(entries)) as T;
+  }
+  if (encodedKind === ENCODED_MAP_KIND) {
+    const entries = Array.isArray(value.entries) ? value.entries : [];
+    return harden(new Map(entries as Iterable<readonly [unknown, unknown]>)) as T;
+  }
+  if (encodedKind === ENCODED_REGEXP_KIND) {
+    const source = typeof value.source === "string" ? value.source : "";
+    const flags = typeof value.flags === "string" ? value.flags : "";
+    return harden(new RegExp(source, flags)) as T;
+  }
+
+  return undefined;
+}
+
+function installPatternResultSchemaNormalizer(
+  patternFactory: Pattern & { resultSchema?: JSONSchema },
+): void {
+  let resultSchema = normalizePatternResultSchema(
+    patternFactory.result,
+    patternFactory.resultSchema,
+  );
+
+  Object.defineProperty(patternFactory, "resultSchema", {
+    enumerable: true,
+    configurable: true,
+    get: () => resultSchema,
+    set: (value: JSONSchema | undefined) => {
+      resultSchema = normalizePatternResultSchema(patternFactory.result, value);
+    },
+  });
+}
+
+function normalizePatternResultSchema(
+  binding: unknown,
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+
+  if (isAliasBinding(binding) && schema.asCell && !schema.asStream) {
+    const normalized = { ...(schema as Record<string, unknown>) };
+    delete normalized.asCell;
+    normalized.asOpaque = true;
+    return normalized as JSONSchema;
+  }
+
+  if (Array.isArray(binding)) {
+    if (!schema.items || typeof schema.items !== "object") {
+      return schema;
+    }
+
+    const normalizedItems = normalizePatternResultSchema(binding[0], schema.items);
+    if (normalizedItems === schema.items) {
+      return schema;
+    }
+
+    return { ...schema, items: normalizedItems };
+  }
+
+  if (!isRecord(binding) || !schema.properties || typeof schema.properties !== "object") {
+    return schema;
+  }
+
+  let changed = false;
+  const properties: Record<string, JSONSchema> = { ...schema.properties };
+  for (const [key, value] of Object.entries(binding)) {
+    const current = schema.properties[key];
+    const normalized = normalizePatternResultSchema(value, current);
+    if (normalized !== current && normalized !== undefined) {
+      properties[key] = normalized;
+      changed = true;
+    }
+  }
+
+  return changed ? { ...schema, properties } : schema;
+}
+
+function isAliasBinding(value: unknown): value is { $alias: { path?: unknown } } {
+  return !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "$alias" in value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }

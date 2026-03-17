@@ -12,6 +12,12 @@ import {
   createSESItemId,
   toDirectFunctionExpression,
 } from "./ses-wrapper-helpers.ts";
+import {
+  ENCODED_DATA_KIND_FIELD,
+  ENCODED_MAP_KIND,
+  ENCODED_REGEXP_KIND,
+  ENCODED_SET_KIND,
+} from "../../../runner/src/sandbox/abi.ts";
 
 const HOISTABLE_BUILDERS = new Set(["derive", "lift", "handler", "action"]);
 const TRUSTED_RUNTIME_IMPORTS = new Set([
@@ -79,9 +85,12 @@ export class SESModuleScopeHoistTransformer extends Transformer {
       }
 
       const callback = ts.isCallExpression(node.expression)
-        ? findCallbackArg(node.expression)
-        : findCallbackArg(node);
-      if (!callback || !referencesExternalSymbols(callback, checker)) {
+        ? resolveBuilderCallback(node.expression, checker)
+        : resolveBuilderCallback(node, checker);
+      if (
+        !callback || !referencesExternalSymbols(callback, checker) ||
+        usesCellMethodCalls(callback)
+      ) {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
 
@@ -187,23 +196,48 @@ export class SESCanonicalWrapperTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, factory, checker } = context;
     const statements: ts.Statement[] = [];
-    const approvedBindings = new Set<string>();
+    const functionDeclarations = sourceFile.statements.filter((statement):
+      statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && !!statement.name && !!statement.body
+    );
+    const orderedStatements = [
+      ...sourceFile.statements.filter((statement) =>
+        ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)
+      ),
+      ...functionDeclarations,
+      ...sourceFile.statements.filter((statement) =>
+        !(
+          ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement) ||
+          (ts.isFunctionDeclaration(statement) && !!statement.name && !!statement.body)
+        )
+      ),
+    ];
+    const approvedBindings = new Set<string>(
+      functionDeclarations.map((statement) => statement.name?.text ?? ""),
+    );
     let ordinal = 0;
 
-    for (const statement of sourceFile.statements) {
+    for (const statement of orderedStatements) {
       if (ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) {
         statements.push(statement);
         continue;
       }
 
       if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+        if (isInjectedJSXHelperDeclaration(statement)) {
+          statements.push(statement);
+          approvedBindings.add(statement.name.text);
+          continue;
+        }
         const localName = statement.name.text;
         const itemId = createSESItemId(sourceFile, ordinal++, localName);
+        const exportAssignments = createExportAssignments(
+          factory,
+          statement.modifiers,
+          localName,
+        );
         const wrapped = factory.createVariableStatement(
-          statement.modifiers?.filter((modifier) =>
-            modifier.kind === ts.SyntaxKind.ExportKeyword ||
-            modifier.kind === ts.SyntaxKind.DefaultKeyword
-          ),
+          undefined,
           factory.createVariableDeclarationList(
             [
               factory.createVariableDeclaration(
@@ -226,7 +260,54 @@ export class SESCanonicalWrapperTransformer extends Transformer {
         statements.push(
           addSESSentinel(wrapped, sourceFile, ordinal - 1, localName, "fn"),
         );
+        statements.push(...exportAssignments);
         approvedBindings.add(localName);
+        continue;
+      }
+
+      if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+        if (ts.isIdentifier(statement.expression)) {
+          statements.push(
+            createExportAssignmentStatement(
+              factory,
+              "default",
+              statement.expression,
+            ),
+          );
+          continue;
+        }
+
+        const localName = `__ct_default_export_${ordinal}`;
+        const canonicalizedStatements = createCanonicalBindingStatements({
+          factory,
+          checker,
+          sourceFile,
+          ordinal,
+          localName,
+          initializer: statement.expression,
+          approvedBindings,
+        });
+        if (!canonicalizedStatements) {
+          statements.push(
+            createExportAssignmentStatement(
+              factory,
+              "default",
+              statement.expression,
+            ),
+          );
+          continue;
+        }
+
+        statements.push(...canonicalizedStatements);
+        statements.push(
+          createExportAssignmentStatement(
+            factory,
+            "default",
+            factory.createIdentifier(localName),
+          ),
+        );
+        approvedBindings.add(localName);
+        ordinal++;
         continue;
       }
 
@@ -251,152 +332,192 @@ export class SESCanonicalWrapperTransformer extends Transformer {
         }
 
         const localName = declaration.name.text;
-        const itemId = createSESItemId(sourceFile, ordinal++, localName);
         const initializer = declaration.initializer;
-        const builderKind = getCanonicalBuilderKind(initializer, checker);
-
-        if (builderKind) {
-          const callback = findCallbackArg(
-            initializer as ts.CallExpression,
-          );
-          if (!callback) {
-            statements.push(statement);
-            continue;
-          }
-          const wrappedInitializer = factory.createCallExpression(
-            createSESHelperExpr(factory, "__ct_builder"),
-            undefined,
-            [
-              factory.createStringLiteral(builderKind),
-              factory.createStringLiteral(itemId),
-              toDirectFunctionExpression(factory, callback),
-            ],
-          );
-          const wrappedStatement = factory.createVariableStatement(
-            modifiers,
-            factory.createVariableDeclarationList(
-              [
-                factory.createVariableDeclaration(
-                  factory.createIdentifier(localName),
-                  undefined,
-                  undefined,
-                  wrappedInitializer,
-                ),
-              ],
-              ts.NodeFlags.Const,
-            ),
-          );
-          statements.push(
-            addSESSentinel(
-              wrappedStatement,
-              sourceFile,
-              ordinal - 1,
-              localName,
-              "builder",
-            ),
-          );
-
-          const schemaAssignments = createSchemaAssignments(
-            factory,
-            localName,
-            initializer as ts.CallExpression,
-            builderKind,
-          );
-          statements.push(...schemaAssignments);
-          approvedBindings.add(localName);
-          continue;
-        }
-
-        if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
-          const captureIds = collectReferencedIdentifiers(
-            initializer.body,
-            approvedBindings,
-          );
-          const helperName = captureIds.length > 0
-            ? "__ct_pure_fn"
-            : "__ct_fn";
-          const wrappedStatement = factory.createVariableStatement(
-            modifiers,
-            factory.createVariableDeclarationList(
-              [
-                factory.createVariableDeclaration(
-                  factory.createIdentifier(localName),
-                  undefined,
-                  undefined,
-                  factory.createCallExpression(
-                    createSESHelperExpr(factory, helperName),
-                    undefined,
-                    helperName === "__ct_fn"
-                      ? [
-                        factory.createStringLiteral(itemId),
-                        toDirectFunctionExpression(factory, initializer),
-                      ]
-                      : [
-                        factory.createStringLiteral(itemId),
-                        factory.createArrayLiteralExpression(
-                          captureIds.map((name) => factory.createStringLiteral(name)),
-                        ),
-                        toDirectFunctionExpression(factory, initializer),
-                      ],
-                  ),
-                ),
-              ],
-              ts.NodeFlags.Const,
-            ),
-          );
-          statements.push(
-            addSESSentinel(
-              wrappedStatement,
-              sourceFile,
-              ordinal - 1,
-              localName,
-              helperName === "__ct_fn" ? "fn" : "pure-fn",
-            ),
-          );
-          approvedBindings.add(localName);
-          continue;
-        }
-
-        const captureIds = collectReferencedIdentifiers(initializer, approvedBindings);
-        const wrappedStatement = factory.createVariableStatement(
+        const exportAssignments = createExportAssignments(
+          factory,
           modifiers,
-          factory.createVariableDeclarationList(
-            [
-              factory.createVariableDeclaration(
-                factory.createIdentifier(localName),
-                undefined,
-                undefined,
-                factory.createCallExpression(
-                  createSESHelperExpr(factory, "__ct_data"),
-                  undefined,
-                  [
-                    factory.createStringLiteral(itemId),
-                    factory.createArrayLiteralExpression(
-                      captureIds.map((name) => factory.createStringLiteral(name)),
-                    ),
-                    initializer,
-                  ],
-                ),
-              ),
-            ],
-            ts.NodeFlags.Const,
-          ),
+          localName,
         );
-        statements.push(
-          addSESSentinel(
-            wrappedStatement,
-            sourceFile,
-            ordinal - 1,
-            localName,
-            "data",
-          ),
-        );
+        const canonicalizedStatements = createCanonicalBindingStatements({
+          factory,
+          checker,
+          sourceFile,
+          ordinal,
+          localName,
+          initializer,
+          approvedBindings,
+        });
+        if (!canonicalizedStatements) {
+          statements.push(statement);
+          continue;
+        }
+
+        statements.push(...canonicalizedStatements);
+        statements.push(...exportAssignments);
         approvedBindings.add(localName);
+        ordinal++;
       }
     }
 
     return factory.updateSourceFile(sourceFile, statements);
   }
+}
+
+function createCanonicalBindingStatements(options: {
+  factory: ts.NodeFactory;
+  checker: ts.TypeChecker;
+  sourceFile: ts.SourceFile;
+  ordinal: number;
+  localName: string;
+  initializer: ts.Expression;
+  approvedBindings: ReadonlySet<string>;
+}): ts.Statement[] | undefined {
+  const {
+    factory,
+    checker,
+    sourceFile,
+    ordinal,
+    localName,
+    initializer,
+    approvedBindings,
+  } = options;
+  const itemId = createSESItemId(sourceFile, ordinal, localName);
+  const builderKind = getCanonicalBuilderKind(initializer, checker);
+
+  if (builderKind) {
+    const callback = resolveBuilderCallback(
+      initializer as ts.CallExpression,
+      checker,
+    );
+    if (!callback) {
+      return undefined;
+    }
+    const wrappedInitializer = factory.createCallExpression(
+      createSESHelperExpr(factory, "__ct_builder"),
+      undefined,
+      [
+        factory.createStringLiteral(builderKind),
+        factory.createStringLiteral(itemId),
+        toDirectFunctionExpression(factory, callback),
+      ],
+    );
+    const wrappedStatement = factory.createVariableStatement(
+      undefined,
+      factory.createVariableDeclarationList(
+        [
+          factory.createVariableDeclaration(
+            factory.createIdentifier(localName),
+            undefined,
+            undefined,
+            wrappedInitializer,
+          ),
+        ],
+        ts.NodeFlags.Const,
+      ),
+    );
+    return [
+      addSESSentinel(
+        wrappedStatement,
+        sourceFile,
+        ordinal,
+        localName,
+        "builder",
+      ),
+      ...createSchemaAssignments(
+        factory,
+        localName,
+        initializer as ts.CallExpression,
+        builderKind,
+      ),
+    ];
+  }
+
+  if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+    const captureIds = collectReferencedIdentifiers(
+      initializer.body,
+      approvedBindings,
+    );
+    const helperName = captureIds.length > 0
+      ? "__ct_pure_fn"
+      : "__ct_fn";
+    const wrappedStatement = factory.createVariableStatement(
+      undefined,
+      factory.createVariableDeclarationList(
+        [
+          factory.createVariableDeclaration(
+            factory.createIdentifier(localName),
+            undefined,
+            undefined,
+            factory.createCallExpression(
+              createSESHelperExpr(factory, helperName),
+              undefined,
+              helperName === "__ct_fn"
+                ? [
+                  factory.createStringLiteral(itemId),
+                  toDirectFunctionExpression(factory, initializer),
+                ]
+                : [
+                  factory.createStringLiteral(itemId),
+                  factory.createArrayLiteralExpression(
+                    captureIds.map((name) => factory.createStringLiteral(name)),
+                  ),
+                  toDirectFunctionExpression(factory, initializer),
+                ],
+            ),
+          ),
+        ],
+        ts.NodeFlags.Const,
+      ),
+    );
+    return [
+      addSESSentinel(
+        wrappedStatement,
+        sourceFile,
+        ordinal,
+        localName,
+        helperName === "__ct_fn" ? "fn" : "pure-fn",
+      ),
+    ];
+  }
+
+  const captureIds = collectReferencedIdentifiers(initializer, approvedBindings);
+  const wrappedStatement = factory.createVariableStatement(
+    undefined,
+    factory.createVariableDeclarationList(
+      [
+        factory.createVariableDeclaration(
+          factory.createIdentifier(localName),
+          undefined,
+          undefined,
+          factory.createCallExpression(
+            createSESHelperExpr(factory, "__ct_data"),
+            undefined,
+            [
+              factory.createStringLiteral(itemId),
+              factory.createArrayLiteralExpression(
+                captureIds.map((name) => factory.createStringLiteral(name)),
+              ),
+              encodeStructuredDataInitializer(
+                factory,
+                initializer,
+                sourceFile,
+              ),
+            ],
+          ),
+        ),
+      ],
+      ts.NodeFlags.Const,
+    ),
+  );
+  return [
+    addSESSentinel(
+      wrappedStatement,
+      sourceFile,
+      ordinal,
+      localName,
+      "data",
+    ),
+  ];
 }
 
 function createSchemaAssignments(
@@ -405,6 +526,10 @@ function createSchemaAssignments(
   initializer: ts.CallExpression,
   builderKind: "pattern" | "recipe" | "lift" | "handler",
 ): ts.Statement[] {
+  if (isCompilerGeneratedHoistedBuilder(localName)) {
+    return [];
+  }
+
   const args = [...initializer.arguments];
   if (builderKind === "lift" && args.length >= 3) {
     return [
@@ -412,7 +537,24 @@ function createSchemaAssignments(
       createAssignment(factory, localName, "resultSchema", args[1]!),
     ];
   }
-  if ((builderKind === "handler" || builderKind === "pattern") && args.length >= 3) {
+  if (builderKind === "handler" && args.length >= 3) {
+    return [
+      createAssignment(
+        factory,
+        localName,
+        "argumentSchema",
+        factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            factory.createIdentifier("__ctHelpers"),
+            "generateHandlerSchema",
+          ),
+          undefined,
+          [args[0]!, args[1]!],
+        ),
+      ),
+    ];
+  }
+  if (builderKind === "pattern" && args.length >= 3) {
     return [
       createAssignment(factory, localName, "argumentSchema", args[1]!),
       createAssignment(factory, localName, "resultSchema", args[2]!),
@@ -424,6 +566,72 @@ function createSchemaAssignments(
     ];
   }
   return [];
+}
+
+function isCompilerGeneratedHoistedBuilder(localName: string): boolean {
+  return localName.startsWith("__ct_hoisted_lift_");
+}
+
+function encodeStructuredDataInitializer(
+  factory: ts.NodeFactory,
+  initializer: ts.Expression,
+  sourceFile: ts.SourceFile,
+): ts.Expression {
+  if (ts.isRegularExpressionLiteral(initializer)) {
+    const text = initializer.getText(sourceFile);
+    const match = text.match(/^\/(.*)\/([a-z]*)$/i);
+    if (!match) {
+      return initializer;
+    }
+
+    return factory.createObjectLiteralExpression([
+      factory.createPropertyAssignment(
+        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
+        factory.createStringLiteral(ENCODED_REGEXP_KIND),
+      ),
+      factory.createPropertyAssignment(
+        factory.createIdentifier("source"),
+        factory.createStringLiteral(match[1]!),
+      ),
+      factory.createPropertyAssignment(
+        factory.createIdentifier("flags"),
+        factory.createStringLiteral(match[2]!),
+      ),
+    ]);
+  }
+
+  if (!ts.isNewExpression(initializer) || !ts.isIdentifier(initializer.expression)) {
+    return initializer;
+  }
+
+  const args = initializer.arguments ?? [];
+  if (initializer.expression.text === "Set") {
+    return factory.createObjectLiteralExpression([
+      factory.createPropertyAssignment(
+        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
+        factory.createStringLiteral(ENCODED_SET_KIND),
+      ),
+      factory.createPropertyAssignment(
+        factory.createIdentifier("values"),
+        args[0] ?? factory.createArrayLiteralExpression(),
+      ),
+    ]);
+  }
+
+  if (initializer.expression.text === "Map") {
+    return factory.createObjectLiteralExpression([
+      factory.createPropertyAssignment(
+        factory.createIdentifier(ENCODED_DATA_KIND_FIELD),
+        factory.createStringLiteral(ENCODED_MAP_KIND),
+      ),
+      factory.createPropertyAssignment(
+        factory.createIdentifier("entries"),
+        args[0] ?? factory.createArrayLiteralExpression(),
+      ),
+    ]);
+  }
+
+  return initializer;
 }
 
 function createAssignment(
@@ -442,6 +650,51 @@ function createAssignment(
       value,
     ),
   );
+}
+
+function createExportAssignments(
+  factory: ts.NodeFactory,
+  modifiers: ts.NodeArray<ts.ModifierLike> | readonly ts.ModifierLike[] | undefined,
+  localName: string,
+): ts.Statement[] {
+  if (!modifiers?.some((modifier) =>
+    modifier.kind === ts.SyntaxKind.ExportKeyword
+  )) {
+    return [];
+  }
+
+  const exportName = modifiers.some((modifier) =>
+    modifier.kind === ts.SyntaxKind.DefaultKeyword
+  )
+    ? "default"
+    : localName;
+
+  return [
+    createExportAssignmentStatement(
+      factory,
+      exportName,
+      factory.createIdentifier(localName),
+    ),
+  ];
+}
+
+function createExportAssignmentStatement(
+  factory: ts.NodeFactory,
+  exportName: string,
+  value: ts.Expression,
+): ts.Statement {
+  return [
+    factory.createExpressionStatement(
+      factory.createBinaryExpression(
+        factory.createPropertyAccessExpression(
+          factory.createIdentifier("exports"),
+          exportName,
+        ),
+        factory.createToken(ts.SyntaxKind.EqualsToken),
+        value,
+      ),
+    ),
+  ][0];
 }
 
 function getCanonicalBuilderKind(
@@ -501,20 +754,38 @@ function isAtModuleScope(node: ts.Node): boolean {
   return false;
 }
 
-function findCallbackArg(
+function isInjectedJSXHelperDeclaration(
+  statement: ts.FunctionDeclaration,
+): boolean {
+  if (statement.name?.text !== "h" || !statement.body) {
+    return false;
+  }
+
+  const compact = statement.body.getText().replace(/\s+/g, " ").trim();
+  return compact.includes("return __ctHelpers.h.apply(null, args);");
+}
+
+function resolveBuilderCallback(
   call: ts.CallExpression,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  checker: ts.TypeChecker,
+): ts.FunctionLikeDeclarationBase | undefined {
   for (let index = call.arguments.length - 1; index >= 0; index--) {
     const argument = call.arguments[index];
     if (argument && isFunctionLikeExpression(argument)) {
       return argument as ts.ArrowFunction | ts.FunctionExpression;
+    }
+    if (argument && ts.isIdentifier(argument)) {
+      const resolved = resolveModuleScopeCallbackReference(argument, checker);
+      if (resolved) {
+        return resolved;
+      }
     }
   }
   return undefined;
 }
 
 function referencesExternalSymbols(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
+  callback: ts.FunctionLikeDeclarationBase,
   checker: ts.TypeChecker,
 ): boolean {
   const localNames = new Set<string>();
@@ -549,8 +820,75 @@ function referencesExternalSymbols(
     ts.forEachChild(node, visit);
   };
 
+  if (!callback.body) {
+    return false;
+  }
+
   visit(callback.body);
   return hasExternalReference;
+}
+
+function resolveModuleScopeCallbackReference(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+): ts.FunctionLikeDeclarationBase | undefined {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  const declarations = symbol?.getDeclarations() ?? [];
+  for (const declaration of declarations) {
+    if (
+      ts.isFunctionDeclaration(declaration) && declaration.body &&
+      isAtModuleScope(declaration)
+    ) {
+      return declaration;
+    }
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      ts.isIdentifier(declaration.name) &&
+      declaration.initializer &&
+      (ts.isArrowFunction(declaration.initializer) ||
+        ts.isFunctionExpression(declaration.initializer)) &&
+      isAtModuleScope(declaration)
+    ) {
+      return declaration.initializer;
+    }
+  }
+  return undefined;
+}
+
+const CELL_METHOD_NAMES = new Set([
+  "get",
+  "key",
+  "push",
+  "send",
+  "set",
+  "update",
+]);
+
+function usesCellMethodCalls(
+  callback: ts.FunctionLikeDeclarationBase,
+): boolean {
+  if (!callback.body) {
+    return false;
+  }
+
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) {
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      CELL_METHOD_NAMES.has(node.expression.name.text)
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(callback.body);
+  return found;
 }
 
 function collectBindingNames(name: ts.BindingName, names: Set<string>): void {

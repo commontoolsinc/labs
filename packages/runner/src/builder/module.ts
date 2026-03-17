@@ -37,32 +37,41 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    annotateImplementation(moduleSpec.implementation);
+    const verifiedImplementation =
+      !!(moduleSpec.implementation as Function & VerifiedMetadataCarrier)[
+        CT_IMPLEMENTATION_REF
+      ];
+    if (!verifiedImplementation) {
+      annotateImplementation(moduleSpec.implementation);
+    }
     moduleSpec.implementationRef ??= ensureImplementationRef(
       moduleSpec.implementation,
       "fn",
     );
   }
 
-  const module: Module & toJSON = {
-    ...moduleSpec,
-    toJSON: () => moduleToJSON(module),
-  };
-  // A module with ifc classification on its argument schema should have at least
-  // that value on its result schema
-  module.resultSchema = applyArgumentIfcToResult(
-    module.argumentSchema,
-    module.resultSchema,
-  );
-  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+  const factory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
-    const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
+    const node: NodeRef = {
+      module: factory as unknown as Module & toJSON,
+      inputs,
+      outputs,
+      frame: getTopFrame(),
+    };
 
     connectInputAndOutputs(node);
     (outputs as OpaqueCell<R>).connect(node);
 
     return outputs;
-  }, module);
+  }, moduleSpec) as ModuleFactory<T, R> & Module & toJSON;
+  factory.toJSON = () => moduleToJSON(factory);
+  // A module with ifc classification on its argument schema should have at least
+  // that value on its result schema
+  factory.resultSchema = applyArgumentIfcToResult(
+    factory.argumentSchema,
+    factory.resultSchema,
+  );
+  return factory;
 }
 
 /** Extract file path and location from a stack frame line
@@ -134,14 +143,34 @@ function getExternalSourceLocation(): string | null {
 function annotateImplementation(implementation: Function): void {
   const location = getExternalSourceLocation();
   if (location) {
-    Object.defineProperty(implementation, "name", {
-      value: location,
-      configurable: true,
-    });
-    (implementation as { src?: string }).src = location;
+    defineDebugProperty(implementation, "name", location);
+    defineDebugProperty(implementation, "src", location);
   }
   const fnStr = implementation.toString();
-  (implementation as { preview?: string }).preview = fnStr.slice(0, 200);
+  defineDebugProperty(implementation, "preview", fnStr.slice(0, 200));
+}
+
+function defineDebugProperty(
+  target: Function,
+  key: "name" | "src" | "preview",
+  value: string,
+): void {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  if (descriptor && !descriptor.configurable && !descriptor.writable) {
+    return;
+  }
+
+  try {
+    Object.defineProperty(target, key, {
+      value,
+      configurable: true,
+      writable: true,
+    });
+  } catch {
+    // Verified wrappers may already be frozen/hardened when they are reused by
+    // higher-level builders. Debug metadata is best-effort and must not break
+    // module construction.
+  }
 }
 
 function ensureImplementationRef(
@@ -161,10 +190,10 @@ function ensureImplementationRef(
     preview: implementation.toString(),
   }, "verified implementation").toString();
 
-  defineMetadata(implementation, CT_IMPLEMENTATION_REF, implementationRef);
-  defineMetadata(implementation, CT_ITEM_ID, implementationRef);
-  defineMetadata(implementation, CT_WRAPPER_KIND, kind);
-  defineMetadata(implementation, CT_CAPTURE_IDS, Object.freeze([]));
+  tryDefineMetadata(implementation, CT_IMPLEMENTATION_REF, implementationRef);
+  tryDefineMetadata(implementation, CT_ITEM_ID, implementationRef);
+  tryDefineMetadata(implementation, CT_WRAPPER_KIND, kind);
+  tryDefineMetadata(implementation, CT_CAPTURE_IDS, Object.freeze([]));
   return implementationRef;
 }
 
@@ -179,6 +208,19 @@ function defineMetadata<T>(
     configurable: true,
     writable: true,
   });
+}
+
+function tryDefineMetadata<T>(
+  target: object,
+  key: symbol,
+  value: T,
+): void {
+  try {
+    defineMetadata(target, key, value);
+  } catch {
+    // Verified/frozen callbacks may already be non-extensible. The enclosing
+    // module factory still carries the generated implementationRef.
+  }
 }
 
 /** Declare a module
@@ -260,22 +302,6 @@ function handlerInternal<E, T>(
   );
 
   annotateImplementation(handler!);
-  const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
-  } = {
-    type: "javascript",
-    implementation: handler,
-    implementationRef: ensureImplementationRef(handler!, "handler"),
-    wrapper: "handler",
-    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
-    // Overriding the default `bind` method on functions. The wrapper will bind
-    // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
-    toJSON: () => moduleToJSON(module),
-    ...(schema !== undefined && { argumentSchema: schema }),
-    ...(writableProxy && { writableProxy: true }),
-  };
-
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
     // If the event schema is false, we actually set it to true here, since
     // otherwise we won't think it needs to be handled. Ditto for state.
@@ -286,7 +312,7 @@ function handlerInternal<E, T>(
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
     const node: NodeRef = {
-      module,
+      module: factory as unknown as Handler<T, E> & toJSON,
       inputs: { $ctx: props, $event: eventStream },
       outputs: {},
       frame: getTopFrame(),
@@ -295,7 +321,21 @@ function handlerInternal<E, T>(
     connectInputAndOutputs(node);
 
     return eventStream;
-  }, module);
+  }, {
+    type: "javascript",
+    implementation: handler,
+    implementationRef: ensureImplementationRef(handler!, "handler"),
+    wrapper: "handler",
+    ...(schema !== undefined && { argumentSchema: schema }),
+    ...(writableProxy && { writableProxy: true }),
+  }) as HandlerFactory<T, E> & Handler<T, E> & toJSON & {
+    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
+  };
+  factory.with = (inputs: Opaque<StripCell<T>>) => factory(inputs);
+  // Overriding the default `bind` method on functions. The wrapper will bind
+  // the actual inputs, so they'll be available as `this`
+  factory.bind = (inputs: Opaque<StripCell<T>>) => factory(inputs);
+  factory.toJSON = () => moduleToJSON(factory);
 
   return factory;
 }
@@ -334,24 +374,10 @@ export function handler<E, T>(
 export function createVerifiedHandlerFactory<E, T>(
   implementation: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
-  annotateImplementation(implementation);
-
-  const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
-  } = {
-    type: "javascript",
-    implementation,
-    implementationRef: ensureImplementationRef(implementation, "handler"),
-    wrapper: "handler",
-    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
-    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
-    toJSON: () => moduleToJSON(module),
-  };
-
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
     const eventStream = stream<E>(true as JSONSchema);
     const node: NodeRef = {
-      module,
+      module: factory as unknown as Handler<T, E> & toJSON,
       inputs: { $ctx: props, $event: eventStream },
       outputs: {},
       frame: getTopFrame(),
@@ -360,7 +386,18 @@ export function createVerifiedHandlerFactory<E, T>(
     connectInputAndOutputs(node);
 
     return eventStream;
-  }, module);
+  }, {
+    type: "javascript",
+    implementation,
+    implementationRef: ensureImplementationRef(implementation, "handler"),
+    wrapper: "handler",
+    writableProxy: true,
+  }) as HandlerFactory<T, E> & Handler<T, E> & toJSON & {
+    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
+  };
+  factory.with = (inputs: Opaque<StripCell<T>>) => factory(inputs);
+  factory.bind = (inputs: Opaque<StripCell<T>>) => factory(inputs);
+  factory.toJSON = () => moduleToJSON(factory);
 
   return factory;
 }
