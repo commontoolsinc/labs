@@ -4,7 +4,7 @@
  * Node.js runner for the object hashing benchmark.
  *
  * Usage:
- *   node scripts/benchmark-object-hashing-node.mjs
+ *   node scripts/benchmark-object-hashing/main.mjs
  */
 
 // Import libraries from esm.sh/npm

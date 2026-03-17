@@ -8,7 +8,7 @@
  * across various data structures.
  *
  * Usage:
- *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing.ts
+ *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/main.ts
  */
 
 // Import libraries from esm.sh to avoid adding dependencies
@@ -923,9 +923,10 @@ function benchmark(
   iterations: number = 1000,
 ): number {
   // Pre-generate cloned objects to exclude clone time from measurement
-  // Use JSON serialization as it's what we're testing against anyway
-  const jsonStr = JSON.stringify(templateData);
-  const objects = Array.from({ length: iterations }, () => JSON.parse(jsonStr));
+  // Use structuredClone to preserve sparse arrays and other non-JSON types
+  const objects = Array.from({ length: iterations }, () =>
+    structuredClone(templateData)
+  );
 
   // Warmup with fresh objects
   for (let i = 0; i < Math.min(100, iterations / 10); i++) {

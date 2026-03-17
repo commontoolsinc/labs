@@ -61,7 +61,7 @@ deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/d
 
 ```bash
 # Run in headless Chrome browser
-deno run --allow-net --allow-read --allow-env --allow-run --allow-write scripts/benchmark-object-hashing/chrome.ts
+deno run --allow-net --allow-read --allow-env --allow-run scripts/benchmark-object-hashing/chrome.ts
 ```
 
 ### Browser (Manual)

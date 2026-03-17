@@ -10,15 +10,12 @@
  */
 
 import { launch } from "@astral/astral";
-import { join } from "@std/path";
 
 async function main() {
   console.log("=== Starting headless Chrome benchmark ===\n");
 
   // Get the path to the HTML file
-  const scriptDir = new URL(".", import.meta.url).pathname;
-  const htmlPath = join(scriptDir, "browser.html");
-  const htmlUrl = `file://${htmlPath}`;
+  const htmlUrl = new URL("browser.html", import.meta.url).href;
 
   console.log(`Loading benchmark from: ${htmlUrl}\n`);
 
