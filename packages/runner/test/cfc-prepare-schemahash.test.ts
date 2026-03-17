@@ -602,7 +602,11 @@ describe("CFC prepare schema hash", () => {
       id: link.id,
       type: "application/json" as const,
     };
-    markCfcRelevantForSchema(tx, siblingIfcObjectSchema, "test-sibling-context");
+    markCfcRelevantForSchema(
+      tx,
+      siblingIfcObjectSchema,
+      "test-sibling-context",
+    );
     recordCfcWriteSchemaContext(tx, {
       ...address,
       path: ["a"],

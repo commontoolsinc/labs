@@ -1,6 +1,9 @@
 import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
-import { joinConfidentialityLabels, type CfcConfidentialityLabel } from "../cfc/label-algebra.ts";
+import {
+  type CfcConfidentialityLabel,
+  joinConfidentialityLabels,
+} from "../cfc/label-algebra.ts";
 import {
   collectSchemaConfidentiality,
   schemaWithConfidentiality,

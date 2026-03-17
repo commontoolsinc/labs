@@ -5,10 +5,10 @@ import type { JSONSchema } from "./builder/types.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
 import {
-  joinConfidentialityLabels,
-  normalizeConfidentialityLabel,
   type CfcConfidentialityLabel,
   type CfcConfidentialityLabelInput,
+  joinConfidentialityLabels,
+  normalizeConfidentialityLabel,
 } from "./cfc/label-algebra.ts";
 
 const logger = getLogger("cfc");
@@ -21,7 +21,6 @@ const embeddedSchemas: Record<string, JSONSchema> = {
 };
 
 export class ContextualFlowControl {
-
   /**
    * Convert a schema that may be undefined or boolean to an object version.
    *
@@ -256,7 +255,9 @@ export class ContextualFlowControl {
   getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
-    extraClassification?: CfcConfidentialityLabelInput | CfcConfidentialityLabel,
+    extraClassification?:
+      | CfcConfidentialityLabelInput
+      | CfcConfidentialityLabel,
   ): JSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
@@ -295,7 +296,9 @@ export class ContextualFlowControl {
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
-    extraClassification?: CfcConfidentialityLabelInput | CfcConfidentialityLabel,
+    extraClassification?:
+      | CfcConfidentialityLabelInput
+      | CfcConfidentialityLabel,
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
@@ -328,7 +331,9 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
-    extraClassification: CfcConfidentialityLabelInput | CfcConfidentialityLabel
+    extraClassification:
+      | CfcConfidentialityLabelInput
+      | CfcConfidentialityLabel
       | undefined,
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
@@ -412,7 +417,10 @@ export class ContextualFlowControl {
           if (typeof cursor === "boolean") {
             break;
           } else {
-            joined = ContextualFlowControl.joinPathClassification(joined, cursor);
+            joined = ContextualFlowControl.joinPathClassification(
+              joined,
+              cursor,
+            );
           }
         } else if (cursor.additionalProperties !== undefined) {
           cursor = cursor.additionalProperties;
@@ -463,9 +471,7 @@ export class ContextualFlowControl {
       cursor.ifc?.classification,
       joined,
     );
-    const ifc = classification
-      ? { ...cursor.ifc, classification }
-      : cursor.ifc;
+    const ifc = classification ? { ...cursor.ifc, classification } : cursor.ifc;
     // Merge any ifc and defs
     return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };
   }

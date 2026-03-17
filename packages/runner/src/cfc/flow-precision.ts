@@ -18,9 +18,9 @@ import {
   isImplementationTrustedForConcept,
 } from "./trust-lattice.ts";
 import {
+  type CfcConfidentialityLabel,
   confidentialityDominates,
   joinConfidentialityLabels,
-  type CfcConfidentialityLabel,
 } from "./label-algebra.ts";
 
 type FlowPrecisionClaimType =

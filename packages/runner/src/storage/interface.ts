@@ -30,8 +30,8 @@ import type {
   CfcPrepareScopeOverrides,
 } from "../cfc/integrity-trust.ts";
 import type {
-  CfcConfidentialityLabelInput,
   CfcConfidentialityLabel,
+  CfcConfidentialityLabelInput,
   CfcIntegrityLabel,
 } from "../cfc/label-algebra.ts";
 

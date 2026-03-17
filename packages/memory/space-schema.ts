@@ -4,9 +4,9 @@ import {
   type JSONSchema,
 } from "@commontools/runner";
 import {
+  type CfcConfidentialityLabel,
   confidentialityDominates,
   normalizeConfidentialityLabel,
-  type CfcConfidentialityLabel,
 } from "../runner/src/cfc/label-algebra.ts";
 import type { StorableDatum } from "./interface.ts";
 import {

@@ -7,12 +7,12 @@ import type {
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { cfcEntityKey } from "./shared.ts";
 import {
-  joinConfidentialityLabels,
-  joinIntegrityLabels,
   type CfcConfidentialityLabel,
   type CfcConfidentialityLabelInput,
   type CfcIntegrityLabel,
   type CfcIntegrityLabelInput,
+  joinConfidentialityLabels,
+  joinIntegrityLabels,
 } from "./label-algebra.ts";
 
 type SchemaContextEntry = {

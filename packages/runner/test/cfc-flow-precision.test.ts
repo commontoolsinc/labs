@@ -179,13 +179,16 @@ describe("CFC flow precision", () => {
 
     let thrown: unknown;
     try {
-      const prepareOptions = Object.assign({
-        implementationIdentity: options.implementationIdentity,
-        actingPrincipal: options.actingPrincipal,
-        trustContext: options.trustContext,
-      }, options.trustEvaluator
-        ? { trustEvaluator: options.trustEvaluator }
-        : {});
+      const prepareOptions = Object.assign(
+        {
+          implementationIdentity: options.implementationIdentity,
+          actingPrincipal: options.actingPrincipal,
+          trustContext: options.trustContext,
+        },
+        options.trustEvaluator
+          ? { trustEvaluator: options.trustEvaluator }
+          : {},
+      );
       await prepareCfcCommitIfNeeded(tx, prepareOptions);
       const { error } = await tx.commit();
       thrown = error;

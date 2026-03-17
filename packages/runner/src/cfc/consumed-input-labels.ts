@@ -26,7 +26,10 @@ function effectiveLabelForPath(
     if (!canonicalLabelPathMatchesReadPath(labelPath, path)) {
       continue;
     }
-    classification = joinConfidentialityLabels(classification, label.classification);
+    classification = joinConfidentialityLabels(
+      classification,
+      label.classification,
+    );
     integrity = joinIntegrityLabels(integrity, label.integrity);
   }
 

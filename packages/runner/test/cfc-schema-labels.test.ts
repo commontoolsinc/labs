@@ -46,7 +46,9 @@ describe("CFC schema label helpers", () => {
 
   it("resolves effective CNF confidentiality at a path", () => {
     expect(
-      normalizeConfidentialityLabel(schemaConfidentialityAtPath(schema, ["ssn"])),
+      normalizeConfidentialityLabel(
+        schemaConfidentialityAtPath(schema, ["ssn"]),
+      ),
     ).toEqual(expectedClassification);
   });
 

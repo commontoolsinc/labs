@@ -2,9 +2,9 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import {
+  type CfcConfidentialityLabel,
   joinConfidentialityLabels,
   normalizeConfidentialityLabel,
-  type CfcConfidentialityLabel,
 } from "./label-algebra.ts";
 
 export function collectSchemaConfidentiality(
@@ -22,7 +22,9 @@ export function collectSchemaConfidentiality(
   }
   cycleTracker.add(key);
 
-  let classification = normalizeConfidentialityLabel(schema.ifc?.classification);
+  let classification = normalizeConfidentialityLabel(
+    schema.ifc?.classification,
+  );
 
   const joinChild = (child: JSONSchema | undefined) => {
     classification = joinConfidentialityLabels(
@@ -59,7 +61,10 @@ export function collectSchemaConfidentiality(
     }
   }
   if (schema.$ref) {
-    const resolved = ContextualFlowControl.resolveSchemaRefs(schema, fullSchema);
+    const resolved = ContextualFlowControl.resolveSchemaRefs(
+      schema,
+      fullSchema,
+    );
     if (resolved && resolved !== schema) {
       joinChild(resolved);
     }
@@ -116,7 +121,10 @@ export function schemaConfidentialityAtPath(
       } else {
         return current;
       }
-      current = joinConfidentialityLabels(current, readLocalClassification(cursor));
+      current = joinConfidentialityLabels(
+        current,
+        readLocalClassification(cursor),
+      );
       continue;
     }
 
@@ -130,7 +138,10 @@ export function schemaConfidentialityAtPath(
       } else {
         cursor = cursor.items ?? true;
       }
-      current = joinConfidentialityLabels(current, readLocalClassification(cursor));
+      current = joinConfidentialityLabels(
+        current,
+        readLocalClassification(cursor),
+      );
       continue;
     }
 

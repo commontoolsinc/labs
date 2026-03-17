@@ -12,8 +12,7 @@ const signer = await Identity.fromPassphrase(
 );
 const space = signer.did();
 
-const requiredConcept =
-  "https://commonfabric.org/cfc/concepts/verified-input";
+const requiredConcept = "https://commonfabric.org/cfc/concepts/verified-input";
 const intermediateConcept =
   "https://commonfabric.org/cfc/concepts/runtime-attested";
 

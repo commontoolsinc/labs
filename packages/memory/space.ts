@@ -11,9 +11,9 @@ import { unclaimedRef } from "./fact.ts";
 import { type ContentId, fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import {
+  type CfcConfidentialityLabel,
   joinConfidentialityLabels,
   normalizeConfidentialityLabel,
-  type CfcConfidentialityLabel,
 } from "../runner/src/cfc/label-algebra.ts";
 import type {
   Assert,

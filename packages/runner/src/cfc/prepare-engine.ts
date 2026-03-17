@@ -47,6 +47,8 @@ import {
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
 import {
+  type CfcConfidentialityLabel,
+  type CfcIntegrityLabel,
   confidentialityDominates,
   confidentialityFromLegacyAtom,
   confidentialitySatisfiesMax,
@@ -54,8 +56,6 @@ import {
   joinIntegrityLabels,
   normalizeConfidentialityLabel,
   normalizeIntegrityLabel,
-  type CfcConfidentialityLabel,
-  type CfcIntegrityLabel,
 } from "./label-algebra.ts";
 import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 
@@ -603,7 +603,10 @@ function collectDynamicWriteIntegrity(
 ): CfcIntegrityLabel | undefined {
   let integrity: CfcIntegrityLabel | undefined;
   for (const consumed of consumedReadLabels) {
-    integrity = joinIntegrityLabels(integrity, consumed.effectiveLabel?.integrity);
+    integrity = joinIntegrityLabels(
+      integrity,
+      consumed.effectiveLabel?.integrity,
+    );
   }
   return integrity;
 }
@@ -802,7 +805,9 @@ function findRequiredIntegrityCoherenceViolation(
   readPath: string,
   requiredIntegrity: readonly string[],
   options: PrepareBoundaryCommitOptions,
-): { path: string; actualIntegrity: CfcIntegrityLabel | undefined } | undefined {
+):
+  | { path: string; actualIntegrity: CfcIntegrityLabel | undefined }
+  | undefined {
   const sortedEntries = Object.entries(labelsByPath).sort(([a], [b]) =>
     a.localeCompare(b)
   );
@@ -1785,7 +1790,9 @@ function buildPolicyLabelFromConsumedReads(
       confidentiality,
       consumed.effectiveLabel?.classification,
     );
-    for (const atom of stringIntegrityAtoms(consumed.effectiveLabel?.integrity)) {
+    for (
+      const atom of stringIntegrityAtoms(consumed.effectiveLabel?.integrity)
+    ) {
       integrity.add(atom);
     }
   }
@@ -1952,7 +1959,9 @@ function applyPolicyRuleOnce(
 
     if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
       clause.splice(targetIndex, 1);
-      const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+      const nextConfidentiality = label.confidentiality.map((
+        entry,
+      ) => [...entry]);
       if (clause.length === 0) {
         nextConfidentiality.splice(clauseIndex, 1);
       } else {
@@ -1988,7 +1997,9 @@ function applyPolicyRuleOnce(
       continue;
     }
 
-    const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+    const nextConfidentiality = label.confidentiality.map((
+      entry,
+    ) => [...entry]);
     nextConfidentiality[clauseIndex] = clause;
     const normalizedConfidentiality =
       normalizeConfidentialityLabel(nextConfidentiality) ?? [];
@@ -2219,11 +2230,12 @@ function verifyOutputTransitionsForAttempt(
       collectDynamicWriteIntegrity(effectiveConsumedReadLabels),
     );
     if (flowPrecisionSelection.mode === "elementLocalExpansion") {
-      const conservativeClassification = strongestContainerStructuralClassification(
-        consumedReadLabels,
-        flowPrecisionSelection.sourceEntityKey,
-        flowPrecisionSelection.sourcePath,
-      );
+      const conservativeClassification =
+        strongestContainerStructuralClassification(
+          consumedReadLabels,
+          flowPrecisionSelection.sourceEntityKey,
+          flowPrecisionSelection.sourcePath,
+        );
       if (
         !classificationDominates(
           minClassification,
