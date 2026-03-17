@@ -135,10 +135,24 @@ export function processDefaultValue(
   const schema = link.schema;
   if (!schema) return defaultValue;
 
-  const resolvedSchema = resolveSchema(schema, true);
+  let resolvedSchema = resolveSchema(schema);
+  let asCell = false;
+  let asStream = false;
+  if (isObject(resolvedSchema)) {
+    asCell = resolvedSchema.asCell === true;
+    asStream = resolvedSchema.asStream === true;
+    if (
+      resolvedSchema.asCell !== undefined ||
+      resolvedSchema.asStream !== undefined
+    ) {
+      const { asCell: _asCell, asStream: _asStream, ...restSchema } =
+        resolvedSchema;
+      resolvedSchema = restSchema;
+    }
+  }
 
   // If schema indicates this should be a cell
-  if (isObject(schema) && schema.asCell) {
+  if (asCell) {
     // If the cell itself has a default value, make it its own (immutable)
     // doc, to emulate the behavior of .get() returning a different underlying
     // document when the value is changed. A classic example is
@@ -166,7 +180,7 @@ export function processDefaultValue(
     }
   }
 
-  if (isObject(schema) && schema.asStream) {
+  if (asStream) {
     logger.warn(
       "Created asStream as a default value, but this is likely unintentional",
     );
