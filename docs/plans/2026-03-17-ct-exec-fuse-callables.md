@@ -4,7 +4,7 @@
 
 **Goal:** Make mounted FUSE `.handler` files and new `.tool` files first-class CLI entrypoints by adding `ct exec <file> ...`, shebang-backed readable/executable callable files, schema-derived flag parsing/help, and real pattern-tool execution.
 
-**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files with a kind (`handler` or `tool`), a mounted path, a generated shebang payload, and an exact backing cell. `ct exec` resolves the mounted path through persisted mount metadata, introspects the backing cell with `asSchemaFromLinks()`, derives the effective command schema (`invoke` for handlers, `run` for tools), then dispatches through the existing piece/runtime stack. Use a generated exec shim rather than guessing the user’s `ct` invocation so mounted files are actually executable from the shell in this repo’s `deno task ct` world.
+**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files with a kind (`handler` or `tool`), a mounted path, a generated shebang payload, and an exact backing cell. `ct exec` resolves the mounted path through persisted mount metadata, reads mounted piece metadata to recover the stable piece ID behind that path, introspects the backing cell with `asSchemaFromLinks()`, derives the effective command schema (`invoke` for handlers, `run` for tools), then dispatches through the existing piece/runtime stack. Use a generated exec shim rather than guessing the user’s `ct` invocation so mounted files are actually executable from the shell in this repo’s `deno task ct` world.
 
 **Tech Stack:** Deno 2, Cliffy, `@commontools/piece`, `@commontools/runner`, FUSE low-level bindings, existing CLI integration shell harnesses.
 
@@ -46,10 +46,12 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 ### Important contracts
 
 1. The mounted path is the stable identity for `ct exec`; there is no daemon RPC for path resolution.
-2. `ct exec` must resolve mount metadata for both foreground and background mounts. The current background-only PID file behavior is insufficient and must be replaced with always-on mount state.
-3. The exact cell used for schema discovery is the callable child cell, not the piece root. Always call `childCell.asSchemaFromLinks()` before classifying or rendering help.
-4. Handler execution must stay semantically aligned with existing write-to-handler behavior: send the event payload to the stream and wait for runtime/piece sync.
-5. Tool execution must stay semantically aligned with existing `patternTool(...)` runtime behavior: run the underlying pattern with `input + extraParams`, then print the resulting value.
+2. The mounted piece directory name is not a stable piece identifier because FUSE de-dupes duplicate names (`foo`, `foo-2`, ...). `ct exec` must recover the real piece ID from mounted metadata (`meta.json` in that piece directory), not by re-deriving a name match from live space contents.
+3. `ct exec` must resolve mount metadata for both foreground and background mounts. The current background-only PID file behavior is insufficient and must be replaced with always-on mount state.
+4. Persist the mount identity as an absolute path. Relative `--identity` values are valid at mount time but would break later `ct exec` calls launched from a different cwd.
+5. The exact cell used for schema discovery is the callable child cell, not the piece root. Always call `childCell.asSchemaFromLinks()` before classifying or rendering help.
+6. Handler execution must stay semantically aligned with existing write-to-handler behavior: write the payload through the same piece property path the FUSE flush path uses, then wait for runtime/piece sync.
+7. Tool execution must stay semantically aligned with existing `patternTool(...)` runtime behavior: run the underlying pattern with `input + extraParams`, then print the resulting value.
 
 ### Boundaries to keep sharp
 
@@ -135,10 +137,11 @@ interface MountStateEntry {
 `ct fuse mount` must:
 
 1. Build or refresh an executable shim under `~/.ct/fuse/bin/`.
-2. Spawn the FUSE daemon in both foreground and background modes.
-3. Persist `MountStateEntry` immediately after spawn.
-4. Pass `--exec-cli <shim>` to `packages/fuse/mod.ts`.
-5. Remove the mount-state file on clean exit.
+2. Normalize the mount identity path to an absolute path before it is persisted or passed onward.
+3. Spawn the FUSE daemon in both foreground and background modes.
+4. Persist `MountStateEntry` immediately after spawn.
+5. Pass `--exec-cli <shim>` to `packages/fuse/mod.ts`.
+6. Remove the mount-state file on clean exit.
 
 The shim itself should be repo-rooted and explicit:
 
@@ -174,7 +177,7 @@ Mode rules:
 
 This keeps `mod.ts` simple and makes the read path and help path identical for both callable kinds.
 
-### 3. Resolve the backing callable by mount path, not by daemon state
+### 3. Resolve the backing callable by mount path plus mounted metadata, not by daemon state
 
 `ct exec` should not talk to the running daemon. It should:
 
@@ -188,16 +191,17 @@ This keeps `mod.ts` simple and makes the read path and help path identical for b
 <space>/pieces/<piece>/<input|result>/<name>.tool
 ```
 
-5. Load the `PieceManager` for that `space` using the mount’s `apiUrl` and `identity`.
-6. Resolve the piece controller by `piece` name.
-7. Resolve the exact child cell with `piece[input|result].getCell().key(name)`.
+5. Read `<mountpoint>/<space>/pieces/<piece>/meta.json` from the mounted filesystem and extract the real piece ID for that directory.
+6. Load the `PieceManager` for that `space` using the mount’s `apiUrl` and absolute `identity`.
+7. Resolve the piece controller by piece ID, not directory name.
+8. Resolve the exact child cell with `piece[input|result].getCell().key(name)`.
 
-The same parser logic should power both:
+The same segment parser logic should power both:
 
 1. FUSE’s write-to-handler routing
 2. CLI `ct exec`
 
-Keep it in one pure helper so the mapping cannot drift.
+Keep the path-shape parsing in one pure helper so the mapping cannot drift. CLI piece-ID recovery is a separate step that intentionally uses mounted metadata because only the mounted filesystem knows how duplicate display names were de-duped.
 
 ### 4. Derive tool schemas from the underlying pattern, not from the wrapper object
 
@@ -266,7 +270,8 @@ Add cases covering:
 
 1. mount-state entries now include `identity`, `pid`, and `execShimPath`
 2. longest-prefix mount resolution for a mounted file path
-3. generated shim content is executable text pointing at `packages/cli/mod.ts`
+3. stored identities are absolute paths, even when the mount command was given a relative key path
+4. generated shim content is executable text pointing at `packages/cli/mod.ts`
 
 Run:
 
@@ -305,10 +310,11 @@ Keep the mountpoint-hash filename behavior so state cleanup remains stable.
 For both foreground and background mounts:
 
 1. generate the shim before spawning
-2. spawn the daemon
-3. persist the mount-state entry
-4. pass `--exec-cli <shim>` to the daemon
-5. on clean foreground exit, remove the state file
+2. resolve `options.identity` to an absolute path before writing state or spawning the daemon
+3. spawn the daemon
+4. persist the mount-state entry
+5. pass `--exec-cli <shim>` to the daemon
+6. on clean foreground exit, remove the state file
 
 Do not regress `ct fuse status` or `ct fuse unmount`.
 
@@ -370,6 +376,7 @@ This helper should:
 1. classify a child cell as `handler`, `tool`, or normal
 2. build the mounted script bytes from the daemon’s `execCli` path
 3. replace callable entries in `.json` siblings with explicit sigils
+4. let `CellBridge` pass in the exact top-level callable keys it discovered from `asSchemaFromLinks()` so `.tool` replacement does not depend on raw `{ pattern, extraParams }` value-shape guessing
 
 Use explicit sigils:
 
@@ -577,9 +584,10 @@ Add focused cases for:
 
 1. rejecting non-mounted paths
 2. rejecting mounted non-callable files
-3. resolving the backing piece and cell from a mounted `.handler` path
-4. resolving the backing piece and cell from a mounted `.tool` path
-5. explicit verb override still working
+3. resolving the backing piece ID from sibling `meta.json`, including de-duped display names like `notes-2`
+4. resolving the backing piece and cell from a mounted `.handler` path
+5. resolving the backing piece and cell from a mounted `.tool` path
+6. explicit verb override still working
 
 Keep these pure or lightly mocked; the real runtime path is covered in Task 6.
 
@@ -599,20 +607,21 @@ Flow:
 ```ts
 const mount = await findMountForPath(absFilePath);
 const target = parseMountedCallablePath(mount.mountpoint, absFilePath);
+const pieceMeta = await readMountedPieceMeta(target);
 const manager = await loadManager({ apiUrl: mount.apiUrl, identity: mount.identity, space: target.spaceName });
-const piece = await new PiecesController(manager).getByNameOrThrow(target.pieceName);
+const piece = await new PiecesController(manager).get(pieceMeta.id, false);
 const rootCell = await piece[target.cellProp].getCell();
 const callableCell = rootCell.key(target.cellKey).asSchemaFromLinks();
 ```
 
-Do not guess piece IDs or use daemon-only state.
+Do not guess piece IDs from mounted directory names and do not use daemon-only state.
 
 - [ ] **Step 3: Implement the execution dispatch**
 
 Handler:
 
 1. derive input from flags / `--json`
-2. send the event to the stream cell
+2. invoke handlers by reusing the same piece-property write semantics as the FUSE flush path (`piece[cellProp].set(value, [cellKey])`)
 3. wait for `runtime.idle()` and `manager.synced()`
 4. exit `0` with no stdout payload unless there is an intentional CLI message on stderr
 
