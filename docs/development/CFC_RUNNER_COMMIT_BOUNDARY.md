@@ -64,6 +64,15 @@ Runner internals now also expose a semantic `IntentEvent` helper layer:
    or runtime code can mint semantic events without adding a second event
    mechanism.
 
+On top of that, runner internals now expose deterministic refinement helpers:
+
+1. Refinement claim cells are keyed by `(sourceIntentId, refinerHash)` and use
+   the ordinary transaction path, so duplicate refinement attempts collapse to
+   normal CAS/conflict behavior.
+2. Derived `IntentOnce` ids are deterministic from the same pair.
+3. Refined intent values accumulate source intent integrity plus a
+   `RefinedBy` atom, but still stop short of sink commit / consumption logic.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

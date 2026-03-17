@@ -437,6 +437,17 @@ Primary file:
 - [x] Add tests for stable id derivation, event-envelope construction, and
       dedup of repeated semantic intent events queued to the same handler.
 
+### 6.8 Intent Refinement Claim Foundation
+
+- [x] Add runner-internal deterministic ids for intent-refinement claim cells
+      and derived `IntentOnce` values keyed by `(sourceIntentId, refinerHash)`.
+- [x] Add a helper that claims refinement through the ordinary transaction path
+      so duplicate refinement attempts collapse to normal CAS/conflict behavior.
+- [x] Add a helper that constructs runner-internal `IntentOnce` values with
+      accumulated integrity chain (`RefinedBy` + source intent integrity).
+- [x] Add tests covering stable claim/once ids, accumulated integrity, and
+      repeated refinement dedup against committed claim cells.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -751,6 +762,9 @@ Primary docs:
 - [x] Step J.2: add semantic `IntentEvent` helpers on top of event envelopes
       so later trusted UI/runtime code can mint stable intent events without
       further scheduler changes.
+- [x] Step J.3: add deterministic refinement-claim helpers so semantic intent
+      refinement can use ordinary transaction conflicts before sink commit
+      machinery exists.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
