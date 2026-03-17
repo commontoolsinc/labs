@@ -91,6 +91,56 @@ Deno.test("memory v2 session registry rejects reopening a session id on a differ
   );
 });
 
+Deno.test("memory v2 server reports cross-space session id conflicts as protocol errors", async () => {
+  const server = createServer("memory://memory-v2-server-session-conflict");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "hello.ok",
+      protocol: MEMORY_V2_PROTOCOL,
+    });
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-space-one",
+      session: { sessionId: "session:fixed" },
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-1",
+      ok: {
+        sessionId: "session:fixed",
+        serverSeq: 0,
+      },
+    });
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-2",
+      space: "did:key:z6Mk-space-two",
+      session: { sessionId: "session:fixed" },
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-2",
+      error: {
+        name: "ProtocolError",
+        message:
+          "session session:fixed is already bound to did:key:z6Mk-space-one",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server opens sessions, commits documents, and queries graph roots", async () => {
   const server = createServer("memory://memory-v2-server");
   const messages: ServerMessage[] = [];

@@ -708,9 +708,11 @@ class SpaceReplica implements ISpaceReplica {
     batch: { uri: URI; value: StorageValue }[],
   ): Promise<Result<Unit, PushError>> {
     const operations = batch.map(({ uri, value }) =>
-      value.value === undefined
-        ? { op: "delete" as const, id: uri }
-        : { op: "set" as const, id: uri, value: toStoredDocument(value) }
+      value.value === undefined ? { op: "delete" as const, id: uri } : {
+        op: "set" as const,
+        id: uri,
+        value: toStoredDocumentFromStorageValue(value),
+      }
     );
     return await this.commitOperations(operations, undefined);
   }
@@ -1190,8 +1192,16 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
     unclaimed({ of: id, the: DOCUMENT_MIME });
 };
 
+const toStoredDocumentFromStorageValue = (
+  value: StorageValue,
+): StorableDatum =>
+  ({
+    ...(value.source !== undefined ? { source: value.source } : {}),
+    value: value.value as StorableValue,
+  }) as StorableDatum;
+
 const toStoredDocument = (
-  value: StorageValue | StorableDatum,
+  value: StorableDatum,
 ): StorableDatum => {
   if (
     isRecord(value) &&

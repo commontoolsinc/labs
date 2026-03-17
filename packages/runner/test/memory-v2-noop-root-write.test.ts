@@ -171,6 +171,7 @@ Deno.test("memory v2 treats an identical nested write as a no-op", async () => {
     const initialState = provider.replica.get(address) as
       | { since?: number }
       | undefined;
+    assert((initialState?.since ?? 0) > 0);
 
     const notifications: string[] = [];
     storage.subscribe({

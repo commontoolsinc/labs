@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
+import { fromFileUrl } from "@std/path/from-file-url";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -338,8 +339,10 @@ Deno.test("memory v2 transactions elide transient nested patches from composed h
     const modulePath = new URL(
       "../../generated-patterns/integration/patterns/counter-nested-handler-composition.pattern.ts",
       import.meta.url,
-    ).pathname;
-    const programResolver = new FileSystemProgramResolver(modulePath);
+    );
+    const programResolver = new FileSystemProgramResolver(
+      fromFileUrl(modulePath),
+    );
     const program = await runtime.harness.resolve(programResolver);
     program.mainExport = "counterWithNestedHandlerComposition";
     const patternFactory = await runtime.patternManager.compilePattern(program);

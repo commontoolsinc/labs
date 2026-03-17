@@ -721,15 +721,25 @@ export class Server {
     message: SessionOpenRequest,
   ): Promise<ResponseMessage<SessionOpenResult>> {
     const engine = await this.openEngine(message.space);
-    return {
-      type: "response",
-      requestId: message.requestId,
-      ok: this.#sessions.open(
-        message.space,
-        message.session,
-        Engine.headSeq(engine),
-      ),
-    };
+    try {
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: this.#sessions.open(
+          message.space,
+          message.session,
+          Engine.headSeq(engine),
+        ),
+      };
+    } catch (error) {
+      return respondTypedError<SessionOpenResult>(
+        message.requestId,
+        toError(
+          "ProtocolError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
   }
 
   async transact(

@@ -231,7 +231,7 @@ export class Client {
           this.rejectPending(
             error instanceof Error ? error : new Error(String(error)),
           );
-          await sleep(reconnectDelayMs(attempt));
+          await this.waitForReconnectDelay(reconnectDelayMs(attempt));
           attempt += 1;
         }
       }
@@ -241,6 +241,16 @@ export class Client {
       await this.#reconnecting;
     } finally {
       this.#reconnecting = null;
+    }
+  }
+
+  private async waitForReconnectDelay(delayMs: number): Promise<void> {
+    for (
+      let remaining = delayMs;
+      remaining > 0 && !this.#closed;
+      remaining -= RECONNECT_BASE_DELAY_MS
+    ) {
+      await sleep(Math.min(RECONNECT_BASE_DELAY_MS, remaining));
     }
   }
 

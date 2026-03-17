@@ -583,23 +583,76 @@ Deno.test("memory v2 client backs off reconnect attempts exponentially", async (
     assertEquals(transport.helloCount, 2);
 
     await time.tickAsync(1);
+    await time.runMicrotasks();
     assertEquals(transport.helloCount, 3);
 
-    await time.tickAsync(49);
+    await time.tickAsync(25);
+    await time.runMicrotasks();
+    assertEquals(transport.helloCount, 3);
+
+    await time.tickAsync(24);
     assertEquals(transport.helloCount, 3);
 
     await time.tickAsync(1);
+    await time.runMicrotasks();
     assertEquals(transport.helloCount, 4);
 
     transport.allowHello();
-    await time.tickAsync(101);
+    for (let step = 0; step < 3; step += 1) {
+      await time.tickAsync(25);
+      await time.runMicrotasks();
+      assertEquals(transport.helloCount, 4);
+    }
+    await time.tickAsync(25);
+    await time.runMicrotasks();
     await time.runMicrotasks();
 
     assertEquals(client.isConnected(), true);
     assertEquals(transport.helloCount, 5);
   } finally {
     Math.random = originalRandom;
-    await client.close();
+    const closePromise = client.close();
+    await time.runMicrotasks();
+    await time.tickAsync(25);
+    await time.runMicrotasks();
+    await closePromise;
+    time.restore();
+  }
+});
+
+Deno.test("memory v2 client close interrupts long reconnect backoff", async () => {
+  const time = new FakeTime();
+  const transport = new ControlledReconnectTransport();
+  const client = await connect({ transport });
+  const originalRandom = Math.random;
+  Math.random = () => 0;
+
+  try {
+    transport.blockHello();
+    transport.disconnect();
+    await time.runMicrotasks();
+    assertEquals(transport.helloCount, 2);
+
+    await time.tickAsync(25);
+    await time.runMicrotasks();
+    assertEquals(transport.helloCount, 3);
+
+    let closed = false;
+    const closePromise = client.close().then(() => {
+      closed = true;
+    });
+    await time.runMicrotasks();
+
+    await time.tickAsync(24);
+    assertEquals(closed, false);
+
+    await time.tickAsync(1);
+    await time.runMicrotasks();
+    assertEquals(closed, true);
+
+    await closePromise;
+  } finally {
+    Math.random = originalRandom;
     time.restore();
   }
 });

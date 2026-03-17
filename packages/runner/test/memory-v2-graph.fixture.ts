@@ -123,7 +123,10 @@ export const createGraphFixture = (space: string): GraphFixture => {
       children.push(linkTo(space, nodeId(right)));
     }
     if (localIndex % 4 === 0) {
-      doc.alternate = linkTo(space, nodeId(28 + (localIndex % 4)));
+      doc.alternate = linkTo(
+        space,
+        nodeId(28 + (Math.floor(localIndex / 4) % 4)),
+      );
     }
     if (localIndex > 0 && localIndex % 5 === 0) {
       const parent = 32 + Math.floor((localIndex - 1) / 2);

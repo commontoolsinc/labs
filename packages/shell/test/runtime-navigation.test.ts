@@ -29,6 +29,19 @@ describe("RuntimeInternals navigation", () => {
       $EXPERIMENTAL_CANONICAL_HASHING?: string;
       $COMPILATION_CACHE_CLIENT?: string;
     };
+    const originalEnv = {
+      $API_URL: env.$API_URL,
+      $ENVIRONMENT: env.$ENVIRONMENT,
+      $COMMIT_SHA: env.$COMMIT_SHA,
+      $MEMORY_VERSION: env.$MEMORY_VERSION,
+      $EXPERIMENTAL_RICH_STORABLE_VALUES:
+        env.$EXPERIMENTAL_RICH_STORABLE_VALUES,
+      $EXPERIMENTAL_STORABLE_PROTOCOL: env.$EXPERIMENTAL_STORABLE_PROTOCOL,
+      $EXPERIMENTAL_UNIFIED_JSON_ENCODING:
+        env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING,
+      $EXPERIMENTAL_CANONICAL_HASHING: env.$EXPERIMENTAL_CANONICAL_HASHING,
+      $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
+    };
     env.$API_URL = "http://shell.test/";
     env.$ENVIRONMENT = "development";
     env.$COMMIT_SHA = undefined;
@@ -83,6 +96,19 @@ describe("RuntimeInternals navigation", () => {
       });
     } finally {
       globalThis.removeEventListener("ct-navigate", onNavigate);
+      env.$API_URL = originalEnv.$API_URL;
+      env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
+      env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;
+      env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
+      env.$EXPERIMENTAL_RICH_STORABLE_VALUES =
+        originalEnv.$EXPERIMENTAL_RICH_STORABLE_VALUES;
+      env.$EXPERIMENTAL_STORABLE_PROTOCOL =
+        originalEnv.$EXPERIMENTAL_STORABLE_PROTOCOL;
+      env.$EXPERIMENTAL_UNIFIED_JSON_ENCODING =
+        originalEnv.$EXPERIMENTAL_UNIFIED_JSON_ENCODING;
+      env.$EXPERIMENTAL_CANONICAL_HASHING =
+        originalEnv.$EXPERIMENTAL_CANONICAL_HASHING;
+      env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }
   });

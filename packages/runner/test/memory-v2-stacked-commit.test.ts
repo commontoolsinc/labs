@@ -759,22 +759,16 @@ const runStressSeed = async (seed: number) => {
           docIds.find((id) => id !== target)!,
       ] as const;
       const mode = randomInt(random, 3);
+      const randomRootOp = (id: URI, label: string): RootOp => {
+        const op = random() < 0.2 ? "delete" : "set";
+        return op === "delete"
+          ? { op, id }
+          : { op, id, value: valueFor(label) };
+      };
       const operations = mode === 0
-        ? [{
-          op: random() < 0.2 ? "delete" : "set",
-          id: target,
-          ...(random() < 0.2
-            ? {}
-            : { value: valueFor(`seed-${seed}-step-${step}-root`) }),
-        } as RootOp]
+        ? [randomRootOp(target, `seed-${seed}-step-${step}-root`)]
         : pair.map((id, index) =>
-          ({
-            op: random() < 0.15 ? "delete" : "set",
-            id,
-            ...(random() < 0.15
-              ? {}
-              : { value: valueFor(`seed-${seed}-step-${step}-doc-${index}`) }),
-          }) as RootOp
+          randomRootOp(id, `seed-${seed}-step-${step}-doc-${index}`)
         );
 
       const outstandingDocs = [...pending.values()]

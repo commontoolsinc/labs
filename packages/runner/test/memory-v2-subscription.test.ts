@@ -326,9 +326,11 @@ describe("Memory v2 storage notifications", () => {
       }),
     ).toEqual({ ok: {} });
     await storageManager.synced();
-    await waitFor(() =>
-      visibleIds(observer, fixture.expandedReachableIds).length ===
-        fixture.initialReachableIds.length
+    await waitFor(
+      () =>
+        visibleIds(observer, fixture.expandedReachableIds).length ===
+          fixture.initialReachableIds.length,
+      1_000,
     );
     expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
       fixture.initialReachableIds,
@@ -345,9 +347,11 @@ describe("Memory v2 storage notifications", () => {
       }),
     ).toEqual({ ok: {} });
     await storageManager.synced();
-    await waitFor(() =>
-      visibleIds(observer, fixture.expandedReachableIds).length ===
-        fixture.expandedReachableIds.length
+    await waitFor(
+      () =>
+        visibleIds(observer, fixture.expandedReachableIds).length ===
+          fixture.expandedReachableIds.length,
+      1_000,
     );
 
     expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(

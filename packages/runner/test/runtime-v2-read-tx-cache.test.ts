@@ -163,5 +163,8 @@ describe("Runtime v2 ambient read transaction", () => {
 
     await v2Runtime.dispose();
     expect(v2Storage.unsubscribed).toHaveLength(1);
+    expect(
+      v2Storage.subscriptions.includes(v2Storage.unsubscribed[0]!),
+    ).toBe(true);
   });
 });
