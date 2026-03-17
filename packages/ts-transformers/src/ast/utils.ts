@@ -89,11 +89,10 @@ function shouldUseInitializerTypeFallback(
   return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
 }
 
-function getInitializerTypeFallback(
+function getIdentifierValueDeclaration(
   node: ts.Identifier,
   checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-): ts.Type | undefined {
+): ts.Declaration | undefined {
   const symbol = checker.getSymbolAtLocation(node);
   let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
   if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
@@ -103,6 +102,30 @@ function getInitializerTypeFallback(
     declaration = shorthandValueSymbol?.valueDeclaration ??
       shorthandValueSymbol?.declarations?.[0];
   }
+  return declaration;
+}
+
+export function getVariableInitializer(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Expression | undefined {
+  if (!ts.isIdentifier(node)) {
+    return undefined;
+  }
+
+  const declaration = getIdentifierValueDeclaration(node, checker);
+  if (declaration && ts.isVariableDeclaration(declaration)) {
+    return declaration.initializer;
+  }
+  return undefined;
+}
+
+function getInitializerTypeFallback(
+  node: ts.Identifier,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  const declaration = getIdentifierValueDeclaration(node, checker);
 
   if (!declaration || !ts.isVariableDeclaration(declaration)) {
     return undefined;

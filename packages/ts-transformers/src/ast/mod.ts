@@ -31,6 +31,7 @@ export {
   getMemberSymbol,
   getMethodCallTarget,
   getTypeAtLocationWithFallback,
+  getVariableInitializer,
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
