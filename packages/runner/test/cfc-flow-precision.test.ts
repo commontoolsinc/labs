@@ -40,6 +40,17 @@ const malformedFlowPrecisionIfc = {
   },
 } as const;
 
+const pointwiseFlowPrecisionIfc = {
+  flowPrecisionClaim: {
+    concept: FLOW_TAINT_PRECISION_CONCEPT,
+    sourceCollection: "/",
+    claims: [
+      { type: "PointwisePresencePreserved" },
+      { type: "PointwiseWriteDependency" },
+    ],
+  },
+} as const;
+
 const confidentialFlowPrecisionItemSchema = {
   type: "number",
   ifc: {
@@ -53,6 +64,14 @@ const malformedFlowPrecisionItemSchema = {
   ifc: {
     classification: ["confidential"],
     ...malformedFlowPrecisionIfc,
+  },
+} as const satisfies JSONSchema;
+
+const pointwiseFlowPrecisionItemSchema = {
+  type: "number",
+  ifc: {
+    classification: ["confidential"],
+    ...pointwiseFlowPrecisionIfc,
   },
 } as const satisfies JSONSchema;
 
@@ -184,6 +203,27 @@ describe("CFC flow precision", () => {
       sourceId,
       targetId,
       itemSchema: confidentialFlowPrecisionItemSchema,
+      implementationIdentity: deriveImplementationIdentity(
+        runtime.moduleRegistry.getModule("map"),
+      ),
+    });
+
+    expect(thrown).toBeUndefined();
+  });
+
+  it("uses trusted Builtin(map) flow precision with Pointwise claims", async () => {
+    const sourceId = "cfc-flow-precision-pointwise-source" as URI;
+    const targetId = "cfc-flow-precision-pointwise-target" as URI;
+    await seedDocument(sourceId, [11, 22], {
+      "/0": { classification: ["secret"] },
+      "/1": { classification: ["confidential"] },
+    });
+    await seedDocument(targetId, [0, 0]);
+
+    const thrown = await runFlowPrecisionPrepare({
+      sourceId,
+      targetId,
+      itemSchema: pointwiseFlowPrecisionItemSchema,
       implementationIdentity: deriveImplementationIdentity(
         runtime.moduleRegistry.getModule("map"),
       ),
