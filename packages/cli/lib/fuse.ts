@@ -63,13 +63,21 @@ function repoRoot(importMetaUrl: string): string {
   return resolve(cliLibDir, "../../..");
 }
 
-/** Hex hash of absolute mountpoint path, used as state filename. */
-export async function mountpointHash(mountpoint: string): Promise<string> {
-  const data = new TextEncoder().encode(
-    await canonicalizeMountLookupPath(mountpoint),
-  );
+async function hashMountLookupKey(key: string): Promise<string> {
+  const data = new TextEncoder().encode(key);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return encodeHex(new Uint8Array(hash)).slice(0, 16);
+}
+
+async function legacyMountpointHash(mountpoint: string): Promise<string> {
+  return await hashMountLookupKey(resolve(mountpoint));
+}
+
+/** Hex hash of absolute mountpoint path, used as state filename. */
+export async function mountpointHash(mountpoint: string): Promise<string> {
+  return await hashMountLookupKey(
+    await canonicalizeMountLookupPath(mountpoint),
+  );
 }
 
 export async function writeMountState(
@@ -81,6 +89,12 @@ export async function writeMountState(
   const hash = await mountpointHash(normalized.mountpoint);
   const path = resolve(stateDir, `${hash}.json`);
   await Deno.writeTextFile(path, JSON.stringify(normalized, null, 2));
+  const legacyHash = await legacyMountpointHash(normalized.mountpoint);
+  if (legacyHash !== hash) {
+    await Deno.remove(resolve(stateDir, `${legacyHash}.json`)).catch(() =>
+      undefined
+    );
+  }
   return path;
 }
 
@@ -88,17 +102,29 @@ export async function readMountState(
   stateDir: string,
   mountpoint: string,
 ): Promise<{ entry: MountStateEntry; path: string } | null> {
-  const hash = await mountpointHash(mountpoint);
-  const path = resolve(stateDir, `${hash}.json`);
-  try {
-    const text = await Deno.readTextFile(path);
-    return {
-      entry: normalizeMountStateEntry(JSON.parse(text) as MountStateEntry),
-      path,
-    };
-  } catch {
-    return null;
+  const candidatePaths = [
+    resolve(stateDir, `${await mountpointHash(mountpoint)}.json`),
+  ];
+  const legacyPath = resolve(
+    stateDir,
+    `${await legacyMountpointHash(mountpoint)}.json`,
+  );
+  if (!candidatePaths.includes(legacyPath)) {
+    candidatePaths.push(legacyPath);
   }
+
+  for (const path of candidatePaths) {
+    try {
+      const text = await Deno.readTextFile(path);
+      return {
+        entry: normalizeMountStateEntry(JSON.parse(text) as MountStateEntry),
+        path,
+      };
+    } catch {
+      // Try the next compatible state filename.
+    }
+  }
+  return null;
 }
 
 export async function readAllMountStates(

@@ -751,20 +751,30 @@ export class CellBridge {
     rootCell: Cell<unknown>,
     value: unknown,
   ): unknown {
-    if (value !== undefined && value !== null) {
+    if (
+      value !== undefined && value !== null &&
+      (typeof value !== "object" || Array.isArray(value))
+    ) {
       return value;
     }
 
-    const schema = rootCell.asSchemaFromLinks().schema as Record<
-      string,
-      unknown
-    > | undefined;
-    const properties = schema?.properties as Record<string, unknown> | undefined;
+    const schema = rootCell.asSchemaFromLinks().schema as
+      | Record<
+        string,
+        unknown
+      >
+      | undefined;
+    const properties = schema?.properties as
+      | Record<string, unknown>
+      | undefined;
     if (!properties || Array.isArray(properties)) {
       return value;
     }
 
-    const materialized: Record<string, unknown> = {};
+    const materialized: Record<string, unknown> =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>) }
+        : {};
     for (const key of Object.keys(properties)) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let childValue: unknown;
@@ -779,14 +789,16 @@ export class CellBridge {
 
       const callableKind =
         classifyCallableEntry(childValue, childCell.schema) ??
-        classifyCallableEntry(childCell, childCell.schema);
+          classifyCallableEntry(childCell, childCell.schema);
 
       if (callableKind) {
-        materialized[key] = childValue ?? childCell;
+        if (!(key in materialized)) {
+          materialized[key] = childValue ?? childCell;
+        }
         continue;
       }
 
-      if (childValue !== undefined) {
+      if (childValue !== undefined && !(key in materialized)) {
         materialized[key] = childValue;
       }
     }
