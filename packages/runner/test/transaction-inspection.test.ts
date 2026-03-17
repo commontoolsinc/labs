@@ -6,12 +6,14 @@ import { txToReactivityLog } from "../src/scheduler.ts";
 import type {
   IExtendedStorageTransaction,
   ITransactionJournal,
+  ITransactionWriteRequest,
   TransactionReactivityLog,
 } from "../src/storage/interface.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
+import { reactivityLogFromActivities } from "../src/storage/reactivity-log.ts";
 import {
   getTransactionReadActivities,
   getTransactionWriteDetails,
@@ -73,6 +75,60 @@ describe("transaction inspection", () => {
         path: ["field"],
       }],
     });
+  });
+
+  it("preserves non-document-prefixed paths in derived reactivity logs", () => {
+    assertEquals(
+      reactivityLogFromActivities([
+        {
+          read: {
+            space: "did:key:test" as any,
+            id: "of:read" as any,
+            type: "application/json",
+            path: ["links", "peer"],
+            meta: {},
+          },
+        },
+        {
+          read: {
+            space: "did:key:test" as any,
+            id: "of:shallow" as any,
+            type: "application/json",
+            path: ["value", "items"],
+            meta: {},
+            nonRecursive: true,
+          },
+        },
+        {
+          write: {
+            space: "did:key:test" as any,
+            id: "of:write" as any,
+            type: "application/json",
+            path: ["meta", "updatedAt"],
+          },
+        },
+      ]),
+      {
+        reads: [{
+          space: "did:key:test",
+          id: "of:read",
+          type: "application/json",
+          path: ["links", "peer"],
+        }],
+        shallowReads: [{
+          space: "did:key:test",
+          id: "of:shallow",
+          type: "application/json",
+          path: ["items"],
+        }],
+        writes: [{
+          space: "did:key:test",
+          id: "of:write",
+          type: "application/json",
+          path: ["meta", "updatedAt"],
+        }],
+      },
+    );
   });
 
   it("uses the native v2 transaction reactivity log hook", async () => {
@@ -174,6 +230,39 @@ describe("transaction inspection", () => {
     } finally {
       await storageManager.close();
     }
+  });
+
+  it("does not fan out batch writes when the wrapped transaction already handles them", () => {
+    const writes: ITransactionWriteRequest[] = [{
+      address: {
+        space,
+        id: "test:transaction-wrapper-write-values-1" as const,
+        type: "application/json",
+        path: ["count"],
+      },
+      value: 1,
+    }, {
+      address: {
+        space,
+        id: "test:transaction-wrapper-write-values-2" as const,
+        type: "application/json",
+        path: ["count"],
+      },
+      value: 2,
+    }];
+    const observed: ITransactionWriteRequest[] = [];
+    const wrapped = new TransactionWrapper({
+      writeValuesOrThrow(batch: Iterable<ITransactionWriteRequest>) {
+        observed.push(...batch);
+      },
+      writeValueOrThrow() {
+        throw new Error("wrapper should not replay batch writes");
+      },
+    } as unknown as IExtendedStorageTransaction);
+
+    wrapped.writeValuesOrThrow(writes);
+
+    assertEquals(observed, writes);
   });
 
   it("uses the native v2 read activity hook without journal replay", async () => {

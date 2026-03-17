@@ -3,7 +3,6 @@ import type * as Routes from "./memory.routes.ts";
 import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commonfabric/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
-import * as HttpStatusCodes from "stoker/http-status-codes";
 
 type NegotiatedSocket = {
   firstMessage: string | undefined;
@@ -98,7 +97,23 @@ const attachV2SocketPipeline = (
     return false;
   }
 
+  const safeSocketClose = (code: number, reason: string) => {
+    if (
+      socket.readyState === WebSocket.CLOSING ||
+      socket.readyState === WebSocket.CLOSED
+    ) {
+      return;
+    }
+    try {
+      socket.close(code, reason);
+    } catch {
+      // Ignore close races with the peer.
+    }
+  };
   const connection = memoryV2Server.connect((message) => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
     socket.send(JSON.stringify(message));
   });
   const onClose = () => {
@@ -117,12 +132,15 @@ const attachV2SocketPipeline = (
         }
         await connection.receive(next.value);
       }
-    } catch (_error) {
-      socket.close(1011, "Memory websocket receive failure");
+    } catch {
+      safeSocketClose(1011, "Memory websocket receive failure");
     } finally {
       onClose();
     }
-  })();
+  })().catch(() => {
+    safeSocketClose(1011, "Memory websocket setup failure");
+    onClose();
+  });
 
   return true;
 };
@@ -229,6 +247,14 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
 
         attachV1SocketPipeline(channel);
         setupSpan.setAttribute("socket.setup", "memory-v1");
+      }).catch(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.close(1011, "Memory websocket setup failure");
+          } catch {
+            // Ignore close races with the peer.
+          }
+        }
       });
 
       return response;
@@ -244,71 +270,5 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       );
       throw error;
     }
-  });
-};
-
-export const putBlob: AppRouteHandler<typeof Routes.putBlob> = async (c) => {
-  return await createSpan("memory.blob.put", async (span) => {
-    const { hash } = c.req.valid("param");
-    const { space } = c.req.valid("query");
-    const contentType = c.req.header("content-type") ??
-      "application/octet-stream";
-    const value = new Uint8Array(await c.req.raw.arrayBuffer());
-
-    span.setAttribute("memory.operation", "blob.put");
-    span.setAttribute("memory.space", space);
-
-    try {
-      const result = await memoryV2Server.putBlob(space, hash, {
-        value,
-        contentType,
-      });
-      span.setAttribute("memory.status", "success");
-      return new Response(null, {
-        status: result.created ? HttpStatusCodes.CREATED : HttpStatusCodes.OK,
-      });
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      span.setAttribute("memory.status", "error");
-      span.setAttribute("error.message", message);
-      span.setAttribute(
-        "error.type",
-        cause instanceof Error ? cause.name : "BlobError",
-      );
-      return c.json(
-        { error: { name: "BlobError", message } },
-        HttpStatusCodes.BAD_REQUEST,
-      );
-    }
-  });
-};
-
-export const getBlob: AppRouteHandler<typeof Routes.getBlob> = async (c) => {
-  return await createSpan("memory.blob.get", async (span) => {
-    const { hash } = c.req.valid("param");
-    const { space } = c.req.valid("query");
-
-    span.setAttribute("memory.operation", "blob.get");
-    span.setAttribute("memory.space", space);
-
-    const blob = await memoryV2Server.getBlob(space, hash);
-    if (blob === null) {
-      span.setAttribute("memory.status", "not_found");
-      return new Response(null, { status: HttpStatusCodes.NOT_FOUND });
-    }
-
-    span.setAttribute("memory.status", "success");
-    return new Response(
-      new Blob([Uint8Array.from(blob.value)], {
-        type: blob.contentType,
-      }),
-      {
-        status: HttpStatusCodes.OK,
-        headers: {
-          "content-type": blob.contentType,
-          "content-length": String(blob.size),
-        },
-      },
-    );
   });
 };

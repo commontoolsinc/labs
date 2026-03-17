@@ -29,20 +29,21 @@ if (result.error) {
   throw result.error;
 }
 
-const memoryV2RootPath = Path.extname(storeUrl.pathname) === ""
-  ? Path.join(Path.fromFileUrl(storeUrl), "v2-engine")
+const storePath = Path.fromFileUrl(storeUrl);
+const memoryV2RootPath = Path.extname(storePath) === ""
+  ? Path.join(storePath, "v2-engine")
   : Path.join(
-    Path.dirname(storeUrl.pathname),
-    `${
-      Path.basename(storeUrl.pathname, Path.extname(storeUrl.pathname))
-    }.v2-engine`,
+    Path.dirname(storePath),
+    `${Path.basename(storePath, Path.extname(storePath))}.v2-engine`,
   );
 const memoryV2StoreUrl = Path.toFileUrl(`${memoryV2RootPath}/`);
-await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
+await FS.ensureDir(
+  env.DB_PATH ? memoryV2RootPath : new URL("./v2/", memoryV2StoreUrl),
+);
 
 export const memory = result.ok;
 export const memoryV2Server = new Memory.V2Server.Server({
-  store: memoryV2StoreUrl,
+  store: env.DB_PATH ? storeUrl : memoryV2StoreUrl,
 });
 console.log("Memory: Provider initialized successfully");
 

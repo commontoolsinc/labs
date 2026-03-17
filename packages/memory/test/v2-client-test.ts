@@ -152,6 +152,7 @@ Deno.test("memory v2 client queryGraph subscriptions expand to previously existi
 
 class ReconnectableLoopbackTransport implements Transport {
   connectionCount = 0;
+  subscriptionQueryCount = 0;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
@@ -159,6 +160,13 @@ class ReconnectableLoopbackTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type?: string;
+      query?: { subscribe?: boolean };
+    };
+    if (message.type === "graph.query" && message.query?.subscribe === true) {
+      this.subscriptionQueryCount++;
+    }
     await this.connection().receive(payload);
   }
 
@@ -442,7 +450,7 @@ Deno.test("memory v2 client reconnects and reissues graph subscriptions", async 
   const updates = view.subscribe();
 
   transport.disconnect();
-  await waitFor(() => transport.connectionCount >= 2);
+  await waitFor(() => transport.subscriptionQueryCount >= 2);
 
   const pending = updates.next();
   await writer.transact({

@@ -7,8 +7,6 @@ const router = createRouter();
 const Router = router
   .openapi(routes.transact, handlers.transact)
   .openapi(routes.query, handlers.query)
-  .openapi(routes.subscribe, handlers.subscribe)
-  .openapi(routes.putBlob, handlers.putBlob)
-  .openapi(routes.getBlob, handlers.getBlob);
+  .openapi(routes.subscribe, handlers.subscribe);
 
 export default Router;

@@ -181,14 +181,16 @@ Deno.test("memory websocket preserves early v1 frames during negotiation", async
       { once: true },
     );
 
-    await completion.promise;
-    assertEquals(
-      receipts.filter((entry) => entry.the === "task/return").length,
-      2,
-    );
-
-    consumer.close();
-    socket.close();
+    try {
+      await completion.promise;
+      assertEquals(
+        receipts.filter((entry) => entry.the === "task/return").length,
+        2,
+      );
+    } finally {
+      consumer.close();
+      socket.close();
+    }
   } finally {
     await server.shutdown();
     try {

@@ -428,12 +428,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   writeValuesOrThrow(
     writes: Iterable<ITransactionWriteRequest>,
   ): void {
-    return this.wrapped.writeValuesOrThrow?.(writes) ??
-      (() => {
-        for (const write of writes) {
-          this.wrapped.writeValueOrThrow(write.address, write.value);
-        }
-      })();
+    if (this.wrapped.writeValuesOrThrow) {
+      return this.wrapped.writeValuesOrThrow(writes);
+    }
+    for (const write of writes) {
+      this.wrapped.writeValueOrThrow(write.address, write.value);
+    }
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
