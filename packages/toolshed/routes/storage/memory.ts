@@ -31,7 +31,7 @@ if (result.error) {
 }
 
 const memoryV2StoreUrl = resolveMemoryV2StoreRootUrl(storeUrl, {
-  singleFileMode: env.DB_PATH !== undefined,
+  singleFileMode: Boolean(env.DB_PATH),
 });
 await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
 
