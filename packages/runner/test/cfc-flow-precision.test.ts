@@ -18,6 +18,7 @@ import {
 } from "../src/cfc/trust-lattice.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Labels, URI } from "../src/storage/interface.ts";
+import type { CfcIntegrityTrustOptions } from "../src/cfc/integrity-trust.ts";
 
 const signer = await Identity.fromPassphrase("cfc flow precision test");
 const space = signer.did();
@@ -146,6 +147,11 @@ describe("CFC flow precision", () => {
       readonly implementationIdentity?: CfcImplementationIdentity;
       readonly actingPrincipal?: string;
       readonly trustContext?: CfcTrustContext;
+      readonly trustEvaluator?: (
+        identity: CfcImplementationIdentity | undefined,
+        concept: string,
+        options: CfcIntegrityTrustOptions,
+      ) => boolean;
     },
   ): Promise<unknown> {
     const tx = runtime.edit();
@@ -177,11 +183,14 @@ describe("CFC flow precision", () => {
 
     let thrown: unknown;
     try {
-      await prepareCfcCommitIfNeeded(tx, {
+      const prepareOptions = Object.assign({
         implementationIdentity: options.implementationIdentity,
         actingPrincipal: options.actingPrincipal,
         trustContext: options.trustContext,
-      });
+      }, options.trustEvaluator
+        ? { trustEvaluator: options.trustEvaluator }
+        : {});
+      await prepareCfcCommitIfNeeded(tx, prepareOptions);
       const { error } = await tx.commit();
       thrown = error;
     } catch (error) {
@@ -237,6 +246,32 @@ describe("CFC flow precision", () => {
         signer.did(),
         encodeImplementationIdentity(implementationIdentity),
       ),
+    });
+
+    expect(thrown).toBeUndefined();
+  });
+
+  it("uses injected trust evaluator for deterministic flow-precision decisions", async () => {
+    const sourceId = "cfc-flow-precision-injected-trust-source" as URI;
+    const targetId = "cfc-flow-precision-injected-trust-target" as URI;
+    const implementationIdentity = deriveImplementationIdentity(
+      runtime.moduleRegistry.getModule("map"),
+    );
+    await seedDocument(sourceId, [11, 22], {
+      "/0": { classification: ["secret"] },
+      "/1": { classification: ["confidential"] },
+    });
+    await seedDocument(targetId, [0, 0]);
+
+    const thrown = await runFlowPrecisionPrepare({
+      sourceId,
+      targetId,
+      itemSchema: confidentialFlowPrecisionItemSchema,
+      implementationIdentity,
+      trustEvaluator: (identity, concept) =>
+        identity?.kind === "builtin" &&
+        identity.name === "map" &&
+        concept === FLOW_TAINT_PRECISION_CONCEPT,
     });
 
     expect(thrown).toBeUndefined();
