@@ -22,6 +22,7 @@ Locked decisions from the spec and user discussion:
 - Dynamic `import()` is rejected in v1.
 - Ambient authored globals are minimal: SES intrinsics, sandboxed `console`, `harden`, and internal wrapper helpers only.
 - Common Tools capabilities continue to flow through trusted AMD runtime modules via `runtimeDeps`.
+- Static imports are allowed only from trusted `runtimeDeps` modules and other modules in the same verified compiled bundle.
 - Top-level non-builder values must be a versioned inert subset of `StorableValue`; v1 allows only `null`, `undefined`, `boolean`, `number`, `string`, `bigint`, arrays, and plain records.
 - `console` is the only tolerated authored module-load side effect.
 - The compiler may help, but the runtime verifier must be able to reject incorrect or malicious compiler output.
@@ -122,6 +123,11 @@ The new SES transformer must run after closure lowering, because the hoisting cr
 
 Create or modify the following files. Keep responsibilities tight; do not hide the verifier, Compartment lifecycle, and runner cutover inside one giant file.
 
+### Repo / dependency plumbing
+
+- Modify: `deno.json`
+  Add the SES package import used by the new sandbox subsystem, or document the deliberate choice to use direct `npm:ses` imports so the dependency contract is explicit in the repo.
+
 ### Compiler / transformer
 
 - Modify: `packages/ts-transformers/src/ct-pipeline.ts`
@@ -189,6 +195,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 
 - Modify: `packages/runner/src/harness/engine.ts`
   Compile as today, evaluate through `ses-runtime`, and expose source-map/error hooks without `UnsafeEvalRuntime`.
+- Modify: `packages/runner/src/harness/eval-runtime.ts`
+  Delete it, or replace it with a clearly named SES-backed low-level test helper so the repo no longer carries an active unsafe-eval runtime abstraction.
 - Modify: `packages/runner/src/harness/types.ts`
   Remove authored `getInvocation()` dependency from the harness contract.
 - Modify: `packages/runner/src/harness/runtime-modules.ts`
@@ -203,6 +211,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
   Initialize and dispose the sandbox runtime cleanly.
 - Modify: `packages/runner/src/scheduler.ts`
   Route surfaced authored errors through sandbox error mapping/formatting.
+- Modify: `packages/runner/src/function-cache.ts`
+  Either remove the string-eval-oriented cache path or key any remaining cache entries by stable `implementationRef` metadata.
 - Modify: `packages/runner/src/builder/types.ts`
   Add `implementationRef` metadata on `Module` and any branded function metadata types needed by the runner.
 - Modify: `packages/runner/src/builder/module.ts`
@@ -218,7 +228,10 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 - Create: `packages/runner/test/sandbox/plain-data.test.ts`
 - Create: `packages/runner/test/sandbox/security.test.ts`
 - Create: `packages/runner/test/sandbox/compartment.test.ts`
+- Modify: `packages/runner/test/engine.test.ts`
 - Modify: `packages/runner/test/pattern-manager.test.ts`
+- Modify: `packages/runner/test/runtime.test.ts`
+- Modify: `packages/runner/test/module.test.ts`
 - Modify: `packages/runner/test/stack-trace.test.ts`
 - Modify: `packages/runner/test/stack-trace-patterns.test.ts`
 - Create: `packages/generated-patterns/integration/patterns/ses-sandbox-smoke.test.ts`
@@ -335,6 +348,7 @@ Cover:
 - rejection of malformed bundle pre/post scaffolding
 - rejection of dynamic `import()`
 - rejection of non-trusted static imports
+- acceptance of trusted `runtimeDeps` imports and same-bundle transformed local imports
 - rejection of malformed wrapper forms
 - acceptance of valid canonicalized module factories
 
@@ -373,7 +387,10 @@ Keep the public bundle contract the same:
 - ensure it contains only top-level `define(...)` registrations
 
 `module-verifier.ts` should:
-- verify AMD dependency policy
+- verify AMD dependency policy:
+  - allow trusted `runtimeDeps` module identifiers
+  - allow same-bundle local module identifiers registered by the verified bundle
+  - reject everything else
 - verify canonical wrappers and sentinels
 - enforce direct callback / direct function / data-safe helper / plain-data forms
 - reject `import()`
@@ -502,13 +519,16 @@ git commit -m "feat: add SES plain-data validation helpers"
 ### Task 4: Build The SES Runtime, Compartment Lifecycle, And Trusted Runtime Modules
 
 **Files:**
+- Modify: `deno.json`
 - Create: `packages/runner/src/sandbox/compartment-globals.ts`
 - Create: `packages/runner/src/sandbox/runtime-modules.ts`
 - Create: `packages/runner/src/sandbox/ses-runtime.ts`
+- Modify: `packages/runner/src/harness/eval-runtime.ts`
 - Modify: `packages/runner/src/harness/runtime-modules.ts`
 - Modify: `packages/runner/src/runtime.ts`
 - Test: `packages/runner/test/sandbox/compartment.test.ts`
 - Test: `packages/runner/test/sandbox/security.test.ts`
+- Test: `packages/runner/test/runtime.test.ts`
 
 - [ ] **Step 1: Write failing runtime/compartment tests**
 
@@ -519,6 +539,7 @@ Cover:
 - minimal globals only
 - trusted runtime modules available through `runtimeDeps`
 - no ambient `fetch`, `Temporal`, randomness, or host objects at module load
+- no low-level unsafe-eval helper remains in the direct runtime/test helper path
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -528,7 +549,8 @@ Run:
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
   packages/runner/test/sandbox/compartment.test.ts \
-  packages/runner/test/sandbox/security.test.ts
+  packages/runner/test/sandbox/security.test.ts \
+  packages/runner/test/runtime.test.ts
 ```
 
 Expected: FAIL because the SES runtime path does not exist yet.
@@ -543,17 +565,31 @@ Expected: FAIL because the SES runtime path does not exist yet.
 - maintain a verified-function registry and export registry keyed by pattern ID and `implementationRef`
 - register source maps for later stack mapping
 
+Also make the SES dependency plumbing explicit here:
+- add the repo import-map entry in `deno.json` if using a bare alias, or
+- keep direct `npm:ses` imports and document that choice in code comments/tests
+
+Do not leave dependency resolution implicit.
+
 - [ ] **Step 4: Migrate runtime modules to the sandbox subsystem**
 
 Move the trusted runtime-module surface out of `harness/runtime-modules.ts` into `sandbox/runtime-modules.ts`, then keep the harness file as a compatibility shim or re-export.
 
 Do not broaden the capability surface during the move.
 
-- [ ] **Step 5: Wire the runtime lifecycle into `Runtime`**
+- [ ] **Step 5: Retire the low-level unsafe-eval helper**
+
+Either:
+- delete `packages/runner/src/harness/eval-runtime.ts` and update direct tests to use the sandbox runtime helpers, or
+- replace it with a clearly named SES-backed adapter that delegates to the same sandbox/runtime code used by `Engine`
+
+Do not keep a live `UnsafeEvalRuntime` abstraction around after the cutover.
+
+- [ ] **Step 6: Wire the runtime lifecycle into `Runtime`**
 
 Initialize the SES runtime once per `Runtime` instance and dispose it cleanly so source maps, Compartments, and registries do not leak across tests or long-lived processes.
 
-- [ ] **Step 6: Re-run targeted tests**
+- [ ] **Step 7: Re-run targeted tests**
 
 Run:
 
@@ -561,21 +597,25 @@ Run:
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
   packages/runner/test/sandbox/compartment.test.ts \
-  packages/runner/test/sandbox/security.test.ts
+  packages/runner/test/sandbox/security.test.ts \
+  packages/runner/test/runtime.test.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add packages/runner/src/sandbox/compartment-globals.ts \
+git add deno.json \
+  packages/runner/src/harness/eval-runtime.ts \
+  packages/runner/src/sandbox/compartment-globals.ts \
   packages/runner/src/sandbox/runtime-modules.ts \
   packages/runner/src/sandbox/ses-runtime.ts \
   packages/runner/src/harness/runtime-modules.ts \
   packages/runner/src/runtime.ts \
   packages/runner/test/sandbox/compartment.test.ts \
-  packages/runner/test/sandbox/security.test.ts
+  packages/runner/test/sandbox/security.test.ts \
+  packages/runner/test/runtime.test.ts
 git commit -m "feat: add SES runtime and pattern compartments"
 ```
 
@@ -587,16 +627,20 @@ git commit -m "feat: add SES runtime and pattern compartments"
 - Modify: `packages/runner/src/harness/index.ts`
 - Modify: `packages/runner/src/runner.ts`
 - Modify: `packages/runner/src/pattern-manager.ts`
+- Modify: `packages/runner/src/function-cache.ts`
 - Modify: `packages/runner/src/builder/module.ts`
 - Modify: `packages/runner/src/builder/pattern.ts`
 - Modify: `packages/runner/src/builder/json-utils.ts`
+- Test: `packages/runner/test/engine.test.ts`
 - Test: `packages/runner/test/pattern-manager.test.ts`
 - Test: `packages/runner/test/runtime.test.ts`
+- Test: `packages/runner/test/module.test.ts`
 - Test: `packages/runner/test/sandbox/security.test.ts`
 
 - [ ] **Step 1: Write failing cutover tests**
 
 Cover:
+- `Engine.evaluate()` still returns the expected `main` / `exportMap` shape through the SES path
 - compiled patterns execute without calling `getInvocation()`
 - live pattern nodes retain function objects plus `implementationRef`
 - serialized JavaScript modules carry `implementationRef` metadata instead of authored source strings
@@ -610,8 +654,10 @@ Run:
 ```bash
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
+  packages/runner/test/module.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
@@ -644,6 +690,8 @@ In `instantiateJavaScriptNode()`:
 
 This is the actual removal of the eval escape hatch. Treat it as a release-blocking change.
 
+At the same time, either remove `FunctionCache` entirely or key any remaining cache entries by `implementationRef` instead of stringified module bodies.
+
 - [ ] **Step 6: Re-run targeted runner tests**
 
 Run:
@@ -651,8 +699,10 @@ Run:
 ```bash
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
+  packages/runner/test/module.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
@@ -666,11 +716,14 @@ git add packages/runner/src/harness/types.ts \
   packages/runner/src/harness/index.ts \
   packages/runner/src/runner.ts \
   packages/runner/src/pattern-manager.ts \
+  packages/runner/src/function-cache.ts \
   packages/runner/src/builder/module.ts \
   packages/runner/src/builder/pattern.ts \
   packages/runner/src/builder/json-utils.ts \
+  packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
+  packages/runner/test/module.test.ts \
   packages/runner/test/sandbox/security.test.ts
 git commit -m "feat: replace authored eval with verified function refs"
 ```
@@ -802,6 +855,7 @@ Expected: PASS.
 Search for and eliminate authored-path references to:
 - `UnsafeEvalRuntime`
 - `UnsafeEvalIsolate`
+- `harness/eval-runtime.ts`
 - `getInvocation()`
 - `module.implementation` string execution
 
@@ -831,8 +885,10 @@ Before declaring the implementation done, verify all of the following:
 - [ ] `__ct_data(...)` rejects getters, symbol keys, custom prototypes, sparse arrays, cycles, reserved keys, and non-v1 `StorableValue` members.
 - [ ] `pattern()` / `recipe()` still run at module load with only the allowed authority surface.
 - [ ] Runner execution never evaluates authored function source strings.
+- [ ] Trusted `runtimeDeps` imports and same-bundle local imports still work; other static imports do not.
 - [ ] One Compartment is reused per loaded pattern, and different patterns do not share one.
 - [ ] Mapped stack traces still point to authored files/lines for top-level, lift, and handler failures.
+- [ ] No low-level `UnsafeEvalRuntime` helper remains reachable from the authored execution path or from runner tests that are supposed to validate the SES path.
 - [ ] Existing generated-pattern behavior remains unchanged for valid patterns.
 
 ## Notes For The Implementer
