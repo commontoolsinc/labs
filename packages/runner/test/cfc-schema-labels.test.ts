@@ -6,6 +6,7 @@ import {
   schemaConfidentialityAtPath,
   schemaWithConfidentiality,
 } from "../src/cfc/schema-labels.ts";
+import { normalizeConfidentialityLabel } from "../src/cfc/label-algebra.ts";
 
 describe("CFC schema label helpers", () => {
   const schema = {
@@ -29,25 +30,24 @@ describe("CFC schema label helpers", () => {
       },
     },
   } as const satisfies JSONSchema;
+  const expectedClassification = normalizeConfidentialityLabel([
+    [{
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: "did:key:alice",
+    }],
+    ["https://commonfabric.org/cfc/atom/EmailSecret"],
+  ]);
 
   it("collects CNF confidentiality from a schema tree", () => {
-    expect(collectSchemaConfidentiality(schema)).toEqual([
-      [{
-        type: "https://commonfabric.org/cfc/atom/User",
-        subject: "did:key:alice",
-      }],
-      ["https://commonfabric.org/cfc/atom/EmailSecret"],
-    ]);
+    expect(
+      normalizeConfidentialityLabel(collectSchemaConfidentiality(schema)),
+    ).toEqual(expectedClassification);
   });
 
   it("resolves effective CNF confidentiality at a path", () => {
-    expect(schemaConfidentialityAtPath(schema, ["ssn"])).toEqual([
-      [{
-        type: "https://commonfabric.org/cfc/atom/User",
-        subject: "did:key:alice",
-      }],
-      ["https://commonfabric.org/cfc/atom/EmailSecret"],
-    ]);
+    expect(
+      normalizeConfidentialityLabel(schemaConfidentialityAtPath(schema, ["ssn"])),
+    ).toEqual(expectedClassification);
   });
 
   it("writes joined CNF confidentiality back to a schema object", () => {

@@ -34,6 +34,10 @@ import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
 import { recordCfcWriteSchemaContext } from "./cfc/schema-context.ts";
+import {
+  collectSchemaConfidentiality,
+  schemaWithConfidentiality,
+} from "./cfc/schema-labels.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -517,12 +521,11 @@ export function normalizeAndDiff(
     // Handle array length changes
     if (Array.isArray(currentValue) && currentValue.length != newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
-      const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+      const classification = (link.schema !== undefined)
+        ? collectSchemaConfidentiality(link.schema)
         : undefined;
-      // We have to cast these, since the type could be changed to another value
-      const childSchema = (lub !== undefined)
-        ? { type: "number", ifc: { classification: [lub] } } as JSONSchema
+      const childSchema = classification
+        ? schemaWithConfidentiality({ type: "number" }, classification)
         : { type: "number" } as JSONSchema;
       changes.push({
         location: {
