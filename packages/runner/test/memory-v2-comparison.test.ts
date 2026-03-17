@@ -1,12 +1,20 @@
 import { assertEquals, assertExists } from "@std/assert";
+import { toFileUrl } from "@std/path";
 import { Identity } from "@commontools/identity";
 import type { URI } from "@commontools/memory/interface";
 import * as Consumer from "@commontools/memory/consumer";
 import * as MemoryProvider from "@commontools/memory/provider";
+import * as MemoryV2Client from "@commontools/memory/v2/client";
+import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { Provider, StorageManager } from "../src/storage/cache.deno.ts";
 import type { StorageNotification } from "../src/storage/interface.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 import * as StorageSubscription from "../src/storage/subscription.ts";
+import {
+  type Options as V2Options,
+  type SessionFactory,
+  StorageManager as V2StorageManager,
+} from "../src/storage/v2.ts";
 
 type TestProvider = {
   get(uri: URI): { value: unknown } | undefined;
@@ -28,6 +36,13 @@ type TestProvider = {
     }
   >;
   destroy(): Promise<void>;
+};
+
+type PersistentProviders = {
+  writer: TestProvider;
+  observer: TestProvider;
+  notifications: NotificationRecorder;
+  close(): Promise<void>;
 };
 
 const signer = await Identity.fromPassphrase("memory-v2-comparison");
@@ -74,6 +89,28 @@ class NotificationRecorder {
   }
 }
 
+class LoopbackSessionFactory implements SessionFactory {
+  constructor(private readonly server: MemoryV2Server.Server) {}
+
+  async create(space: string) {
+    const client = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(this.server),
+    });
+    const session = await client.mount(space);
+    return { client, session };
+  }
+}
+
+class TestV2StorageManager extends V2StorageManager {
+  static create(options: V2Options, sessionFactory: SessionFactory) {
+    return new TestV2StorageManager(options, sessionFactory);
+  }
+
+  private constructor(options: V2Options, sessionFactory: SessionFactory) {
+    super(options, sessionFactory);
+  }
+}
+
 const waitFor = async (
   predicate: () => boolean,
   timeout = 500,
@@ -117,22 +154,50 @@ const normalizeValue = (value: unknown): unknown => {
   return value;
 };
 
-const normalizedGraphNotifications = (notifications: StorageNotification[]) =>
-  notifications
-    .filter((notification) =>
-      notification.type === "pull" || notification.type === "integrate"
-    )
-    .map((notification) => ({
-      type: notification.type,
-      ids: "changes" in notification
-        ? [...notification.changes].map((change) => change.address.id).sort()
-        : [],
-    }));
+const normalizedGraphNotifications = (
+  notifications: StorageNotification[],
+  trackedIds: readonly URI[],
+) => {
+  const allowed = new Set(trackedIds);
+  const grouped = new Map<"pull" | "integrate", Set<URI>>();
+
+  for (const notification of notifications) {
+    if (notification.type !== "pull" && notification.type !== "integrate") {
+      continue;
+    }
+    let ids = grouped.get(notification.type);
+    if (!ids) {
+      ids = new Set();
+      grouped.set(notification.type, ids);
+    }
+    if (!("changes" in notification)) {
+      continue;
+    }
+    for (const change of notification.changes) {
+      if (allowed.has(change.address.id)) {
+        ids.add(change.address.id as URI);
+      }
+    }
+  }
+
+  return [...grouped.entries()]
+    .map(([type, ids]) => ({
+      type,
+      ids: [...ids].sort(),
+    }))
+    .filter((notification) => notification.ids.length > 0);
+};
 
 const sendDocs = async (
   provider: TestProvider,
   docs: Array<{ id: URI; value: unknown }>,
 ) => {
+  for (const doc of docs) {
+    assertEquals(
+      await provider.sync(doc.id, { path: [], schema: false }),
+      { ok: {} },
+    );
+  }
   assertEquals(
     await provider.send(
       docs.map((doc) => ({
@@ -144,48 +209,99 @@ const sendDocs = async (
   );
 };
 
-const createSharedProviders = (memoryVersion: "v1" | "v2") => {
-  const memoryProvider = MemoryProvider.emulate({
-    serviceDid: signer.did(),
-    memoryVersion,
+const createStore = async () => {
+  const dir = await Deno.makeTempDir({
+    prefix: "memory-v2-comparison-",
   });
-  const writerSession = Consumer.open({
+  await Deno.mkdir(`${dir}/v2`, { recursive: true });
+  return {
+    dir,
+    url: toFileUrl(`${dir}/`),
+  };
+};
+
+const removeStore = async (dir: string) => {
+  await Deno.remove(dir, { recursive: true }).catch(() => {});
+};
+
+const createPersistentProviders = async (
+  memoryVersion: "v1" | "v2",
+  store: URL,
+): Promise<PersistentProviders> => {
+  if (memoryVersion === "v1") {
+    const opened = await MemoryProvider.open({
+      store,
+      serviceDid: signer.did(),
+    });
+    if (opened.error) {
+      throw opened.error;
+    }
+    const memoryProvider = opened.ok;
+    const writerSession = Consumer.open({
+      as: signer,
+      session: memoryProvider.session(),
+    });
+    const observerSession = Consumer.open({
+      as: signer,
+      session: memoryProvider.session(),
+    });
+    const writerSubscription = StorageSubscription.create();
+    const observerSubscription = StorageSubscription.create();
+    const writer = Provider.open({
+      session: writerSession,
+      subscription: writerSubscription,
+      space,
+      memoryVersion,
+    }) as unknown as TestProvider;
+    const observer = Provider.open({
+      session: observerSession,
+      subscription: observerSubscription,
+      space,
+      memoryVersion,
+    }) as unknown as TestProvider;
+    const notifications = new NotificationRecorder();
+    observerSubscription.subscribe(notifications);
+
+    return {
+      writer,
+      observer,
+      notifications,
+      close: async () => {
+        await writer.destroy();
+        await observer.destroy();
+        writerSession.close();
+        observerSession.close();
+        await writerSession.closed;
+        await observerSession.closed;
+        memoryProvider.disposeSessions();
+        await memoryProvider.close();
+      },
+    };
+  }
+
+  const server = new MemoryV2Server.Server({ store });
+  const sessionFactory = new LoopbackSessionFactory(server);
+  const writerManager = TestV2StorageManager.create({
     as: signer,
-    session: memoryProvider.session(),
-  });
-  const observerSession = Consumer.open({
+    address: new URL(`memory://writer-${crypto.randomUUID()}`),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const observerManager = TestV2StorageManager.create({
     as: signer,
-    session: memoryProvider.session(),
-  });
-  const writerSubscription = StorageSubscription.create();
-  const observerSubscription = StorageSubscription.create();
-  const writer = Provider.open({
-    session: writerSession,
-    subscription: writerSubscription,
-    space,
-    memoryVersion,
-  }) as unknown as TestProvider;
-  const observer = Provider.open({
-    session: observerSession,
-    subscription: observerSubscription,
-    space,
-    memoryVersion,
-  }) as unknown as TestProvider;
+    address: new URL(`memory://observer-${crypto.randomUUID()}`),
+    memoryVersion: "v2",
+  }, sessionFactory);
   const notifications = new NotificationRecorder();
-  observerSubscription.subscribe(notifications);
+  observerManager.subscribe(notifications);
 
   return {
-    writer,
-    observer,
+    writer: writerManager.open(space) as unknown as TestProvider,
+    observer: observerManager.open(space) as unknown as TestProvider,
     notifications,
     close: async () => {
-      await writer.destroy();
-      await observer.destroy();
-      writerSession.close();
-      observerSession.close();
-      await writerSession.closed;
-      await observerSession.closed;
-      memoryProvider.disposeSessions();
+      await writerManager.close();
+      await observerManager.close();
+      await server.close();
     },
   };
 };
@@ -193,63 +309,78 @@ const createSharedProviders = (memoryVersion: "v1" | "v2") => {
 const runGraphExpansion = async (
   memoryVersion: "v1" | "v2",
 ) => {
-  const shared = createSharedProviders(memoryVersion);
+  const store = await createStore();
   const fixture = createGraphFixture(space);
+  const seed = await createPersistentProviders(memoryVersion, store.url);
+  let shared: PersistentProviders | undefined;
 
   try {
-    await sendDocs(shared.writer, fixture.docs);
-    shared.notifications.clear();
+    await sendDocs(seed.writer, fixture.docs);
+    await seed.close();
+    shared = await createPersistentProviders(memoryVersion, store.url);
+    if (!shared) {
+      throw new Error("Failed to reopen persistent comparison providers");
+    }
+    const active = shared;
+    active.notifications.clear();
 
     assertEquals(
-      await shared.observer.sync(fixture.rootId, {
+      await active.observer.sync(fixture.rootId, {
         path: [],
         schema: fixture.schema,
       }),
       { ok: {} },
     );
     await waitFor(() =>
-      visibleGraphIds(shared.observer, fixture.expandedReachableIds).length ===
+      visibleGraphIds(active.observer, fixture.expandedReachableIds).length ===
         fixture.initialReachableIds.length
     );
 
     const initialState = visibleGraphState(
-      shared.observer,
+      active.observer,
       fixture.expandedReachableIds,
     );
     const initialNotifications = normalizedGraphNotifications(
-      shared.notifications.notifications,
+      active.notifications.notifications,
+      fixture.expandedReachableIds,
     );
-    shared.notifications.clear();
+    active.notifications.clear();
 
     assertEquals(
-      visibleGraphIds(shared.observer, fixture.expandedReachableIds),
+      visibleGraphIds(active.observer, fixture.expandedReachableIds),
       fixture.initialReachableIds,
     );
 
-    await sendDocs(shared.writer, [{
+    await sendDocs(active.writer, [{
       id: fixture.rootId,
       value: fixture.expandedRootValue,
     }]);
     await waitFor(() =>
-      visibleGraphIds(shared.observer, fixture.expandedReachableIds).length ===
+      visibleGraphIds(active.observer, fixture.expandedReachableIds).length ===
         fixture.expandedReachableIds.length
     );
 
     return {
-      close: shared.close,
+      close: async () => {
+        await active.close();
+        await removeStore(store.dir);
+      },
       initialState,
       expandedState: visibleGraphState(
-        shared.observer,
+        active.observer,
         fixture.expandedReachableIds,
       ),
       initialNotifications,
       expandedNotifications: normalizedGraphNotifications(
-        shared.notifications.notifications,
+        active.notifications.notifications,
+        fixture.expandedReachableIds,
       ),
       fixture,
     };
   } catch (error) {
-    await shared.close();
+    await seed.close().catch(() => {});
+    await shared?.close().catch(() => {});
+    await removeStore(store.dir);
     throw error;
   }
 };
@@ -287,7 +418,7 @@ Deno.test("memory v2 matches v1 provider-visible behavior for a randomized basic
   }
 });
 
-Deno.test.ignore(
+Deno.test(
   "memory v2 matches v1 for 64-node graph expansion across sessions",
   async () => {
     const v1 = await runGraphExpansion("v1");
@@ -313,42 +444,57 @@ Deno.test.ignore(
   },
 );
 
-Deno.test.ignore(
+Deno.test(
   "memory v2 matches v1 for repeated 64-node graph retarget workloads",
   async () => {
     const fixture = createGraphFixture(space);
     const initialDocs = new Map(
       fixture.docs.map((doc) => [doc.id, structuredClone(doc.value)]),
     );
-    const v1 = createSharedProviders("v1");
-    const v2 = createSharedProviders("v2");
+    const v1Store = await createStore();
+    const v2Store = await createStore();
+    const v1Seed = await createPersistentProviders("v1", v1Store.url);
+    const v2Seed = await createPersistentProviders("v2", v2Store.url);
+    let v1: PersistentProviders | undefined;
+    let v2: PersistentProviders | undefined;
 
     const applyMutation = async (id: URI) => {
       const value = structuredClone(initialDocs.get(id)!);
       assertExists(value);
-      await sendDocs(v1.writer, [{ id, value }]);
-      await sendDocs(v2.writer, [{ id, value }]);
+      await sendDocs(v1!.writer, [{ id, value }]);
+      await sendDocs(v2!.writer, [{ id, value }]);
     };
 
     try {
-      await sendDocs(v1.writer, fixture.docs);
-      await sendDocs(v2.writer, fixture.docs);
+      await sendDocs(v1Seed.writer, fixture.docs);
+      await sendDocs(v2Seed.writer, fixture.docs);
+      await v1Seed.close();
+      await v2Seed.close();
+      v1 = await createPersistentProviders("v1", v1Store.url);
+      v2 = await createPersistentProviders("v2", v2Store.url);
+      if (!v1 || !v2) {
+        throw new Error(
+          "Failed to reopen persistent graph comparison providers",
+        );
+      }
+      const v1Active = v1;
+      const v2Active = v2;
       assertEquals(
-        await v1.observer.sync(fixture.rootId, {
+        await v1Active.observer.sync(fixture.rootId, {
           path: [],
           schema: fixture.schema,
         }),
         { ok: {} },
       );
       assertEquals(
-        await v2.observer.sync(fixture.rootId, {
+        await v2Active.observer.sync(fixture.rootId, {
           path: [],
           schema: fixture.schema,
         }),
         { ok: {} },
       );
-      v1.notifications.clear();
-      v2.notifications.clear();
+      v1Active.notifications.clear();
+      v2Active.notifications.clear();
 
       const retargetIds = [
         fixture.rootId,
@@ -403,26 +549,39 @@ Deno.test.ignore(
 
         await waitFor(() =>
           JSON.stringify(
-            visibleGraphState(v1.observer, fixture.expandedReachableIds),
+            visibleGraphState(v1Active.observer, fixture.expandedReachableIds),
           ) ===
             JSON.stringify(
-              visibleGraphState(v2.observer, fixture.expandedReachableIds),
+              visibleGraphState(
+                v2Active.observer,
+                fixture.expandedReachableIds,
+              ),
             )
         );
         assertEquals(
-          visibleGraphState(v2.observer, fixture.expandedReachableIds),
-          visibleGraphState(v1.observer, fixture.expandedReachableIds),
+          visibleGraphState(v2Active.observer, fixture.expandedReachableIds),
+          visibleGraphState(v1Active.observer, fixture.expandedReachableIds),
         );
         assertEquals(
-          normalizedGraphNotifications(v2.notifications.notifications),
-          normalizedGraphNotifications(v1.notifications.notifications),
+          normalizedGraphNotifications(
+            v2Active.notifications.notifications,
+            fixture.expandedReachableIds,
+          ),
+          normalizedGraphNotifications(
+            v1Active.notifications.notifications,
+            fixture.expandedReachableIds,
+          ),
         );
-        v1.notifications.clear();
-        v2.notifications.clear();
+        v1Active.notifications.clear();
+        v2Active.notifications.clear();
       }
     } finally {
-      await v1.close();
-      await v2.close();
+      await v1Seed.close().catch(() => {});
+      await v2Seed.close().catch(() => {});
+      await v1?.close().catch(() => {});
+      await v2?.close().catch(() => {});
+      await removeStore(v1Store.dir);
+      await removeStore(v2Store.dir);
     }
   },
 );
