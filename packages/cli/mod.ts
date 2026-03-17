@@ -55,7 +55,7 @@ export async function main(args: string[]) {
     if (e instanceof TransformerError || e instanceof CompilerError) {
       console.error(e.message);
     } else if (e instanceof Error) {
-      console.error(e.message);
+      console.error(e.stack ?? e.message);
     } else {
       console.error(e);
     }
