@@ -27,8 +27,13 @@ const EXPORT_MAP_ASSIGNMENT_PATTERN =
   /^exportMap\["[^"]+"\] = require\("([^"]+)"\)$/;
 const RETURN_OBJECT_PATTERN = /^return \{\s*main,\s*exportMap\s*\}$/;
 const RETURN_REQUIRE_PATTERN = /^return require\("([^"]+)"\)$/;
-const TS_HELPER_PATTERN =
-  /^var __[A-Za-z_$][\w$]* = \(this && this\.__[A-Za-z_$][\w$]*\) \|\| /;
+const TRUSTED_TS_HELPER_PATTERNS = [
+  /^var __createBinding = \(this && this\.__createBinding\) \|\| \(Object\.create \? \(function\(o, m, k, k2\) \{[\s\S]*\}\) : \(function\(o, m, k, k2\) \{[\s\S]*\}\)\)$/,
+  /^var __exportStar = \(this && this\.__exportStar\) \|\| function\(m, exports\) \{[\s\S]*\}$/,
+  /^var __importDefault = \(this && this\.__importDefault\) \|\| function ?\(mod\) \{[\s\S]*\}$/,
+  /^var __setModuleDefault = \(this && this\.__setModuleDefault\) \|\| \(Object\.create \? \(function\(o, v\) \{[\s\S]*\}\) : function\(o, v\) \{[\s\S]*\}\)$/,
+  /^var __importStar = \(this && this\.__importStar\) \|\| \(function ?\(\) \{[\s\S]*return function ?\(mod\) \{[\s\S]*\};?[\s\S]*\}\)\(\)$/,
+];
 
 export function extractBundleRegion(bundleSource: string): string {
   return parseBundle(bundleSource).defineStatements.join("");
@@ -151,9 +156,8 @@ function stripNewLines(input: string): string {
 }
 
 function isTrustedTSHelperStatement(statement: string): boolean {
-  const normalized = stripTrailingSemicolon(statement);
-  return TS_HELPER_PATTERN.test(normalized) &&
-    !/(?:^|[^\w$.])(?:globalThis|window|document)\b/.test(normalized);
+  const normalized = normalizeTrustedStatement(statement);
+  return TRUSTED_TS_HELPER_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function normalizeTrustedStatement(statement: string): string {

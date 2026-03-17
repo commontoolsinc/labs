@@ -225,6 +225,127 @@ export function splitTopLevelStatements(source: string): string[] {
   return statements;
 }
 
+export function splitTopLevelCommaList(source: string): string[] {
+  const entries: string[] = [];
+  let start = 0;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let inRegex = false;
+  let inRegexCharClass = false;
+  let regexEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < source.length; index++) {
+    const current = source[index]!;
+    const next = source[index + 1];
+    const prev = source[index - 1];
+
+    if (inLineComment) {
+      if (current === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (prev === "*" && current === "/") inBlockComment = false;
+      continue;
+    }
+    if (inSingle) {
+      if (current === "'" && prev !== "\\") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (current === `"` && prev !== "\\") inDouble = false;
+      continue;
+    }
+    if (inTemplate) {
+      if (current === "`" && prev !== "\\") inTemplate = false;
+      continue;
+    }
+    if (inRegex) {
+      if (regexEscaped) {
+        regexEscaped = false;
+        continue;
+      }
+      if (current === "\\") {
+        regexEscaped = true;
+        continue;
+      }
+      if (inRegexCharClass) {
+        if (current === "]") inRegexCharClass = false;
+        continue;
+      }
+      if (current === "[") {
+        inRegexCharClass = true;
+        continue;
+      }
+      if (current === "/") {
+        inRegex = false;
+      }
+      continue;
+    }
+
+    if (current === "/" && next === "/") {
+      inLineComment = true;
+      index++;
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      inBlockComment = true;
+      index++;
+      continue;
+    }
+    if (current === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (current === `"`) {
+      inDouble = true;
+      continue;
+    }
+    if (current === "`") {
+      inTemplate = true;
+      continue;
+    }
+    if (
+      current === "/" && next !== "/" && next !== "*" &&
+      canStartRegexLiteral(source, index)
+    ) {
+      inRegex = true;
+      inRegexCharClass = false;
+      regexEscaped = false;
+      continue;
+    }
+
+    if (current === "(") parenDepth++;
+    if (current === ")") parenDepth--;
+    if (current === "{") braceDepth++;
+    if (current === "}") braceDepth--;
+    if (current === "[") bracketDepth++;
+    if (current === "]") bracketDepth--;
+
+    if (
+      current === "," && parenDepth === 0 && braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      const entry = source.slice(start, index).trim();
+      if (entry) {
+        entries.push(entry);
+      }
+      start = index + 1;
+    }
+  }
+
+  const trailing = source.slice(start).trim();
+  if (trailing) {
+    entries.push(trailing);
+  }
+  return entries;
+}
+
 const REGEX_PREFIX_KEYWORDS = new Set([
   "case",
   "delete",

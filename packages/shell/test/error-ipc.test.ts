@@ -150,4 +150,35 @@ describe("Error IPC propagation", () => {
     expect(receivedError!.stackTrace).toContain("something broke");
     expect(receivedError!.stackTrace).toBeDefined();
   });
+
+  it("forwards SES-mapped worker metadata and authored stack frames unchanged", () => {
+    const transport = new MockTransport();
+    const connection = new RuntimeConnection(transport);
+
+    let receivedError: ErrorNotification | null = null;
+    connection.on("error", (err) => {
+      receivedError = err;
+    });
+
+    transport.simulateMessage({
+      type: NotificationType.ErrorReport,
+      message: "handler exploded",
+      pieceId: "piece-789",
+      space: "did:key:z6Mkses",
+      patternId: "pattern-abc",
+      spellId: "spell-def",
+      stackTrace: `Error: handler exploded
+    at onIncrement (/patterns/simple-counter.pattern.ts:12:11)
+    at <CT_INTERNAL>`,
+    });
+
+    expect(receivedError).not.toBeNull();
+    expect(receivedError!.pieceId).toBe("piece-789");
+    expect(receivedError!.patternId).toBe("pattern-abc");
+    expect(receivedError!.spellId).toBe("spell-def");
+    expect(receivedError!.stackTrace).toContain(
+      "/patterns/simple-counter.pattern.ts:12:11",
+    );
+    expect(receivedError!.stackTrace).not.toContain(".js, <anonymous>");
+  });
 });

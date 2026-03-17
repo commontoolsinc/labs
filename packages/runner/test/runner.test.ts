@@ -247,6 +247,37 @@ describe("runPattern", () => {
     ).rejects.toThrow(/string-backed authored javascript module/i);
   });
 
+  it("runs serialized verified-ref javascript modules after round-trip", async () => {
+    const compiledPattern = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    const reloadedPattern = JSON.parse(JSON.stringify(compiledPattern)) as Pattern;
+    const resultCell = runtime.getCell(
+      space,
+      "runs serialized verified-ref javascript modules after round-trip",
+    );
+
+    const result = await runtime.runSynced(
+      resultCell,
+      reloadedPattern,
+      { value: 4 },
+    );
+
+    await expect(result.pull()).resolves.toEqual({ result: 8 });
+  });
+
   it("should handle incorrect inputs gracefully", async () => {
     let ran = false;
 

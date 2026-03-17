@@ -29,6 +29,7 @@ export class SESRuntime {
   private readonly sourceMaps = new SourceMapParser();
   private readonly compartments = new Map<string, SESCompartment>();
   private readonly verifiedFunctions = new Map<string, Map<string, Function>>();
+  private readonly verifiedFunctionIndex = new Map<string, Function>();
 
   evaluateBundle(
     compileId: string,
@@ -94,10 +95,9 @@ export class SESRuntime {
   }
 
   getVerifiedFunction(
-    compileId: string,
     implementationRef: string,
   ): Function | undefined {
-    return this.verifiedFunctions.get(compileId)?.get(implementationRef);
+    return this.verifiedFunctionIndex.get(implementationRef);
   }
 
   getCompartmentCount(): number {
@@ -107,6 +107,7 @@ export class SESRuntime {
   clear(): void {
     this.compartments.clear();
     this.verifiedFunctions.clear();
+    this.verifiedFunctionIndex.clear();
     this.sourceMaps.clear();
   }
 
@@ -212,6 +213,7 @@ export class SESRuntime {
           this.verifiedFunctions.set(compileId, registry);
         }
         registry.set(implementationRef, value);
+        this.verifiedFunctionIndex.set(implementationRef, value);
       }
     }
 

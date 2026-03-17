@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { moduleToJSON } from "../src/builder/json-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -213,6 +214,80 @@ describe("Engine.evaluate()", () => {
     const utilExports = result.exportMap![utilsKey!];
     expect(typeof utilExports["double"]).toBe("function");
     expect(typeof utilExports["triple"]).toBe("function");
+  });
+
+  it("creates one compartment per loaded pattern evaluation while reusing the same loaded pattern", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await engine.compile(program);
+    await engine.evaluate(compiled.id, compiled.jsScript, program.files);
+    expect(engine.getSESCompartmentCount()).toBe(1);
+
+    await engine.evaluate(compiled.id, compiled.jsScript, program.files);
+    expect(engine.getSESCompartmentCount()).toBe(2);
+
+    const secondProgram: RuntimeProgram = {
+      main: "/second.tsx",
+      files: [
+        {
+          name: "/second.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern } from 'commontools';",
+            "export default pattern<{ value: number }>(({ value }) => ({ value }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const secondCompiled = await engine.compile(secondProgram);
+    await engine.evaluate(
+      secondCompiled.id,
+      secondCompiled.jsScript,
+      secondProgram.files,
+    );
+    expect(engine.getSESCompartmentCount()).toBe(3);
+  });
+
+  it("rebinds verified implementation refs after JSON round-trip", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await engine.compile(program);
+    const { main } = await engine.evaluate(compiled.id, compiled.jsScript, program.files);
+    const pattern = main!.default as { nodes: Array<{ module: unknown }> };
+    const serialized = JSON.parse(JSON.stringify(pattern, (_key, value) =>
+      typeof value === "function" ? undefined : value
+    ));
+
+    const module = serialized.nodes[0].module as Parameters<typeof moduleToJSON>[0];
+    expect(typeof module.implementationRef).toBe("string");
+    expect(engine.getVerifiedFunction(module.implementationRef!)).toBeDefined();
   });
 });
 

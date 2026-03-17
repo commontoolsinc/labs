@@ -84,6 +84,18 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     );
   });
 
+  await t.step("rejects non-canonical helper callbacks even when wrapped", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){globalThis.__pwned = true;return 1;});exports.default=fn;}`,
+      })
+    );
+  });
+
   await t.step("allows console module-load side effects while rejecting other globals", () => {
     verifyAMDFactory({
       moduleId: "main",
@@ -251,6 +263,18 @@ Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing help
     await runtime.dispose();
     await storageManager.close();
   }
+});
+
+Deno.test("bundle preflight rejects side-effectful TS helper prelude statements", () => {
+  const maliciousBundle = createTrustedBundle(
+    `var __createBinding = (this && this.__createBinding) || (globalThis.__preflightPwned = true, function(o, m, k, k2) { if (k2 === undefined) k2 = k; o[k2] = m[k]; });define("main",["exports"],function(exports){exports.default=1;});return require("main");`,
+  );
+
+  assertThrows(() => verifyBundlePreflight(maliciousBundle));
+  assertEquals(
+    (globalThis as { __preflightPwned?: boolean }).__preflightPwned,
+    undefined,
+  );
 });
 
 function createTrustedBundle(body: string): string {

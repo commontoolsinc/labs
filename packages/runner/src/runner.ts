@@ -1177,7 +1177,15 @@ export class Runner {
         this.functionCache.set(module, fn);
       }
     } else if (module.implementationRef) {
-      const cached = this.functionCache.get(module);
+      let cached = this.functionCache.get(module);
+      if (!cached) {
+        cached = this.runtime.harness.getVerifiedFunction(
+          module.implementationRef,
+        ) as ((...args: any[]) => any) | undefined;
+        if (cached) {
+          this.functionCache.set(module, cached);
+        }
+      }
       if (!cached) {
         throw new Error(
           `Unknown verified implementationRef: ${module.implementationRef}`,

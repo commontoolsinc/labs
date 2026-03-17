@@ -6,6 +6,7 @@ import type { RuntimeProgram } from "../../src/harness/types.ts";
 import { UnsafeEvalRuntime } from "../../src/harness/eval-runtime.ts";
 import * as RuntimeModules from "../../src/harness/runtime-modules.ts";
 import type { JsScript } from "@commontools/js-compiler";
+import type { Pattern } from "../../src/builder/types.ts";
 
 export async function compareExports(program: RuntimeProgram): Promise<void> {
   const signer = await Identity.fromPassphrase("runtime-compare exports");
@@ -54,6 +55,64 @@ export async function compareMappedError(
   } finally {
     await runtime.dispose();
     await storageManager.close();
+  }
+}
+
+export async function comparePatternResult<TArgument>(
+  program: RuntimeProgram,
+  argument: TArgument,
+): Promise<void> {
+  const sesSigner = await Identity.fromPassphrase("runtime-compare ses pattern");
+  const sesStorageManager = StorageManager.emulate({ as: sesSigner });
+  const sesRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: sesStorageManager,
+  });
+
+  const legacySigner = await Identity.fromPassphrase(
+    "runtime-compare legacy pattern",
+  );
+  const legacyStorageManager = StorageManager.emulate({ as: legacySigner });
+  const legacyRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: legacyStorageManager,
+  });
+
+  try {
+    const { id, jsScript } = await sesRuntime.harness.compile(program);
+    const ses = await sesRuntime.harness.evaluate(id, jsScript, program.files);
+    const legacy = await executeLegacy(jsScript);
+    const exportName = program.mainExport ?? "default";
+    const sesPattern = ses.main?.[exportName] as Pattern;
+    const legacyPattern = legacy.main[exportName] as Pattern;
+
+    const sesResultCell = sesRuntime.getCell(
+      sesSigner.did(),
+      { compare: "ses-pattern-result" },
+      sesPattern.resultSchema,
+    );
+    const legacyResultCell = legacyRuntime.getCell(
+      legacySigner.did(),
+      { compare: "legacy-pattern-result" },
+      legacyPattern.resultSchema,
+    );
+
+    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const legacyResult = await legacyRuntime.runSynced(
+      legacyResultCell,
+      legacyPattern,
+      argument,
+    );
+
+    assertEquals(
+      normalizeValue(await sesResult.pull()),
+      normalizeValue(await legacyResult.pull()),
+    );
+  } finally {
+    await sesRuntime.dispose();
+    await legacyRuntime.dispose();
+    await sesStorageManager.close();
+    await legacyStorageManager.close();
   }
 }
 

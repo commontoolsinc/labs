@@ -83,6 +83,7 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private evaluationCounter = 0;
 
   constructor(ctRuntime: Runtime) {
     super();
@@ -158,8 +159,9 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
     const { runtime, console, runtimeExports, exportsCallback } = await this
       .getInternals();
+    const evaluationId = `${id}:evaluation:${this.evaluationCounter++}`;
 
-    const result = runtime.evaluateBundle(id, jsScript, {
+    const result = runtime.evaluateBundle(evaluationId, jsScript, {
       console,
       runtimeExports: runtimeExports ?? {},
     });
@@ -228,6 +230,20 @@ export class Engine extends EventTarget implements Harness {
       return stack;
     }
     return this.internals.runtime.parseStack(stack);
+  }
+
+  getSESCompartmentCount(): number {
+    if (!this.internals) {
+      return 0;
+    }
+    return this.internals.runtime.getCompartmentCount();
+  }
+
+  getVerifiedFunction(implementationRef: string): Function | undefined {
+    if (!this.internals) {
+      return undefined;
+    }
+    return this.internals.runtime.getVerifiedFunction(implementationRef);
   }
 
   // Returns a map of runtime module types.
