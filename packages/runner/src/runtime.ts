@@ -39,6 +39,7 @@ import type {
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
+  IStorageNotification,
   IStorageProvider,
   MemorySpace,
   MemoryVersion,
@@ -261,6 +262,7 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   #ambientReadTx?: IExtendedStorageTransaction;
+  #ambientReadSubscription?: IStorageNotification;
 
   constructor(options: RuntimeOptions) {
     const defaultMemoryVersion = getDefaultMemoryVersion();
@@ -323,12 +325,13 @@ export class Runtime {
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
     if (this.memoryVersion === "v2") {
-      this.storageManager.subscribe({
+      this.#ambientReadSubscription = {
         next: () => {
           this.clearAmbientReadTx();
           return undefined;
         },
-      });
+      };
+      this.storageManager.subscribe(this.#ambientReadSubscription);
     }
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
@@ -452,6 +455,7 @@ export class Runtime {
       queue.abortPending();
     }
     this.queues.clear();
+    this.removeAmbientReadSubscription();
     this.clearAmbientReadTx();
     // Stop all running docs
     this.runner.stopAll();
@@ -613,6 +617,14 @@ export class Runtime {
     if (ambient?.status().status === "ready") {
       ambient.abort();
     }
+  }
+
+  private removeAmbientReadSubscription(): void {
+    if (!this.#ambientReadSubscription) {
+      return;
+    }
+    this.storageManager.unsubscribe?.(this.#ambientReadSubscription);
+    this.#ambientReadSubscription = undefined;
   }
 
   // Cell factory methods

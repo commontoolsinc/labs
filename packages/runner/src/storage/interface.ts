@@ -255,8 +255,13 @@ export interface IStorageNotificationCapability {
    * }
    * storage.subscribe(log(5));
    * ```
-   */
+  */
   subscribe(subscription: IStorageNotification): void;
+
+  /**
+   * Removes a previously registered notification subscriber.
+   */
+  unsubscribe?(subscription: IStorageNotification): void;
 }
 
 /**

@@ -27,6 +27,9 @@ export class StorageNotificationRelay
   subscribe(subscription: IStorageNotification): void {
     this.#subscribers.add(subscription);
   }
+  unsubscribe(subscription: IStorageNotification): void {
+    this.#subscribers.delete(subscription);
+  }
   next(notification: StorageNotification) {
     for (const subscriber of this.#subscribers) {
       try {

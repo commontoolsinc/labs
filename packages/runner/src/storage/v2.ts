@@ -398,6 +398,10 @@ export class StorageManager implements IStorageManager {
     this.#subscription.subscribe(subscription);
   }
 
+  unsubscribe(subscription: IStorageNotification): void {
+    this.#subscription.unsubscribe(subscription);
+  }
+
   async syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
     const { space, id, schema } = cell.getAsNormalizedFullLink();
     if (!space) {

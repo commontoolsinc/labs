@@ -59,6 +59,10 @@ export class StorageManagerEmulator extends BaseStorageManager {
     this.#subscription.subscribe(subscription);
   }
 
+  override unsubscribe(subscription: IStorageSubscription): void {
+    this.#subscription.unsubscribe(subscription);
+  }
+
   override async close() {
     await super.close();
     // Dispose provider sessions to clear pending schema flush timers,

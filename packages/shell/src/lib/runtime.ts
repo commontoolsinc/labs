@@ -229,8 +229,11 @@ export class RuntimeInternals extends EventTarget {
     const pieceId = cell.id();
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    if (cell.space() === this.#space && this.#spaceName) {
+    if (cell.space() === this.#space) {
       void this.registerNavigatedPiece(cell);
+    }
+
+    if (cell.space() === this.#space && this.#spaceName) {
       navigate({
         spaceName: this.#spaceName,
         pieceId,

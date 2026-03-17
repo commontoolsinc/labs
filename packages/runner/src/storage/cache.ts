@@ -2278,6 +2278,10 @@ export class StorageManager implements IStorageManager {
     this.#subscription.subscribe(subscription);
   }
 
+  unsubscribe(subscription: IStorageSubscription): void {
+    this.#subscription.unsubscribe(subscription);
+  }
+
   /**
    * Wait for all pending syncs to complete + the microtask queue to flush, so
    * that they are also all processed.

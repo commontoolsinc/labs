@@ -1,11 +1,55 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import type { DID } from "@commontools/identity";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { IStorageNotification } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runtime-v2-read-tx-cache");
 const space = signer.did();
+
+class MockStorageManager {
+  readonly id = "mock-storage-manager";
+  readonly as = {
+    did: () => space as DID,
+  };
+  readonly memoryVersion: "v1" | "v2";
+  readonly subscriptions: IStorageNotification[] = [];
+  readonly unsubscribed: IStorageNotification[] = [];
+
+  constructor(memoryVersion: "v1" | "v2") {
+    this.memoryVersion = memoryVersion;
+  }
+
+  open(): never {
+    throw new Error("MockStorageManager.open should not be called");
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  edit(): never {
+    throw new Error("MockStorageManager.edit should not be called");
+  }
+
+  synced(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  addCrossSpacePromise(): void {}
+
+  removeCrossSpacePromise(): void {}
+
+  subscribe(subscription: IStorageNotification): void {
+    this.subscriptions.push(subscription);
+  }
+
+  unsubscribe(subscription: IStorageNotification): void {
+    this.unsubscribed.push(subscription);
+  }
+}
 
 describe("Runtime v2 ambient read transaction", () => {
   it("reuses a single ambient read transaction for repeated reads", async () => {
@@ -97,5 +141,27 @@ describe("Runtime v2 ambient read transaction", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("unsubscribes the ambient v2 notification listener on dispose", async () => {
+    const v1Storage = new MockStorageManager("v1");
+    const v1Runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: v1Storage as any,
+      memoryVersion: "v1",
+    });
+
+    await v1Runtime.dispose();
+    expect(v1Storage.unsubscribed).toHaveLength(0);
+
+    const v2Storage = new MockStorageManager("v2");
+    const v2Runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: v2Storage as any,
+      memoryVersion: "v2",
+    });
+
+    await v2Runtime.dispose();
+    expect(v2Storage.unsubscribed).toHaveLength(1);
   });
 });
