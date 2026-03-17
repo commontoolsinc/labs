@@ -29,6 +29,11 @@ import type {
   CfcPrepareScope,
   CfcPrepareScopeOverrides,
 } from "../cfc/integrity-trust.ts";
+import type {
+  CfcConfidentialityLabelInput,
+  CfcConfidentialityLabel,
+  CfcIntegrityLabel,
+} from "../cfc/label-algebra.ts";
 
 export {
   ignoreReadForSchedulingMarker,
@@ -89,8 +94,8 @@ export interface IReadOptions {
 // This type is used to tag a document with any important metadata.
 // Labels currently support confidentiality-like classification and integrity tags.
 export type Labels = {
-  classification?: string[];
-  integrity?: string[];
+  classification?: CfcConfidentialityLabelInput;
+  integrity?: CfcIntegrityLabel;
 };
 
 /** Immutable storage value container. */
@@ -735,8 +740,8 @@ export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly path: string;
   readonly maxConfidentiality?: readonly string[];
   readonly requiredIntegrity?: readonly string[];
-  readonly actualClassification?: string;
-  readonly actualIntegrity?: readonly string[];
+  readonly actualClassification?: CfcConfidentialityLabel;
+  readonly actualIntegrity?: CfcIntegrityLabel;
   readonly requiredReadPath?: string;
   readonly predicatePath?: string;
   readonly expectedValue?: unknown;
@@ -760,8 +765,8 @@ export interface ICfcOutputTransitionViolationError extends IStorageError {
   readonly path: string;
   readonly sourcePath?: string;
   readonly projectionPath?: string;
-  readonly minClassification?: string;
-  readonly actualClassification?: string;
+  readonly minClassification?: CfcConfidentialityLabel;
+  readonly actualClassification?: CfcConfidentialityLabel;
 }
 
 export interface ICfcPolicyNonConvergenceError extends IStorageError {

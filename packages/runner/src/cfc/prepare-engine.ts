@@ -40,11 +40,23 @@ import {
   normalizePersistedLabels,
 } from "./shared.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 import {
   type CfcTrustContext,
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
+import {
+  confidentialityDominates,
+  confidentialityFromLegacyAtom,
+  confidentialitySatisfiesMax,
+  joinConfidentialityLabels,
+  joinIntegrityLabels,
+  normalizeConfidentialityLabel,
+  normalizeIntegrityLabel,
+  type CfcConfidentialityLabel,
+  type CfcIntegrityLabel,
+} from "./label-algebra.ts";
 import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
@@ -93,7 +105,7 @@ function CfcSchemaHashMismatchError(
 function CfcMaxConfidentialityViolationError(
   read: CanonicalBoundaryRead,
   maxConfidentiality: readonly string[],
-  actualClassification: string,
+  actualClassification: CfcConfidentialityLabel | undefined,
 ): ICfcInputRequirementViolationError {
   return {
     name: "CfcInputRequirementViolationError",
@@ -112,7 +124,7 @@ function CfcMaxConfidentialityViolationError(
 function CfcRequiredIntegrityViolationError(
   read: CanonicalBoundaryRead,
   requiredIntegrity: readonly string[],
-  actualIntegrity: readonly string[],
+  actualIntegrity: CfcIntegrityLabel | undefined,
   path = read.path,
 ): ICfcInputRequirementViolationError {
   return {
@@ -125,7 +137,7 @@ function CfcRequiredIntegrityViolationError(
     type: read.type,
     path,
     requiredIntegrity: [...requiredIntegrity],
-    actualIntegrity: [...actualIntegrity],
+    actualIntegrity,
   };
 }
 
@@ -172,8 +184,8 @@ function CfcStatePreconditionPredicateViolationError(
 function CfcOutputTransitionViolationError(
   entity: EntityAddress,
   path: string,
-  minClassification: string,
-  actualClassification: string,
+  minClassification: CfcConfidentialityLabel | undefined,
+  actualClassification: CfcConfidentialityLabel | undefined,
 ): ICfcOutputTransitionViolationError {
   return {
     name: "CfcOutputTransitionViolationError",
@@ -321,20 +333,16 @@ function schemaBlobAddress(
 }
 
 function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
-  const cfc = new ContextualFlowControl();
   type LabelAccumulator = {
-    classification: Set<string>;
-    integrity: Set<string>;
+    classification?: CfcConfidentialityLabel;
+    integrity?: CfcIntegrityLabel;
   };
   const byPath = new Map<string, LabelAccumulator>();
 
   const ensureAccumulator = (path: string): LabelAccumulator => {
     let accumulator = byPath.get(path);
     if (!accumulator) {
-      accumulator = {
-        classification: new Set<string>(),
-        integrity: new Set<string>(),
-      };
+      accumulator = {};
       byPath.set(path, accumulator);
     }
     return accumulator;
@@ -342,19 +350,21 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
 
   const pushLabelsForPath = (
     path: string,
-    classification: Set<string>,
-    integrity: Set<string>,
+    classification: CfcConfidentialityLabel | undefined,
+    integrity: CfcIntegrityLabel | undefined,
   ) => {
-    if (classification.size === 0 && integrity.size === 0) {
+    if (!classification && !integrity) {
       return;
     }
     const accumulator = ensureAccumulator(path);
-    for (const value of classification) {
-      accumulator.classification.add(value);
-    }
-    for (const value of integrity) {
-      accumulator.integrity.add(value);
-    }
+    accumulator.classification = joinConfidentialityLabels(
+      accumulator.classification,
+      classification,
+    );
+    accumulator.integrity = joinIntegrityLabels(
+      accumulator.integrity,
+      integrity,
+    );
   };
 
   const resolveNodeRefs = (
@@ -373,8 +383,8 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
   const collect = (
     node: JSONSchema | undefined,
     path: string,
-    inheritedClassification: Set<string>,
-    inheritedIntegrity: Set<string>,
+    inheritedClassification: CfcConfidentialityLabel | undefined,
+    inheritedIntegrity: CfcIntegrityLabel | undefined,
     fullSchema: JSONSchema,
     stack: Set<object>,
   ) => {
@@ -392,30 +402,26 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     }
     stack.add(node);
 
-    const classification = new Set(inheritedClassification);
-    const integrity = new Set(inheritedIntegrity);
-
     const ifc = (node as { ifc?: unknown }).ifc;
-    if (ifc && typeof ifc === "object" && !Array.isArray(ifc)) {
-      const localClassification = (ifc as { classification?: unknown })
-        .classification;
-      if (Array.isArray(localClassification)) {
-        for (const value of localClassification) {
-          if (typeof value === "string" && value.length > 0) {
-            classification.add(value);
-          }
-        }
-      }
+    const localClassification = ifc && typeof ifc === "object" &&
+        !Array.isArray(ifc)
+      ? normalizeConfidentialityLabel(
+        (ifc as { classification?: unknown }).classification,
+      )
+      : undefined;
+    const localIntegrity = ifc && typeof ifc === "object" &&
+        !Array.isArray(ifc)
+      ? normalizeIntegrityLabel((ifc as { integrity?: unknown }).integrity)
+      : undefined;
 
-      const localIntegrity = (ifc as { integrity?: unknown }).integrity;
-      if (Array.isArray(localIntegrity)) {
-        for (const value of localIntegrity) {
-          if (typeof value === "string" && value.length > 0) {
-            integrity.add(value);
-          }
-        }
-      }
-    }
+    const classification = joinConfidentialityLabels(
+      inheritedClassification,
+      localClassification,
+    );
+    const integrity = joinIntegrityLabels(
+      inheritedIntegrity,
+      localIntegrity,
+    );
 
     pushLabelsForPath(path, classification, integrity);
 
@@ -504,18 +510,16 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     stack.delete(node);
   };
 
-  collect(schema, "/", new Set(), new Set(), schema, new Set());
+  collect(schema, "/", undefined, undefined, schema, new Set());
 
   const result: Record<string, Labels> = {};
   for (const [path, { classification, integrity }] of byPath) {
-    if (classification.size === 0 && integrity.size === 0) {
+    if (!classification && !integrity) {
       continue;
     }
     result[path] = {
-      ...(classification.size > 0
-        ? { classification: [cfc.lub(classification)] }
-        : {}),
-      ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
+      ...(classification ? { classification } : {}),
+      ...(integrity ? { integrity } : {}),
     };
   }
   return result;
@@ -555,24 +559,19 @@ function mergeLabel(
     return undefined;
   }
 
-  const classification = new Set([
-    ...(base?.classification ?? []),
-    ...(dynamic?.classification ?? []),
-  ]);
-  const integrity = new Set([
-    ...(base?.integrity ?? []),
-    ...(dynamic?.integrity ?? []),
-  ]);
+  const classification = joinConfidentialityLabels(
+    base?.classification,
+    dynamic?.classification,
+  );
+  const integrity = joinIntegrityLabels(base?.integrity, dynamic?.integrity);
 
-  if (classification.size === 0 && integrity.size === 0) {
+  if (!classification && !integrity) {
     return undefined;
   }
 
   return {
-    ...(classification.size > 0
-      ? { classification: [...classification].sort() }
-      : {}),
-    ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
+    ...(classification ? { classification } : {}),
+    ...(integrity ? { integrity } : {}),
   };
 }
 
@@ -601,30 +600,28 @@ function mergePreparedLabels(
 
 function collectDynamicWriteIntegrity(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
-): readonly string[] {
-  const integrity = new Set<string>();
+): CfcIntegrityLabel | undefined {
+  let integrity: CfcIntegrityLabel | undefined;
   for (const consumed of consumedReadLabels) {
-    for (const atom of consumed.effectiveLabel?.integrity ?? []) {
-      integrity.add(atom);
-    }
+    integrity = joinIntegrityLabels(integrity, consumed.effectiveLabel?.integrity);
   }
-  return [...integrity].sort();
+  return integrity;
 }
 
 function recordDynamicWriteIntegrity(
   labelsByEntity: Map<string, Record<string, Labels>>,
   entity: EntityAddress,
   writePath: string,
-  integrity: readonly string[],
+  integrity: CfcIntegrityLabel | undefined,
 ): void {
-  if (integrity.length === 0) {
+  if (!integrity || integrity.length === 0) {
     return;
   }
 
   const entityKey = cfcEntityKey(entity);
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
   for (const path of canonicalAncestorPaths(writePath)) {
-    const merged = mergeLabel(labels[path], { integrity: [...integrity] });
+    const merged = mergeLabel(labels[path], { integrity });
     if (merged) {
       labels[path] = merged;
     }
@@ -636,9 +633,9 @@ function recordDynamicContainerClassification(
   labelsByEntity: Map<string, Record<string, Labels>>,
   entity: EntityAddress,
   writePath: string,
-  classification: string,
+  classification: CfcConfidentialityLabel | undefined,
 ): void {
-  if (classification.length === 0 || classification === "unclassified") {
+  if (!classification || classification.length === 0) {
     return;
   }
 
@@ -651,7 +648,7 @@ function recordDynamicContainerClassification(
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
   for (const path of ancestorPaths.slice(0, -1)) {
     const merged = mergeLabel(labels[path], {
-      classification: [classification],
+      classification,
     });
     if (merged) {
       labels[path] = merged;
@@ -742,24 +739,6 @@ async function resolvePreparedWriteSchemas(
   return prepared;
 }
 
-function classificationSatisfiesMaxConfidentiality(
-  classification: string,
-  maxConfidentiality: readonly string[],
-  cfc: ContextualFlowControl,
-): boolean {
-  for (const maxClassification of maxConfidentiality) {
-    try {
-      const joined = cfc.lub(new Set([classification, maxClassification]));
-      if (joined === maxClassification) {
-        return true;
-      }
-    } catch {
-      // Unknown classifications are treated as non-matching for this bound.
-    }
-  }
-  return false;
-}
-
 function isSameOrDescendantCanonicalPath(
   basePath: string,
   candidatePath: string,
@@ -770,12 +749,60 @@ function isSameOrDescendantCanonicalPath(
   return candidatePath === basePath || candidatePath.startsWith(`${basePath}/`);
 }
 
+function effectiveLabelForPath(
+  labelsByPath: Record<string, Labels>,
+  path: string,
+): Labels | undefined {
+  let classification: CfcConfidentialityLabel | undefined;
+  let integrity: CfcIntegrityLabel | undefined;
+  for (const [labelPath, label] of Object.entries(labelsByPath)) {
+    if (!canonicalLabelPathMatchesReadPath(labelPath, path)) {
+      continue;
+    }
+    classification = joinConfidentialityLabels(
+      classification,
+      label.classification,
+    );
+    integrity = joinIntegrityLabels(integrity, label.integrity);
+  }
+  if (!classification && !integrity) {
+    return undefined;
+  }
+  return {
+    ...(classification ? { classification } : {}),
+    ...(integrity ? { integrity } : {}),
+  };
+}
+
+function stringIntegrityAtoms(
+  integrity: CfcIntegrityLabel | undefined,
+): readonly string[] {
+  return (integrity ?? []).filter((atom): atom is string =>
+    typeof atom === "string" && atom.length > 0
+  );
+}
+
+function classificationSatisfiesMaxConfidentiality(
+  classification: CfcConfidentialityLabel | undefined,
+  maxConfidentiality: readonly string[],
+): boolean {
+  if (maxConfidentiality.length === 0) {
+    return true;
+  }
+  return maxConfidentiality.some((maxClassification) =>
+    confidentialitySatisfiesMax(
+      classification,
+      confidentialityFromLegacyAtom(maxClassification),
+    )
+  );
+}
+
 function findRequiredIntegrityCoherenceViolation(
   labelsByPath: Record<string, Labels>,
   readPath: string,
   requiredIntegrity: readonly string[],
   options: PrepareBoundaryCommitOptions,
-): { path: string; actualIntegrity: readonly string[] } | undefined {
+): { path: string; actualIntegrity: CfcIntegrityLabel | undefined } | undefined {
   const sortedEntries = Object.entries(labelsByPath).sort(([a], [b]) =>
     a.localeCompare(b)
   );
@@ -783,10 +810,10 @@ function findRequiredIntegrityCoherenceViolation(
     if (!isSameOrDescendantCanonicalPath(readPath, path)) {
       continue;
     }
-    const actualIntegrity = label.integrity ?? [];
+    const actualIntegrity = normalizeIntegrityLabel(label.integrity);
     if (
       !integritySatisfiesRequiredIntegrity(
-        actualIntegrity,
+        stringIntegrityAtoms(actualIntegrity),
         requiredIntegrity,
         options,
       )
@@ -833,19 +860,18 @@ function verifyInputRequirementsForAttempt(
     consumedReads,
     labelsByEntity,
   );
-  const cfc = new ContextualFlowControl();
   for (const consumed of consumedReadLabels) {
     const maxConfidentiality = readMaxConfidentialityFromMeta(
       consumed.read.cfc,
     );
     if (maxConfidentiality && maxConfidentiality.length > 0) {
-      const actualClassification =
-        consumed.effectiveLabel?.classification?.[0] ?? "unclassified";
+      const actualClassification = normalizeConfidentialityLabel(
+        consumed.effectiveLabel?.classification,
+      );
       if (
         !classificationSatisfiesMaxConfidentiality(
           actualClassification,
           maxConfidentiality,
-          cfc,
         )
       ) {
         throw CfcMaxConfidentialityViolationError(
@@ -875,10 +901,12 @@ function verifyInputRequirementsForAttempt(
           coherenceViolation.path,
         );
       }
-      const actualIntegrity = consumed.effectiveLabel?.integrity ?? [];
+      const actualIntegrity = normalizeIntegrityLabel(
+        consumed.effectiveLabel?.integrity,
+      );
       if (
         !integritySatisfiesRequiredIntegrity(
-          actualIntegrity,
+          stringIntegrityAtoms(actualIntegrity),
           requiredIntegrity,
           options,
         )
@@ -896,47 +924,23 @@ function verifyInputRequirementsForAttempt(
 }
 
 function classificationDominates(
-  actualClassification: string,
-  minClassification: string,
-  cfc: ContextualFlowControl,
+  actualClassification: CfcConfidentialityLabel | undefined,
+  minClassification: CfcConfidentialityLabel | undefined,
 ): boolean {
-  try {
-    return cfc.lub(new Set([actualClassification, minClassification])) ===
-      actualClassification;
-  } catch {
-    return false;
-  }
+  return confidentialityDominates(actualClassification, minClassification);
 }
 
 function strongestConsumedClassification(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
-  cfc: ContextualFlowControl,
-): string {
-  const consumed = new Set<string>();
+): CfcConfidentialityLabel | undefined {
+  let consumed: CfcConfidentialityLabel | undefined;
   for (const read of consumedReadLabels) {
-    consumed.add(read.effectiveLabel?.classification?.[0] ?? "unclassified");
+    consumed = joinConfidentialityLabels(
+      consumed,
+      read.effectiveLabel?.classification,
+    );
   }
-  if (consumed.size === 0) {
-    return "unclassified";
-  }
-  return cfc.lub(consumed);
-}
-
-function effectiveWriteClassification(
-  rootSchema: JSONSchema,
-  writeSchema: JSONSchema | undefined,
-  cfc: ContextualFlowControl,
-): string {
-  const rootClassification = cfc.lubSchema(rootSchema);
-  const writeClassification = writeSchema
-    ? cfc.lubSchema(writeSchema)
-    : undefined;
-
-  if (rootClassification && writeClassification) {
-    return cfc.lub(new Set([rootClassification, writeClassification]));
-  }
-
-  return writeClassification ?? rootClassification ?? "unclassified";
+  return consumed;
 }
 
 function fromCanonicalPath(path: string): string[] {
@@ -1549,7 +1553,7 @@ type PolicyRewriteConfig = {
 };
 
 type PolicyLabelState = {
-  readonly confidentiality: readonly (readonly string[])[];
+  readonly confidentiality: CfcConfidentialityLabel;
   readonly integrity: readonly string[];
 };
 
@@ -1756,23 +1760,21 @@ function readPolicyRewriteConfig(
 function buildPolicyLabelFromConsumedReads(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
 ): PolicyLabelState {
-  const confidentiality: string[][] = [];
+  let confidentiality: CfcConfidentialityLabel | undefined;
   const integrity = new Set<string>();
 
   for (const consumed of consumedReadLabels) {
-    const clause = toStringArray(consumed.effectiveLabel?.classification);
-    confidentiality.push(
-      clause.length > 0 ? [...new Set(clause)] : [
-        "unclassified",
-      ],
+    confidentiality = joinConfidentialityLabels(
+      confidentiality,
+      consumed.effectiveLabel?.classification,
     );
-    for (const atom of toStringArray(consumed.effectiveLabel?.integrity)) {
+    for (const atom of stringIntegrityAtoms(consumed.effectiveLabel?.integrity)) {
       integrity.add(atom);
     }
   }
 
   return {
-    confidentiality,
+    confidentiality: confidentiality ?? [],
     integrity: [...integrity].sort(),
   };
 }
@@ -1784,21 +1786,26 @@ function policyRuleConfidentialityMatches(
 ): boolean {
   const clause = label.confidentiality[clauseIndex];
   const targetAtom = rule.confidentialityPre[0];
-  if (!clause || !clause.includes(targetAtom)) {
+  const clauseContains = (atom: string) =>
+    clause?.some((entry) => typeof entry === "string" && entry === atom) ??
+      false;
+  if (!clause || !clauseContains(targetAtom)) {
     return false;
   }
 
   for (const sideCondition of rule.confidentialityPre.slice(1)) {
     if (rule.preConfScope === "anywhere") {
       const found = label.confidentiality.some((candidateClause) =>
-        candidateClause.includes(sideCondition)
+        candidateClause.some((entry) =>
+          typeof entry === "string" && entry === sideCondition
+        )
       );
       if (!found) {
         return false;
       }
       continue;
     }
-    if (!clause.includes(sideCondition)) {
+    if (!clauseContains(sideCondition)) {
       return false;
     }
   }
@@ -1919,25 +1926,27 @@ function applyPolicyRuleOnce(
       continue;
     }
     const clause = [...label.confidentiality[clauseIndex]];
-    const targetIndex = clause.indexOf(target);
+    const targetIndex = clause.findIndex((atom) =>
+      typeof atom === "string" && atom === target
+    );
     if (targetIndex < 0) {
       continue;
     }
 
     if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
       clause.splice(targetIndex, 1);
-      const nextConfidentiality = label.confidentiality.map((
-        entry,
-      ) => [...entry]);
+      const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
       if (clause.length === 0) {
         nextConfidentiality.splice(clauseIndex, 1);
       } else {
         nextConfidentiality[clauseIndex] = clause;
       }
+      const normalizedConfidentiality =
+        normalizeConfidentialityLabel(nextConfidentiality) ?? [];
       return {
         changed: true,
         label: {
-          confidentiality: nextConfidentiality,
+          confidentiality: normalizedConfidentiality,
           integrity: addPolicyIntegrity(label.integrity, rule.addIntegrity),
         },
       };
@@ -1945,7 +1954,9 @@ function applyPolicyRuleOnce(
 
     let clauseChanged = false;
     for (const alternative of rule.addAlternatives) {
-      if (!clause.includes(alternative)) {
+      if (
+        !clause.some((atom) => typeof atom === "string" && atom === alternative)
+      ) {
         clause.push(alternative);
         clauseChanged = true;
       }
@@ -1960,14 +1971,14 @@ function applyPolicyRuleOnce(
       continue;
     }
 
-    const nextConfidentiality = label.confidentiality.map((
-      entry,
-    ) => [...entry]);
+    const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
     nextConfidentiality[clauseIndex] = clause;
+    const normalizedConfidentiality =
+      normalizeConfidentialityLabel(nextConfidentiality) ?? [];
     return {
       changed: true,
       label: {
-        confidentiality: nextConfidentiality,
+        confidentiality: normalizedConfidentiality,
         integrity: nextIntegrity,
       },
     };
@@ -2050,15 +2061,9 @@ function evaluatePolicyFixpoint(
 
 function policyAllowsClassification(
   label: PolicyLabelState,
-  classification: string,
-  cfc: ContextualFlowControl,
+  classification: CfcConfidentialityLabel | undefined,
 ): boolean {
-  if (label.confidentiality.length === 0) {
-    return true;
-  }
-  return label.confidentiality.every((clause) =>
-    clause.some((atom) => classificationDominates(classification, atom, cfc))
-  );
+  return confidentialityDominates(classification, label.confidentiality);
 }
 
 function evaluatePolicyDowngradeDecision(
@@ -2067,8 +2072,7 @@ function evaluatePolicyDowngradeDecision(
   writePath: string,
   schemaAtWritePath: JSONSchema | undefined,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
-  outputClassification: string,
-  cfc: ContextualFlowControl,
+  outputClassification: CfcConfidentialityLabel | undefined,
   options: PrepareBoundaryCommitOptions = {},
 ): PolicyDowngradeDecision {
   const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
@@ -2091,7 +2095,6 @@ function evaluatePolicyDowngradeDecision(
     allowed: policyAllowsClassification(
       policyResult.label,
       outputClassification,
-      cfc,
     ),
     nonConverged: false,
     fuel: policyResult.fuel,
@@ -2111,6 +2114,7 @@ function verifyOutputTransitionsForAttempt(
   }
   const cfc = new ContextualFlowControl();
   const dynamicLabelsByEntity = new Map<string, Record<string, Labels>>();
+  const preparedLabelsByEntity = new Map<string, Record<string, Labels>>();
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -2151,18 +2155,22 @@ function verifyOutputTransitionsForAttempt(
       flowPrecisionSelection.consumedReadLabels;
     const minClassification = strongestConsumedClassification(
       effectiveConsumedReadLabels,
-      cfc,
     );
-    const actualClassification = effectiveWriteClassification(
-      rootSchema,
-      schemaAtWritePath,
-      cfc,
+    let preparedLabels = preparedLabelsByEntity.get(cfcEntityKey(entity));
+    if (!preparedLabels) {
+      preparedLabels = computePreparedLabels(rootSchema);
+      preparedLabelsByEntity.set(cfcEntityKey(entity), preparedLabels);
+    }
+    const actualClassification = normalizeConfidentialityLabel(
+      effectiveLabelForPath(
+        preparedLabels,
+        write.path,
+      )?.classification,
     );
     if (
       !classificationDominates(
         actualClassification,
         minClassification,
-        cfc,
       )
     ) {
       const decision = evaluatePolicyDowngradeDecision(
@@ -2172,7 +2180,6 @@ function verifyOutputTransitionsForAttempt(
         schemaAtWritePath,
         effectiveConsumedReadLabels,
         actualClassification,
-        cfc,
         options,
       );
       if (decision.nonConverged) {
@@ -2197,13 +2204,11 @@ function verifyOutputTransitionsForAttempt(
     if (flowPrecisionSelection.mode === "elementLocalExpansion") {
       const conservativeClassification = strongestConsumedClassification(
         consumedReadLabels,
-        cfc,
       );
       if (
         !classificationDominates(
           minClassification,
           conservativeClassification,
-          cfc,
         )
       ) {
         recordDynamicContainerClassification(

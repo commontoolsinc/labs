@@ -61,15 +61,15 @@ describe("collectConsumedInputLabels", () => {
     const labeled = collectConsumedInputLabels(reads, labelsByEntity);
     expect(labeled).toHaveLength(3);
     expect(labeled[0].effectiveLabel).toEqual({
-      classification: ["secret"],
+      classification: [["confidential"], ["secret"]],
       integrity: ["source-a", "source-b"],
     });
     expect(labeled[1].effectiveLabel).toEqual({
-      classification: ["confidential"],
+      classification: [["confidential"]],
       integrity: ["source-a"],
     });
     expect(labeled[2].effectiveLabel).toEqual({
-      classification: ["unclassified"],
+      classification: [["unclassified"]],
     });
   });
 
@@ -114,7 +114,7 @@ describe("collectConsumedInputLabels", () => {
 
     const labeled = collectConsumedInputLabels([read], labelsByEntity);
     expect(labeled[0].effectiveLabel).toEqual({
-      classification: ["secret"],
+      classification: [["secret"]],
       integrity: ["source-a"],
     });
   });

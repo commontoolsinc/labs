@@ -1,4 +1,8 @@
 import type { IMemorySpaceAddress, Labels } from "../storage/interface.ts";
+import {
+  normalizeConfidentialityLabel,
+  normalizeIntegrityLabel,
+} from "./label-algebra.ts";
 
 type CfcEntityKeyAddress = {
   space: string;
@@ -51,25 +55,18 @@ export function normalizePersistedLabels(
     if (!rawLabel || typeof rawLabel !== "object" || Array.isArray(rawLabel)) {
       continue;
     }
-    const rawClassification = (rawLabel as { classification?: unknown })
-      .classification;
-    const classification = Array.isArray(rawClassification)
-      ? rawClassification.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    const rawIntegrity = (rawLabel as { integrity?: unknown }).integrity;
-    const integrity = Array.isArray(rawIntegrity)
-      ? rawIntegrity.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    if (classification.length === 0 && integrity.length === 0) {
+    const classification = normalizeConfidentialityLabel(
+      (rawLabel as { classification?: unknown }).classification,
+    );
+    const integrity = normalizeIntegrityLabel(
+      (rawLabel as { integrity?: unknown }).integrity,
+    );
+    if (!classification && !integrity) {
       continue;
     }
     labelsByPath[path] = {
-      ...(classification.length > 0 ? { classification } : {}),
-      ...(integrity.length > 0 ? { integrity } : {}),
+      ...(classification ? { classification } : {}),
+      ...(integrity ? { integrity } : {}),
     };
   }
   return labelsByPath;

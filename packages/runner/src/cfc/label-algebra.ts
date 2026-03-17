@@ -4,6 +4,10 @@ export type CfcAtom = JSONValue;
 export type CfcIntegrityLabel = readonly CfcAtom[];
 export type CfcConfidentialityClause = readonly CfcAtom[];
 export type CfcConfidentialityLabel = readonly CfcConfidentialityClause[];
+export type CfcConfidentialityLabelInput =
+  | readonly CfcAtom[]
+  | readonly CfcConfidentialityClause[];
+export type CfcIntegrityLabelInput = readonly CfcAtom[];
 
 function normalizeJsonValue(value: unknown): JSONValue | undefined {
   if (
@@ -122,18 +126,21 @@ export function normalizeIntegrityLabel(
 }
 
 export function joinConfidentialityLabels(
-  left: CfcConfidentialityLabel | undefined,
-  right: CfcConfidentialityLabel | undefined,
+  left: CfcConfidentialityLabelInput | CfcConfidentialityLabel | undefined,
+  right: CfcConfidentialityLabelInput | CfcConfidentialityLabel | undefined,
 ): CfcConfidentialityLabel | undefined {
-  if (!left) {
-    return right;
+  const normalizedLeft = normalizeConfidentialityLabel(left);
+  const normalizedRight = normalizeConfidentialityLabel(right);
+
+  if (!normalizedLeft) {
+    return normalizedRight;
   }
-  if (!right) {
-    return left;
+  if (!normalizedRight) {
+    return normalizedLeft;
   }
 
   const byKey = new Map<string, CfcConfidentialityClause>();
-  for (const clause of [...left, ...right]) {
+  for (const clause of [...normalizedLeft, ...normalizedRight]) {
     const key = canonicalKey(clause as JSONValue);
     if (!byKey.has(key)) {
       byKey.set(key, clause);
@@ -143,18 +150,21 @@ export function joinConfidentialityLabels(
 }
 
 export function joinIntegrityLabels(
-  left: CfcIntegrityLabel | undefined,
-  right: CfcIntegrityLabel | undefined,
+  left: CfcIntegrityLabelInput | CfcIntegrityLabel | undefined,
+  right: CfcIntegrityLabelInput | CfcIntegrityLabel | undefined,
 ): CfcIntegrityLabel | undefined {
-  if (!left) {
-    return right;
+  const normalizedLeft = normalizeIntegrityLabel(left);
+  const normalizedRight = normalizeIntegrityLabel(right);
+
+  if (!normalizedLeft) {
+    return normalizedRight;
   }
-  if (!right) {
-    return left;
+  if (!normalizedRight) {
+    return normalizedLeft;
   }
 
   const byKey = new Map<string, CfcAtom>();
-  for (const atom of [...left, ...right]) {
+  for (const atom of [...normalizedLeft, ...normalizedRight]) {
     const key = canonicalKey(atom);
     if (!byKey.has(key)) {
       byKey.set(key, atom);
@@ -185,4 +195,13 @@ export function confidentialitySatisfiesMax(
   max: CfcConfidentialityLabel | undefined,
 ): boolean {
   return confidentialityDominates(max, actual);
+}
+
+export function confidentialityFromLegacyAtom(
+  classification: string | undefined,
+): CfcConfidentialityLabel | undefined {
+  if (!classification || classification.length === 0) {
+    return undefined;
+  }
+  return normalizeConfidentialityLabel([classification]);
 }

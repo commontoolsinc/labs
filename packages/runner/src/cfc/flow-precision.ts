@@ -17,6 +17,11 @@ import {
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
 } from "./trust-lattice.ts";
+import {
+  confidentialityDominates,
+  joinConfidentialityLabels,
+  type CfcConfidentialityLabel,
+} from "./label-algebra.ts";
 
 type FlowPrecisionClaimType =
   | "PointwisePresencePreserved"
@@ -91,29 +96,22 @@ function isSameOrDescendantCanonicalPath(
 
 function strongestConsumedClassification(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
-  cfc: ContextualFlowControl,
-): string {
-  const consumed = new Set<string>();
+): CfcConfidentialityLabel | undefined {
+  let consumed: CfcConfidentialityLabel | undefined;
   for (const read of consumedReadLabels) {
-    consumed.add(read.effectiveLabel?.classification?.[0] ?? "unclassified");
+    consumed = joinConfidentialityLabels(
+      consumed,
+      read.effectiveLabel?.classification,
+    );
   }
-  if (consumed.size === 0) {
-    return "unclassified";
-  }
-  return cfc.lub(consumed);
+  return consumed;
 }
 
 function classificationDominates(
-  actualClassification: string,
-  minClassification: string,
-  cfc: ContextualFlowControl,
+  actualClassification: CfcConfidentialityLabel | undefined,
+  minClassification: CfcConfidentialityLabel | undefined,
 ): boolean {
-  try {
-    return cfc.lub(new Set([actualClassification, minClassification])) ===
-      actualClassification;
-  } catch {
-    return false;
-  }
+  return confidentialityDominates(actualClassification, minClassification);
 }
 
 function isFlowPrecisionClaimType(
@@ -522,19 +520,15 @@ export function selectFlowPrecisionConsumedReads(
     };
   }
 
-  const cfc = new ContextualFlowControl();
   const defaultClassification = strongestConsumedClassification(
     consumedReadLabels,
-    cfc,
   );
   const claimedClassification = strongestConsumedClassification(
     claimedConsumedReadLabels,
-    cfc,
   );
   const trustRequired = !classificationDominates(
     claimedClassification,
     defaultClassification,
-    cfc,
   );
   const trusted = !trustRequired ||
     (trustEvaluator ?? isImplementationTrustedForConcept)(
