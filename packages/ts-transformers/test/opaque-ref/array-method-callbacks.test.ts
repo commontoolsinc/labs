@@ -95,6 +95,38 @@ export default pattern<State>((state) => {
 });
 `;
 
+const DESTRUCTURE_ALIAS_LENGTH_SOURCE = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Person {
+  name: string;
+  spotPreferences: string[];
+}
+
+interface State {
+  people: Person[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <ul>
+        {state.people.map((person) => {
+          const { name, spotPreferences } = person;
+          return (
+            <li>
+              {spotPreferences.length > 0
+                ? name + ": " + spotPreferences.join(", ")
+                : name}
+            </li>
+          );
+        })}
+      </ul>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -128,6 +160,19 @@ describe("OpaqueRef map callbacks", () => {
     );
     // The captures object (last arg to mapWithPattern) must be empty
     assertStringIncludes(output, "), {})");
+  });
+
+  it("lowers destructured array aliases in map callback bodies to key bindings", async () => {
+    const output = await transformSource(DESTRUCTURE_ALIAS_LENGTH_SOURCE, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    assertStringIncludes(output, 'const name = person.key("name")');
+    assertStringIncludes(
+      output,
+      'spotPreferences = person.key("spotPreferences")',
+    );
+    assertStringIncludes(output, 'length: spotPreferences.key("length")');
   });
 
   it("derives map callback parameters and unary negations (capability-first)", async () => {

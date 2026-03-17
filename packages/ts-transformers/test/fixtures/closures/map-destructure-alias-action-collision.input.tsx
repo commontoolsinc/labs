@@ -10,10 +10,10 @@ interface State {
 }
 
 // FIXTURE: map-destructure-alias-action-collision
-// Verifies: destructured alias inside map callback body is preserved as-is in the output
-//   const { spotNumber: sn } = spot → kept as destructure from the element binding
+// Verifies: destructured alias inside map callback body is lowered to explicit key() access
+//   const { spotNumber: sn } = spot → const sn = spot.key("spotNumber")
 //   .map(fn) → .mapWithPattern(pattern(...), {})
-// Context: Alias is in the callback body (not the parameter), so no lowering to key() is needed
+// Context: Body destructuring from opaque map elements becomes explicit key() bindings
 export default pattern<State>((state) => {
   return {
     [UI]: (

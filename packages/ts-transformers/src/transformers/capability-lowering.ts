@@ -309,6 +309,112 @@ function rewritePatternBody(
     return createComputedCallForExpression(initializer, plan, context);
   };
 
+  const lowerOpaqueDestructuredVariableStatement = (
+    statement: ts.VariableStatement,
+  ): ts.VariableStatement | undefined => {
+    const rewrittenDeclarations: ts.VariableDeclaration[] = [];
+    let changed = false;
+
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        !declaration.initializer ||
+        ts.isIdentifier(declaration.name) ||
+        declaration.type
+      ) {
+        rewrittenDeclarations.push(declaration);
+        continue;
+      }
+
+      if (
+        !isOpaqueSourceExpression(
+          declaration.initializer,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        )
+      ) {
+        rewrittenDeclarations.push(declaration);
+        continue;
+      }
+
+      const bindings: DestructureBinding[] = [];
+      const defaults: DefaultDestructureBinding[] = [];
+      const unsupported: string[] = [];
+      collectDestructureBindings(
+        declaration.name,
+        [],
+        bindings,
+        defaults,
+        unsupported,
+        context,
+      );
+
+      if (unsupported.length > 0 || defaults.length > 0) {
+        for (const message of unsupported) {
+          reportComputationError(context, declaration.name, message);
+        }
+        rewrittenDeclarations.push(declaration);
+        continue;
+      }
+
+      changed = true;
+
+      const initializer = unwrapExpression(declaration.initializer);
+      let rootIdentifier: ts.Identifier;
+      if (ts.isIdentifier(initializer)) {
+        rootIdentifier = context.factory.createIdentifier(initializer.text);
+      } else {
+        rootIdentifier = context.factory.createUniqueName("__ct_destructure");
+        rewrittenDeclarations.push(
+          context.factory.createVariableDeclaration(
+            rootIdentifier,
+            undefined,
+            undefined,
+            declaration.initializer,
+          ),
+        );
+      }
+
+      for (const binding of bindings) {
+        let loweredInitializer: ts.Expression;
+        if (binding.directKeyExpression) {
+          loweredInitializer = context.factory.createElementAccessExpression(
+            rootIdentifier,
+            cloneKeyExpression(binding.directKeyExpression, context.factory),
+          );
+        } else if (binding.path.length === 0) {
+          loweredInitializer = rootIdentifier;
+        } else {
+          loweredInitializer = createKeyCall(
+            rootIdentifier,
+            binding.path,
+            context.factory,
+          );
+        }
+
+        rewrittenDeclarations.push(
+          context.factory.createVariableDeclaration(
+            context.factory.createIdentifier(binding.localName),
+            undefined,
+            undefined,
+            loweredInitializer,
+          ),
+        );
+      }
+    }
+
+    if (!changed) return undefined;
+
+    return context.factory.updateVariableStatement(
+      statement,
+      statement.modifiers,
+      context.factory.updateVariableDeclarationList(
+        statement.declarationList,
+        rewrittenDeclarations,
+      ),
+    );
+  };
+
   const visit = (node: ts.Node): ts.Node => {
     if (ts.isFunctionLike(node)) {
       if (node !== body) {
@@ -321,6 +427,13 @@ function rewritePatternBody(
       const rewritten = visitEachChildWithJsx(node, visit, context.tsContext);
       exitScope();
       return rewritten;
+    }
+
+    if (ts.isVariableStatement(node)) {
+      const loweredStatement = lowerOpaqueDestructuredVariableStatement(node);
+      if (loweredStatement) {
+        return visit(loweredStatement);
+      }
     }
 
     // Record call targets BEFORE visiting children so nested visits can
