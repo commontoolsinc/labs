@@ -8,7 +8,7 @@ Start with the shared testing guidance in:
 
 - `docs/common/ai/pattern-testing-guide.md`
 
-Read that guide first. It is the canonical, agent-neutral reference.
+Read that guide first. It is the canonical reference.
 
 Runtime notes:
 

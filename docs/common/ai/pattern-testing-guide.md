@@ -1,6 +1,6 @@
 # Pattern Testing Guide
 
-This is the agent-neutral reference for testing Common Fabric patterns.
+This is the canonical reference for testing Common Fabric patterns.
 
 ## Preconditions
 
@@ -45,6 +45,8 @@ The usual shape is:
 4. return the test sequence in order
 
 ```tsx
+/// <cts-enable />
+
 import { action, computed, pattern } from "commontools";
 import Pattern from "./pattern.tsx";
 
@@ -78,16 +80,11 @@ export default pattern(() => {
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
 
-## Completion Standard
+## Done When
 
 - the test file exists beside the pattern or in the expected local test layout
-- tests pass
+- the tests pass
 - the test report explains what was covered and what was intentionally omitted
 - the pattern still compiles after any interface changes made to support
   testing
-
-## Done When
-
-- the test file exists alongside the pattern
-- the tests pass
 - the pattern is ready for the next dependent sub-pattern or release step

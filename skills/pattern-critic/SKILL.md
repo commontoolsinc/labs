@@ -7,7 +7,7 @@ Start with the shared critique guidance in:
 
 - `docs/common/ai/pattern-critique-guide.md`
 
-Read that guide first. It is the canonical, agent-neutral reference.
+Read that guide first. It is the canonical reference.
 
 Then use the detailed references already maintained in the repo for:
 
@@ -86,12 +86,8 @@ export default pattern<Input>(({ deck }) => ({
 
 ```typescript
 // Both are valid - ternaries auto-transform to ifElse()
-{
-  showDetails ? <div>Details content</div> : null;
-}
-{
-  ifElse(showDetails, <div>Details content</div>, null);
-}
+{showDetails ? <div>Details content</div> : null}
+{ifElse(showDetails, <div>Details content</div>, null)}
 ```
 
 ### Correct Style Syntax

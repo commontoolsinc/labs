@@ -8,7 +8,7 @@ Start with the shared manual testing guidance in:
 
 - `docs/common/ai/manual-testing-guide.md`
 
-Read that guide first. It is the canonical, agent-neutral reference.
+Read that guide first. It is the canonical reference.
 
 # Browser Automation with agent-browser
 
@@ -42,8 +42,6 @@ agent-browser close
 
 # Snapshot
 agent-browser snapshot -i             # Interactive elements with refs
-agent-browser snapshot -i -C
-                                       # Include cursor-interactive elements
 agent-browser snapshot -s "#selector"
 
 # Interaction
@@ -127,6 +125,7 @@ agent-browser session list
 
 ```bash
 agent-browser --headed open https://example.com
+agent-browser snapshot -i
 agent-browser highlight @e1
 agent-browser record start demo.webm
 ```
@@ -134,28 +133,17 @@ agent-browser record start demo.webm
 ### Local files
 
 ```bash
-agent-browser --allow-file-access open file:///path/to/document.pdf
-agent-browser --allow-file-access open file:///path/to/page.html
+agent-browser open file:///path/to/document.pdf
+agent-browser open file:///path/to/page.html
 agent-browser screenshot output.png
 ```
 
-### iOS simulator and mobile-style workflows
+### Mobile-style workflows
 
-```bash
-agent-browser device list
-agent-browser -p ios --device "iPhone 16 Pro" open https://example.com
-agent-browser -p ios snapshot -i
-agent-browser -p ios tap @e1
-agent-browser -p ios fill @e2 "text"
-agent-browser -p ios swipe up
-agent-browser -p ios screenshot mobile.png
-agent-browser -p ios close
-```
-
-Requirements: macOS with Xcode, Appium, and the required mobile automation
-dependencies.
-
-Real devices can use the same flow when the device is already configured.
+If your environment includes device emulation or a mobile browser harness, use
+the same open -> snapshot -> interact -> re-snapshot rhythm there. Treat those
+flows as provider-specific extensions rather than core `agent-browser` CLI
+commands unless your local install documents them explicitly.
 
 ## Ref Lifecycle
 

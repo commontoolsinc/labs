@@ -7,7 +7,7 @@ Start with the shared pattern development guidance in:
 
 - `docs/common/ai/pattern-development-guide.md`
 
-Read that guide first. It is the canonical, agent-neutral reference.
+Read that guide first. It is the canonical reference.
 
 Runtime notes:
 

@@ -1,6 +1,6 @@
 # Pattern Development Guide
 
-This is the agent-neutral reference for building Common Fabric patterns.
+This is the canonical reference for building Common Fabric patterns.
 
 ## Core Working Style
 
@@ -130,20 +130,20 @@ const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
 ### Correct `handler()` usage
 
 ```tsx
-const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
-  (_, { item, items }) => {
+const deleteItem = handler<void, { index: number; items: Writable<Item[]> }>(
+  (_, { index, items }) => {
     const list = items.get();
-    items.set(list.filter((entry) => entry !== item));
+    items.set(list.filter((_, itemIndex) => itemIndex !== index));
   },
 );
 
 const List = pattern<ListInput, ListOutput>(({ items }) => ({
   [UI]: (
     <ul>
-      {items.map((item) => (
+      {items.map((item, index) => (
         <li>
           {item.name}
-          <ct-button onClick={deleteItem({ item, items })}>Delete</ct-button>
+          <ct-button onClick={deleteItem({ index, items })}>Delete</ct-button>
         </li>
       ))}
     </ul>

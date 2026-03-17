@@ -1,6 +1,6 @@
 # Pattern Critique Guide
 
-This is the agent-neutral reference for reviewing Common Fabric patterns.
+This is the canonical reference for reviewing Common Fabric patterns.
 
 ## Review Goals
 

@@ -17,7 +17,7 @@ documentation.
 ## Find Identity Key
 
 ```bash
-ls -la *.key 2>/dev/null || ls -la ~/.claude/*.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
+ls -la ./ct.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
 ```
 
 ## Commands

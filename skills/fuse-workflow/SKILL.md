@@ -28,11 +28,11 @@ change a cell in the browser, the file updates within ~1 second.
 brew install --cask fuse-t          # macOS only, requires sudo
 
 # Identity (reuse existing or create one)
-ls claude.key || deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
+ls ct.key || deno run -A packages/cli/mod.ts id derive "implicit trust" > ct.key
 
 # Environment
 export CT_API_URL=http://localhost:8000
-export CT_IDENTITY=./claude.key
+export CT_IDENTITY=./ct.key
 
 # Mount
 deno task ct fuse mount /tmp/ct
@@ -183,7 +183,7 @@ cat /tmp/ct/dev-space/pieces/my-pattern/result.json | jq '.'
 ### Identity Mismatch
 
 The CLI identity key creates a _different space_ than the browser. If you deploy
-with `claude.key` but browse with your browser identity, you'll see different
+with `ct.key` but browse with your browser identity, you'll see different
 spaces.
 
 **Fix:** Use the browser's space name when mounting:

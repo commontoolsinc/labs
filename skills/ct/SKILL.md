@@ -23,13 +23,13 @@ deno task ct check --help     # Type checking
 **Identity key** (required for most operations):
 
 ```bash
-ls -la claude.key              # Check for existing
+ls -la ct.key                  # Check for existing
 
 # For local dev: derive key matching toolshed's "implicit trust" identity
-deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
+deno run -A packages/cli/mod.ts id derive "implicit trust" > ct.key
 
 # For a fresh random key (e.g., against production):
-deno run -A packages/cli/mod.ts id new > claude.key
+deno run -A packages/cli/mod.ts id new > ct.key
 ```
 
 **IMPORTANT:** Do NOT use `deno task ct id new > file` — the `deno task` wrapper
@@ -40,7 +40,7 @@ prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
 
 ```bash
 export CT_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
-export CT_IDENTITY=./claude.key
+export CT_IDENTITY=./ct.key
 ```
 
 **Experimental flags** (must be set on both servers AND CLI commands):
@@ -165,7 +165,7 @@ See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and
 | Issue                        | Fix                                                                          |
 | ---------------------------- | ---------------------------------------------------------------------------- |
 | Commands hang                | Check Tailnet connection for `*.ts.net` URLs                                 |
-| Permission denied            | `chmod 600 claude.key`                                                       |
+| Permission denied            | `chmod 600 ct.key`                                                           |
 | JSON parse error             | Check nested quotes, no trailing commas                                      |
 | Local servers not responding | `./scripts/check-local-dev.sh` then `./scripts/restart-local-dev.sh --force` |
 

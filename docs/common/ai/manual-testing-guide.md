@@ -1,6 +1,6 @@
 # Manual Testing Guide
 
-This is the agent-neutral reference for runtime validation of Common Fabric
+This is the canonical reference for runtime validation of Common Fabric
 patterns.
 
 ## Core Goals
