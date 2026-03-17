@@ -1,7 +1,7 @@
 # TS Transformers Design Deltas
 
 **Status:** Partially implemented (status snapshot)\
-**Date:** March 4, 2026\
+**Date:** March 17, 2026\
 **Companion:**
 `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
@@ -15,33 +15,50 @@ behavior and open follow-up work.
 
 ## Delta Backlog
 
-## Implementation Snapshot (March 4, 2026)
+## Implementation Snapshot (March 17, 2026)
 
 - Landed:
   - capability-first transform pipeline (legacy `useLegacyOpaqueRefSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
+  - provenance-first CommonTools call detection with shadowed-helper rejection
+    and narrow synthetic/ambient fallback paths
   - deterministic JSX logical lowering policy (`&&` / `||`) by context
+  - helper-owned ternary / conditional branches re-analyzed under synthetic
+    compute ownership
   - `.map` rewrite matrix by `{context, receiverKind}`
+  - local reactive rewrap aliases in compute callbacks can re-enter collection
+    rewrite eligibility
   - pattern callback canonicalization and `key(...)` lowering
+  - local opaque-root rewriting inside derive callbacks
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
+  - structural reactive-origin detection for `.get()` validation and opaque-root
+    classification even when `OpaqueRef<T>` is an identity alias
   - static destructuring default initializer lowering to schema defaults
   - array destructuring lowering in pattern/map callbacks
   - wildcard classification includes `for...of` over tracked sources
   - empty-array cell-factory validation (`cell-factory:empty-array`)
+  - schema-generator distinguishes `unknown` from `any`, preserves synthetic
+    `unknown` union members, and no longer emits `asOpaque`
   - schema-generator synthetic union parity for `undefined` members
   - map capture classification hardened for reactive vs non-reactive captures
   - pattern-boundary schema continuity alignment (defaults-only application
     mode)
   - schema shrink coverage validation (`schema:unknown-type-access`,
     `schema:path-not-in-type`)
+  - schema shrink validation for declared `unknown`-typed properties
+  - array item shrinking to `unknown` when only non-item properties (for
+    example `.length`) are observed
+  - projected-result / object-literal schema recovery for derive/lift result
+    inference
+  - compute-context local reactive alias diagnostics
 - Partially landed:
   - diagnostics migration (some legacy validation remains)
   - compute-context interprocedural capability summaries (MVP scope)
 - Open:
-  - standalone-function `.map` policy finalization
-  - collection-method generalization beyond `.map` (`.filter`, etc.)
+  - collection-method generalization beyond current `.map` / `.filter` /
+    `.flatMap` coverage (`.find`, `.some`, `.every`, etc.)
   - full diagnostics convergence onto lowerability-only checks
 
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
@@ -93,7 +110,9 @@ behavior and open follow-up work.
 3. Behavior is test-covered for nested/mixed logical expressions and ternary
    adjacency.
 
-## D-003 Context-Driven Collection Operator Policy (`.map` first, then analogs)
+## D-003 Context-Driven Collection Operator Policy (`.map` / `.filter` / `.flatMap` first, then analogs)
+
+**Status:** Mostly landed
 
 **Policy target:**
 
@@ -101,15 +120,19 @@ behavior and open follow-up work.
   reactive forms.
 - In **compute context**: rewrite only when receiver type is in the
   non-auto-unwrapped cell-like set (`Cell`, `Writable`, `Stream`, etc.).
+- In **compute context**, local aliases created inside the same callback may
+  become reactive again when they re-wrap a reactive collection via
+  `computed(...)`, `derive(...)`, `lift(...)`, `action(...)`, `handler(...)`,
+  `wish(...)`, or an already-lowered reactive collection call.
 - Never rewrite plain JS array operators.
 - The callback parameter of `.map` is treated as a **pattern callback
   parameter** only in cases where the call is actually rewritten to
   `mapWithPattern`. If a `.map` is not rewritten, its callback parameter keeps
   ordinary compute/plain semantics.
 
-**Initial operator in scope:** `.map`\
-**Future analogous operators:** `.filter`, `.find`, `.some`, `.every` (subject
-to runtime contract support).
+**Currently landed operators:** `.map`, `.filter`, `.flatMap`\
+**Future analogous operators:** `.find`, `.some`, `.every` (subject to runtime
+contract support).
 
 **Rationale:**
 
@@ -130,13 +153,20 @@ to runtime contract support).
    rewritten `.map` -> pattern callback semantics; non-rewritten `.map` ->
    regular callback semantics.
 6. Test matrix exists and is extensible to future operators.
+7. Synthetic compute-owned branches/calls must not retain stale pattern
+   ownership after earlier rewrites.
 
 ## D-004 Replace OpaqueRef-Heuristic Typing With Capability Dataflow + Type Shrinking
+
+**Status:** Mostly landed
 
 **Policy target:**
 
 - Move away from relying on complex proxy-heavy `OpaqueRef<T>` surface types as
   the primary decision source for transform policy.
+- `OpaqueRef<T>` surface typing can simplify toward ordinary `T` so long as
+  reactive-origin detection remains available structurally to validation and
+  lowering passes.
 - Build a flow-aware capability model from normal parameters/locals and
   propagated origins.
 - Treat pattern inputs and outputs of `lift(...)` / `pattern(...)` inside
@@ -223,6 +253,8 @@ to runtime contract support).
     reads/writes when interprocedural summaries are enabled.
 15. Schema shrink validation: unresolvable property paths produce hard errors
     rather than silently falling back to broader schemas (see D-005).
+16. `.get()` validation and opaque-root discovery continue to work when
+    `OpaqueRef<T>` is no longer represented by a dedicated schema marker.
 
 ## D-005 Validate Schema Shrink Coverage
 
@@ -251,6 +283,9 @@ to runtime contract support).
 - Wildcard parameters typed `unknown` now produce `schema:unknown-type-access`
   because the generated schema cannot express what to fetch. `any`-typed and
   concrete-typed wildcard parameters are not affected.
+- Declared interface/type members whose resolved property type is `unknown`
+  also produce `schema:unknown-type-access` when accessed. `any`-typed members
+  do not.
 - `buildShrunkTypeNodeFromTypeNode` resolves non-Cell TypeReferences (type
   aliases, interfaces) to their declaration members via
   `resolveTypeReferenceMembers`, then shrinks those members directly using
@@ -273,7 +308,7 @@ to runtime contract support).
 **Diagnostic codes:**
 
 - `schema:unknown-type-access` — parameter typed `unknown`/`any` with property
-  accesses
+  accesses, or concrete parameter with accessed `unknown`-typed property heads
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
 **Test coverage:** `test/schema-shrink-validation.test.ts` with 14 cases:

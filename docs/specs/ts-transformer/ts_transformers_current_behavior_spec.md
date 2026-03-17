@@ -2,7 +2,7 @@
 
 **Status:** Implemented (current behavior)\
 **Package:** `@commontools/ts-transformers`\
-**Effective date:** March 4, 2026\
+**Effective date:** March 17, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures.
 
@@ -83,21 +83,33 @@ Current mode-sensitive behavior:
 - builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
 - `derive`
 - `ifElse`, `when`, `unless`
-- reactive array calls (`map`, `mapWithPattern`)
+- reactive array calls (`map`, `mapWithPattern`, `filter`,
+  `filterWithPattern`, `flatMap`, `flatMapWithPattern`)
 - cell factories (`cell`, `Cell.of`, `OpaqueCell.of`, `Stream.of`, etc.)
 - `Cell.for`-style calls
 - `wish`
 - `generateObject`
 - `patternTool`
 
-Detection strategy is layered:
+Detection is provenance-first:
 
-1. direct identifier name fast-path
-2. symbol/alias resolution
-3. name-based fallback
+1. symbol resolution against CommonTools declarations/imports
+2. stable alias/signature following (`const alias = computed`,
+   `declare const alias: typeof ifElse`)
+3. synthetic helper support for `__ctHelpers.*` nodes introduced by earlier
+   passes
 
-Consequence: name-based fallback can intentionally match non-CommonTools symbols
-with the same names.
+Remaining fallback behavior is intentionally narrow:
+
+- unresolved bare builder identifiers can still match builders
+- ambient builder declarations and ambient call-signature aliases can still
+  classify as builders in type-only environments
+- shadowed local helpers and object methods with CommonTools-like names are not
+  classified
+
+Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
+functions returned by builders are not reclassified as direct `lift()` or
+`handler()` invocations.
 
 ## 6. Validation Transformers
 
@@ -136,12 +148,24 @@ No error when:
 
 On call `receiver.get()` (no args):
 
-- if receiver cell kind resolves to `"opaque"`:
+- if receiver cell kind resolves to `"cell"` or `"stream"`:
+  - no diagnostic
+- otherwise if receiver either:
+  - resolves to opaque cell kind via `getCellKind()`, or
+  - structurally traces back to a reactive-origin call result/alias/binding
+    initialized from one of:
+    - builders (`pattern`, `computed`, `lift`, `handler`, `action`, `render`)
+    - `derive`
+    - `ifElse`, `when`, `unless`
+    - cell factories / `Cell.for`
+    - `wish`
+    - `generateObject`
   - **Error** `opaque-get:invalid-call`
   - message instructs direct access, clarifies only `Writable<T>`/`Cell<T>`
     reads require `.get()`.
 
-No error for non-opaque kinds (e.g., writable/cell/stream).
+Same-named local helpers are not treated as reactive origins unless the call
+itself resolves through the CommonTools provenance rules in §5.
 
 ### 6.4 Schema shrink validation
 
@@ -172,6 +196,13 @@ because the generated schema cannot express what data to fetch. This does not
 apply to `any`-typed parameters (which fetch everything at runtime) or to
 concrete types (which already describe the expected shape).
 
+Declared members typed as `unknown` also trigger
+`schema:unknown-type-access` when accessed, even if the property name exists in
+the declared interface/type literal. This catches cases like
+`{ data?: unknown }` where the schema would otherwise degrade to
+`{ type: "unknown" }` for that property and the runtime could not express the
+required fetch shape.
+
 Guards that skip validation:
 
 - wildcard parameters with a non-`unknown` base type (full-shape access,
@@ -186,9 +217,11 @@ Guards that skip validation:
 Diagnostics:
 
 - **Error** `schema:unknown-type-access`
-  - parameter is typed as `unknown` or `any` but the code accesses properties
-  - message lists the accessed property heads and instructs the author to replace
-    `unknown` with a concrete type
+  - parameter is typed as `unknown`/`any` and the code accesses properties, OR
+    one or more accessed property heads resolve to `unknown`-typed members on
+    an otherwise concrete type
+  - message lists the accessed property heads and instructs the author to
+    replace `unknown` with a concrete type
 - **Error** `schema:path-not-in-type`
   - parameter has a concrete type but one or more accessed properties are not
     present in that type
@@ -216,7 +249,8 @@ Restricted contexts are callbacks of:
 
 - `pattern`
 - `render`
-- `.map(...)`/`.mapWithPattern(...)` callbacks detected as array-map calls
+- transformed array-method callbacks (`.map(...)`, `.filter(...)`,
+  `.flatMap(...)` and their `...WithPattern(...)` forms)
 
 Compute wrappers override restrictions:
 
@@ -237,9 +271,19 @@ Diagnostics emitted in all modes:
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
   - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `derive(...)`, or `.map(...)` on reactive receivers
-  - `.map(...)` diagnostic includes guidance that eager `<cell>.get().map(...)`
-    is acceptable for explicit eager mapping
+    `computed(...)`, `derive(...)`, or reactive collection methods on
+    reactive receivers
+  - collection-method diagnostics currently use `.map(...)`-style guidance and
+    suggest eager `<cell>.get().map(...)` when explicit eager mapping is
+    acceptable
+- **Error** `compute-context:local-reactive-use`
+  - inside a `computed(...)`/`derive(...)` callback, a reactive value created in
+    that same callback is consumed as a plain value in control-flow or another
+    non-lowered computation site
+  - typical culprits are local `computed(...)`, `derive(...)`, `lift(...)`,
+    `wish(...)`, or reactive collection aliases and their property accesses
+  - message instructs the author to move the use into a nested
+    `computed(() => ...)` or `derive(() => ...)`
 - **Error** `pattern-context:optional-chaining`
   - optional property access `?.` in restricted reactive context (outside JSX)
 - **Error** `pattern-context:computation`
@@ -324,6 +368,12 @@ Key rewrite rules:
 - compute contexts:
   - no derive/computed wrappers; only child rewrites and logical conversions
 
+Helper-owned compute branches introduced by ternary / conditional-helper
+rewriting are re-analyzed with synthetic compute ownership. This preserves
+plain-array semantics inside fully compute-wrapped branches while still letting
+later stages recover reactive collection rewrites for locally rewrapped aliases
+created inside compute code.
+
 Synthetic calls generated by this pass register result types in `typeRegistry`
 for later schema injection.
 
@@ -345,7 +395,7 @@ calls.
 
 1. handler JSX attribute strategy
 2. action strategy
-3. map strategy
+3. array-method strategy
 4. patternTool strategy
 5. derive strategy
 
@@ -378,10 +428,10 @@ Transforms `action(...)` to handler factory invocation:
   - event param present -> inferred/explicit type
 - callback extraction currently supports arrow callbacks only
 
-### 9.4 Map strategy
+### 9.4 Array-method strategy
 
-Transforms reactive `.map(...)` to `.mapWithPattern(...)` with explicit capture
-params.
+Transforms eligible reactive collection operators to explicit `...WithPattern`
+forms with explicit capture params.
 
 Transform eligibility:
 
@@ -389,14 +439,21 @@ Transform eligibility:
   - pattern context + reactive receiver origin -> transform
   - compute context + `celllike_requires_rewrite` receiver kind -> transform
   - compute context + `opaque_autounwrapped` receiver kind -> do not transform
+  - compute context + local alias in the same callback whose initializer
+    re-wraps a reactive collection (`computed`, `derive`, `lift`, `action`,
+    `handler`, `wish`, already-rewritten collection calls, or other reactive
+    cell-like receivers) -> transform
 - plain array `.map()` is not transformed
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
+- synthetic compute-owned array-method nodes assert that stale pattern ownership
+  is not retained after earlier rewrites
 
 Result shape:
 
-- `receiver.map(fn[, thisArg])` ->
-  `receiver.mapWithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
+- `receiver.<method>(fn[, thisArg])` ->
+  `receiver.<method>WithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
+- currently supported methods are `map`, `filter`, and `flatMap`
 - callback schema includes `{ element, index?, array? }` and adds `params` only
   when captures exist
 - computed destructuring keys are stabilized with generated key constants and
@@ -451,6 +508,11 @@ Primary behaviors:
   context with diagnostics
 - classifies map captures as reactive vs non-reactive and avoids `.key(...)`
   rewrites for non-reactive captures
+- recursively rewrites derive callback bodies so locally-declared opaque/reactive
+  aliases created inside compute callbacks (including inside nested blocks) also
+  receive `.key(...)` lowering
+- local opaque-root discovery is symbol-scoped and block-aware to avoid
+  same-name false rewrites across scopes
 - extracts static destructuring defaults into capability summaries for schema
   default application
 - registers capability summaries for transformed callbacks/builders for
@@ -503,6 +565,11 @@ If schemas are not already present via type args:
 - special-case `derive({}, cb)` to treat input as exact empty object type
 - literal-based input inference widens literals (`"x"` -> `string`, `1` ->
   `number`, etc.)
+- when inferred result type is missing or degrades to `any`/`unknown`, recovery
+  first attempts object-literal return reconstruction and then direct
+  projection recovery (`x => x.foo`, `x => x["foo"]`)
+- direct projection recovery can reuse result types recovered from local
+  `lift(...)` / `derive(...)` initializer aliases registered in `typeRegistry`
 
 ### 10.5 Cell factories and related APIs
 
@@ -546,6 +613,17 @@ adjustments:
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
 - wildcard roots disable path shrinking for affected parameters/arguments
+- capability analysis resolves member access through `.get()` when the member
+  access itself is observed (`notes.get().length` records `["length"]` rather
+  than a blanket root read) and suppresses the redundant blanket `.get()` read
+- array-like roots whose observed paths only touch non-item properties
+  (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
+  item type to `unknown`
+- node-driven shrinking can still shrink the inner type of cell-like wrappers
+  when `.get()` contributes an empty path but coexists with more specific
+  non-empty paths
+- tuple types and numeric-indexed object types are not rewritten to
+  array-with-unknown-items during this optimization
 - after shrinking, `validateShrinkCoverage` checks that all requested property
   paths were materialized (see §6.4); unresolvable paths produce hard errors
 
@@ -576,6 +654,13 @@ Special path:
 - synthetic union handling preserves `undefined` members (for example
   `string | undefined` retains an explicit `undefined` branch in generated
   schema).
+- `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains
+  `true`
+- arrays of `unknown` emit `items: { type: "unknown" }`
+- synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
+  rather than collapsing them away
+- `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add
+  wrapper markers such as `asCell` / `asStream`
 
 ## 12. Diagnostics Message Transformation (Optional Consumer Layer)
 
@@ -611,12 +696,12 @@ pipeline. Current built-in behavior:
 
 Primary fixture suites executed by `fixture-based.test.ts`:
 
-- `ast-transform`: 29 fixtures
+- `ast-transform`: 28 fixtures
 - `handler-schema`: 8 fixtures
 - `jsx-expressions`: 39 fixtures
 - `schema-transform`: 8 fixtures
-- `closures`: 136 fixtures
-- `schema-injection`: 17 fixtures
+- `closures`: 141 fixtures
+- `schema-injection`: 19 fixtures
 
 Total active fixture inputs in these suites: **237**.
 
