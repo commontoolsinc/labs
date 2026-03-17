@@ -51,7 +51,7 @@ describe("RuntimeInternals navigation", () => {
     );
 
     let registrations = 0;
-    runtime.registerNavigatedPiece = async () => {
+    runtime.registerNavigatedPiece = () => {
       registrations += 1;
     };
 

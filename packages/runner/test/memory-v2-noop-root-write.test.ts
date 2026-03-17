@@ -140,3 +140,62 @@ Deno.test("memory v2 no-op commits skip stale-read validation when there are no 
     await storage.close();
   }
 });
+
+Deno.test("memory v2 treats an identical nested write as a no-op", async () => {
+  const signer = await Identity.fromPassphrase("memory-v2-noop-nested-write");
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+  const runtime = new Runtime({
+    storageManager: storage,
+    memoryVersion: "v2",
+    apiUrl: new URL(import.meta.url),
+  });
+  const space = signer.did();
+  const address = {
+    id: "bench:no-op-nested-write" as const,
+    type: "application/json" as const,
+    path: [] as string[],
+  };
+
+  try {
+    const seed = runtime.edit();
+    seed.writeValueOrThrow({ ...address, space }, {
+      profile: { name: "Ada" },
+      stats: { visits: 1 },
+    });
+    assert((await seed.commit()).ok);
+
+    const provider = storage.open(space);
+    const initialState = provider.replica.get(address) as
+      | { since?: number }
+      | undefined;
+
+    const notifications: string[] = [];
+    storage.subscribe({
+      next(notification) {
+        notifications.push(notification.type);
+        return undefined;
+      },
+    });
+
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      ...address,
+      space,
+      path: ["stats", "visits"],
+    }, 1);
+    assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), []);
+    assert((await tx.commit()).ok);
+
+    const finalState = provider.replica.get(address) as
+      | { since?: number }
+      | undefined;
+    assertEquals(finalState?.since, initialState?.since);
+    assertEquals(notifications, []);
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});

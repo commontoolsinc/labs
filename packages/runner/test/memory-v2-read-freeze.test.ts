@@ -152,3 +152,68 @@ Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes
     resetStorableValueConfig();
   }
 });
+
+Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling writes", async () => {
+  setStorableValueConfig({ richStorableValues: true });
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+
+  try {
+    const tx = storage.edit();
+    const id = "of:memory-v2-read-freeze-sibling";
+    assert(
+      tx.write({
+        space,
+        id,
+        type,
+        path: [],
+      }, {
+        value: {
+          profile: { name: "Ada" },
+          stats: { visits: 1 },
+        },
+      }).ok,
+    );
+
+    const first = tx.read({
+      space,
+      id,
+      type,
+      path: ["value"],
+    }).ok?.value as
+      | {
+        profile: { name: string };
+        stats: { visits: number };
+      }
+      | undefined;
+    assert(first);
+    assert(Object.isFrozen(first));
+
+    assert(
+      tx.write({
+        space,
+        id,
+        type,
+        path: ["value", "stats", "visits"],
+      }, 2).ok,
+    );
+
+    const second = tx.read({
+      space,
+      id,
+      type,
+      path: ["value"],
+    }).ok?.value as typeof first;
+    assert(second);
+    assertNotStrictEquals(first, second);
+    assertEquals(first.stats.visits, 1);
+    assertEquals(second.stats.visits, 2);
+    assert(Object.isFrozen(second));
+    assert(Object.isFrozen(second.stats));
+  } finally {
+    await storage.close();
+    resetStorableValueConfig();
+  }
+});

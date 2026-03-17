@@ -1248,3 +1248,373 @@ Deno.test("memory v2 engine rejects pending reads when later commits touch the r
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async () => {
+  const cases = [
+    {
+      name: "parent read conflicts with child replace",
+      readPath: ["profile"],
+      remotePatches: [{ op: "replace", path: "/profile/name", value: "Bob" }],
+      expectConflict: true,
+    },
+    {
+      name: "sibling read survives unrelated replace",
+      readPath: ["profile", "name"],
+      remotePatches: [{
+        op: "replace",
+        path: "/settings/theme",
+        value: "dark",
+      }],
+      expectConflict: false,
+    },
+    {
+      name: "child read conflicts when parent is replaced",
+      readPath: ["profile", "name"],
+      remotePatches: [{
+        op: "replace",
+        path: "/profile",
+        value: { name: "Bob", title: "Dr" },
+      }],
+      expectConflict: true,
+    },
+    {
+      name: "array element read conflicts with splice",
+      readPath: ["items", "0"],
+      remotePatches: [{
+        op: "splice",
+        path: "/items",
+        index: 0,
+        remove: 0,
+        add: ["zero"],
+      }],
+      expectConflict: true,
+    },
+    {
+      name: "sibling branch read survives unrelated add",
+      readPath: ["settings"],
+      remotePatches: [{ op: "add", path: "/profile/title", value: "Dr" }],
+      expectConflict: false,
+    },
+    {
+      name: "escaped pointer read conflicts with matching replace",
+      readPath: ["a/b"],
+      remotePatches: [{ op: "replace", path: "/a~1b", value: 2 }],
+      expectConflict: true,
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const { engine, path } = await createEngine();
+    try {
+      const invocation = {
+        iss: "did:key:alice",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: "did:key:space",
+        args: { localSeq: 1, case: testCase.name },
+      };
+      const authorization = {
+        signature: "sig:alice",
+        access: { "proof:1": {} },
+      };
+
+      applyCommit(engine, {
+        sessionId: "session:1",
+        invocation,
+        authorization,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:source",
+            value: toEntityDocument({
+              profile: { name: "Alice" },
+              settings: { theme: "light" },
+              items: ["one"],
+              "a/b": 1,
+            }),
+          }],
+        },
+      });
+
+      applyCommit(engine, {
+        sessionId: "session:other",
+        invocation: {
+          ...invocation,
+          args: { localSeq: 1, actor: "other", case: testCase.name },
+        },
+        authorization,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: "entity:source",
+            patches: testCase.remotePatches as any,
+          }],
+        },
+      });
+
+      const commit = () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: {
+            ...invocation,
+            args: { localSeq: 2, case: testCase.name },
+          },
+          authorization,
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [{
+                id: "entity:source",
+                path: testCase.readPath,
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:derived",
+              value: toEntityDocument({ case: testCase.name }),
+            }],
+          },
+        });
+
+      if (testCase.expectConflict) {
+        assertThrows(commit, Error, "stale confirmed read");
+        assertEquals(read(engine, { id: "entity:derived" }), null);
+      } else {
+        const applied = commit();
+        assertEquals(applied.seq, 3);
+        assertEquals(read(engine, { id: "entity:derived" }), {
+          value: { case: testCase.name },
+        });
+      }
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  }
+});
+
+Deno.test("memory v2 engine reconstructs point-in-time state across delete boundaries", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:timeline",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:timeline",
+          value: toEntityDocument({
+            phase: "one",
+            data: { start: true },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:timeline",
+      invocation: { ...invocation, args: { localSeq: 2 } },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:timeline",
+          patches: [{ op: "add", path: "/data/step", value: 2 }],
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:timeline",
+      invocation: { ...invocation, args: { localSeq: 3 } },
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "entity:timeline" }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:timeline",
+      invocation: { ...invocation, args: { localSeq: 4 } },
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:timeline",
+          value: toEntityDocument({
+            phase: "two",
+            data: { restart: true },
+          }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:timeline",
+      invocation: { ...invocation, args: { localSeq: 5 } },
+      authorization,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:timeline",
+          patches: [{ op: "add", path: "/data/final", value: 5 }],
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:timeline", seq: 1 }), {
+      value: { phase: "one", data: { start: true } },
+    });
+    assertEquals(read(engine, { id: "entity:timeline", seq: 2 }), {
+      value: { phase: "one", data: { start: true, step: 2 } },
+    });
+    assertEquals(read(engine, { id: "entity:timeline", seq: 3 }), null);
+    assertEquals(read(engine, { id: "entity:timeline", seq: 4 }), {
+      value: { phase: "two", data: { restart: true } },
+    });
+    assertEquals(read(engine, { id: "entity:timeline", seq: 5 }), {
+      value: { phase: "two", data: { restart: true, final: 5 } },
+    });
+    assertEquals(read(engine, { id: "entity:timeline" }), {
+      value: { phase: "two", data: { restart: true, final: 5 } },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt documents", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    snapshotInterval: 1,
+  });
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-delete",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:snapshot-delete",
+          value: toEntityDocument({ before: { kept: true } }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-delete",
+      invocation: { ...invocation, args: { localSeq: 2 } },
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:snapshot-delete",
+          patches: [{ op: "add", path: "/before/count", value: 2 }],
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-delete",
+      invocation: { ...invocation, args: { localSeq: 3 } },
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "entity:snapshot-delete" }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-delete",
+      invocation: { ...invocation, args: { localSeq: 4 } },
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:snapshot-delete",
+          value: toEntityDocument({ after: { rebuilt: true } }),
+        }],
+      },
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:snapshot-delete",
+      invocation: { ...invocation, args: { localSeq: 5 } },
+      authorization,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:snapshot-delete",
+          patches: [{ op: "add", path: "/after/final", value: 5 }],
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 2 }), {
+      value: { before: { kept: true, count: 2 } },
+    });
+    assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 3 }), null);
+    assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 5 }), {
+      value: { after: { rebuilt: true, final: 5 } },
+    });
+    assertEquals(read(engine, { id: "entity:snapshot-delete" }), {
+      value: { after: { rebuilt: true, final: 5 } },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

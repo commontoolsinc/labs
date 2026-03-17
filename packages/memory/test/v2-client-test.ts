@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { MEMORY_V2_PROTOCOL } from "../v2.ts";
 import { connect, loopback, type Transport } from "../v2/client.ts";
+import { createGraphFixture } from "./v2-graph.fixture.ts";
 
 Deno.test("memory v2 client transacts and receives graph subscription updates", async () => {
   const server = new Server({
@@ -76,6 +77,76 @@ Deno.test("memory v2 client transacts and receives graph subscription updates", 
 
   await client.close();
   await server.close();
+});
+
+Deno.test("memory v2 client queryGraph subscriptions expand to previously existing hidden nodes", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-graph-expansion"),
+  });
+  const writerClient = await connect({
+    transport: loopback(server),
+  });
+  const observerClient = await connect({
+    transport: loopback(server),
+  });
+  const writer = await writerClient.mount(
+    "did:key:z6Mk-memory-v2-client-graph",
+  );
+  const observer = await observerClient.mount(
+    "did:key:z6Mk-memory-v2-client-graph",
+  );
+  const fixture = createGraphFixture(writer.space);
+
+  try {
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map((doc) => ({
+        op: "set" as const,
+        id: doc.id,
+        value: { value: doc.value } as any,
+      })),
+    });
+
+    const view = await observer.queryGraph({
+      subscribe: true,
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+    });
+
+    assertEquals(
+      view.entities.map((entity) => entity.id),
+      fixture.initialReachableIds,
+    );
+
+    const updates = view.subscribe();
+    const pending = updates.next();
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue } as any,
+      }],
+    });
+
+    const update = await pending;
+    assertEquals(update.done, false);
+    assertEquals(
+      update.value.entities.map((entity: any) => entity.id),
+      fixture.expandedReachableIds,
+    );
+  } finally {
+    await writerClient.close();
+    await observerClient.close();
+    await server.close();
+  }
 });
 
 class ReconnectableLoopbackTransport implements Transport {

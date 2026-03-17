@@ -6,6 +6,7 @@ import {
   type ResponseMessage,
   type ServerMessage,
 } from "../v2.ts";
+import { createGraphFixture } from "./v2-graph.fixture.ts";
 
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -154,6 +155,95 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
         },
       },
     }],
+  );
+
+  await server.close();
+});
+
+Deno.test("memory v2 server graph.query subscriptions expand to previously existing hidden nodes", async () => {
+  const server = createServer("memory://memory-v2-server-graph-expansion");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-graph-expansion";
+  const fixture = createGraphFixture(space);
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map((doc) => ({
+        op: "set",
+        id: doc.id,
+        value: { value: doc.value },
+      })),
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+    },
+  }));
+  const subscribed = assertResponse(shiftMessage(messages));
+  assertEquals(
+    (subscribed.ok as any)?.entities.map((entity: any) => entity.id),
+    fixture.initialReachableIds,
+  );
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "expand",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "expand");
+  await tick();
+
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    update.result.entities.map((entity: any) => entity.id),
+    fixture.expandedReachableIds,
   );
 
   await server.close();
@@ -1132,6 +1222,226 @@ Deno.test("memory v2 server batches identical graph updates across subscriptions
     "of:doc:1",
   ]);
   assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server tracked-id retargeting follows the new 64-node frontier", async () => {
+  const server = createServer("memory://memory-v2-server-graph-retargeting");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-graph-retargeting";
+  const fixture = createGraphFixture(space);
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map((doc) => ({
+        op: "set",
+        id: doc.id,
+        value: { value: doc.value },
+      })),
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: fixture.rootId,
+        selector: { path: [], schema: fixture.schema },
+      }],
+    },
+  }));
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "expand",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "expand");
+  await tick();
+  shiftMessage(messages);
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "hidden-update",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.hiddenRootId,
+        value: {
+          value: {
+            ...fixture.docs.find((doc) => doc.id === fixture.hiddenRootId)!
+              .value,
+            metadata: { tag: "retargeted-hidden" },
+          },
+        },
+      }],
+    },
+  }));
+  assertEquals(
+    assertResponse(shiftMessage(messages)).requestId,
+    "hidden-update",
+  );
+  await tick();
+
+  const hiddenUpdate = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    hiddenUpdate.result.entities.some((entity: any) =>
+      entity.id === fixture.hiddenRootId &&
+      entity.document?.value?.metadata?.tag === "retargeted-hidden"
+    ),
+    true,
+  );
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "unrelated-update",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:test-node-unrelated",
+        value: { value: { name: "Outside", metadata: { tag: "outside" } } },
+      }],
+    },
+  }));
+  assertEquals(
+    assertResponse(shiftMessage(messages)).requestId,
+    "unrelated-update",
+  );
+  await tick();
+  assertEquals(messages.length, 0);
+
+  await server.close();
+});
+
+Deno.test("memory v2 server topology fallback reevaluates once and returns the full expanded 64-node set", async () => {
+  const server = new CountingServer({
+    store: new URL("memory://memory-v2-server-graph-topology"),
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-graph-topology";
+  const fixture = createGraphFixture(space);
+
+  await connection.receive(JSON.stringify({
+    type: "hello",
+    protocol: MEMORY_V2_PROTOCOL,
+  }));
+  shiftMessage(messages);
+  await connection.receive(JSON.stringify({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+  }));
+  const opened = assertResponse(shiftMessage(messages));
+  assertExists(opened.ok);
+  const sessionId = (opened.ok as any).sessionId;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "seed",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map((doc) => ({
+        op: "set",
+        id: doc.id,
+        value: { value: doc.value },
+      })),
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "seed");
+
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      subscribe: true,
+      roots: [{
+        id: fixture.rootId,
+        selector: { path: [], schema: fixture.schema },
+      }],
+    },
+  }));
+  shiftMessage(messages);
+  server.queryCount = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "expand",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    },
+  }));
+  assertEquals(assertResponse(shiftMessage(messages)).requestId, "expand");
+  await tick();
+  await tick();
+
+  assertEquals(server.queryCount, 1);
+  const update = assertUpdate(shiftMessage(messages));
+  assertEquals(
+    update.result.entities.map((entity: any) => entity.id),
+    fixture.expandedReachableIds,
+  );
 
   await server.close();
 });

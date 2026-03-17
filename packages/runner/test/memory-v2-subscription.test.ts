@@ -11,6 +11,7 @@ import type {
 import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
+import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
 const space = signer.did();
@@ -40,6 +41,10 @@ class Subscription implements IStorageNotification {
       notification.type === "pull"
     );
   }
+
+  clear() {
+    this.notifications = [];
+  }
 }
 
 const waitFor = async (
@@ -54,6 +59,11 @@ const waitFor = async (
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 };
+
+const visibleIds = (
+  provider: { get(uri: URI): { value: unknown } | undefined },
+  ids: readonly URI[],
+) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
 describe("Memory v2 storage notifications", () => {
   let runtime: Runtime;
@@ -283,5 +293,74 @@ describe("Memory v2 storage notifications", () => {
       schema: false,
     });
     expect(subscription.pulls).toHaveLength(1);
+  });
+
+  it("expands subscribed graph state to previously existing hidden docs after a root retarget", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+    const fixture = createGraphFixture(space);
+    const observer = storageManager.open(space) as unknown as {
+      get(uri: URI): { value: unknown } | undefined;
+      sync(
+        uri: URI,
+        selector: { path: string[]; schema: unknown },
+      ): Promise<{ ok?: Record<PropertyKey, never> }>;
+    };
+
+    expect(
+      await storageManager.session().mount(space).transact({
+        changes: Changes.from(fixture.docs.map((doc) =>
+          Fact.assert({
+            the: "application/json",
+            of: doc.id,
+            is: doc.value,
+          })
+        )),
+      }),
+    ).toEqual({ ok: {} });
+
+    expect(
+      await observer.sync(fixture.rootId, {
+        path: [],
+        schema: fixture.schema,
+      }),
+    ).toEqual({ ok: {} });
+    await storageManager.synced();
+    await waitFor(() =>
+      visibleIds(observer, fixture.expandedReachableIds).length ===
+        fixture.initialReachableIds.length
+    );
+    expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
+      fixture.initialReachableIds,
+    );
+
+    subscription.clear();
+    expect(
+      await storageManager.session().mount(space).transact({
+        changes: Changes.from([Fact.assert({
+          the: "application/json",
+          of: fixture.rootId,
+          is: fixture.expandedRootValue,
+        })]),
+      }),
+    ).toEqual({ ok: {} });
+    await storageManager.synced();
+    await waitFor(() =>
+      visibleIds(observer, fixture.expandedReachableIds).length ===
+        fixture.expandedReachableIds.length
+    );
+
+    expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
+      fixture.expandedReachableIds,
+    );
+    const integrateIds = subscription.notifications
+      .filter((notification) => notification.type === "integrate")
+      .flatMap((notification) =>
+        "changes" in notification
+          ? [...notification.changes].map((change) => change.address.id as URI)
+          : []
+      );
+    expect(integrateIds).toContain(fixture.hiddenRootId);
+    expect(integrateIds).toContain("of:test-node-63");
   });
 });

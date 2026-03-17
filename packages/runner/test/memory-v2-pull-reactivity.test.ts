@@ -7,6 +7,8 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
+import type { URI } from "@commontools/memory/interface";
+import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -23,6 +25,11 @@ const waitFor = async (
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 };
+
+const visibleIds = (
+  provider: { get(uri: URI): { value: unknown } | undefined },
+  ids: readonly URI[],
+) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
 describe("Memory v2 pull reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -112,5 +119,106 @@ describe("Memory v2 pull reactivity", () => {
     expect(result.get()).toBe(20);
     expect(computationRuns).toBe(2);
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
+  });
+
+  it.ignore("marks pull-mode graph computations dirty when a 64-node frontier expands", async () => {
+    runtime.scheduler.enablePullMode();
+    const fixture = createGraphFixture(space);
+    const observer = storageManager.open(space) as unknown as {
+      get(uri: URI): { value: unknown } | undefined;
+      sync(
+        uri: URI,
+        selector: { path: string[]; schema: unknown },
+      ): Promise<{ ok?: Record<PropertyKey, never> }>;
+    };
+
+    expect(
+      await storageManager.session().mount(space).transact({
+        changes: Changes.from(fixture.docs.map((doc) =>
+          Fact.assert({
+            the: "application/json",
+            of: doc.id,
+            is: doc.value,
+          })
+        )),
+      }),
+    ).toEqual({ ok: {} });
+
+    const root = runtime.getCell<any>(
+      space,
+      fixture.rootId,
+      fixture.schema as any,
+      tx,
+    );
+    const result = runtime.getCell<string>(
+      space,
+      `memory-v2-pull-graph-result-${Date.now()}`,
+      undefined,
+      tx,
+    );
+    result.set("init");
+    await tx.commit();
+    tx = runtime.edit();
+
+    expect(
+      await observer.sync(fixture.rootId, { path: [], schema: fixture.schema }),
+    ).toEqual({ ok: {} });
+    await root.sync();
+    await root.pull();
+    await storageManager.synced();
+    await waitFor(() =>
+      visibleIds(observer, fixture.expandedReachableIds).length ===
+        fixture.initialReachableIds.length
+    );
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      const current = root.withTx(actionTx).get();
+      const next = current?.alternate?.["/"]?.["link@1"]?.id ?? "missing";
+      result.withTx(actionTx).send(next);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [root.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    await result.pull();
+    expect(result.get()).toBe("of:test-node-28");
+    expect(computationRuns).toBe(1);
+    expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
+      fixture.initialReachableIds,
+    );
+
+    expect(
+      await storageManager.session().mount(space).transact({
+        changes: Changes.from([Fact.assert({
+          the: "application/json",
+          of: fixture.rootId,
+          is: fixture.expandedRootValue,
+        })]),
+      }),
+    ).toEqual({ ok: {} });
+
+    await waitFor(() => runtime.scheduler.isDirty(computation));
+    await waitFor(() =>
+      visibleIds(observer, fixture.expandedReachableIds).length ===
+        fixture.expandedReachableIds.length
+    );
+    expect(computationRuns).toBe(1);
+
+    await result.pull();
+    expect(result.get()).toBe("of:test-node-32");
+    expect(computationRuns).toBe(2);
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+    expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
+      fixture.expandedReachableIds,
+    );
   });
 });

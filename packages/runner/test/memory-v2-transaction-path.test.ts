@@ -134,4 +134,49 @@ describe("memory v2 transaction path semantics", () => {
 
     await tx.commit();
   });
+
+  it("preserves siblings across mixed object and array path writes", async () => {
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      space,
+      id: "of:path-write-mixed-branches",
+      type: "application/json",
+      path: [],
+    }, {
+      profile: { name: "Ada" },
+      items: [{ label: "one" }],
+    });
+
+    tx.writeValueOrThrow({
+      space,
+      id: "of:path-write-mixed-branches",
+      type: "application/json",
+      path: ["items", "1", "label"],
+    }, "two");
+    tx.writeValueOrThrow({
+      space,
+      id: "of:path-write-mixed-branches",
+      type: "application/json",
+      path: ["details", "flags", "active"],
+    }, true);
+
+    expect(
+      tx.readValueOrThrow({
+        space,
+        id: "of:path-write-mixed-branches",
+        type: "application/json",
+        path: [],
+      }),
+    ).toEqual({
+      profile: { name: "Ada" },
+      items: [{ label: "one" }, { label: "two" }],
+      details: {
+        flags: {
+          active: true,
+        },
+      },
+    });
+
+    await tx.commit();
+  });
 });
