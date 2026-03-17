@@ -223,6 +223,7 @@ export async function ensureExecShim(
   const denoPath = Deno.execPath();
   const modPath = cliMod(importMetaUrl);
   const script = `#!/usr/bin/env bash
+export CT_EXEC_SHEBANG=1
 exec "${denoPath}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${modPath}" "$@"
 `;
 

@@ -10,6 +10,7 @@ import {
   type ParsedExecArgs,
   parseExecArgs,
   renderExecHelp,
+  renderExecHelpJson,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -44,6 +45,8 @@ export interface ExecDependencies {
   timeoutMs?: number;
   uuid?: () => string;
   waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
+  invocationStyle?: "ct" | "direct";
+  readJsonInput?: () => Promise<unknown>;
 }
 
 export interface ExecutedMountedCallableFile {
@@ -206,6 +209,50 @@ async function defaultWaitForResult(
   throw new Error(`Timed out waiting for tool result after ${timeoutMs}ms`);
 }
 
+async function defaultReadJsonInput(): Promise<unknown> {
+  const text = await new Response(Deno.stdin.readable).text();
+  if (text.trim().length === 0) {
+    throw new Error("Expected JSON on stdin for --json");
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON on stdin for --json");
+  }
+}
+
+function coerceJsonInputForSchema(
+  value: unknown,
+  schema: JSONSchema,
+): unknown {
+  const isObjectSchema = typeof schema === "object" && schema !== null &&
+    !Array.isArray(schema) &&
+    (schema.type === "object" || "properties" in schema);
+  if (!isObjectSchema) {
+    return value;
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid JSON for --json: expected object");
+  }
+
+  const required = Array.isArray((schema as { required?: unknown }).required)
+    ? (schema as { required: string[] }).required
+    : [];
+  for (const key of required) {
+    if (!(key in (value as Record<string, unknown>))) {
+      throw new Error(
+        `Missing required flag --${
+          key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()
+        }`,
+      );
+    }
+  }
+
+  return value;
+}
+
 export async function resolveMountedCallableFile(
   filePath: string,
   deps: ExecDependencies = {},
@@ -261,18 +308,31 @@ export async function executeMountedCallableFile(
 ): Promise<ExecutedMountedCallableFile> {
   const resolved = await resolveMountedCallableFile(filePath, deps);
   const parsed = parseExecArgs(resolved.commandSpec, rawArgs);
+  const invocationStyle = deps.invocationStyle ??
+    (Deno.env.get("CT_EXEC_SHEBANG") === "1" ? "direct" : "ct");
 
   if (parsed.showHelp) {
     return {
-      helpText: renderExecHelp(resolved.absPath, resolved.commandSpec),
+      helpText: parsed.showHelpJson
+        ? renderExecHelpJson(resolved.commandSpec)
+        : renderExecHelp(filePath, resolved.commandSpec, {
+          invocationStyle,
+        }),
       parsed,
       resolved,
     };
   }
 
+  const input = parsed.readJsonFromStdin
+    ? coerceJsonInputForSchema(
+      await (deps.readJsonInput ?? defaultReadJsonInput)(),
+      resolved.commandSpec.inputSchema,
+    )
+    : parsed.input;
+
   if (resolved.callablePath.callableKind === "handler") {
     await resolved.piece[resolved.callablePath.cellProp].set(
-      parsed.input,
+      input,
       [resolved.callablePath.cellKey],
     );
     await resolved.manager.runtime.idle();
@@ -297,7 +357,7 @@ export async function executeMountedCallableFile(
   resolved.manager.runtime.run(
     tx,
     pattern,
-    mergeToolInput(parsed.input, extraParams),
+    mergeToolInput(input, extraParams),
     resultCell,
   );
   await tx.commit();

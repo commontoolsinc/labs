@@ -7,6 +7,7 @@ import {
   type ExecCommandSpec,
   parseExecArgs,
   renderExecHelp,
+  renderExecHelpJson,
 } from "../lib/exec-schema.ts";
 import {
   executeMountedCallableFile,
@@ -67,10 +68,11 @@ describe("parseExecArgs", () => {
 
     expect(result.verb).toBe("run");
     expect(result.showHelp).toBe(true);
+    expect(result.showHelpJson).toBe(false);
     expect(result.input).toEqual({});
   });
 
-  it("treats post-verb --help as a string schema field when help exists", () => {
+  it("treats top-level --help with a value as a schema field when help exists", () => {
     const result = parseExecArgs(
       makeSpec("tool", {
         type: "object",
@@ -79,7 +81,7 @@ describe("parseExecArgs", () => {
           query: { type: "string" },
         },
       }),
-      ["run", "--help", "details", "--query", "milk"],
+      ["--help", "details", "--query", "milk"],
     );
 
     expect(result.showHelp).toBe(false);
@@ -89,7 +91,7 @@ describe("parseExecArgs", () => {
     });
   });
 
-  it("treats post-verb --help as a boolean schema field when help is boolean", () => {
+  it("reserves standalone --help even when help is a boolean schema field", () => {
     const result = parseExecArgs(
       makeSpec("tool", {
         type: "object",
@@ -97,14 +99,29 @@ describe("parseExecArgs", () => {
           help: { type: "boolean" },
         },
       }),
-      ["run", "--help"],
+      ["--help"],
+    );
+
+    expect(result.showHelp).toBe(true);
+    expect(result.input).toEqual({});
+  });
+
+  it("still accepts explicit boolean help values", () => {
+    const result = parseExecArgs(
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          help: { type: "boolean" },
+        },
+      }),
+      ["--help=true"],
     );
 
     expect(result.showHelp).toBe(false);
     expect(result.input).toEqual({ help: true });
   });
 
-  it("falls back to command help after the verb when help is not a schema field", () => {
+  it("supports --help --json for machine-readable schema help", () => {
     const result = parseExecArgs(
       makeSpec("tool", {
         type: "object",
@@ -112,10 +129,11 @@ describe("parseExecArgs", () => {
           query: { type: "string" },
         },
       }),
-      ["run", "--help"],
+      ["--help", "--json"],
     );
 
     expect(result.showHelp).toBe(true);
+    expect(result.showHelpJson).toBe(true);
     expect(result.input).toEqual({});
   });
 
@@ -179,10 +197,10 @@ describe("parseExecArgs", () => {
     });
   });
 
-  it("supports non-object schemas through --value and object schemas through --json", () => {
+  it("supports non-object schemas through --value and inline object schemas through --json", () => {
     const primitive = parseExecArgs(
       makeSpec("handler", { type: "number" }),
-      ["invoke", "--value", "42"],
+      ["--value", "42"],
     );
     const json = parseExecArgs(
       makeSpec("tool", {
@@ -195,20 +213,37 @@ describe("parseExecArgs", () => {
           },
         },
       }),
-      ["run", "--json", '{"query":"oat milk","filters":{"fresh":true}}'],
+      ["--json", '{"query":"oat milk","filters":{"fresh":true}}'],
     );
 
     expect(primitive.input).toBe(42);
+    expect(primitive.readJsonFromStdin).toBe(false);
     expect(json.input).toEqual({
       query: "oat milk",
       filters: { fresh: true },
     });
   });
 
+  it("treats bare --json as stdin input mode", () => {
+    const result = parseExecArgs(
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      }),
+      ["--json"],
+    );
+
+    expect(result.readJsonFromStdin).toBe(true);
+    expect(result.input).toBeUndefined();
+  });
+
   it("preserves omitted non-object inputs as undefined", () => {
     const primitive = parseExecArgs(
       makeSpec("handler", { type: "number" }),
-      ["invoke"],
+      [],
     );
 
     expect(primitive.input).toBeUndefined();
@@ -221,7 +256,7 @@ describe("parseExecArgs", () => {
           type: "object",
           properties: { query: { type: "string" } },
         }),
-        ["run", "--json", '{"query":"tea"}', "--query", "coffee"],
+        ["--json", '{"query":"tea"}', "--query", "coffee"],
       )
     ).toThrow(/--json cannot be combined with generated flags/i);
   });
@@ -236,20 +271,18 @@ describe("parseExecArgs", () => {
       required: ["query"],
     });
 
-    expect(() => parseExecArgs(spec, ["run", "--mode", "fast"])).toThrow(
+    expect(() => parseExecArgs(spec, ["--mode", "fast"])).toThrow(
       /Missing required flag --query/i,
     );
-    expect(() =>
-      parseExecArgs(spec, ["run", "--query", "tea", "--mode", "invalid"])
-    ).toThrow(/Invalid value for --mode/i);
-    expect(() =>
-      parseExecArgs(spec, ["run", "--query", "tea", "--unknown", "value"])
-    ).toThrow(/Unknown flag --unknown/i);
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--mode", "invalid"]))
+      .toThrow(/Invalid value for --mode/i);
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
+      .toThrow(/Unknown flag --unknown/i);
   });
 });
 
 describe("renderExecHelp", () => {
-  it("renders callable kind, verb, input schema, and tool output summary", () => {
+  it("renders flag-first tool help without schema prose", () => {
     const help = renderExecHelp(
       "/tmp/search.tool",
       makeSpec(
@@ -274,11 +307,101 @@ describe("renderExecHelp", () => {
       ),
     );
 
-    expect(help).toContain("tool");
-    expect(help).toContain("run");
-    expect(help).toContain("/tmp/search.tool");
-    expect(help).toContain("query");
+    expect(help).toContain("Usage:");
+    expect(help).toContain("ct exec /tmp/search.tool --query <string>");
+    expect(help).toContain("ct exec /tmp/search.tool --json");
+    expect(help).toContain("ct exec /tmp/search.tool --help --json");
+    expect(help).toContain("--query <string>");
+    expect(help).toContain('Optional input field named "help".');
+    expect(help).toContain("Read the full input object from stdin.");
+    expect(help).toContain("Show full schema details as JSON.");
+    expect(help).toContain("Output:");
+    expect(help).toContain("JSON on success:");
     expect(help).toContain("results");
+    expect(help).not.toContain("Callable:");
+    expect(help).not.toContain("Input schema:");
+  });
+
+  it("renders direct mounted-file usage when called via shebang", () => {
+    const help = renderExecHelp(
+      "./legacyWrite.handler",
+      makeSpec("handler", {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      }),
+      { invocationStyle: "direct" },
+    );
+
+    expect(help).toContain("./legacyWrite.handler --message <string>");
+    expect(help).toContain("./legacyWrite.handler --help");
+    expect(help).not.toContain("ct exec ./legacyWrite.handler");
+    expect(help).toContain("No output on success.");
+    expect(help).toContain(
+      "Alternatively, write JSON to this file to invoke the handler.",
+    );
+  });
+
+  it("quotes direct mounted-file usage when the path contains spaces", () => {
+    const help = renderExecHelp(
+      "/tmp/Fuse Exec Fixture/search.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      }),
+      { invocationStyle: "direct" },
+    );
+
+    expect(help).toContain(
+      "'/tmp/Fuse Exec Fixture/search.tool' --query <string>",
+    );
+    expect(help).toContain("'/tmp/Fuse Exec Fixture/search.tool' --help");
+  });
+
+  it("renders primitive callable flags through --value and --json", () => {
+    const help = renderExecHelp(
+      "/tmp/number.handler",
+      makeSpec("handler", { type: "number" }),
+    );
+
+    expect(help).toContain("ct exec /tmp/number.handler --value <number>");
+    expect(help).toContain("ct exec /tmp/number.handler --json");
+    expect(help).toContain("--value <number>");
+    expect(help).toContain("Read the full input value as JSON from stdin.");
+  });
+});
+
+describe("renderExecHelpJson", () => {
+  it("renders machine-readable schema details", () => {
+    const schema = JSON.parse(
+      renderExecHelpJson(
+        makeSpec(
+          "tool",
+          {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+            },
+            required: ["query"],
+          },
+          {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+            },
+          },
+        ),
+      ),
+    );
+
+    expect(schema.callableKind).toBe("tool");
+    expect(schema.inputSchema.required).toEqual(["query"]);
+    expect(schema.outputSchema.properties.summary.type).toBe("string");
   });
 });
 
@@ -609,7 +732,7 @@ describe("mounted callable resolution and execution", () => {
     try {
       await executeMountedCallableFile(
         filePath,
-        ["invoke", "--query", "milk"],
+        ["--query", "milk"],
         {
           stateDir,
           loadManager: () => Promise.resolve(harness.manager),
@@ -644,7 +767,7 @@ describe("mounted callable resolution and execution", () => {
 
     const result = await executeMountedCallableFile(
       filePath,
-      ["invoke", "--query", "milk"],
+      ["--query", "milk"],
       {
         stateDir,
         loadManager: () => Promise.resolve(harness.manager),
@@ -717,7 +840,7 @@ describe("mounted callable resolution and execution", () => {
     });
     const result = await executeMountedCallableFile(
       filePath,
-      ["run", "--query", "tea"],
+      ["--query", "tea"],
       {
         stateDir,
         loadManager: () => Promise.resolve(harness.manager),
@@ -788,7 +911,7 @@ describe("mounted callable resolution and execution", () => {
 
     await executeMountedCallableFile(
       filePath,
-      ["run", "--query", "tea"],
+      ["--query", "tea"],
       {
         stateDir,
         loadManager: () => Promise.resolve(harness.manager),
@@ -798,6 +921,116 @@ describe("mounted callable resolution and execution", () => {
     );
 
     expect(harness.tracker.toolResultSpace).toBe("did:key:resolved-space");
+  });
+
+  it("reads --json input from stdin for mounted handlers", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      ["--json"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readJsonInput: () => Promise.resolve({ query: "milk" }),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["add"],
+        value: { query: "milk" },
+      },
+    ]);
+  });
+
+  it("returns machine-readable schema details for --help --json", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            source: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      },
+      extraParams: {
+        source: "bound-source",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--help", "--json"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    expect(result.helpText).toBeDefined();
+    expect(JSON.parse(result.helpText!)).toEqual({
+      callableKind: "tool",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          summary: { type: "string" },
+        },
+      },
+    });
   });
 });
 

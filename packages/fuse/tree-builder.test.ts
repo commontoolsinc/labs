@@ -821,15 +821,17 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   const piece = {
     id: "of:entity-123",
     name: () => "Sparse Fixture",
-    getPatternMeta: async () => ({ patternName: "Sparse Fixture" }),
+    getPatternMeta: () => Promise.resolve({ patternName: "Sparse Fixture" }),
     input: {
-      getCell: async () =>
-        makeCell(undefined, { type: "object", properties: {} }),
-      get: async () => undefined,
+      getCell: () =>
+        Promise.resolve(
+          makeCell(undefined, { type: "object", properties: {} }),
+        ),
+      get: () => Promise.resolve(undefined),
     },
     result: {
-      getCell: async () => resultCell,
-      get: async () => undefined,
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve(undefined),
     },
   };
 
@@ -938,15 +940,17 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const piece = {
     id: "of:entity-123",
     name: () => "Mixed Fixture",
-    getPatternMeta: async () => ({ patternName: "Mixed Fixture" }),
+    getPatternMeta: () => Promise.resolve({ patternName: "Mixed Fixture" }),
     input: {
-      getCell: async () =>
-        makeCell(undefined, { type: "object", properties: {} }),
-      get: async () => undefined,
+      getCell: () =>
+        Promise.resolve(
+          makeCell(undefined, { type: "object", properties: {} }),
+        ),
+      get: () => Promise.resolve(undefined),
     },
     result: {
-      getCell: async () => resultCell,
-      get: async () => ({ title: "hello" }),
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve({ title: "hello" }),
     },
   };
 

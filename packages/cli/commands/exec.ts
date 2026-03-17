@@ -1,5 +1,4 @@
 import { Command } from "@cliffy/command";
-import { resolve } from "@std/path";
 import { executeMountedCallableFile } from "../lib/exec.ts";
 
 export const exec = new Command()
@@ -18,10 +17,7 @@ export const exec = new Command()
   .arguments("<mountedFile:string> [tail...:string]")
   .action(async (_options, mountedFile, ...tail) => {
     try {
-      const result = await executeMountedCallableFile(
-        resolve(mountedFile),
-        tail,
-      );
+      const result = await executeMountedCallableFile(mountedFile, tail);
       if (result.helpText) {
         console.log(result.helpText);
         return;

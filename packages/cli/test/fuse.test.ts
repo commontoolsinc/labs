@@ -280,6 +280,7 @@ describe("mount state operations", () => {
     expect(shimPath).toBe(join(repoRoot, ".ct", "fuse", "ct-exec"));
     expect(shimPath).not.toBe(join(stateDir, "ct-exec"));
     expect(shim).toContain("#!/usr/bin/env bash");
+    expect(shim).toContain("export CT_EXEC_SHEBANG=1");
     expect(shim).toContain('" run --allow-net');
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain('"$@"');

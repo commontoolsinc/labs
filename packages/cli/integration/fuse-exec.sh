@@ -224,18 +224,32 @@ success "Callable files are executable and expose ct exec shebangs"
 COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
 HANDLER_HELP=$(ct exec "$HANDLER_FILE" --help)
 TOOL_HELP=$(ct exec "$TOOL_FILE" --help)
-assert_contains "$HANDLER_HELP" "Callable: handler" "Handler help should describe a handler callable."
-assert_contains "$HANDLER_HELP" "Verb: invoke" "Handler help should show the invoke verb."
-assert_contains "$TOOL_HELP" "Callable: tool" "Tool help should describe a tool callable."
-assert_contains "$TOOL_HELP" "Verb: run" "Tool help should show the run verb."
-assert_contains "$TOOL_HELP" "Output:" "Tool help should show an output summary."
+TOOL_HELP_JSON=$(ct exec "$TOOL_FILE" --help --json)
+DIRECT_HANDLER_HELP=$("$HANDLER_FILE" --help)
+assert_contains "$HANDLER_HELP" "ct exec" "ct exec help should describe the ct exec call form."
+assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
+assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
+assert_contains "$HANDLER_HELP" "No output on success." "Handler help should describe handler output."
+assert_contains "$HANDLER_HELP" "Alternatively, write JSON to this file to invoke the handler." "Handler help should mention write-through invocation."
+assert_contains "$TOOL_HELP" "--query <string>" "Tool help should expand schema-derived flags."
+assert_contains "$TOOL_HELP" "JSON on success:" "Tool help should show JSON output."
+assert_contains "$TOOL_HELP" "--help --json" "Tool help should mention machine-readable schema help."
+assert_contains "$DIRECT_HANDLER_HELP" "$HANDLER_FILE" "Direct help should mention the mounted file path."
+assert_contains "$DIRECT_HANDLER_HELP" "--message <string>" "Direct help should show the mounted file call form."
+if [[ "$DIRECT_HANDLER_HELP" == *"ct exec $HANDLER_FILE"* ]]; then
+  error "Direct help should hide the ct exec call form."
+fi
+printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.inputSchema.required == ["query"]' >/dev/null ||
+  error "Machine-readable help should include the input schema."
+printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.outputSchema.properties.summary.type == "string"' >/dev/null ||
+  error "Machine-readable help should include the output schema."
 COUNT_AFTER_HELP=$(read_piece_value_or_default "messageCount" "0")
 if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
   error "Top-level ct exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
 fi
-success "Top-level ct exec --help prints help without invoking callables"
+success "Top-level and direct --help print agent-oriented callable help without invoking callables"
 
-"$HANDLER_FILE" invoke --message "piece-direct"
+"$HANDLER_FILE" --message "piece-direct"
 wait_for_piece_value "lastMessage" '"piece-direct"'
 wait_for_piece_value "messageCount" "1"
 DIRECT_TOOL=$("$TOOL_FILE" --query "direct" --help "via-shebang")
@@ -245,50 +259,62 @@ assert_json_eq \
   "Direct tool execution returned unexpected JSON"
 success "Mounted callables can be executed directly through their shebangs"
 
-ct exec "$HANDLER_FILE" invoke --message "piece-explicit"
-wait_for_piece_value "lastMessage" '"piece-explicit"'
+printf '{"message":"stdin-handler"}' | ct exec "$HANDLER_FILE" --json
+wait_for_piece_value "lastMessage" '"stdin-handler"'
 wait_for_piece_value "messageCount" "2"
-success "ct exec invokes mounted handlers with the explicit verb"
+success "ct exec reads handler JSON input from stdin"
+
+DIRECT_TOOL_STDIN=$(printf '{"query":"stdin-tool","help":"stdin-help"}' | "$TOOL_FILE" --json)
+assert_json_eq \
+  "$DIRECT_TOOL_STDIN" \
+  '{"help":"stdin-help","query":"stdin-tool","source":"bound-source","summary":"bound-source:stdin-tool:stdin-help"}' \
+  "Direct tool execution with stdin JSON returned unexpected JSON"
+success "Mounted tools read JSON input from stdin"
+
+ct exec "$HANDLER_FILE" --message "piece-explicit"
+wait_for_piece_value "lastMessage" '"piece-explicit"'
+wait_for_piece_value "messageCount" "3"
+success "ct exec invokes mounted handlers with schema-derived flags"
 
 ct exec "$HANDLER_FILE" --message "piece-implicit"
 wait_for_piece_value "lastMessage" '"piece-implicit"'
-wait_for_piece_value "messageCount" "3"
-success "ct exec defaults mounted handlers to invoke"
+wait_for_piece_value "messageCount" "4"
+success "ct exec invokes mounted handlers without an explicit verb"
 
-TOOL_EXPLICIT=$(ct exec "$TOOL_FILE" run --query "explicit" --help "schema-field")
+TOOL_EXPLICIT=$(ct exec "$TOOL_FILE" --query "explicit" --help "schema-field")
 assert_json_eq \
   "$TOOL_EXPLICIT" \
   '{"help":"schema-field","query":"explicit","source":"bound-source","summary":"bound-source:explicit:schema-field"}' \
   "Explicit tool execution returned unexpected JSON"
 success "ct exec runs mounted tools with schema-derived flags"
 
-HELP_FIELD_OUTPUT=$(ct exec "$TOOL_FILE" run --help "literal-help" --query "help-field")
+HELP_FIELD_OUTPUT=$(ct exec "$TOOL_FILE" --help "literal-help" --query "help-field")
 assert_json_eq \
   "$HELP_FIELD_OUTPUT" \
   '{"help":"literal-help","query":"help-field","source":"bound-source","summary":"bound-source:help-field:literal-help"}' \
-  "Post-verb --help should be parsed as the tool schema field"
-success "Post-verb --help is parsed as the schema field when present"
+  "Top-level --help with a value should be parsed as the tool schema field"
+success "Top-level --help with a value is parsed as the schema field when present"
 
 TOOL_IMPLICIT=$(ct exec "$TOOL_FILE" --query "implicit" --help "")
 assert_json_eq \
   "$TOOL_IMPLICIT" \
   '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
   "Implicit tool execution returned unexpected JSON"
-success "ct exec defaults mounted tools to run"
+success "ct exec runs mounted tools without an explicit verb"
 
 COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-ct exec "$HANDLER_FILE" invoke --message "shared-message"
+ct exec "$HANDLER_FILE" --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
 
 COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-ct exec "$ENTITY_HANDLER_FILE" invoke --message "shared-message"
+ct exec "$ENTITY_HANDLER_FILE" --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
 success "Handler execution through pieces/ and entities/ reaches the same backing cell"
 
-PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" run --query "shared-tool" --help "entity-compare")
-ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" run --query "shared-tool" --help "entity-compare")
+PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
+ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
 assert_json_eq \
   "$PIECES_TOOL_SHARED" \
   "$ENTITIES_TOOL_SHARED" \

@@ -1,5 +1,4 @@
 import type { JSONSchema } from "@commontools/api";
-import { schemaToTypeString } from "../../runner/src/schema-format.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -12,12 +11,23 @@ export interface ParsedExecArgs {
   verb: "invoke" | "run";
   input: unknown;
   showHelp: boolean;
+  showHelpJson: boolean;
+  readJsonFromStdin: boolean;
+}
+
+export interface RenderExecHelpOptions {
+  invocationStyle?: "ct" | "direct";
 }
 
 interface FlagDescriptor {
   key: string;
   flagName: string;
   schema: JSONSchema;
+}
+
+interface ParsedInputMode {
+  input: unknown;
+  readJsonFromStdin: boolean;
 }
 
 function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
@@ -55,6 +65,14 @@ function flagNameForKey(key: string): string {
   return key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function displayCommandPath(path: string): string {
+  return /^[A-Za-z0-9_./:-]+$/.test(path) ? path : shellQuote(path);
+}
+
 function parseBoolean(value: string, flagName: string): boolean {
   if (value === "true") return true;
   if (value === "false") return false;
@@ -67,6 +85,20 @@ function parseJson(value: string, flagName: string): unknown {
   } catch {
     throw new Error(`Invalid JSON for ${flagName}`);
   }
+}
+
+function parseInlineOrStdinJson(
+  args: string[],
+  index: number,
+): { inlineValue?: string; consumeNext: boolean } {
+  const candidate = args[index + 1];
+  if (candidate === undefined) {
+    return { consumeNext: false };
+  }
+  if (candidate.startsWith("--")) {
+    throw new Error("--json cannot be combined with generated flags");
+  }
+  return { inlineValue: candidate, consumeNext: true };
 }
 
 function validateEnum(
@@ -135,7 +167,7 @@ function parseValueForSchema(
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
-): Record<string, unknown> {
+): ParsedInputMode {
   const properties = objectProperties(schema) ?? {};
   const descriptors = new Map<string, FlagDescriptor>();
   for (const [key, propertySchema] of Object.entries(properties)) {
@@ -146,6 +178,7 @@ function parseObjectInput(
   const input: Record<string, unknown> = {};
   let usedJson = false;
   let usedGeneratedFlags = false;
+  let readJsonFromStdin = false;
 
   for (let i = 0; i < args.length; i++) {
     const token = args[i];
@@ -160,21 +193,24 @@ function parseObjectInput(
       if (usedJson) {
         throw new Error("--json can only be provided once");
       }
-      const rawValue = args[i + 1];
-      if (rawValue === undefined) {
-        throw new Error("Missing value for --json");
+      const { inlineValue, consumeNext } = parseInlineOrStdinJson(args, i);
+      usedJson = true;
+      if (inlineValue === undefined) {
+        readJsonFromStdin = true;
+        continue;
       }
-      const parsed = parseJson(rawValue, "--json");
+      const parsed = parseJson(inlineValue, "--json");
       if (
         typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
       ) {
         throw new Error("Invalid JSON for --json: expected object");
       }
-      // TODO: validate decoded --json input against the linked schema here so
+      // TODO(#3117): validate decoded --json input against the linked schema here so
       // callers get field-level CLI errors before runner-side validation.
       Object.assign(input, parsed as Record<string, unknown>);
-      usedJson = true;
-      i++;
+      if (consumeNext) {
+        i++;
+      }
       continue;
     }
 
@@ -232,17 +268,35 @@ function parseObjectInput(
     }
   }
 
+  if (readJsonFromStdin) {
+    return {
+      input: undefined,
+      readJsonFromStdin: true,
+    };
+  }
+
   for (const key of requiredFlags(schema)) {
     if (!(key in input)) {
       throw new Error(`Missing required flag --${flagNameForKey(key)}`);
     }
   }
 
-  return input;
+  return {
+    input,
+    readJsonFromStdin: false,
+  };
 }
 
-function parseNonObjectInput(schema: JSONSchema, args: string[]): unknown {
-  if (args.length === 0) return undefined;
+function parseNonObjectInput(
+  schema: JSONSchema,
+  args: string[],
+): ParsedInputMode {
+  if (args.length === 0) {
+    return {
+      input: undefined,
+      readJsonFromStdin: false,
+    };
+  }
   if (args.length > 2) {
     throw new Error(`Unexpected argument ${args[2]}`);
   }
@@ -251,13 +305,28 @@ function parseNonObjectInput(schema: JSONSchema, args: string[]): unknown {
   if (flag !== "--value" && flag !== "--json") {
     throw new Error(`Unknown flag ${flag}`);
   }
+  if (flag === "--json" && rawValue === undefined) {
+    return {
+      input: undefined,
+      readJsonFromStdin: true,
+    };
+  }
   if (rawValue === undefined) {
     throw new Error(`Missing value for ${flag}`);
   }
   if (flag === "--json") {
-    return parseJson(rawValue, flag);
+    if (rawValue.startsWith("--")) {
+      throw new Error("--json cannot be combined with generated flags");
+    }
+    return {
+      input: parseJson(rawValue, flag),
+      readJsonFromStdin: false,
+    };
   }
-  return parseValueForSchema(rawValue, schema, flag);
+  return {
+    input: parseValueForSchema(rawValue, schema, flag),
+    readJsonFromStdin: false,
+  };
 }
 
 function hasHelpField(schema: JSONSchema): boolean {
@@ -265,10 +334,195 @@ function hasHelpField(schema: JSONSchema): boolean {
   return properties ? "help" in properties : false;
 }
 
-function inputSchemaSummary(schema: JSONSchema): string {
-  if (schema === true) return "unknown";
-  if (schema === false) return "never";
-  return schemaToTypeString(schema);
+function schemaDescription(schema: JSONSchema): string | undefined {
+  return isSchemaObject(schema) && typeof schema.description === "string"
+    ? schema.description
+    : undefined;
+}
+
+function schemaEnumSummary(schema: JSONSchema): string | undefined {
+  if (!isSchemaObject(schema) || !Array.isArray(schema.enum)) return undefined;
+  return (schema.enum as unknown[]).map((value) => JSON.stringify(value)).join(
+    " | ",
+  );
+}
+
+function schemaDefaultSummary(schema: JSONSchema): string | undefined {
+  if (!isSchemaObject(schema) || !("default" in schema)) return undefined;
+  return JSON.stringify(schema.default);
+}
+
+function valuePlaceholder(schema: JSONSchema): string {
+  const type = schemaType(schema);
+  switch (type) {
+    case "boolean":
+      return "<boolean>";
+    case "integer":
+      return "<integer>";
+    case "number":
+      return "<number>";
+    case "string":
+      return "<string>";
+    case "object":
+      return "<json-object>";
+    case "array":
+      return "<json-array>";
+    case "null":
+      return "<null>";
+    default:
+      return "<json>";
+  }
+}
+
+function primaryFlagUsage(flagName: string, schema: JSONSchema): string {
+  const type = schemaType(schema);
+  if (type === "boolean") {
+    return `--${flagName}`;
+  }
+  return `--${flagName} ${valuePlaceholder(schema)}`;
+}
+
+function fullFlagUsage(flagName: string, schema: JSONSchema): string {
+  const type = schemaType(schema);
+  if (type === "boolean") {
+    return `--${flagName} | --no-${flagName}`;
+  }
+  return primaryFlagUsage(flagName, schema);
+}
+
+function specificFlagLines(schema: JSONSchema): string[] {
+  const properties = objectProperties(schema);
+  if (!properties) {
+    return [
+      `  ${`--value ${valuePlaceholder(schema)}`.padEnd(20)}  Required.`,
+    ];
+  }
+
+  const required = requiredFlags(schema);
+  const descriptors = Object.entries(properties).map(
+    ([key, propertySchema]) => {
+      const flagName = flagNameForKey(key);
+      const parts: string[] = [];
+      if (key === "help") {
+        parts.push('Optional input field named "help".');
+      } else {
+        parts.push(required.has(key) ? "Required." : "Optional.");
+      }
+      const type = schemaType(propertySchema);
+      if (type === "boolean") {
+        parts.push(
+          `Boolean. Use --${flagName} for true or --no-${flagName} for false.`,
+        );
+      }
+      const enumSummary = schemaEnumSummary(propertySchema);
+      if (enumSummary) {
+        parts.push(`Allowed: ${enumSummary}.`);
+      }
+      const defaultSummary = schemaDefaultSummary(propertySchema);
+      if (defaultSummary !== undefined) {
+        parts.push(`Default: ${defaultSummary}.`);
+      }
+      const description = schemaDescription(propertySchema);
+      if (description) {
+        parts.push(description);
+      }
+      return {
+        usage: fullFlagUsage(flagName, propertySchema),
+        detail: parts.join(" "),
+      };
+    },
+  );
+
+  const maxUsage = descriptors.reduce(
+    (width, descriptor) => Math.max(width, descriptor.usage.length),
+    0,
+  );
+
+  return descriptors.map((descriptor) =>
+    `  ${descriptor.usage.padEnd(maxUsage)}  ${descriptor.detail}`
+  );
+}
+
+function genericFlagLines(schema: JSONSchema): string[] {
+  const jsonLabel = objectProperties(schema) ? "--json" : "--json";
+  const jsonDescription = objectProperties(schema)
+    ? "Read the full input object from stdin. Cannot be combined with other input flags."
+    : "Read the full input value as JSON from stdin. Cannot be combined with other input flags.";
+  const descriptors = [
+    { usage: jsonLabel, detail: jsonDescription },
+    { usage: "--help", detail: "Show this help." },
+    { usage: "--help --json", detail: "Show full schema details as JSON." },
+  ];
+  const maxUsage = descriptors.reduce(
+    (width, descriptor) => Math.max(width, descriptor.usage.length),
+    0,
+  );
+
+  return descriptors.map((descriptor) =>
+    `  ${descriptor.usage.padEnd(maxUsage)}  ${descriptor.detail}`
+  );
+}
+
+function outputPropertyLines(schema: JSONSchema): string[] {
+  const properties = objectProperties(schema);
+  if (!properties || Object.keys(properties).length === 0) {
+    return ["  JSON on success."];
+  }
+
+  return [
+    "  JSON on success:",
+    ...Object.entries(properties).map(([key, propertySchema]) =>
+      `    ${key} ${valuePlaceholder(propertySchema)}`
+    ),
+  ];
+}
+
+function usageCommandPrefix(
+  mountedFilePath: string,
+  invocationStyle: "ct" | "direct",
+): string {
+  const displayedPath = displayCommandPath(mountedFilePath);
+  return invocationStyle === "direct"
+    ? displayedPath
+    : `ct exec ${displayedPath}`;
+}
+
+function usageLine(
+  mountedFilePath: string,
+  spec: ExecCommandSpec,
+  invocationStyle: "ct" | "direct",
+): string {
+  const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  const properties = objectProperties(spec.inputSchema);
+
+  if (!properties) {
+    return `${prefix} --value ${valuePlaceholder(spec.inputSchema)}`;
+  }
+
+  const required = requiredFlags(spec.inputSchema);
+  const requiredUsages = Object.entries(properties)
+    .filter(([key]) => required.has(key))
+    .map(([key, propertySchema]) =>
+      primaryFlagUsage(flagNameForKey(key), propertySchema)
+    );
+  const suffix = requiredUsages.length > 0
+    ? ` ${requiredUsages.join(" ")}`
+    : "";
+  return `${prefix}${suffix}`;
+}
+
+function helpUsageLines(
+  mountedFilePath: string,
+  spec: ExecCommandSpec,
+  invocationStyle: "ct" | "direct",
+): string[] {
+  const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  return [
+    `  ${usageLine(mountedFilePath, spec, invocationStyle)}`,
+    `  ${prefix} --json`,
+    `  ${prefix} --help`,
+    `  ${prefix} --help --json`,
+  ];
 }
 
 export function parseExecArgs(
@@ -277,9 +531,30 @@ export function parseExecArgs(
 ): ParsedExecArgs {
   const args = [...rawArgs];
   let verb = spec.defaultVerb;
+  const helpField = hasHelpField(spec.inputSchema);
 
   if (rawArgs[0] === "--help") {
-    return { verb, input: {}, showHelp: true };
+    if (rawArgs.length === 1) {
+      return {
+        verb,
+        input: {},
+        showHelp: true,
+        showHelpJson: false,
+        readJsonFromStdin: false,
+      };
+    }
+    if (rawArgs.length === 2 && rawArgs[1] === "--json") {
+      return {
+        verb,
+        input: {},
+        showHelp: true,
+        showHelpJson: true,
+        readJsonFromStdin: false,
+      };
+    }
+    if (!helpField) {
+      throw new Error("Unknown flag --help");
+    }
   }
 
   if (args[0] === "invoke" || args[0] === "run") {
@@ -293,35 +568,90 @@ export function parseExecArgs(
     verb = args.shift() as "invoke" | "run";
   }
 
-  if (args[0] === "--help" && !hasHelpField(spec.inputSchema)) {
-    return { verb, input: {}, showHelp: true };
+  if (args[0] === "--help") {
+    if (args.length === 1) {
+      return {
+        verb,
+        input: {},
+        showHelp: true,
+        showHelpJson: false,
+        readJsonFromStdin: false,
+      };
+    }
+    if (args.length === 2 && args[1] === "--json") {
+      return {
+        verb,
+        input: {},
+        showHelp: true,
+        showHelpJson: true,
+        readJsonFromStdin: false,
+      };
+    }
+    if (!helpField) {
+      throw new Error("Unknown flag --help");
+    }
   }
 
   const properties = objectProperties(spec.inputSchema);
-  const input = properties
+  const parsedInput = properties
     ? parseObjectInput(spec.inputSchema, args)
     : parseNonObjectInput(spec.inputSchema, args);
 
   return {
     verb,
-    input: properties ? input ?? {} : input,
+    input: properties && !parsedInput.readJsonFromStdin
+      ? parsedInput.input ?? {}
+      : parsedInput.input,
     showHelp: false,
+    showHelpJson: false,
+    readJsonFromStdin: parsedInput.readJsonFromStdin,
   };
+}
+
+export function renderExecHelpJson(spec: ExecCommandSpec): string {
+  const value: Record<string, unknown> = {
+    callableKind: spec.callableKind,
+    inputSchema: spec.inputSchema,
+  };
+  if (spec.outputSchemaSummary !== undefined) {
+    value.outputSchema = spec.outputSchemaSummary;
+  }
+  return JSON.stringify(value, null, 2);
 }
 
 export function renderExecHelp(
   mountedFilePath: string,
   spec: ExecCommandSpec,
+  options: RenderExecHelpOptions = {},
 ): string {
+  const invocationStyle = options.invocationStyle ?? "ct";
+  const specificFlags = specificFlagLines(spec.inputSchema);
+  const genericFlags = genericFlagLines(spec.inputSchema);
+
   const lines = [
-    `Usage: ct exec ${mountedFilePath} [${spec.defaultVerb}] [flags]`,
-    `Callable: ${spec.callableKind}`,
-    `Verb: ${spec.defaultVerb}`,
-    `Input: ${inputSchemaSummary(spec.inputSchema)}`,
+    "Usage:",
+    ...helpUsageLines(mountedFilePath, spec, invocationStyle),
+    "",
+    "Flags:",
+    ...specificFlags,
+    ...(specificFlags.length > 0 ? [""] : []),
+    ...genericFlags,
   ];
 
-  if (spec.callableKind === "tool" && spec.outputSchemaSummary !== undefined) {
-    lines.push(`Output: ${inputSchemaSummary(spec.outputSchemaSummary)}`);
+  if (spec.callableKind === "handler") {
+    lines.push("");
+    lines.push("Output:");
+    lines.push("  No output on success.");
+    lines.push("");
+    lines.push("Alternatively, write JSON to this file to invoke the handler.");
+  } else if (spec.outputSchemaSummary !== undefined) {
+    lines.push("");
+    lines.push("Output:");
+    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
+  } else if (spec.callableKind === "tool") {
+    lines.push("");
+    lines.push("Output:");
+    lines.push("  JSON on success.");
   }
 
   return lines.join("\n");
