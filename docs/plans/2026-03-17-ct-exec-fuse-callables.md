@@ -46,7 +46,7 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 ### Important contracts
 
 1. The mounted path is the stable identity for `ct exec`; there is no daemon RPC for path resolution.
-2. The mounted piece directory name is not a stable piece identifier because FUSE de-dupes duplicate names (`foo`, `foo-2`, ...). `ct exec` must recover the real piece ID from mounted metadata (`meta.json` in that piece directory), not by re-deriving a name match from live space contents.
+2. The mounted display name under `pieces/` is not a stable piece identifier because FUSE de-dupes duplicate names (`foo`, `foo-2`, ...). `ct exec` must recover the real piece ID from mounted metadata (`meta.json` in that mounted piece directory), not by re-deriving a name match from live space contents. The same mounted-metadata lookup should also work for `entities/<entity-id>/...` callable paths so every mounted callable file can be executed consistently.
 3. `ct exec` must resolve mount metadata for both foreground and background mounts. The current background-only PID file behavior is insufficient and must be replaced with always-on mount state.
 4. Persist the mount identity as an absolute path. Relative `--identity` values are valid at mount time but would break later `ct exec` calls launched from a different cwd.
 5. The exact cell used for schema discovery is the callable child cell, not the piece root. Always call `childCell.asSchemaFromLinks()` before classifying or rendering help.
@@ -55,7 +55,9 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 
 ### Boundaries to keep sharp
 
-1. Only mounted FUSE callable files are in scope for `ct exec`. Reject normal files like `result/title` and reject arbitrary repo files.
+1. Only mounted FUSE callable files are in scope for `ct exec`. Reject normal files like `result/title` and reject arbitrary repo files, but accept callable paths from both mounted piece views:
+   - `<space>/pieces/<display-name>/<input|result>/<name>.(handler|tool)`
+   - `<space>/entities/<entity-id>/<input|result>/<name>.(handler|tool)`
 2. Only top-level callable entries in `input/` and `result/` are surfaced as `.handler` / `.tool` siblings. Do not recurse into nested pattern-tool internals.
 3. `ct exec` should support object-shaped schemas with generated flags plus a raw JSON escape hatch. Do not invent a large nested flag DSL.
 
@@ -91,7 +93,7 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
 - `packages/cli/commands/main.ts`
   - Register the new `exec` command and brief top-level help text.
 - `packages/cli/commands/fuse.ts`
-  - Always write/remove mount-state files, generate the executable shim, and pass the shim path into the FUSE daemon.
+  - Always write/remove mount-state files, generate the executable shim, pass the shim path into the FUSE daemon, and refresh the built-in FUSE help text for readable/executable `.handler` and new `.tool` files.
 - `packages/cli/lib/fuse.ts`
   - Replace the narrow PID-file model with a mount-state model that includes `identity`, `pid`, and `execShimPath`; add longest-prefix mount lookup and shim generation helpers.
 - `packages/fuse/types.ts`
@@ -192,14 +194,18 @@ This keeps `mod.ts` simple and makes the read path and help path identical for b
 1. Resolve the absolute user-supplied path.
 2. Find the longest matching mounted `mountpoint` from persisted mount-state files.
 3. Parse the relative path under that mountpoint.
-4. Require the shape:
+4. Require one of these mounted callable path shapes:
 
 ```text
 <space>/pieces/<piece>/<input|result>/<name>.handler
 <space>/pieces/<piece>/<input|result>/<name>.tool
+<space>/entities/<entity-id>/<input|result>/<name>.handler
+<space>/entities/<entity-id>/<input|result>/<name>.tool
 ```
 
-5. Read `<mountpoint>/<space>/pieces/<piece>/meta.json` from the mounted filesystem and extract the real piece ID for that directory.
+5. Read sibling `meta.json` from the mounted piece directory itself and extract the real piece ID for that directory:
+   - `<mountpoint>/<space>/pieces/<piece>/meta.json`
+   - `<mountpoint>/<space>/entities/<entity-id>/meta.json`
 6. Load the `PieceManager` for that `space` using the mount’s `apiUrl` and absolute `identity`.
 7. Resolve the piece controller by piece ID, not directory name.
 8. Resolve the exact child cell with `piece[input|result].getCell().key(name)`.
@@ -209,7 +215,7 @@ The same segment parser logic should power both:
 1. FUSE’s write-to-handler routing
 2. CLI `ct exec`
 
-Keep the path-shape parsing in one pure helper so the mapping cannot drift. CLI piece-ID recovery is a separate step that intentionally uses mounted metadata because only the mounted filesystem knows how duplicate display names were de-duped.
+Keep the path-shape parsing in one pure helper so the mapping cannot drift. CLI piece-ID recovery is a separate step that intentionally uses mounted metadata because only the mounted filesystem knows how duplicate display names were de-duped, and because the same metadata path keeps `pieces/` and `entities/` execution behavior aligned.
 
 ### 4. Derive tool schemas from the underlying pattern, not from the wrapper object
 
@@ -281,6 +287,7 @@ Add cases covering:
 3. stored identities are absolute paths, even when the mount command was given a relative key path
 4. generated shim content is executable text pointing at `packages/cli/mod.ts`
 5. stale mount-state entries are ignored so `ct exec` cannot attach to a dead mount
+6. the built-in `ct fuse --help` text no longer claims `.handler` files are write-only and includes `.tool`
 
 Run:
 
@@ -324,6 +331,7 @@ For both foreground and background mounts:
 4. persist the mount-state entry
 5. pass `--exec-cli <shim>` to the daemon
 6. on clean foreground exit, remove the state file
+7. update the command description/examples while in `packages/cli/commands/fuse.ts` so CLI help matches the shipped callable-file behavior
 
 Do not regress `ct fuse status` or `ct fuse unmount`.
 
@@ -364,6 +372,7 @@ Extend `packages/fuse/tree-builder.test.ts` to cover:
 2. callable entries are skipped from normal JSON expansion
 3. `.json` siblings replace tools with a compact sigil
 4. callable nodes carry script content whose first line is the passed shebang
+5. handler routing keeps working from both `pieces/.../*.handler` and `entities/.../*.handler` mounted paths once callable path parsing is generalized
 
 Run:
 
@@ -413,6 +422,7 @@ Implement:
 1. `getattr` / `read` / `open` support for readable/executable callable nodes
 2. handler callables remain writable
 3. tool callables reject writes with `EACCES`
+4. handler writes continue to work for callable files reached through either mounted `pieces/` paths or mounted `entities/` paths
 
 Mode constants should reflect reality:
 
@@ -603,10 +613,11 @@ Add focused cases for:
 1. rejecting non-mounted paths
 2. rejecting mounted non-callable files
 3. resolving the backing piece ID from sibling `meta.json`, including de-duped display names like `notes-2`
-4. resolving the backing piece and cell from a mounted `.handler` path
-5. resolving the backing piece and cell from a mounted `.tool` path
-6. explicit verb override still working
-7. tool execution delegates to the shared runner callable helper instead of a CLI-local `runtime.run(...)` path
+4. resolving the backing piece and cell from a mounted `.handler` path under `pieces/`
+5. resolving the backing piece and cell from a mounted `.tool` path under `pieces/`
+6. resolving the backing piece and cell from mounted `.handler` / `.tool` paths under `entities/`
+7. explicit verb override still working
+8. tool execution delegates to the shared runner callable helper instead of a CLI-local `runtime.run(...)` path
 
 Keep these pure or lightly mocked; the real runtime path is covered in Task 6.
 
@@ -713,6 +724,7 @@ The script should:
 11. assert the handler changed piece state
 12. assert the tool printed the expected JSON
 13. verify legacy `echo '{}' > file.handler` still works
+14. exercise at least one callable through the mounted `entities/<entity-id>/...` path to prove `ct exec` resolves any mounted callable file, not just `pieces/...`
 
 Run:
 
@@ -736,6 +748,7 @@ Required doc changes:
 3. callable files are readable/executable
 4. direct execution and `ct exec` examples are documented
 5. handler-testing docs mention mounted handler execution as a fast local workflow
+6. the built-in `ct fuse` command description/examples no longer describe handlers as write-only and mention `.tool`
 
 - [ ] **Step 4: Run the focused automated checks**
 
@@ -779,6 +792,7 @@ git commit -m "docs: document exec-backed fuse callables"
 ## Final Verification
 
 - [ ] `ct exec` works with explicit and implicit verbs for both `.handler` and `.tool`.
+- [ ] `ct exec` resolves callable files from both mounted `pieces/...` and mounted `entities/...` paths.
 - [ ] Direct execution of mounted callable files works from the shell for both `.handler` and `.tool` because the files are executable and their first line is the generated shebang.
 - [ ] Handler write-through (`echo ... > file.handler`) still works unchanged.
 - [ ] `.tool` hides `pattern/extraParams` internals from the mounted tree.
