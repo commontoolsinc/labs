@@ -530,6 +530,109 @@ type PreparedWriteSchema = {
   readonly shouldWriteSchemaHash: boolean;
 };
 
+function canonicalAncestorPaths(path: string): string[] {
+  if (path === "/") {
+    return ["/"];
+  }
+
+  const trimmed = path.startsWith("/") ? path.slice(1) : path;
+  const segments = trimmed.length === 0
+    ? []
+    : trimmed.split("/").filter((segment) => segment.length > 0);
+  const ancestors = ["/"];
+  for (let index = 0; index < segments.length; index++) {
+    ancestors.push(
+      `/${segments.slice(0, index + 1).map(escapeJsonPointerToken).join("/")}`,
+    );
+  }
+  return ancestors;
+}
+
+function mergeLabel(
+  base: Labels | undefined,
+  dynamic: Labels | undefined,
+): Labels | undefined {
+  if (!base && !dynamic) {
+    return undefined;
+  }
+
+  const classification = new Set([
+    ...(base?.classification ?? []),
+    ...(dynamic?.classification ?? []),
+  ]);
+  const integrity = new Set([
+    ...(base?.integrity ?? []),
+    ...(dynamic?.integrity ?? []),
+  ]);
+
+  if (classification.size === 0 && integrity.size === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(classification.size > 0
+      ? { classification: [...classification].sort() }
+      : {}),
+    ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
+  };
+}
+
+function mergePreparedLabels(
+  baseLabels: Record<string, Labels>,
+  dynamicLabels: Record<string, Labels> | undefined,
+): Record<string, Labels> {
+  if (!dynamicLabels) {
+    return baseLabels;
+  }
+
+  const merged: Record<string, Labels> = { ...baseLabels };
+  for (
+    const path of new Set([
+      ...Object.keys(baseLabels),
+      ...Object.keys(dynamicLabels),
+    ])
+  ) {
+    const label = mergeLabel(baseLabels[path], dynamicLabels[path]);
+    if (label) {
+      merged[path] = label;
+    }
+  }
+  return merged;
+}
+
+function collectDynamicWriteIntegrity(
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+): readonly string[] {
+  const integrity = new Set<string>();
+  for (const consumed of consumedReadLabels) {
+    for (const atom of consumed.effectiveLabel?.integrity ?? []) {
+      integrity.add(atom);
+    }
+  }
+  return [...integrity].sort();
+}
+
+function recordDynamicWriteIntegrity(
+  labelsByEntity: Map<string, Record<string, Labels>>,
+  entity: EntityAddress,
+  writePath: string,
+  integrity: readonly string[],
+): void {
+  if (integrity.length === 0) {
+    return;
+  }
+
+  const entityKey = cfcEntityKey(entity);
+  const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
+  for (const path of canonicalAncestorPaths(writePath)) {
+    const merged = mergeLabel(labels[path], { integrity: [...integrity] });
+    if (merged) {
+      labels[path] = merged;
+    }
+  }
+  labelsByEntity.set(entityKey, labels);
+}
+
 async function resolvePreparedWriteSchemas(
   tx: IExtendedStorageTransaction,
   writtenEntities: readonly EntityAddress[],
@@ -1944,11 +2047,12 @@ function verifyOutputTransitionsForAttempt(
   canonical: CanonicalBoundaryActivity,
   options: PrepareBoundaryCommitOptions = {},
   rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
-): void {
+): ReadonlyMap<string, Record<string, Labels>> {
   if (canonical.attemptedWrites.length === 0) {
-    return;
+    return new Map();
   }
   const cfc = new ContextualFlowControl();
+  const dynamicLabelsByEntity = new Map<string, Record<string, Labels>>();
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -2019,6 +2123,13 @@ function verifyOutputTransitionsForAttempt(
         );
       }
     }
+
+    recordDynamicWriteIntegrity(
+      dynamicLabelsByEntity,
+      entity,
+      write.path,
+      collectDynamicWriteIntegrity(effectiveConsumedReadLabels),
+    );
 
     const statePrecondition = readStatePrecondition(schemaAtWritePath);
     if (statePrecondition) {
@@ -2234,17 +2345,27 @@ function verifyOutputTransitionsForAttempt(
       }
     }
   }
+
+  return dynamicLabelsByEntity;
 }
 
 export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
   options: PrepareBoundaryCommitOptions = {},
 ): Promise<void> {
+  const prepareScope = tx.resolveCfcPrepareScopeSnapshot();
+  const effectiveOptions: PrepareBoundaryCommitOptions = {
+    ...options,
+    implementationIdentity: options.implementationIdentity ??
+      prepareScope.implementationIdentity,
+    actingPrincipal: options.actingPrincipal ?? prepareScope.actingPrincipal,
+    trustContext: options.trustContext ?? prepareScope.trustContext,
+  };
   const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
   const writtenEntities = collectWrittenEntities(canonical);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
   const preparedWriteSchemas = hasIfcWriteReason
-    ? await resolvePreparedWriteSchemas(tx, writtenEntities, options)
+    ? await resolvePreparedWriteSchemas(tx, writtenEntities, effectiveOptions)
     : [];
 
   if (
@@ -2265,13 +2386,13 @@ export async function prepareBoundaryCommit(
   const consumedReadLabels = verifyInputRequirementsForAttempt(
     tx,
     canonical,
-    options,
+    effectiveOptions,
   );
-  verifyOutputTransitionsForAttempt(
+  const dynamicOutputLabels = verifyOutputTransitionsForAttempt(
     tx,
     consumedReadLabels,
     canonical,
-    options,
+    effectiveOptions,
     preparedRootSchemasByEntity,
   );
 
@@ -2303,14 +2424,20 @@ export async function prepareBoundaryCommit(
           prepared.actualSchemaHash,
         );
       }
-      tx.writeOrThrow(cfcLabelsAddress(prepared.entity), prepared.labels);
+      tx.writeOrThrow(
+        cfcLabelsAddress(prepared.entity),
+        mergePreparedLabels(
+          prepared.labels,
+          dynamicOutputLabels.get(cfcEntityKey(prepared.entity)),
+        ),
+      );
     }
   }
 
   const digest = computeCfcActivityDigest(tx.journal.activity(), {
-    implementationIdentity: options.implementationIdentity,
-    actingPrincipal: options.actingPrincipal,
-    trustContext: options.trustContext,
+    implementationIdentity: effectiveOptions.implementationIdentity,
+    actingPrincipal: effectiveOptions.actingPrincipal,
+    trustContext: effectiveOptions.trustContext,
   });
   tx.markCfcPrepared(digest);
 }

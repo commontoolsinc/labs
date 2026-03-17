@@ -311,7 +311,7 @@ Primary files:
 - [x] Compute new effective labels for outputs/writes.
 - [x] Resolve schema to canonical bytes and compute hash.
 - [x] Write `cfc.schemaHash` and `cfc.labels` as part of prepare path.
-- [ ] Persist concrete integrity evidence only; do not materialize
+- [x] Persist concrete integrity evidence only; do not materialize
       trust-closure-derived concept atoms into stored labels.
 - [x] Ensure prepare fails if schema hash cannot be resolved.
 
@@ -667,7 +667,7 @@ Primary docs:
       cross-clause-mixing attack shapes.
 - [x] Confirm concept-valued integrity guards are evaluated from concrete
       integrity via acting-principal trust closure.
-- [ ] Confirm concrete integrity is persisted; derived concept satisfaction is
+- [x] Confirm concrete integrity is persisted; derived concept satisfaction is
       boundary-evaluated and not serialized into stored labels.
 - [x] Confirm the same concrete evidence may satisfy concept guards for one
       acting principal and fail for another.

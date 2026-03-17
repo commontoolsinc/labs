@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
+import type { URI } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("cfc policy concept guard test");
 const space = signer.did();
@@ -67,17 +68,20 @@ describe("CFC policy concept guard trust closure", () => {
     await storageManager.close();
   });
 
-  it("allows declassify integrityPre concepts via trust closure without stored concept atoms", async () => {
+  async function runConceptGuardRewrite(
+    sourceName: string,
+    targetName: string,
+  ): Promise<{ targetId: URI }> {
     let tx = runtime.edit();
     const source = runtime.getCell<number>(
       space,
-      "cfc-policy-concept-source",
+      sourceName,
       undefined,
       tx,
     );
     const target = runtime.getCell<number>(
       space,
-      "cfc-policy-concept-target",
+      targetName,
       undefined,
       tx,
     );
@@ -105,5 +109,39 @@ describe("CFC policy concept guard trust closure", () => {
     await prepareCfcCommitIfNeeded(tx);
     const { error } = await tx.commit();
     expect(error).toBeUndefined();
+    return { targetId: target.getAsNormalizedFullLink().id };
+  }
+
+  it("allows declassify integrityPre concepts via trust closure without stored concept atoms", async () => {
+    await runConceptGuardRewrite(
+      "cfc-policy-concept-source",
+      "cfc-policy-concept-target",
+    );
+  });
+
+  it("persists concrete integrity evidence without serializing derived concept atoms", async () => {
+    const { targetId } = await runConceptGuardRewrite(
+      "cfc-policy-concept-persist-source",
+      "cfc-policy-concept-persist-target",
+    );
+
+    const tx = runtime.edit();
+    const labels = tx.readOrThrow({
+      space,
+      id: targetId,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }) as {
+      "/": {
+        classification?: readonly string[];
+        integrity?: readonly string[];
+      };
+    };
+
+    expect(labels["/"]?.classification).toEqual(["confidential"]);
+    expect(labels["/"]?.integrity).toEqual(["runtime-attested-source"]);
+    expect(labels["/"]?.integrity?.includes(conceptRequiredIntegrity)).toBe(
+      false,
+    );
   });
 });
