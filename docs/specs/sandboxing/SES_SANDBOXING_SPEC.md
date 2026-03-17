@@ -38,10 +38,10 @@ hardening of module-scope definitions at load time.
 4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
    only when they are direct functions and their captured module environment is
    reduced to immutable verified values and trusted hardened capabilities.
-5. **Verified Plain Data**: Any other top-level value must be proven to be
-   recursively plain data and then hardened by a custom checker/freezer.
-   Computing that value via an IIFE is allowed only if the final result passes
-   this verifier.
+5. **Verified Module-Safe Data**: Any other top-level value must be proven to
+   be a versioned, recursively inert subset of `StorableValue` and then
+   hardened by a custom checker/freezer. Computing that value via an IIFE is
+   allowed only if the final result passes this verifier.
 6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
    code to reduce runtime parsing cost, but compiler output is not trusted and
    the runner must verify the final code boundary.
@@ -81,7 +81,7 @@ SES (Secure ECMAScript) provides:
 
 `harden()` is necessary but not sufficient for this threat model. It preserves
 behavioral objects as-is, including functions and objects with hidden
-mutability. This spec therefore requires an additional runtime plain-data
+mutability. This spec therefore requires an additional runtime module-safe-data
 checker/freezer for top-level non-function values.
 
 Alternative considered: QuickJS (via `js-sandbox` package). SES is preferred because:
@@ -130,10 +130,11 @@ Pattern Source (.tsx)
     - TypeScript → AMD bundle with per-module AMD factories intact
     ↓
 [3] Runtime Verifier (TCB)
+    - Preflight the full compiled bundle before any evaluation
     - Inspect each AMD module factory before execution
     - Require direct callbacks for trusted builders
     - Permit direct top-level functions only
-    - Route all other top-level values through plain-data verification
+    - Route all other top-level values through module-safe-data verification
     - Reject anything else
     ↓
 [4] SES Execution
@@ -166,19 +167,11 @@ Pattern Source (.tsx)
 │  └──────────────────────────────────────────────────────┘  │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ String Eval Compartment (per-string, fresh each time) │  │
+│  │ Future Dynamic Import Compartments (v2 only)          │  │
+│  │  Not part of this implementation baseline             │  │
 │  │                                                       │  │
-│  │  Used for: inline strings that couldn't be hoisted   │  │
-│  │  Created fresh each invocation to prevent closures   │  │
-│  │                                                       │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ Dynamic Import Compartment (per-import, fresh)        │  │
-│  │  TODO: not yet wired up — see Section 6              │  │
-│  │                                                       │  │
-│  │  Used for: await import("https://esm.sh/lodash")     │  │
-│  │  Fresh instance each time to prevent state leakage   │  │
+│  │  If added later, each import must get fresh module    │  │
+│  │  instantiation plus the same verification policy      │  │
 │  │                                                       │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -187,8 +180,9 @@ Pattern Source (.tsx)
 The primary enforcement mechanism is still verified module load plus hardened
 exports, not the Compartment itself. The runtime nevertheless SHOULD use one
 Compartment per loaded pattern as the default containment boundary, because that
-reduces blast radius if verification misses something. Fresh Compartments remain
-appropriate for rare string-eval fallbacks and future dynamic-import isolation.
+reduces blast radius if verification misses something. Future dynamic-import
+isolation may add fresh Compartments later, but authored pattern execution in
+this baseline uses exactly one verified SES path.
 
 ---
 
@@ -214,7 +208,7 @@ following categories:
 
 1. Trusted builder definitions with a **direct callback**
 2. Direct top-level function definitions
-3. Verified plain data that is hardened before exposure
+3. Verified module-safe data that is hardened before exposure
 4. Type-only and import/export declarations
 
 All surviving top-level bindings should be normalized into a small canonical
@@ -236,7 +230,7 @@ A callback is "direct" when it is:
 The following are allowed:
 
 ```typescript
-import { pattern, recipe, lift, handler } from "@commonfabric/common-builder";
+import { pattern, recipe, lift, handler } from "commontools";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   return { value: props.value };
@@ -315,11 +309,23 @@ This lets the verifier accept one function shape rather than many syntactic
 variants. The verifier must still inspect the wrapped expression and confirm it
 is a direct `function` expression.
 
-#### 4.2.3 Verified Plain Data
+If a top-level helper is intended to be callable from `__ct_data(...)`, it must
+be approved under a stricter data-safe class, for example `__ct_pure_fn(...)`.
+That stricter class requires:
+
+- captures limited to module-safe data or other approved `__ct_pure_fn(...)`
+  helpers
+- no references to builder entrypoints, graph constructors, or arbitrary runtime
+  imports
+
+Ordinary `__ct_fn(...)` helpers are callable from builder/pattern code but are
+not assumed to be safe inside data wrappers.
+
+#### 4.2.3 Verified Module-Safe Data
 
 Any top-level value that is not a trusted builder definition or direct function
-must be plain data and pass a custom checker/freezer before it survives module
-load. This is the only category where an IIFE is acceptable.
+must be module-safe data and pass a custom checker/freezer before it survives
+module load. This is the only category where an IIFE is acceptable.
 
 ```typescript
 const CONFIG = freezeVerifiedPlainData({
@@ -346,11 +352,37 @@ const LOOKUP = __ct_data((() => {
 })());
 ```
 
-The default allowed domain is:
+Within `__ct_data(...)`, the allowed operation set is narrower than normal
+pattern construction. A data initializer may use:
 
-- primitives
+- literals and operators
+- previously verified module-safe-data bindings
+- approved `__ct_pure_fn(...)` top-level helpers whose captures are themselves
+  limited to module-safe data
+
+A data initializer MUST NOT call:
+
+- trusted builder entrypoints such as `pattern`, `recipe`, `lift`, or `handler`
+- graph-construction built-ins such as `fetchData`, `compileAndRun`,
+  `navigateTo`, or `wish`
+- arbitrary imported runtime-module functions
+
+Version 1 of the allowed domain is a deliberate subset of
+`@commontools/memory`'s `StorableValue`:
+
+- `null`
+- `undefined`
+- `boolean`
+- `number`
+- `string`
+- `bigint`
 - arrays of allowed values
 - plain object records with allowed values
+
+Future widening of this set, including support for `Map`, `Set`, temporal
+primitives, or other richer `StorableValue` members, requires an explicit spec
+revision and validator version bump. The v1 verifier MUST NOT silently widen
+with upstream `StorableValue` changes.
 
 The default rejected domain includes:
 
@@ -361,17 +393,26 @@ The default rejected domain includes:
 - `Date`
 - class instances
 - proxies
+- objects with symbol keys
+- objects with accessors
+- sparse arrays
+- cyclic object graphs
+- records with reserved keys such as `__proto__`, `constructor`, or `prototype`
 - platform capability objects
 
-Module-load side effects are disallowed except for sandboxed `console` output,
-which is separately controlled and treated as a debugging/observability channel
-rather than a surviving state channel.
+Externally observable module-load side effects are disallowed except for
+sandboxed `console` output, which is separately controlled and treated as a
+debugging/observability channel rather than a surviving state channel. Trusted
+graph construction during active builder execution is allowed as part of pattern
+assembly, but data-category initializers must remain inert apart from console
+output. This is enforced by giving authored code a narrower module-load
+authority surface than the runtime's later execution environment.
 
 `__ct_data(...)` validates the result that survives module load, not the full
 semantics of the computation that produced it. This is acceptable under the
-current threat model because module-load code may only observe already-verified
-module bindings and the only tolerated side effect in this context is sandboxed
-console output.
+current threat model because data-category code may only observe already-verified
+module-safe bindings and the only tolerated externally observable side effect in
+that context is sandboxed console output.
 
 #### 4.2.4 Type-Only Syntax
 
@@ -385,6 +426,8 @@ Import/export policy:
 
 - static imports are allowed only from trusted runtime modules and from other
   modules in the same transformed-and-verified bundle
+- trusted runtime capabilities are supplied through those runtime modules and
+  the AMD `runtimeDeps` mechanism, not as ambient application globals
 - external third-party static imports are rejected in v1
 - exports should be normalized to simple local bindings plus explicit export
   wiring so the verifier does not need to accept the full surface of ESM export
@@ -393,8 +436,9 @@ Import/export policy:
 
 #### 4.2.5 Disallowed Module-Scope Forms
 
-The following are rejected unless transformed into `freezeVerifiedPlainData(...)`
-and the final result passes validation:
+The following are rejected unless they are normalized into `__ct_data(...)`,
+satisfy the stricter data-initializer rules above, and the final escaping value
+passes module-safe-data validation:
 
 ```typescript
 // ❌ Arbitrary call result at module scope
@@ -420,18 +464,27 @@ The compiler/transformer is not in the TCB. It may assist by:
 - inserting stable sentinel comments before each top-level item
 - rewriting trusted builders, top-level functions, and data initializers into a
   small canonical wrapper language such as `__ct_builder(...)`, `__ct_fn(...)`,
-  and `__ct_data(...)`
+  `__ct_pure_fn(...)`, and `__ct_data(...)`
 - rewriting candidate plain-data initializers into
   `freezeVerifiedPlainData(...)`
 - hoisting inline callbacks to make direct-callback verification easier
+- emitting capture manifests or equivalent canonical metadata for `__ct_data(...)`
+  items so the verifier can reject references to builder/runtime capabilities
 - emitting those wrappers during compilation so source maps and stack traces
   continue to point back to authored source, rather than introducing wrappers at
   runtime
 
 However, the runner must still verify the code that is about to execute. The
-trusted verification boundary is the AMD module factory emitted by the bundler,
-because it preserves per-module top-level structure better than the fully
-wrapped bundle entrypoint.
+trusted verification boundary is two-stage:
+
+- preflight the full compiled bundle before any `compartment.evaluate(...)`
+  call, ensuring the outer wrapper contains only trusted boilerplate plus AMD
+  `define(...)` registrations in the untrusted source region
+- verify each AMD module factory before it can be required or executed
+
+The AMD module factory remains the primary authored-code boundary because it
+preserves per-module top-level structure better than the fully wrapped bundle
+entrypoint.
 
 The trusted verifier should be a recognizer for the canonical emitted grammar,
 not a general JavaScript parser. It only needs to:
@@ -442,6 +495,9 @@ not a general JavaScript parser. It only needs to:
   up
 - confirm that each surviving top-level item matches one of the canonical
   wrapper forms or allowed import/export/type forms
+- for `__ct_data(...)` items, confirm their declared captures resolve only to
+  previously approved module-safe-data bindings or approved `__ct_pure_fn(...)`
+  helpers
 - reject anything outside that mini-language
 
 The trusted verifier does **not** need to understand arbitrary JavaScript AST
@@ -600,9 +656,9 @@ Notes:
 
 - `overrideTaming: "severe"` remains the compatibility default.
 - `mathTaming` and `dateTaming` should not be relied on as policy knobs in the
-  reimplementation. In newer SES releases those options are gone; time and
-  randomness should instead be controlled through explicit runtime helpers such
-  as `Temporal`, `secureRandom`, and `randomUUID`.
+  reimplementation. In newer SES releases those options are gone; any future
+  reintroduction of time/randomness helpers for authored code must be explicit
+  and accompanied by call-site restrictions.
 
 ### 5.2 Compiled Bundle Evaluation
 
@@ -622,21 +678,33 @@ The verified runtime path evaluates that bundle inside the pattern's
 Compartment:
 
 ```typescript
+preflightCompiledBundle(compiledBundle);
 const entrypoint = patternCompartment.evaluate(compiledBundle);
-const result = entrypoint(runtimeGlobals);
+const result = entrypoint(runtimeDeps);
 ```
 
 Important details:
 
 - the bundle itself stays in AMD form until execution
-- runtime capability injection happens explicitly through `runtimeGlobals`
-- the verifier runs at the AMD module factory boundary before any factory may be
-  required or executed
+- the runtime performs bundle preflight before any Compartment evaluation
+- runtime capability injection happens explicitly through trusted AMD
+  `runtimeDeps`
+- after preflight, the verifier runs at the AMD module factory boundary before
+  any factory may be required or executed
 - the harness uses the resulting `exportMap` to associate exported runtime
   values with their source `RuntimeProgram`
 - the runtime preserves the existing bundle ABI unless there is a deliberate
   compiler change
 - only verified exported builder objects are cached for later invocation
+
+The bundle preflight step MUST confirm all of the following:
+
+- the outer bundle still matches the trusted bundler ABI
+- the untrusted source region contains only top-level `define(...)`
+  registrations
+- no other authored statements can execute before verified factories are
+  registered
+- the trailing return scaffolding matches the trusted bundle shape
 
 For any cached export-based execution path, the minimal runtime-facing metadata
 shape can stay small:
@@ -658,216 +726,95 @@ interface PatternCompartment {
 Source maps, source files, and display metadata belong in the error-mapping
 layer rather than on every `PatternCompartment`.
 
-### 5.3 Runtime Globals Provider
+### 5.3 Authority Surfaces
 
-Globals are built from `createBuilder()` plus a sandboxed console, and hardened
-before injection where appropriate.
+The runtime distinguishes two authority surfaces:
 
-The categories are:
+#### 5.3.1 Minimal Compartment Globals
+
+Ambient Compartment globals for authored modules must stay intentionally narrow:
+
+- SES intrinsics
+- sandboxed `console`
+- `harden`
+- verifier/runtime helper bindings needed to realize canonical wrappers
+
+Ambient globals available to authored module code in v1 MUST NOT include:
+
+- direct `fetch`
+- `Temporal`
+- `secureRandom`
+- `randomUUID`
+- any host object that performs network, time, randomness, navigation, storage,
+  or compilation effects immediately when called
+
+This keeps module-load execution aligned with the rule that sandboxed `console`
+output is the only tolerated module-load side effect.
+
+#### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
+
+Common Tools capabilities are supplied as trusted AMD runtime modules registered
+through the existing `runtimeDeps` bundle ABI. This is the primary way authored
+code receives builder and graph-construction capabilities.
+
+In v1, the trusted runtime module identifiers are:
+
+- `commontools`
+- `commontools/schema`
+- `turndown`
+- `@commontools/html`
+- `@commontools/builder`
+- `@commontools/runner`
+
+These runtime modules may export:
 
 - builder entrypoints: `recipe`, `pattern`, `patternTool`, `lift`, `handler`,
   `action`, `derive`, `computed`
 - cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
   `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
-- built-ins: `str`, `ifElse`, `when`, `unless`, `llm`, `llmDialog`,
-  `generateObject`, `generateText`, `fetchData`, `fetchProgram`, `streamData`,
-  `compileAndRun`, `navigateTo`, `wish`
-- utilities: `byRef`, `getRecipeEnvironment`, `getEntityId`
-- constants: `ID`, `ID_FIELD`, `SELF`, `TYPE`, `NAME`, `UI`
-- schema/render helpers: `schema`, `toSchema`, `AuthSchema`, `h`
-- console and SES helpers: sandboxed `console`, `harden`
-- explicit runtime replacements: `Temporal`, `secureRandom`, `randomUUID`
-- network escape hatch: `fetch` with a deprecation warning
+- graph-construction built-ins: `str`, `ifElse`, `when`, `unless`, `llm`,
+  `llmDialog`, `generateObject`, `generateText`, `fetchData`, `fetchProgram`,
+  `streamData`, `compileAndRun`, `navigateTo`, `wish`
+- utilities and constants required for graph construction and schema handling
 
-Representative shape:
+The important distinction is that these are graph-building or deferred runtime
+constructors. They may be used during module load to build the frozen reactive
+graph, but they do not directly perform host effects merely by being present as
+imports. Host-visible effects happen later, under the runtime's node execution
+model, not during authored module evaluation. These imports are not valid from
+within `__ct_data(...)` initializers.
 
-```typescript
-export interface RuntimeGlobals {
-  readonly recipe: unknown;
-  readonly pattern: unknown;
-  readonly patternTool: unknown;
-  readonly lift: unknown;
-  readonly handler: unknown;
-  readonly action: unknown;
-  readonly derive: unknown;
-  readonly computed: unknown;
-  readonly Cell: unknown;
-  readonly Writable: unknown;
-  readonly OpaqueCell: unknown;
-  readonly Stream: unknown;
-  readonly ComparableCell: unknown;
-  readonly ReadonlyCell: unknown;
-  readonly WriteonlyCell: unknown;
-  readonly cell: unknown;
-  readonly equals: unknown;
-  readonly str: unknown;
-  readonly ifElse: unknown;
-  readonly when: unknown;
-  readonly unless: unknown;
-  readonly llm: unknown;
-  readonly llmDialog: unknown;
-  readonly generateObject: unknown;
-  readonly generateText: unknown;
-  readonly fetchData: unknown;
-  readonly fetchProgram: unknown;
-  readonly streamData: unknown;
-  readonly compileAndRun: unknown;
-  readonly navigateTo: unknown;
-  readonly wish: unknown;
-  readonly byRef: unknown;
-  readonly getRecipeEnvironment: unknown;
-  readonly getEntityId: unknown;
-  readonly ID: unknown;
-  readonly ID_FIELD: unknown;
-  readonly SELF: unknown;
-  readonly TYPE: unknown;
-  readonly NAME: unknown;
-  readonly UI: unknown;
-  readonly schema: unknown;
-  readonly toSchema: unknown;
-  readonly AuthSchema: unknown;
-  readonly h: unknown;
-  readonly console: Console;
-  readonly Temporal: typeof Temporal;
-  readonly secureRandom: () => number;
-  readonly randomUUID: () => string;
-  readonly fetch: typeof fetch;
-  readonly harden: <T>(obj: T) => T;
-}
-```
+### 5.4 No Separate Authored String-Evaluation Path
 
-Implementation notes worth preserving:
+Untrusted authored pattern code reaches execution only through the compiled
+bundle preflight plus AMD-factory verification pipeline. There is no separate
+string-eval fallback for authored pattern execution in this baseline.
 
-- almost all injected Common Tools capabilities are explicitly hardened
-- `fetch` should warn and steer authors toward `fetchData()`
-- `secureRandom()` returns a `Math.random()`-like number using
-  `crypto.getRandomValues`
-- `randomUUID()` provides a stable replacement for direct crypto access
-- `createMinimalGlobals()` is useful for narrow evaluation cases that only need
-  `console` and `harden`
-
-### 5.4 String Evaluation
-
-For ad hoc string evaluation, the runtime uses a fresh Compartment after
-lockdown and evaluates code directly:
-
-```typescript
-function evaluateStringSync(code: string, globals: Record<string, unknown>): unknown {
-  const compartment = new Compartment(harden(globals), {}, {
-    name: "<eval>",
-    __noNamespaceBox__: true,
-  });
-  return compartment.evaluate(code);
-}
-```
-
-Two details matter:
-
-- the string-eval path should use a fresh Compartment
-- `evaluateStringSync()` evaluates the provided code directly; the IIFE wrapper
-  pattern is for wrapped module/bundle sources, not a requirement of the
-  string-eval helper itself
-- this helper is a legacy escape hatch for cases that cannot be represented as
-  verified cached exports; it must not become the default execution path
+A standalone `evaluateStringSync()` utility may still exist for trusted
+internal tooling or diagnostics, but it is outside this threat model and MUST
+NOT be used to run untrusted authored pattern code.
 
 ---
 
-## 6. Dynamic Import Support (esm.sh)
+## 6. Dynamic Imports (Deferred)
 
-> **TODO**: Import hooks exist in `packages/runner/src/sandbox/import-hooks.ts`
-> with full implementation (including `ESMCache`, `createResolveHook`, and
-> `createImportHook`) but are not yet wired into the Compartment creation path.
-> This section describes the intended design for future work.
+Dynamic import support is not part of this implementation baseline.
 
-### 6.1 Requirements
+Normative v1 behavior:
 
-Patterns may use dynamic imports from esm.sh:
+- any authored `import()` expression is rejected by the verifier
+- no import-hook implementation is assumed or required for this baseline
+- the escape-hatch and threat-model analysis must treat dynamic imports as
+  unavailable, not controlled
 
-```typescript
-export const MyPattern = pattern<Input, Output>(async (props) => {
-  const lodash = await import("https://esm.sh/lodash@4.17.21");
-  return { result: lodash.capitalize(props.text) };
-});
-```
+Future v2 requirements, if dynamic imports are reintroduced:
 
-**Security requirements:**
-1. Each import gets a fresh module instance (no state leakage between invocations)
-2. Downloaded code is cached (network efficiency)
-3. Module graph is isolated per invocation
-
-### 6.2 Import Hooks
-
-SES Compartments support import hooks for dynamic imports:
-
-```typescript
-interface ImportHooks {
-  resolveHook: (specifier: string, referrer: string) => string;
-  importHook: (moduleSpecifier: string) => Promise<StaticModuleRecord>;
-}
-
-const esmCache = new Map<string, string>();  // URL → source code
-
-async function createDynamicImportCompartment(): Promise<Compartment> {
-  let invocationId = 0;
-
-  const compartment = new Compartment({
-    // ... globals ...
-  }, {}, {
-    resolveHook(specifier: string, referrer: string): string {
-      // Return a unique specifier each time to force fresh instantiation
-      if (specifier.startsWith('https://esm.sh/')) {
-        invocationId++;
-        return `${specifier}#__invocation_${invocationId}`;
-      }
-      // Standard resolution for internal modules
-      return new URL(specifier, referrer).href;
-    },
-
-    async importHook(moduleSpecifier: string): Promise<StaticModuleRecord> {
-      // Strip invocation suffix for caching
-      const url = moduleSpecifier.split('#')[0];
-
-      // Check cache
-      let source = esmCache.get(url);
-      if (!source) {
-        // Fetch and cache
-        const response = await fetch(url);
-        source = await response.text();
-        esmCache.set(url, source);
-      }
-
-      // Return as StaticModuleRecord (SES will create fresh instance)
-      return new StaticModuleRecord(source, moduleSpecifier);
-    },
-  });
-
-  return compartment;
-}
-```
-
-### 6.3 Pre-fetching Optimization (Future)
-
-The transformer can analyze dynamic imports and emit prefetch hints:
-
-```typescript
-// Transformer output (metadata)
-{
-  dynamicImports: [
-    "https://esm.sh/lodash@4.17.21",
-    "https://esm.sh/date-fns@2.30.0"
-  ]
-}
-
-// Runner pre-fetch before first invocation
-async function prefetchDynamicImports(imports: string[]): Promise<void> {
-  await Promise.all(imports.map(async (url) => {
-    if (!esmCache.has(url)) {
-      const response = await fetch(url);
-      esmCache.set(url, await response.text());
-    }
-  }));
-}
-```
+1. each import must get fresh module instantiation so no state leaks between
+   invocations
+2. fetched modules must be verified under an equivalent policy before execution
+3. downloaded code may be cached only if that caching does not weaken isolation
+4. the import-hook implementation should live in a dedicated sandbox subsystem,
+   likely under `packages/runner/src/sandbox/`
 
 ---
 
@@ -898,7 +845,7 @@ The verifier enforces that surviving module-scope bindings:
 - Are only assigned at declaration time
 - Are never reassigned
 - Are const (not let/var)
-- Are either trusted direct functions or verified plain data
+- Are either trusted direct functions or verified module-safe data
 
 ```typescript
 // ❌ REJECTED: let at module scope
@@ -908,7 +855,7 @@ let counter = 0;
 const config = {};
 config.key = "value";
 
-// ✅ ALLOWED: verified plain data
+// ✅ ALLOWED: verified module-safe data
 const CONFIG = freezeVerifiedPlainData({ key: "value" });
 ```
 
@@ -965,22 +912,26 @@ function helper(x: number) {
 harden(helper);
 ```
 
-#### 7.2.4 Custom Plain-Data Checker/Freezer
+#### 7.2.4 Custom Module-Safe Data Checker/Freezer
 
 This spec introduces a runtime helper dedicated to non-function top-level
 values:
 
 ```typescript
-type PlainData =
+type ModuleSafeValueV1 =
   | null
   | undefined
   | boolean
   | number
   | string
-  | PlainData[]
-  | { [key: string]: PlainData };
+  | bigint
+  | ModuleSafeValueV1[]
+  | { [key: string]: ModuleSafeValueV1 };
 
-function assertPlainData(value: unknown, path = "<root>"): asserts value is PlainData;
+function assertPlainData(
+  value: unknown,
+  path = "<root>",
+): asserts value is ModuleSafeValueV1;
 
 function freezeVerifiedPlainData<T>(value: T): T {
   assertPlainData(value);
@@ -988,20 +939,32 @@ function freezeVerifiedPlainData<T>(value: T): T {
 }
 ```
 
-The verifier may allow a top-level expression to compute data in any way it
-likes, including via an IIFE, but only if the value that escapes module load
-passes `assertPlainData()` and is then hardened.
+`assertPlainData()` MUST validate structure without triggering user-defined
+behavior. In particular, the checker must:
 
-#### 7.2.5 Fresh Compartments for Strings
+- inspect own property descriptors before reading property values
+- reject accessor properties without invoking getters
+- reject symbol keys
+- reject any object whose prototype is neither `Object.prototype` nor `null`
+- reject arrays with holes or extra own properties
+- reject cycles in v1
+- reject reserved keys such as `__proto__`, `constructor`, and `prototype`
+- reject any `StorableValue` members outside the approved v1 subset
 
-For any code evaluated at runtime (string implementations), a fresh Compartment ensures no closure state persists:
+The verifier may allow a top-level expression to compute data via an IIFE, but
+only if the value that escapes module load passes `assertPlainData()` and is
+then hardened.
 
-```typescript
-// Each invocation gets a fresh Compartment
-invocation1: Compartment1 evaluates code → result1
-invocation2: Compartment2 evaluates code → result2
-// Compartment1 is garbage collected, no state shared
-```
+#### 7.2.5 No Unverified String Execution for Pattern Code
+
+Any pattern implementation represented as a string must either:
+
+- be reintroduced through the same compiled-bundle preflight and AMD-factory
+  verification pipeline, or
+- be rejected when SES verification is enabled
+
+A fresh Compartment utility may still exist for trusted internal tooling, but it
+does not satisfy the authored-pattern security model by itself.
 
 ---
 
@@ -1591,6 +1554,10 @@ and SES frames are shown.
 
 ### 8.8 Implementation Checklist
 
+Unless noted otherwise, `packages/runner/src/sandbox/*` paths referenced below
+are target modules in the new sandbox subsystem and may not yet exist in the
+current tree.
+
 | Task | Priority | Files |
 |------|----------|-------|
 | Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
@@ -1619,9 +1586,11 @@ Examples:
   `__ct_builder("lift", function ...)`
 - normalize top-level functions into canonical forms such as
   `__ct_fn(function ...)`
+- normalize data-safe helper functions into canonical forms such as
+  `__ct_pure_fn(function ...)`
 - normalize data bindings into canonical forms such as
   `__ct_data(expr)`
-- rewrite plain-data candidates into `freezeVerifiedPlainData(...)` within the
+- rewrite module-safe-data candidates into `freezeVerifiedPlainData(...)` within the
   canonical data wrapper
 - normalize export syntax to simple local bindings plus explicit export wiring
 
@@ -1640,17 +1609,21 @@ reduces the complexity of runtime direct-callback verification.
 
 ### Phase 2: Trusted Runtime Verification at the AMD Module Boundary
 
-#### 2.1 Verify module factories before execution (Priority: High)
+#### 2.1 Preflight bundles and verify module factories before execution (Priority: High)
 
-The trusted verifier should operate on each AMD module factory, not only on the
-fully wrapped bundle entrypoint. This preserves per-module top-level structure
-and avoids trusting compiler rewrites.
+The trusted verifier should operate in two stages:
+
+- preflight the full compiled bundle before any Compartment evaluation
+- verify each AMD module factory before it can be required
+
+This preserves per-module top-level structure while also preventing untrusted
+compiler output from executing statements outside `define(...)` registrations.
 
 The verifier must check:
 
 - trusted builders receive direct callbacks only
 - top-level functions are direct functions only
-- all other surviving top-level values are plain data and hardened
+- all other surviving top-level values are module-safe data and hardened
 - no unclassified top-level side effects survive
 
 The verifier should be implemented as a minimal recognizer for the canonical
@@ -1666,19 +1639,24 @@ If the output deviates from the canonical wrapper language, the verifier should
 fail closed.
 
 **Likely files:**
+- `packages/js-compiler/typescript/bundler/bundle.ts`
 - `packages/js-compiler/typescript/bundler/amd-loader.ts`
 - `packages/runner/src/harness/engine.ts`
+- new `packages/runner/src/sandbox/bundle-preflight.ts`
 - new `packages/runner/src/sandbox/module-verifier.ts`
 
-#### 2.2 Add custom plain-data checker/freezer (Priority: High)
+#### 2.2 Add custom module-safe-data checker/freezer (Priority: High)
 
-Implement a runtime helper that proves a value is recursively plain data and
-then hardens it. This helper is stricter than `harden()` alone and stricter
-than Endo pass-style checks.
+Implement a runtime helper that proves a value is a versioned, recursively inert
+subset of `StorableValue` and then hardens it. This helper is stricter than
+`harden()` alone and stricter than Endo pass-style checks. It must inspect
+descriptors without triggering getters and reject cycles, symbol keys, exotic
+prototypes, reserved keys, and all non-approved `StorableValue` members.
 
 **Likely files:**
 - new `packages/runner/src/sandbox/plain-data.ts`
 - `packages/runner/src/sandbox/mod.ts`
+- `packages/memory/interface.ts` (contract reference only)
 - tests under `packages/runner/test/sandbox/`
 
 #### 2.3 Harden approved functions immediately after load (Priority: High)
@@ -1709,92 +1687,31 @@ one authoritative verified SES execution path.
 
 The runtime should execute each loaded pattern in its own Compartment. That
 Compartment is a containment boundary, not the primary mechanism that prevents
-callback collusion. Fresh Compartments are still appropriate for string-eval
-fallbacks and future dynamic-import isolation.
+callback collusion. Future dynamic-import isolation may introduce additional
+Compartments later, but authored pattern execution in v1 has no separate
+string-eval fallback.
 
-#### 3.3 Runtime globals and lockdown policy (Priority: Medium)
+#### 3.3 Minimal globals plus trusted runtime modules (Priority: Medium)
 
-Keep the runtime globals surface explicit and hardened. Temporary relaxations
-(`fetch`, `Date`, `Math.random`) remain separate migration decisions.
+Keep ambient Compartment globals intentionally narrow and supply Common Tools
+capabilities through trusted runtime modules registered via `runtimeDeps`.
+Future reintroduction of time/network/randomness helpers for authored code
+remains a separate scoped decision.
 
-#### 3.4 Runtime Globals Provider
+#### 3.4 Runtime module provider and minimal globals
 
-The runtime provides a comprehensive set of globals to pattern Compartments.
-These are injected directly as Compartment globals (not via module maps):
+Build a new sandbox subsystem that separates:
 
-```typescript
-// packages/runner/src/sandbox/runtime-globals.ts
+- minimal ambient globals for Compartments
+- trusted runtime-module exports registered through `runtimeDeps`
 
-export function createRuntimeGlobals(
-  patternId: string,
-  customConsole?: Console,
-): RuntimeGlobals {
-  const { commontools } = createBuilder();
-  const sandboxedConsole = customConsole ?? createSandboxedConsole({ patternId });
+Initial implementation can migrate logic from the current harness runtime-module
+surface, but the target module split should live under `packages/runner/src/sandbox/`.
 
-  return {
-    recipe: harden(commontools.recipe),
-    pattern: harden(commontools.pattern),
-    patternTool: harden(commontools.patternTool),
-    lift: harden(commontools.lift),
-    handler: harden(commontools.handler),
-    action: harden(commontools.action),
-    derive: harden(commontools.derive),
-    computed: harden(commontools.computed),
-    Cell: harden(commontools.Cell),
-    Writable: harden(commontools.Writable),
-    OpaqueCell: harden(commontools.OpaqueCell),
-    Stream: harden(commontools.Stream),
-    ComparableCell: harden(commontools.ComparableCell),
-    ReadonlyCell: harden(commontools.ReadonlyCell),
-    WriteonlyCell: harden(commontools.WriteonlyCell),
-    cell: harden(commontools.cell),
-    equals: harden(commontools.equals),
-    str: harden(commontools.str),
-    ifElse: harden(commontools.ifElse),
-    when: harden(commontools.when),
-    unless: harden(commontools.unless),
-    llm: harden(commontools.llm),
-    llmDialog: harden(commontools.llmDialog),
-    generateObject: harden(commontools.generateObject),
-    generateText: harden(commontools.generateText),
-    fetchData: harden(commontools.fetchData),
-    fetchProgram: harden(commontools.fetchProgram),
-    streamData: harden(commontools.streamData),
-    compileAndRun: harden(commontools.compileAndRun),
-    navigateTo: harden(commontools.navigateTo),
-    wish: harden(commontools.wish),
-    byRef: harden(commontools.byRef),
-    getRecipeEnvironment: harden(commontools.getRecipeEnvironment),
-    getEntityId: harden(commontools.getEntityId),
-    ID: commontools.ID,
-    ID_FIELD: commontools.ID_FIELD,
-    SELF: commontools.SELF,
-    TYPE: commontools.TYPE,
-    NAME: commontools.NAME,
-    UI: commontools.UI,
-    schema: harden(commontools.schema),
-    toSchema: harden(commontools.toSchema),
-    AuthSchema: harden(commontools.AuthSchema),
-    h: harden(commontools.h),
-    console: sandboxedConsole,
-    fetch: ((...args) => {
-      sandboxedConsole.warn(
-        "Direct fetch() is deprecated. Rewrite as several steps in a pattern using fetchData() instead.",
-      );
-      return fetch(...args);
-    }) as typeof fetch,
-    Temporal: harden(Temporal),
-    secureRandom: () =>
-      crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000,
-    randomUUID: () => crypto.randomUUID(),
-    harden: typeof harden === "function" ? harden : Object.freeze,
-  };
-}
-```
-
-**Files:**
-- `packages/runner/src/sandbox/runtime-globals.ts` (exists)
+**Likely files:**
+- new `packages/runner/src/sandbox/runtime-modules.ts`
+- new `packages/runner/src/sandbox/compartment-globals.ts`
+- `packages/runner/src/harness/runtime-modules.ts` (migration source)
 
 ### Phase 4: Runner Integration
 
@@ -1813,12 +1730,11 @@ private instantiateJavaScriptNode(
   let fn: Function;
 
   if (typeof module.implementation === "string") {
-    // Preferred path: retrieve a previously verified frozen export.
-    // Secondary path: evaluate in a fresh verified Compartment if this string
-    // is not yet represented as a cached export record.
+    // String-backed implementations must resolve to a previously verified
+    // frozen export from the authoritative SES pipeline.
     fn = getVerifiedFunction(module);
   } else {
-    fn = module.implementation;
+    fn = assertVerifiedFunctionObject(module.implementation);
   }
 
   // ... rest of existing logic ...
@@ -1846,55 +1762,12 @@ fn = getVerifiedFunction(module);
 - `packages/runner/src/harness/engine.ts` (deprecate or remove)
 - `packages/runner/src/harness/eval-runtime.ts` (deprecate or remove)
 
-### Phase 5: Dynamic Import Support (TODO / Future Work)
+### Phase 5: Dynamic Imports (Deferred)
 
-> **Status**: `import-hooks.ts` exists with full implementation (`ESMCache`,
-> `createResolveHook`, `createImportHook`) but is not yet wired into the
-> Compartment creation path. This phase depends on connecting import hooks to
-> the SESRuntime Compartment creation.
-
-#### 5.1 Wire Up Import Hooks
-
-Connect the existing import hook implementations to Compartment creation:
-
-```typescript
-// packages/runner/src/sandbox/import-hooks.ts (exists, needs wiring)
-
-export function createImportHooks(
-  esmCache: Map<string, string>
-): ImportHooks {
-  let invocationCounter = 0;
-
-  return {
-    resolveHook(specifier: string, referrer: string): string {
-      if (isEsmShUrl(specifier)) {
-        return `${specifier}#__inv_${invocationCounter++}`;
-      }
-      return resolveStandard(specifier, referrer);
-    },
-
-    async importHook(specifier: string): Promise<StaticModuleRecord> {
-      const url = stripInvocationSuffix(specifier);
-
-      let source = esmCache.get(url);
-      if (!source) {
-        source = await fetchAndCache(url, esmCache);
-      }
-
-      return new StaticModuleRecord(source, specifier);
-    },
-  };
-}
-```
-
-#### 5.2 Dynamic Import Compartment (TODO)
-
-Create isolated Compartments for dynamic imports, providing per-invocation
-module instances. This depends on Phase 5.1 (wiring up import hooks).
-
-**Files:**
-- `packages/runner/src/sandbox/import-hooks.ts` (exists, not wired)
-- `packages/runner/src/sandbox/dynamic-import-compartment.ts` (to be created)
+Dynamic imports are not implemented in v1. The verifier should reject authored
+`import()` expressions outright. If this scope is reopened later, it should
+introduce a dedicated import-hook subsystem under `packages/runner/src/sandbox/`
+and must preserve fresh-instantiation and verification guarantees.
 
 ### Phase 6: Testing & Hardening
 
@@ -1928,21 +1801,12 @@ describe('SES Sandbox Security', () => {
     expect(result.hasProcess).toBe(false);
   });
 
-  it('isolates dynamic imports between invocations', async () => {
+  it('rejects dynamic imports in v1', async () => {
     const pattern = `
-      export const TestPattern = pattern(async () => {
-        const mod = await import('https://esm.sh/stateful-module');
-        mod.increment();
-        return { count: mod.getCount() };
-      });
+      export const TestPattern = pattern(() => import('https://esm.sh/stateful-module'));
     `;
 
-    const result1 = await invokePattern(pattern, {});
-    const result2 = await invokePattern(pattern, {});
-
-    // Each should start fresh
-    expect(result1.count).toBe(1);
-    expect(result2.count).toBe(1);  // NOT 2!
+    await expect(loadPattern(pattern)).rejects.toThrow();
   });
 
   it('freezes all pattern exports', async () => {
@@ -1956,13 +1820,29 @@ describe('SES Sandbox Security', () => {
     expect(Object.isFrozen(exp)).toBe(true);
     expect(Object.isFrozen(exp.implementation)).toBe(true);
   });
+
+  it('rejects accessor-based plain-data escapes', async () => {
+    const pattern = `
+      const BAD = freezeVerifiedPlainData({
+        get value() { return 1; }
+      });
+    `;
+
+    await expect(loadPattern(pattern)).rejects.toThrow();
+  });
+
+  it('rejects bundle code outside AMD define calls', async () => {
+    const compiled = "((runtimeDeps={}) => { evil(); define('m', [], function () {}); return { main: {}, exportMap: {} }; })";
+    expect(() => preflightCompiledBundle(compiled)).toThrow();
+  });
 });
 ```
 
 **Files to create:**
 - `packages/runner/test/sandbox/security.test.ts`
 - `packages/runner/test/sandbox/compartment.test.ts`
-- `packages/runner/test/sandbox/import-hooks.test.ts`
+- `packages/runner/test/sandbox/bundle-preflight.test.ts`
+- `packages/runner/test/sandbox/plain-data.test.ts`
 
 #### 6.2 Performance Tests
 
@@ -2048,15 +1928,15 @@ runner.start(recipe, inputs);
 
 | Threat | Mitigation |
 |--------|------------|
-| Arbitrary code execution | SES Compartments plus controlled runtime capability injection |
-| Collusion between callbacks in the same pattern | Runtime module verifier, direct-callback enforcement, verified plain-data freezing |
-| Compiler/transformer compromise | Runner-side verification at the AMD module boundary |
+| Arbitrary code execution | Bundle preflight, SES Compartments, and controlled runtime-module injection |
+| Collusion between callbacks in the same pattern | Runtime module verifier, direct-callback enforcement, and verified module-safe-data freezing |
+| Compiler/transformer compromise | Runner-side bundle preflight plus AMD-factory verification |
 | Global pollution | Frozen intrinsics, controlled globals |
 | Prototype pollution | Frozen prototypes (SES default) |
 | Closure-based data leakage | No surviving mutable module bindings; function hardening plus verified environments |
-| State leakage via modules | Verified immutable top-level bindings; fresh Compartments for dynamic imports when needed |
+| State leakage via modules | Verified immutable top-level bindings; dynamic imports rejected in v1 |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
-| Network access | Future: Control fetch in globals (not in this spec) |
+| Ambient network/time/random authority at module load | Narrow Compartment globals; no ambient `fetch`, `Temporal`, `secureRandom`, or `randomUUID` in v1 |
 
 ### 11.2 Known Limitations
 
@@ -2064,27 +1944,28 @@ runner.start(recipe, inputs);
 
 2. **No memory limits**: Memory exhaustion possible. Future work: Monitor heap usage.
 
-3. **No network restrictions**: `fetch` is not blocked. Future work: Proxy `fetch` with allowlist.
+3. **No egress policy on runtime-managed network nodes**: `fetchData()`,
+   `fetchProgram()`, and `streamData()` remain allowed graph constructors and
+   may still reach arbitrary URLs under runtime control.
 
 4. **Compartments are secondary containment only**: If the verifier is wrong,
    a shared Compartment increases blast radius. Per-pattern Compartments reduce
    that blast radius but do not replace verification.
 
-### 11.3 Temporary Relaxations
+### 11.3 Deferred Capability Reintroduction
 
-The following unsafe capabilities are temporarily allowed while existing
-patterns are migrated. Each will be tightened in a future release.
+The following capabilities are intentionally excluded from the verified authored
+module surface in v1. Reintroducing them requires separate scoped work.
 
-1. **Time and randomness migration**: Do not rely on
-   `mathTaming` / `dateTaming` knobs as the long-term policy surface. The
-   runtime should instead provide explicit helpers such as `Temporal`,
-   `secureRandom()`, and `randomUUID()`, and continue migrating patterns away
-   from ambient time/randomness APIs.
+1. **Time and randomness helpers**: Do not rely on
+   `mathTaming` / `dateTaming` knobs as the long-term policy surface. Any
+   future exposure of `Temporal`, `secureRandom()`, or `randomUUID()` to
+   authored code requires explicit call-site restrictions.
 
-2. **`fetch()`** (provided as a global with deprecation warning): Patterns
-   should use `fetchData()` instead, which is managed by the runtime.
-   Direct `fetch()` logs a console warning and will be removed once all
-   patterns are migrated.
+2. **Direct `fetch()`**: Verified authored modules should use runtime-managed
+   graph constructors such as `fetchData()` instead. Any legacy migration shim
+   that still exposes ambient `fetch()` elsewhere in the runtime is outside this
+   sandbox spec.
 
 ### 11.4 Escape Hatch Analysis
 
@@ -2094,9 +1975,10 @@ Potential escape routes and their status:
 |--------|--------|-------|
 | `eval()` | Blocked | SES removes `eval` from Compartment globals |
 | `Function()` | Blocked | SES removes `Function` constructor |
-| `import()` | Controlled | Via import hooks (TODO: not yet wired) |
+| `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
 | Prototype access | Blocked | Frozen prototypes |
-| `globalThis` | Controlled | Custom Compartment globals |
+| ambient `fetch` | Blocked in v1 | Not injected into authored module Compartment globals |
+| `globalThis` | Controlled | Custom minimal Compartment globals |
 | `__proto__` | Blocked | Frozen Object.prototype |
 | `constructor` | Blocked | Frozen constructors |
 
