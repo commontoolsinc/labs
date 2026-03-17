@@ -1,5 +1,6 @@
 // tree.ts — In-memory filesystem tree with inode management
 
+import type { CallableKind } from "./callables.ts";
 import type { FsNode } from "./types.ts";
 
 const ROOT_INO = 1n;
@@ -87,11 +88,13 @@ export class FsTree {
     return ino;
   }
 
-  addHandler(
+  addCallable(
     parentIno: bigint,
     name: string,
+    callableKind: CallableKind,
     cellKey: string,
     cellProp: "input" | "result",
+    script: Uint8Array,
   ): bigint {
     const parent = this.inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
@@ -99,7 +102,13 @@ export class FsTree {
     }
 
     const ino = this.allocInode();
-    const node: FsNode = { kind: "handler", cellKey, cellProp };
+    const node: FsNode = {
+      kind: "callable",
+      callableKind,
+      cellKey,
+      cellProp,
+      script,
+    };
     this.inodes.set(ino, node);
     parent.children.set(name, ino);
     this.parents.set(ino, parentIno);

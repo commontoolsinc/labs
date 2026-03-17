@@ -25,7 +25,6 @@ import {
   EXDEV,
   FILE_MODE,
   FILE_MODE_RW,
-  FILE_MODE_WO,
   FUSE_SET_ATTR_SIZE,
   O_RDWR,
   O_TRUNC,
@@ -61,13 +60,14 @@ globalThis.addEventListener("error", (e) => {
 
 async function main() {
   const args = parseArgs(Deno.args, {
-    string: ["api-url", "space", "identity"],
+    string: ["api-url", "space", "identity", "exec-cli"],
     boolean: ["debug"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CT_API_URL") ?? "",
       space: [] as string[],
       identity: Deno.env.get("CT_IDENTITY") ?? "",
+      "exec-cli": "",
       debug: false,
     },
   });
@@ -100,7 +100,7 @@ async function main() {
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
-    bridge = new CellBridge(tree);
+    bridge = new CellBridge(tree, args["exec-cli"] || "");
     bridge.init({
       apiUrl,
       identity: args.identity || "",
@@ -132,7 +132,9 @@ async function main() {
     if (!node) return 0;
     if (node.kind === "dir") return DIR_MODE;
     if (node.kind === "symlink") return SYMLINK_MODE;
-    if (node.kind === "handler") return FILE_MODE_WO;
+    if (node.kind === "callable") {
+      return node.callableKind === "handler" ? FILE_MODE_RW : FILE_MODE;
+    }
     // Files in writable piece data get 644, others stay 444
     if (bridge && ino !== undefined && bridge.resolveWritePath(ino)) {
       return FILE_MODE_RW;
@@ -144,7 +146,7 @@ async function main() {
     if (!node) return 0;
     if (node.kind === "file") return node.content.length;
     if (node.kind === "symlink") return node.target.length;
-    if (node.kind === "handler") return 0;
+    if (node.kind === "callable") return node.script.length;
     return 0;
   }
 
@@ -315,23 +317,28 @@ async function main() {
         return;
       }
 
-      // Handler files: write-only, no read
-      if (node.kind === "handler") {
-        const { flags: hFlags } = readFileInfo(fi);
-        const isWriting = (hFlags & O_WRONLY) !== 0 ||
-          (hFlags & O_RDWR) !== 0;
-        if (!isWriting) {
+      const { flags } = readFileInfo(fi);
+      const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
+
+      if (node.kind === "callable") {
+        if (node.callableKind === "tool" && isWriting) {
           fuse.symbols.fuse_reply_err(req, EACCES);
           return;
         }
-        const fh = handles.open(inode, hFlags, new Uint8Array(0));
+
+        const truncate = (flags & O_TRUNC) !== 0;
+        const fh = handles.open(
+          inode,
+          flags,
+          truncate ? new Uint8Array(0) : node.script,
+        );
+        if (truncate) {
+          handles.get(fh)!.dirty = true;
+        }
         writeFileInfo(fi, fh);
         fuse.symbols.fuse_reply_open(req, fi);
         return;
       }
-
-      const { flags } = readFileInfo(fi);
-      const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
 
       if (isWriting && bridge) {
         const writePath = bridge.resolveWritePath(inode);
@@ -373,13 +380,6 @@ async function main() {
     ) => {
       const inode = BigInt(ino);
 
-      // Handler files are write-only
-      const handlerNode = tree.getNode(inode);
-      if (handlerNode?.kind === "handler") {
-        fuse.symbols.fuse_reply_err(req, EACCES);
-        return;
-      }
-
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
@@ -403,14 +403,14 @@ async function main() {
       }
 
       const node = tree.getNode(inode);
-      if (!node || node.kind !== "file") {
+      if (!node || (node.kind !== "file" && node.kind !== "callable")) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
 
       const off = Number(offset);
       const sz = Number(size);
-      const data = node.content;
+      const data = node.kind === "file" ? node.content : node.script;
 
       if (off >= data.length) {
         // EOF — empty reply
@@ -540,8 +540,11 @@ async function main() {
     if (!handle || !handle.dirty || !bridge) return 0;
 
     // Handler files: parse JSON and send to stream cell
-    const handlerNode = tree.getNode(handle.ino);
-    if (handlerNode?.kind === "handler") {
+    const callableNode = tree.getNode(handle.ino);
+    if (
+      callableNode?.kind === "callable" &&
+      callableNode.callableKind === "handler"
+    ) {
       try {
         const text = new TextDecoder().decode(handle.buffer);
         const value = JSON.parse(text.trim());
@@ -553,6 +556,13 @@ async function main() {
         console.error(`[fuse] handler flush error: ${e}`);
         return EIO;
       }
+    }
+
+    if (
+      callableNode?.kind === "callable" &&
+      callableNode.callableKind === "tool"
+    ) {
+      return EACCES;
     }
 
     const writePath = bridge.resolveWritePath(handle.ino);

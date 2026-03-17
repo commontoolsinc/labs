@@ -1,5 +1,10 @@
 // tree-builder.ts — Convert JSON values to FsTree nodes
 
+import {
+  isHandlerCell,
+  isStreamValue,
+  transformCallableValues,
+} from "./callables.ts";
 import { FsTree } from "./tree.ts";
 
 /**
@@ -21,17 +26,6 @@ export function safeStringify(value: unknown, indent = 2): string {
 }
 
 /**
- * Detect stream marker values: { $stream: true }
- *
- * Inline implementation to avoid importing @commontools/runner.
- */
-export function isStreamValue(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const obj = v as Record<string, unknown>;
-  return "$stream" in obj && obj.$stream === true;
-}
-
-/**
  * Replace stream markers and handler sigil links with handler sigils for JSON.
  * { $stream: true } → { "/handler": "<key>" }
  * { "/": { "link@1": { path: ["internal", ...] } } } → { "/handler": "<key>" }
@@ -41,29 +35,11 @@ export function isStreamValue(v: unknown): boolean {
  * identity for safeStringify's WeakSet-based detection.
  */
 export function transformStreamValues(value: unknown): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return value;
-  }
-  const obj = value as Record<string, unknown>;
-  const isHandler = (val: unknown) => isStreamValue(val) || isHandlerCell(val);
-  // Only allocate a new object if there are entries to replace
-  let hasHandlers = false;
-  for (const val of Object.values(obj)) {
-    if (isHandler(val)) {
-      hasHandlers = true;
-      break;
-    }
-  }
-  if (!hasHandlers) return value;
-  const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(obj)) {
-    if (isHandler(val)) {
-      result[key] = { "/handler": key };
-    } else {
-      result[key] = val;
-    }
-  }
-  return result;
+  return transformCallableValues(
+    value,
+    (_key, candidate) =>
+      isStreamValue(candidate) || isHandlerCell(candidate) ? "handler" : null,
+  );
 }
 
 /**
@@ -82,27 +58,7 @@ export function isSigilLink(v: unknown): boolean {
   return "link@1" in (inner as Record<string, unknown>);
 }
 
-/**
- * Detect stream/handler Cell references via duck-typing.
- * Live Cell objects expose an `isStream()` method that returns true for
- * stream handlers (increment, decrement, etc.). These should be rendered
- * as `.handler` files, not expanded as directories of Cell internals.
- *
- * Also matches raw `{ $stream: true }` markers for completeness.
- */
-export function isHandlerCell(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  // Duck-type: Cell objects have an isStream() method
-  const cell = v as { isStream?: () => boolean };
-  if (typeof cell.isStream === "function") {
-    try {
-      return cell.isStream();
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
+export { isHandlerCell, isStreamValue } from "./callables.ts";
 
 /** Options for buildJsonTree beyond the required params. */
 export interface BuildJsonTreeOpts {
@@ -224,13 +180,13 @@ export function buildJsonTree(
     tree.addFile(
       parentIno,
       `${name}.json`,
-      safeStringify(transformStreamValues(value)),
+      safeStringify(transformCallableValues(value)),
       "object",
     );
 
     // Recurse for each key, skipping stream/handler values (handler files created separately)
     for (const [key, val] of Object.entries(obj)) {
-      if (isStreamValue(val)) continue;
+      if (isStreamValue(val) || isHandlerCell(val)) continue;
       if (skipEntry?.(val)) continue;
       buildJsonTree(
         tree,
