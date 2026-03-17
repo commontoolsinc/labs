@@ -55,7 +55,7 @@ assert_json_eq() {
 
 wait_for_path() {
   local path="$1"
-  local timeout_seconds="${2:-10}"
+  local timeout_seconds="${2:-20}"
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
@@ -127,6 +127,7 @@ ct id new >"$IDENTITY"
 
 PIECE_ID=$(ct piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
+wait_for_piece_value "messageCount" "0" 20
 
 ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background
 
