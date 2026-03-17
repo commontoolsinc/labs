@@ -209,9 +209,10 @@ inference creates unusable reactive types (for example `Cell.of([])` inferring
 
 When capability analysis detects that a callback reads specific properties, and
 schema shrinking attempts to narrow the declared type to those paths, the result
-must be validated. If the declared type is `unknown`/`any` (no structure) or is
+must be validated. If the declared type is `unknown` (no structure), or is
 concrete but missing accessed properties, the transformer must produce a hard
-error so authors fix their types before the pattern compiles. Silent fallback to
+error so authors fix their types before the pattern compiles. `any` remains the
+full-shape fallback and does not trigger this diagnostic. Silent fallback to
 unshrunk schemas hides type mismatches that cause runtime surprises. This
 includes declared members whose own type is `unknown`, not just top-level
 `unknown` parameters.
@@ -355,9 +356,9 @@ We are meeting goals when:
     enabled
 12. empty-array cell-factory fixtures fail with actionable diagnostics unless
     explicit element type arguments are provided
-13. schema shrink validation errors on `unknown`/`any` parameter types when
-    property accesses are detected, and on concrete types missing accessed
-    properties, with messages that name the missing paths and guide the fix
+13. schema shrink validation errors on `unknown` parameter types when property
+    accesses are detected, and on concrete types missing accessed properties,
+    with messages that name the missing paths and guide the fix
 
 ## 8. Policy For Future Changes
 

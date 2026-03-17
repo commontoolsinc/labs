@@ -265,8 +265,10 @@ contract support).
 - When capability analysis detects property reads/writes and schema shrinking
   narrows the declared type, validate that all accessed top-level property
   heads are actually present in the result.
-- If the declared type is `unknown`/`any`, every property access is
-  unresolvable → hard error.
+- If the declared type is `unknown`, every property access is unresolvable →
+  hard error.
+- If the declared type is `any`, path validation is skipped because runtime
+  fetch is already full-shape.
 - If the declared type is concrete but missing accessed properties → hard error
   naming the missing paths.
 
@@ -307,7 +309,7 @@ contract support).
 
 **Diagnostic codes:**
 
-- `schema:unknown-type-access` — parameter typed `unknown`/`any` with property
+- `schema:unknown-type-access` — parameter typed `unknown` with property
   accesses, or concrete parameter with accessed `unknown`-typed property heads
 - `schema:path-not-in-type` — concrete type missing accessed properties
 

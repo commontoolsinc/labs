@@ -217,9 +217,9 @@ Guards that skip validation:
 Diagnostics:
 
 - **Error** `schema:unknown-type-access`
-  - parameter is typed as `unknown`/`any` and the code accesses properties, OR
-    one or more accessed property heads resolve to `unknown`-typed members on
-    an otherwise concrete type
+  - parameter is typed as `unknown` and the code accesses properties, OR one or
+    more accessed property heads resolve to `unknown`-typed members on an
+    otherwise concrete type
   - message lists the accessed property heads and instructs the author to
     replace `unknown` with a concrete type
 - **Error** `schema:path-not-in-type`
