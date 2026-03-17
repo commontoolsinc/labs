@@ -155,6 +155,44 @@ describe("memoryVersion cutover seam", () => {
 
     await storageManager.close();
   });
+
+  it("allows an explicit runtime memoryVersion when a custom storage manager does not declare one", async () => {
+    let closed = false;
+    const storageManager = {
+      id: "legacy-storage-manager",
+      as: {
+        did: () => signer.did(),
+      },
+      open() {
+        throw new Error("legacy storage manager open should not be called");
+      },
+      close() {
+        closed = true;
+        return Promise.resolve();
+      },
+      edit() {
+        throw new Error("legacy storage manager edit should not be called");
+      },
+      synced() {
+        return Promise.resolve();
+      },
+      addCrossSpacePromise() {},
+      removeCrossSpacePromise() {},
+      subscribe() {},
+      unsubscribe() {},
+    };
+
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storageManager as any,
+      memoryVersion: "v1",
+    });
+
+    expect(runtime.memoryVersion).toBe("v1");
+
+    await runtime.dispose();
+    expect(closed).toBe(true);
+  });
 });
 
 describe("storage notification aliases", () => {

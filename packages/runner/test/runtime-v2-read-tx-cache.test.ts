@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import type { DID } from "@commontools/identity";
 import { Identity } from "@commontools/identity";
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IStorageNotification } from "../src/storage/interface.ts";
@@ -166,5 +167,64 @@ describe("Runtime v2 ambient read transaction", () => {
     expect(
       v2Storage.subscriptions.includes(v2Storage.unsubscribed[0]!),
     ).toBe(true);
+  });
+
+  it("uses a fresh read transaction for top-level query result proxy reads when no tx is provided", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const seed = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "runtime-v2-query-result-proxy-read",
+        { type: "number" } as const,
+        seed,
+      );
+      cell.set(1);
+      await seed.commit();
+
+      const staleTx = runtime.edit();
+      expect(cell.withTx(staleTx).get()).toBe(1);
+
+      const update = runtime.edit();
+      cell.withTx(update).set(2);
+      await update.commit();
+      expect(cell.withTx(staleTx).get()).toBe(1);
+
+      const freshTx = runtime.edit();
+      const instrumented = runtime as Runtime & {
+        readTx: typeof runtime.readTx;
+        edit: typeof runtime.edit;
+      };
+      const originalReadTx = instrumented.readTx;
+      const originalEdit = instrumented.edit;
+      instrumented.readTx = () => staleTx;
+      instrumented.edit = () => freshTx;
+
+      try {
+        expect(
+          createQueryResultProxy<number>(
+            runtime,
+            undefined,
+            cell.getAsNormalizedFullLink(),
+          ),
+        ).toBe(2);
+      } finally {
+        instrumented.readTx = originalReadTx;
+        instrumented.edit = originalEdit;
+        staleTx.abort();
+        freshTx.abort();
+      }
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

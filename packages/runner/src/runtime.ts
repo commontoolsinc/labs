@@ -267,10 +267,14 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     const defaultMemoryVersion = getDefaultMemoryVersion();
     this.memoryVersion = options.memoryVersion ?? defaultMemoryVersion;
-    const storageManagerMemoryVersion = options.storageManager.memoryVersion ??
-      defaultMemoryVersion;
+    const storageManagerMemoryVersion = (
+      options.storageManager as { memoryVersion?: MemoryVersion }
+    ).memoryVersion;
 
-    if (storageManagerMemoryVersion !== this.memoryVersion) {
+    if (
+      storageManagerMemoryVersion !== undefined &&
+      storageManagerMemoryVersion !== this.memoryVersion
+    ) {
       throw new Error(
         "Runtime memoryVersion does not match storage manager memoryVersion: " +
           `${this.memoryVersion} !== ${storageManagerMemoryVersion}`,

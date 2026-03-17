@@ -1,4 +1,5 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
+import * as MemoryV2Server from "@commontools/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
 import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commonfabric/memory/codec";
@@ -93,7 +94,7 @@ const attachV2SocketPipeline = (
   channel: Pick<NegotiatedSocket, "readable">,
   firstMessage: string,
 ): boolean => {
-  if (Memory.V2Server.parseClientMessage(firstMessage) === null) {
+  if (MemoryV2Server.parseClientMessage(firstMessage) === null) {
     return false;
   }
 

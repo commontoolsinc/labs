@@ -585,7 +585,16 @@ Deno.test("memory v2 server batches nearby commits into one subscription refresh
 });
 
 Deno.test("memory v2 server cancels scheduled refresh when the last connection closes", async () => {
-  const server = createServer("memory://memory-v2-server-refresh-disconnect");
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-refresh-disconnect"),
+    subscriptionRefreshDelayMs: 20,
+  });
+  const originalFlushSubscriptions = server.flushSubscriptions.bind(server);
+  let flushCalls = 0;
+  server.flushSubscriptions = async (spaces?: Iterable<string>) => {
+    flushCalls += 1;
+    return await originalFlushSubscriptions(spaces);
+  };
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-refresh-disconnect";
@@ -627,7 +636,55 @@ Deno.test("memory v2 server cancels scheduled refresh when the last connection c
   }));
   assertEquals(assertResponse(shiftMessage(messages)).requestId, "tx-1");
 
+  await connection.receive(JSON.stringify({
+    type: "graph.query",
+    requestId: "query-1",
+    space,
+    sessionId,
+    query: {
+      roots: [{
+        id: "of:doc:1",
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+      subscribe: true,
+    },
+  }));
+  assertResponse(shiftMessage(messages));
+  flushCalls = 0;
+
+  await connection.receive(JSON.stringify({
+    type: "transact",
+    requestId: "tx-2",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            hello: "again",
+          },
+        },
+      }],
+    },
+  }));
+  takeResponse(messages, "tx-2");
+
   connection.close();
+  await sleep(30);
+  assertEquals(flushCalls, 0);
+  assertEquals(
+    messages.filter((message) => message.type === "graph.update").length,
+    0,
+  );
+
+  await server.close();
 });
 
 Deno.test("memory v2 server does not reevaluate plain source-lineage queries for sigil-only changes", async () => {
