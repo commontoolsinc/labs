@@ -253,4 +253,20 @@ export default errorOnLine6;
     expect(parsed).toContain("other-file.js:100:50");
     expect(parsed).toContain("https://example.com/lib.js:200:30");
   });
+
+  it("preserves SES sentinel comments through emit", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.ts", {
+      "/main.ts": `
+/*__CT_TOPLEVEL__:main.ts:000:demo:data*/
+export const demo = 1;
+`,
+    });
+
+    const compiled = await compiler.resolveAndCompile(program, {
+      filename: "sentinel.js",
+    });
+
+    expect(compiled.js).toContain("/*__CT_TOPLEVEL__:");
+  });
 });

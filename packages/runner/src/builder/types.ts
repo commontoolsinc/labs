@@ -162,6 +162,7 @@ declare module "@commontools/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+    implementationRef?: string;
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;

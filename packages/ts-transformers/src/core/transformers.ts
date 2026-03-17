@@ -55,6 +55,7 @@ export interface TransformationOptions {
   readonly mode?: TransformMode;
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
+  readonly sesMode?: boolean;
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
   readonly syntheticComputeCallbackRegistry?: WeakSet<ts.Node>;

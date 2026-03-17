@@ -5,6 +5,8 @@ import {
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
+  SESCanonicalWrapperTransformer,
+  SESModuleScopeHoistTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
@@ -54,12 +56,20 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new ClosureTransformer(sharedOps),
     );
 
+    if (sharedOps.sesMode) {
+      transformers.push(new SESModuleScopeHoistTransformer(sharedOps));
+    }
+
     transformers.push(new CapabilityLoweringTransformer(sharedOps));
 
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
     );
+
+    if (sharedOps.sesMode) {
+      transformers.push(new SESCanonicalWrapperTransformer(sharedOps));
+    }
 
     super(transformers);
 

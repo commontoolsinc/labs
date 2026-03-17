@@ -4,5 +4,9 @@ export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.t
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { OpaqueRefJSXTransformer } from "./opaque-ref-jsx.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
+export {
+  SESCanonicalWrapperTransformer,
+  SESModuleScopeHoistTransformer,
+} from "./ses-module-scope.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";

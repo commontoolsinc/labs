@@ -45,6 +45,7 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { isTrustedRuntimeImport } from "./ses-module-scope.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
@@ -59,6 +60,10 @@ export class PatternContextValidationTransformer extends Transformer {
     const analyze = createDataFlowAnalyzer(checker);
 
     const visit = (node: ts.Node): ts.Node => {
+      if (ts.isImportDeclaration(node)) {
+        this.validateImportDeclaration(node, context);
+      }
+
       // Skip JSX - OpaqueRefJSXTransformer handles those
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
@@ -107,6 +112,9 @@ export class PatternContextValidationTransformer extends Transformer {
 
       // Check for .get() calls and lift/handler placement in reactive context
       if (ts.isCallExpression(node)) {
+        this.validateDynamicImport(node, context);
+        this.validateDirectBuilderCallback(node, context, checker);
+
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
@@ -375,6 +383,107 @@ export class PatternContextValidationTransformer extends Transformer {
     };
 
     visitBody(func.body);
+  }
+
+  private validateImportDeclaration(
+    node: ts.ImportDeclaration,
+    context: TransformationContext,
+  ): void {
+    if (!ts.isStringLiteral(node.moduleSpecifier)) {
+      return;
+    }
+    if (!context.options.sesMode) {
+      return;
+    }
+    const specifier = node.moduleSpecifier.text;
+    if (
+      specifier.startsWith("./") || specifier.startsWith("../") ||
+      specifier.startsWith("/")
+    ) {
+      return;
+    }
+    if (isTrustedRuntimeImport(specifier)) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:external-import",
+      message:
+        `Static import '${specifier}' is not allowed in SES-authored code. Only trusted runtimeDeps modules or same-bundle relative imports are supported.`,
+      node,
+    });
+  }
+
+  private validateDynamicImport(
+    node: ts.CallExpression,
+    context: TransformationContext,
+  ): void {
+    if (node.expression.kind !== ts.SyntaxKind.ImportKeyword) {
+      return;
+    }
+    if (!context.options.sesMode) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:dynamic-import",
+      message: "Dynamic import() is not supported by the SES authored runtime.",
+      node,
+    });
+  }
+
+  private validateDirectBuilderCallback(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    const callKind = detectCallKind(node, checker);
+    const builderName = callKind?.kind === "builder"
+      ? callKind.builderName
+      : callKind?.kind === "derive"
+      ? "derive"
+      : undefined;
+    if (
+      !builderName ||
+      (builderName !== "lift" && builderName !== "handler" &&
+        builderName !== "pattern" && builderName !== "recipe")
+    ) {
+      return;
+    }
+    if (!context.options.sesMode) {
+      return;
+    }
+    if (!this.isAtModuleScope(node)) {
+      return;
+    }
+    const callback = node.arguments[node.arguments.length - 1];
+    if (!callback || isInsideSafeCallbackWrapper(callback, checker, context)) {
+      return;
+    }
+    if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:non-direct-builder-callback",
+      message:
+        `${builderName}() requires a direct function expression callback in the SES-authored runtime.`,
+      node: callback,
+    });
+  }
+
+  private isAtModuleScope(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      if (ts.isSourceFile(current)) {
+        return true;
+      }
+      if (ts.isFunctionLike(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
   }
 
   private isMemberAccessBase(node: ts.Identifier): boolean {

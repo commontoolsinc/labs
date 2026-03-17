@@ -28,7 +28,7 @@ export const getCompilerOptions = (): CompilerOptions => {
      * Emit
      */
 
-    removeComments: true,
+    removeComments: false,
     noEmitOnError: true,
     // Note: declaration emit is disabled because TypeScript's declaration emit
     // has trouble with unique symbols (CELL_BRAND, CELL_INNER_TYPE) in exported

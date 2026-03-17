@@ -22,6 +22,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -38,6 +39,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -53,6 +55,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -68,6 +71,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -83,6 +87,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -97,6 +102,7 @@ Deno.test("Cast Validation", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Should not produce any errors");
@@ -220,6 +226,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
+      sesMode: true,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -227,6 +234,53 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       0,
       ".get() inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
     );
+  });
+});
+
+Deno.test("SES module-scope validation", async (t) => {
+  await t.step("errors on dynamic import()", async () => {
+    const source = `/// <cts-enable />
+      export async function loadThing() {
+        return await import("./thing.ts");
+      }
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:dynamic-import");
+  });
+
+  await t.step("errors on non-trusted external static imports", async () => {
+    const source = `/// <cts-enable />
+      import { uniq } from "lodash";
+      export default uniq;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:external-import");
+  });
+
+  await t.step("errors when lift callback is not a direct function", async () => {
+    const source = `/// <cts-enable />
+      import { lift } from "commontools";
+
+      const makeCallback = () => (value: number) => value + 1;
+      export const lifted = lift(makeCallback());
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:non-direct-builder-callback");
   });
 });
 

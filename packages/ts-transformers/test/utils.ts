@@ -16,6 +16,7 @@ let sourceFileCache: Map<string, ts.SourceFile> | undefined;
 
 export interface TransformOptions {
   mode?: "transform" | "error";
+  sesMode?: boolean;
   types?: Record<string, string>;
   logger?: (message: string) => void;
   typeCheck?: boolean;
@@ -518,6 +519,7 @@ export async function transformFiles(
   const pipeline = new CommonToolsTransformerPipeline({
     mode,
     logger,
+    sesMode: options.sesMode,
   });
 
   const out: Record<string, string> = {};
@@ -760,6 +762,7 @@ export async function validateFiles(
   const pipeline = new CommonToolsTransformerPipeline({
     mode,
     logger,
+    sesMode: options.sesMode,
   });
 
   const outputs: Record<string, string> = {};
