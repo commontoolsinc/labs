@@ -642,6 +642,10 @@ function collectToolEntries(
   return { legacy, pieces };
 }
 
+const TOOL_CATALOG_SCHEMA = toDeepFrozenSchema({
+  type: "object",
+  additionalProperties: LLMToolSchema,
+});
 const READ_TOOL_NAME = "read";
 const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
@@ -984,14 +988,7 @@ function buildToolCatalog(
     | Cell<Record<string, BuiltInLLMTool> | undefined>,
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
-    toolsCell.asSchema(
-      toDeepFrozenSchema(
-        {
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        },
-      ),
-    ),
+    toolsCell.asSchema(TOOL_CATALOG_SCHEMA),
   );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
