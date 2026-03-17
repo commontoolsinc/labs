@@ -1,26 +1,53 @@
 # SES Sandboxing Specification for Pattern Execution
 
-## Status: Draft
+## Status: Implementation Baseline
 
 ## Authors
 - AI-assisted specification
 
 ## Last Updated
-2026-01-27
+2026-03-16
+
+This document is the sole authoritative SES sandboxing specification for the
+current reimplementation effort. It supersedes prior divergence notes and
+branch-specific planning summaries.
 
 ---
 
 ## 1. Executive Summary
 
-This specification describes a security architecture for sandboxing untrusted JavaScript execution in the Common Tools pattern runtime using **SES (Secure ECMAScript)** Compartments. The goal is to prevent malicious or buggy pattern code from escaping its sandbox while maintaining high performance by reusing Compartments rather than creating new ones for each invocation.
+This specification describes a security architecture for sandboxing untrusted
+JavaScript execution in the Common Tools pattern runtime using
+**SES (Secure ECMAScript)**. The primary goal is not to trust an authored
+pattern as a unit, but to ensure that each invocation of pattern-authored
+callbacks is isolated from shared mutable module state except through trusted
+Common Tools abstractions. SES Compartments reduce ambient authority and limit
+blast radius, but the primary enforcement mechanism is runtime verification and
+hardening of module-scope definitions at load time.
 
 ### Key Principles
 
-1. **Compartment Reuse**: Load compiled pattern modules into a single Compartment per pattern; freeze all exports
-2. **No Surviving Closures**: Pattern code must not create closures that persist user data beyond a single invocation
-3. **Allowlisted Module-Scope Calls**: Only `pattern`, `pattern`, `lift`, `handler`, and top-level function definitions are permitted at module scope
-4. **Frozen Implementations**: All exported `lift` and `handler` implementations are frozen and callable directly
-5. **Dynamic Import Isolation**: External ESM imports (esm.sh) get fresh module instances per invocation
+1. **Invocation Isolation**: Each callback invocation must be isolated from
+   any other invocation except through trusted runtime abstractions such as
+   `Cell`, `lift`, `handler`, `pattern`, and `recipe`.
+2. **Verified Module Load**: Every top-level module item must be classified and
+   verified before it may execute or become observable.
+3. **Direct Callback Builders**: `pattern`, `recipe`, `lift`, `handler`, and
+   similar trusted builders must receive direct callbacks, not IIFE-produced or
+   otherwise computed callables.
+4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
+   only when they are direct functions and their captured module environment is
+   reduced to immutable verified values and trusted hardened capabilities.
+5. **Verified Plain Data**: Any other top-level value must be proven to be
+   recursively plain data and then hardened by a custom checker/freezer.
+   Computing that value via an IIFE is allowed only if the final result passes
+   this verifier.
+6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
+   code to reduce runtime parsing cost, but compiler output is not trusted and
+   the runner must verify the final code boundary.
+7. **Per-Pattern Compartments Provide Containment**: The runtime uses one
+   Compartment per loaded pattern to limit blast radius, while verification and
+   hardening remain the primary enforcement mechanisms.
 
 ---
 
@@ -52,11 +79,38 @@ SES (Secure ECMAScript) provides:
 - **Hardened APIs**: `harden()` to deeply freeze object graphs
 - **Import Hooks**: Control over module resolution and loading
 
+`harden()` is necessary but not sufficient for this threat model. It preserves
+behavioral objects as-is, including functions and objects with hidden
+mutability. This spec therefore requires an additional runtime plain-data
+checker/freezer for top-level non-function values.
+
 Alternative considered: QuickJS (via `js-sandbox` package). SES is preferred because:
 - Runs in the same V8/SpiderMonkey engine (no serialization overhead)
 - Same JavaScript semantics (no edge cases)
 - Can share frozen objects between Compartments without copying
 - Better debugging experience (same DevTools)
+
+### 2.3 Trust Model
+
+Patterns are treated as untrusted code and may attempt to collude with
+themselves across callbacks or invocations to route around the intended data
+flow controls provided by trusted runtime abstractions.
+
+The primary trust boundary is therefore:
+
+- the verified set of module-scope bindings that survive module load
+- the trusted builder/runtime capabilities injected by the platform
+- the individual invocation of a verified callback
+
+The following are **not** trusted:
+
+- pattern source code
+- compiled JavaScript output
+- transformer or compiler rewrites
+- arbitrary top-level closures or objects, even if later frozen
+
+Compartments are still valuable, but as containment and ambient-authority
+reduction rather than as the sole or primary trust boundary.
 
 ---
 
@@ -68,21 +122,26 @@ Alternative considered: QuickJS (via `js-sandbox` package). SES is preferred bec
 Pattern Source (.tsx)
     ↓
 [1] ts-transformers (enhanced)
-    - Hoist lift/handler to module scope
+    - Hoist lift/handler to module scope (when external references exist)
     - Rewrite inline derive → lift call
-    - Add __exportName annotations
-    - Validate allowlisted module-scope calls
+    - Emit optional verification hints for top-level items
     ↓
 [2] js-compiler (existing)
-    - TypeScript → AMD bundle
+    - TypeScript → AMD bundle with per-module AMD factories intact
     ↓
-[3] SES Compartment Loader (new)
-    - Create Compartment with frozen globals
-    - Execute AMD bundle once
-    - Freeze all exports
-    - Return callable implementations
+[3] Runtime Verifier (TCB)
+    - Inspect each AMD module factory before execution
+    - Require direct callbacks for trusted builders
+    - Permit direct top-level functions only
+    - Route all other top-level values through plain-data verification
+    - Reject anything else
     ↓
-[4] Runner (modified)
+[4] SES Execution
+    - Execute verified module factories in one Compartment per loaded pattern
+    - Freeze verified top-level functions and exports
+    - Expose only approved callable/data exports
+    ↓
+[5] Runner (modified)
     - Call frozen .implementation directly
     - No eval() per invocation
 ```
@@ -94,12 +153,13 @@ Pattern Source (.tsx)
 │ Root Compartment (lockdown applied)                         │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ Pattern Compartment (per-pattern, created once)       │  │
+│  │ Pattern Compartment (one per loaded pattern)          │  │
 │  │                                                       │  │
-│  │  Globals: { pattern, pattern, lift, handler, ... }    │  │
+│  │  Globals: trusted runtime capabilities + SES          │  │
+│  │  intrinsics                                            │  │
 │  │                                                       │  │
 │  │  Module Exports (frozen):                            │  │
-│  │  - MyPattern: { implementation: fn, schema: {...} }  │  │
+│  │  - MyPattern: { implementation: fn, patternId: ... } │  │
 │  │  - myLift: { implementation: fn, ... }               │  │
 │  │  - myHandler: { implementation: fn, ... }            │  │
 │  │                                                       │  │
@@ -115,6 +175,7 @@ Pattern Source (.tsx)
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ Dynamic Import Compartment (per-import, fresh)        │  │
+│  │  TODO: not yet wired up — see Section 6              │  │
 │  │                                                       │  │
 │  │  Used for: await import("https://esm.sh/lodash")     │  │
 │  │  Fresh instance each time to prevent state leakage   │  │
@@ -122,6 +183,12 @@ Pattern Source (.tsx)
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+The primary enforcement mechanism is still verified module load plus hardened
+exports, not the Compartment itself. The runtime nevertheless SHOULD use one
+Compartment per loaded pattern as the default containment boundary, because that
+reduces blast radius if verification misses something. Fresh Compartments remain
+appropriate for rare string-eval fallbacks and future dynamic-import isolation.
 
 ---
 
@@ -133,72 +200,275 @@ The `ts-transformers` package requires the following enhancements:
 
 | Transformation | Current Behavior | New Behavior |
 |----------------|------------------|--------------|
-| `computed(() => ...)` | → `derive({}, () => ...)` | → call to module-scope `lift` |
-| `action(() => ...)` | → `handler((_, {}) => ...)({})` | → call to module-scope `handler` |
-| inline `derive(input, fn)` | kept inline | → call to module-scope `lift` (or inline if self-contained) |
+| `computed(() => ...)` | → `derive({}, () => ...)` | → call to module-scope `lift` (when external refs exist) |
+| `action(() => ...)` | → `handler((_, {}) => ...)({})` | → call to module-scope `handler` (when external refs exist) |
+| inline `derive(input, fn)` | kept inline | → call to module-scope `lift` (when external refs exist) |
 | `lift(...)` | allowed inline | **ERROR** if not at module scope |
 | `handler(...)` | allowed inline | **ERROR** if not at module scope |
 | module-scope calls | minimal validation | strict allowlist enforcement |
 
-### 4.2 Module-Scope Allowlist
+### 4.2 Module-Scope Verification Rules
 
-Only these calls are permitted at module scope:
+At module scope, every surviving binding must fall into exactly one of the
+following categories:
+
+1. Trusted builder definitions with a **direct callback**
+2. Direct top-level function definitions
+3. Verified plain data that is hardened before exposure
+4. Type-only and import/export declarations
+
+All surviving top-level bindings should be normalized into a small canonical
+wrapper language before trusted verification. The wrappers are not trusted on
+their own; they exist so the verifier can recognize a tiny emitted grammar
+instead of parsing arbitrary JavaScript.
+
+#### 4.2.1 Trusted Builder Definitions
+
+Trusted builders may only appear at module scope when their callback is direct.
+A callback is "direct" when it is:
+
+- an inline `function` expression
+- an inline arrow function that the transformer normalizes to a `function`
+  expression before verification
+- an identifier that resolves to a direct top-level function definition that is
+  itself normalized into the canonical function wrapper form
+
+The following are allowed:
 
 ```typescript
-// ALLOWED at module scope
-import { pattern, pattern, lift, handler } from "@commontools/common-builder";
+import { pattern, recipe, lift, handler } from "@commontools/common-builder";
 
-// Pattern/Pattern definitions - these call their inner functions at load time
-// but user data is not available yet, so this is safe
 export const MyPattern = pattern<Input, Output>((props) => {
-  // ...inner function runs at load time...
+  return { value: props.value };
 });
 
-export const MyPattern = pattern<Input, Output>("name", (props) => {
-  // ...inner function runs at load time...
+export const MyRecipe = recipe<Input, Output>("name", (props) => {
+  return { value: props.value };
 });
 
-// Lift definitions - pure functions, will be frozen
 export const myLift = lift<Input, Output>((input) => {
   return transform(input);
 });
 
-// Handler definitions - event handlers, will be frozen
 export const myHandler = handler<Event, State>((event, state) => {
   return newState;
 });
+```
 
-// Top-level function definitions (allowed, but NOT immediately called)
+The following are rejected:
+
+```typescript
+const makeCallback = () => (input) => transform(input);
+
+// ❌ Callback is computed, not direct
+export const badLift = lift(makeCallback());
+
+// ❌ Callback produced by an IIFE
+export const badHandler = handler((() => (event, state) => state)());
+```
+
+In canonical emitted form, trusted builder bindings should be normalized to a
+single shape such as:
+
+```javascript
+const myLift = __ct_builder("lift", function (input) {
+  return transform(input);
+});
+```
+
+The trusted verifier must confirm both:
+
+- the outer wrapper is the expected canonical wrapper
+- the wrapped callback is syntactically a direct `function` expression, not an
+  arbitrary expression that merely evaluates to a function
+
+#### 4.2.2 Direct Top-Level Functions
+
+Standalone top-level functions are allowed, including functions that close over
+other module-level symbols, provided those captured symbols are themselves
+verified immutable values or trusted hardened capabilities.
+
+```typescript
 function helperFunction(x: number): number {
   return x * 2;
 }
 
-// Variable declarations with literals
-const CONFIG = { maxItems: 100 };
+const helper2 = (x: number): number => {
+  return x * 2;
+};
+```
 
-// Type definitions
+These function objects are hardened immediately after definition, but that
+hardening is only safe because the verifier has already constrained the module
+environment they may close over.
+
+The transformer should normalize top-level functions to a canonical wrapped
+assignment before verification, for example:
+
+```javascript
+const helperFunction = __ct_fn(function (x) {
+  return x * 2;
+});
+```
+
+This lets the verifier accept one function shape rather than many syntactic
+variants. The verifier must still inspect the wrapped expression and confirm it
+is a direct `function` expression.
+
+#### 4.2.3 Verified Plain Data
+
+Any top-level value that is not a trusted builder definition or direct function
+must be plain data and pass a custom checker/freezer before it survives module
+load. This is the only category where an IIFE is acceptable.
+
+```typescript
+const CONFIG = freezeVerifiedPlainData({
+  maxItems: 100,
+  labels: ["a", "b"],
+});
+
+const LOOKUP = freezeVerifiedPlainData((() => {
+  return {
+    open: "Open",
+    closed: "Closed",
+  };
+})());
+```
+
+Canonical emitted form:
+
+```javascript
+const LOOKUP = __ct_data((() => {
+  return {
+    open: "Open",
+    closed: "Closed",
+  };
+})());
+```
+
+The default allowed domain is:
+
+- primitives
+- arrays of allowed values
+- plain object records with allowed values
+
+The default rejected domain includes:
+
+- functions
+- `Promise`
+- `Error`
+- `Map` / `Set`
+- `Date`
+- class instances
+- proxies
+- platform capability objects
+
+Module-load side effects are disallowed except for sandboxed `console` output,
+which is separately controlled and treated as a debugging/observability channel
+rather than a surviving state channel.
+
+`__ct_data(...)` validates the result that survives module load, not the full
+semantics of the computation that produced it. This is acceptable under the
+current threat model because module-load code may only observe already-verified
+module bindings and the only tolerated side effect in this context is sandboxed
+console output.
+
+#### 4.2.4 Type-Only Syntax
+
+Type-only declarations remain allowed:
+
+```typescript
 type MyType = { name: string };
 ```
 
-**DISALLOWED** at module scope:
+Import/export policy:
+
+- static imports are allowed only from trusted runtime modules and from other
+  modules in the same transformed-and-verified bundle
+- external third-party static imports are rejected in v1
+- exports should be normalized to simple local bindings plus explicit export
+  wiring so the verifier does not need to accept the full surface of ESM export
+  syntax
+- non-trusted external module access is deferred to dynamic imports in v2
+
+#### 4.2.5 Disallowed Module-Scope Forms
+
+The following are rejected unless transformed into `freezeVerifiedPlainData(...)`
+and the final result passes validation:
 
 ```typescript
-// ❌ Immediately calling a function at module scope (creates closures)
+// ❌ Arbitrary call result at module scope
 const result = someFunction();
 
-// ❌ IIFE (Immediately Invoked Function Expression)
-const value = (() => computeSomething())();
+// ❌ Callable produced by an IIFE
+const helper = (() => (x: number) => x * 2)();
 
-// ❌ Any function call except allowlisted builders
+// ❌ Non-builder side effect at module scope
 const data = fetchData();
 
 // ❌ Await expressions (implies side effects)
 const response = await fetch(url);
+
+// ❌ Hidden mutability survives even behind const
+const state = { count: 0 };
 ```
+
+#### 4.2.6 Compiler Assistance and Trusted Verification
+
+The compiler/transformer is not in the TCB. It may assist by:
+
+- inserting stable sentinel comments before each top-level item
+- rewriting trusted builders, top-level functions, and data initializers into a
+  small canonical wrapper language such as `__ct_builder(...)`, `__ct_fn(...)`,
+  and `__ct_data(...)`
+- rewriting candidate plain-data initializers into
+  `freezeVerifiedPlainData(...)`
+- hoisting inline callbacks to make direct-callback verification easier
+- emitting those wrappers during compilation so source maps and stack traces
+  continue to point back to authored source, rather than introducing wrappers at
+  runtime
+
+However, the runner must still verify the code that is about to execute. The
+trusted verification boundary is the AMD module factory emitted by the bundler,
+because it preserves per-module top-level structure better than the fully
+wrapped bundle entrypoint.
+
+The trusted verifier should be a recognizer for the canonical emitted grammar,
+not a general JavaScript parser. It only needs to:
+
+- locate top-level item boundaries using sentinel comments and balanced
+  delimiter scanning
+- handle strings, comments, and template literals correctly so delimiters line
+  up
+- confirm that each surviving top-level item matches one of the canonical
+  wrapper forms or allowed import/export/type forms
+- reject anything outside that mini-language
+
+The trusted verifier does **not** need to understand arbitrary JavaScript AST
+structure if the emitted grammar is kept small and canonical.
 
 ### 4.3 Hoisting Inline Transformations
 
-#### 4.3.1 Computed → Lifted Call
+Hoisting to module scope only occurs when the inline function body references
+external symbols (variables from the enclosing scope). Self-contained callbacks
+(where all identifiers are parameters or locally defined) remain inline — this
+is the default behavior, not merely an optimization.
+
+**Detection criteria for leaving inline (no hoisting needed):**
+- No free variables (all identifiers are parameters or locally defined)
+- No `this` references
+- No `arguments` references
+- No `eval` or `Function` calls
+
+```typescript
+// This stays inline (self-contained — no external references)
+const doubled = derive(props.value, x => x * 2);
+
+// This MUST be hoisted (references outer scope variable `multiplier`)
+const doubled = derive(props.value, x => x * multiplier);
+```
+
+#### 4.3.1 Computed → Lifted Call (when external references exist)
 
 **Before (current):**
 ```typescript
@@ -216,13 +486,12 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-**After transformation (new):**
+**After transformation (new, only when external references exist):**
 ```typescript
 // Hoisted to module scope
 const __computed_1 = lift<{ value: number }, number>(
   ({ value }) => value * 2
 );
-__computed_1.__exportName = "__computed_1";  // Annotation for verification
 
 export const MyPattern = pattern<Input, Output>((props) => {
   const doubled = __computed_1({ value: props.value });
@@ -230,7 +499,7 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-#### 4.3.2 Action → Handler Call
+#### 4.3.2 Action → Handler Call (when external references exist)
 
 **Before (current):**
 ```typescript
@@ -250,7 +519,6 @@ const __action_1 = handler<void, { count: Cell<number> }>(
     count.set(count.get() + 1);
   }
 );
-__action_1.__exportName = "__action_1";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   const doSomething = __action_1({ count: props.count });
@@ -258,7 +526,7 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-#### 4.3.3 Inline Derive → Lifted Call
+#### 4.3.3 Inline Derive → Lifted Call (when external references exist)
 
 **Before:**
 ```typescript
@@ -273,7 +541,6 @@ export const MyPattern = pattern<Input, Output>((props) => {
 const __derive_1 = lift<number[], number>(
   items => items.reduce((a, b) => a + b, 0)
 );
-__derive_1.__exportName = "__derive_1";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   const total = __derive_1(props.items);
@@ -281,236 +548,236 @@ export const MyPattern = pattern<Input, Output>((props) => {
 });
 ```
 
-#### 4.3.4 Optimization: Self-Contained Inline
-
-If the inline function body is entirely self-contained (no references to outer scope), it MAY remain inline for simplicity. The Compartment can evaluate it safely.
-
-**Detection criteria:**
-- No free variables (all identifiers are parameters or locally defined)
-- No `this` references
-- No `arguments` references
-- No `eval` or `Function` calls
-
-```typescript
-// This can stay inline (self-contained)
-const doubled = derive(props.value, x => x * 2);
-
-// This MUST be hoisted (references outer scope)
-const doubled = derive(props.value, x => x * multiplier);
-```
-
-### 4.4 Export Name Annotation
-
-Every module-scope `pattern`, `pattern`, `lift`, and `handler` must be annotated with its export name. This allows runtime verification that the implementation was indeed defined at module scope and thus frozen.
-
-```typescript
-// Before annotation
-export const MyLift = lift<In, Out>(fn);
-
-// After annotation (transformer adds this)
-export const MyLift = lift<In, Out>(fn);
-MyLift.__exportName = "MyLift";
-```
-
-For generated/hoisted definitions:
-```typescript
-const __computed_1 = lift<In, Out>(fn);
-__computed_1.__exportName = "__computed_1";
-```
-
-**Runtime verification:**
-```typescript
-function verifyFrozen(impl: any, name: string): void {
-  if (impl.__exportName !== name) {
-    throw new Error(`Implementation ${name} was not defined at module scope`);
-  }
-  if (!Object.isFrozen(impl.implementation)) {
-    throw new Error(`Implementation ${name}.implementation is not frozen`);
-  }
-}
-```
-
 ---
 
-## 5. SES Compartment Integration
+## 5. SES Execution Details
+
+The runtime uses one authoritative SES execution path for compiled pattern
+modules:
+
+- verify each AMD module factory before it can execute
+- execute verified modules inside one Compartment per loaded pattern
+- expose only verified exported builder objects to the runner
+
+Fresh Compartment evaluation remains available only for the rare string-based
+fallback path described in Section 5.4. It is not the normal invocation path.
 
 ### 5.1 Lockdown Configuration
 
-At application startup, apply SES lockdown:
+The runtime uses a small `SandboxConfig` surface:
 
 ```typescript
-import 'ses';
+export interface SandboxConfig {
+  enabled: boolean;
+  debug: boolean;
+  console?: Console;
+}
+```
 
+Default config:
+
+```typescript
+function getDefaultSandboxConfig(): SandboxConfig {
+  return {
+    enabled: true,
+    debug: false,
+  };
+}
+```
+
+Lockdown options are derived from `debug`:
+
+```typescript
 lockdown({
-  // Error taming: show full stack traces
-  errorTaming: 'unsafe',
-
-  // Stack traces: show real file names
-  stackFiltering: 'verbose',
-
-  // Overrides: allow some taming for compatibility
-  overrideTaming: 'moderate',
-
-  // Console: allow console.log for debugging (configurable)
-  consoleTaming: 'unsafe',  // or 'safe' in production
-
-  // Locale: standard behavior
-  localeTaming: 'unsafe',
-
-  // Eval: controlled via Compartments
-  evalTaming: 'safeEval',
+  errorTaming: debug ? "unsafe" : "safe",
+  stackFiltering: debug ? "verbose" : "concise",
+  overrideTaming: "severe",
+  consoleTaming: "unsafe",
 });
 ```
 
-### 5.2 Pattern Compartment Creation
+Notes:
+
+- `overrideTaming: "severe"` remains the compatibility default.
+- `mathTaming` and `dateTaming` should not be relied on as policy knobs in the
+  reimplementation. In newer SES releases those options are gone; time and
+  randomness should instead be controlled through explicit runtime helpers such
+  as `Temporal`, `secureRandom`, and `randomUUID`.
+
+### 5.2 Compiled Bundle Evaluation
+
+The AMD bundler emits a bundle whose evaluation result is a function expecting
+runtime dependencies:
 
 ```typescript
-interface PatternCompartment {
-  compartment: Compartment;
-  exports: Map<string, FrozenExport>;
-}
+type CompiledBundleEntrypoint = (
+  runtimeDeps?: Record<string, unknown>,
+) => {
+  main: Record<string, unknown>;
+  exportMap: Record<string, Record<string, unknown>>;
+};
+```
 
+The verified runtime path evaluates that bundle inside the pattern's
+Compartment:
+
+```typescript
+const entrypoint = patternCompartment.evaluate(compiledBundle);
+const result = entrypoint(runtimeGlobals);
+```
+
+Important details:
+
+- the bundle itself stays in AMD form until execution
+- runtime capability injection happens explicitly through `runtimeGlobals`
+- the verifier runs at the AMD module factory boundary before any factory may be
+  required or executed
+- the harness uses the resulting `exportMap` to associate exported runtime
+  values with their source `RuntimeProgram`
+- the runtime preserves the existing bundle ABI unless there is a deliberate
+  compiler change
+- only verified exported builder objects are cached for later invocation
+
+For any cached export-based execution path, the minimal runtime-facing metadata
+shape can stay small:
+
+```typescript
 interface FrozenExport {
-  __exportName: string;
-  implementation: Function;  // frozen
-  inputSchema: JSONSchema;
-  resultSchema: JSONSchema;
+  readonly name: string;
+  readonly implementation: unknown;
+  readonly patternId: string;
 }
 
-function createPatternCompartment(
-  compiledAMD: string,
-  runtimeGlobals: Record<string, unknown>
-): PatternCompartment {
-
-  // Create Compartment with controlled globals
-  const compartment = new Compartment({
-    // Frozen intrinsics (automatic with SES)
-
-    // Runtime-provided globals (frozen)
-    ...harden(runtimeGlobals),
-
-    // Builder functions
-    pattern: harden(createPatternBuilder()),
-    pattern: harden(createPatternBuilder()),
-    lift: harden(createLiftBuilder()),
-    handler: harden(createHandlerBuilder()),
-    derive: harden(createDeriveBuilder()),
-
-    // Cell/reactive primitives
-    Cell: harden(Cell),
-    cell: harden(cell),
-
-    // UI helpers (frozen)
-    h: harden(h),
-
-    // Allowlisted globals
-    console: harden(console),  // or filtered console
-    JSON: harden(JSON),
-    Math: harden(Math),
-  });
-
-  // Execute the AMD bundle in the Compartment
-  const moduleExports = compartment.evaluate(compiledAMD)({
-    // Runtime dependencies injection
-    "@commontools/common-builder": harden(builderExports),
-    "@commontools/common-html": harden(htmlExports),
-    // ... other runtime modules
-  });
-
-  // Freeze all exports deeply
-  const frozenExports = new Map<string, FrozenExport>();
-
-  for (const [name, exp] of Object.entries(moduleExports)) {
-    if (isBuilderExport(exp)) {
-      // Verify it was defined at module scope
-      if (exp.__exportName !== name) {
-        throw new Error(
-          `Export ${name} was not defined at module scope ` +
-          `(found __exportName: ${exp.__exportName})`
-        );
-      }
-
-      // Deep freeze the implementation
-      harden(exp);
-
-      frozenExports.set(name, exp as FrozenExport);
-    }
-  }
-
-  return { compartment, exports: frozenExports };
+interface PatternCompartment {
+  readonly patternId: string;
+  readonly exports: Map<string, FrozenExport>;
+  getExport(name: string): FrozenExport | undefined;
 }
 ```
 
-### 5.3 Invoking Frozen Implementations
+Source maps, source files, and display metadata belong in the error-mapping
+layer rather than on every `PatternCompartment`.
 
-Once a pattern is loaded and frozen, invocations simply call the frozen functions:
+### 5.3 Runtime Globals Provider
+
+Globals are built from `createBuilder()` plus a sandboxed console, and hardened
+before injection where appropriate.
+
+The categories are:
+
+- builder entrypoints: `recipe`, `pattern`, `patternTool`, `lift`, `handler`,
+  `action`, `derive`, `computed`
+- cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
+  `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
+- built-ins: `str`, `ifElse`, `when`, `unless`, `llm`, `llmDialog`,
+  `generateObject`, `generateText`, `fetchData`, `fetchProgram`, `streamData`,
+  `compileAndRun`, `navigateTo`, `wish`
+- utilities: `byRef`, `getRecipeEnvironment`, `getEntityId`
+- constants: `ID`, `ID_FIELD`, `SELF`, `TYPE`, `NAME`, `UI`
+- schema/render helpers: `schema`, `toSchema`, `AuthSchema`, `h`
+- console and SES helpers: sandboxed `console`, `harden`
+- explicit runtime replacements: `Temporal`, `secureRandom`, `randomUUID`
+- network escape hatch: `fetch` with a deprecation warning
+
+Representative shape:
 
 ```typescript
-class SandboxedRunner {
-  private patternCompartments = new Map<string, PatternCompartment>();
-
-  async loadPattern(patternId: string, source: string): Promise<void> {
-    // Compile (existing pipeline)
-    const compiled = await this.compiler.compile(source);
-
-    // Create sandboxed compartment
-    const patternCompartment = createPatternCompartment(
-      compiled.js,
-      this.getRuntimeGlobals()
-    );
-
-    this.patternCompartments.set(patternId, patternCompartment);
-  }
-
-  invoke(patternId: string, exportName: string, input: unknown): unknown {
-    const pattern = this.patternCompartments.get(patternId);
-    if (!pattern) {
-      throw new Error(`Pattern ${patternId} not loaded`);
-    }
-
-    const exp = pattern.exports.get(exportName);
-    if (!exp) {
-      throw new Error(`Export ${exportName} not found in ${patternId}`);
-    }
-
-    // Direct call to frozen implementation - no new Compartment needed!
-    return exp.implementation(input);
-  }
+export interface RuntimeGlobals {
+  readonly recipe: unknown;
+  readonly pattern: unknown;
+  readonly patternTool: unknown;
+  readonly lift: unknown;
+  readonly handler: unknown;
+  readonly action: unknown;
+  readonly derive: unknown;
+  readonly computed: unknown;
+  readonly Cell: unknown;
+  readonly Writable: unknown;
+  readonly OpaqueCell: unknown;
+  readonly Stream: unknown;
+  readonly ComparableCell: unknown;
+  readonly ReadonlyCell: unknown;
+  readonly WriteonlyCell: unknown;
+  readonly cell: unknown;
+  readonly equals: unknown;
+  readonly str: unknown;
+  readonly ifElse: unknown;
+  readonly when: unknown;
+  readonly unless: unknown;
+  readonly llm: unknown;
+  readonly llmDialog: unknown;
+  readonly generateObject: unknown;
+  readonly generateText: unknown;
+  readonly fetchData: unknown;
+  readonly fetchProgram: unknown;
+  readonly streamData: unknown;
+  readonly compileAndRun: unknown;
+  readonly navigateTo: unknown;
+  readonly wish: unknown;
+  readonly byRef: unknown;
+  readonly getRecipeEnvironment: unknown;
+  readonly getEntityId: unknown;
+  readonly ID: unknown;
+  readonly ID_FIELD: unknown;
+  readonly SELF: unknown;
+  readonly TYPE: unknown;
+  readonly NAME: unknown;
+  readonly UI: unknown;
+  readonly schema: unknown;
+  readonly toSchema: unknown;
+  readonly AuthSchema: unknown;
+  readonly h: unknown;
+  readonly console: Console;
+  readonly Temporal: typeof Temporal;
+  readonly secureRandom: () => number;
+  readonly randomUUID: () => string;
+  readonly fetch: typeof fetch;
+  readonly harden: <T>(obj: T) => T;
 }
 ```
 
-### 5.4 String Evaluation Compartment
+Implementation notes worth preserving:
 
-For strings that couldn't be hoisted (rare case), create a fresh Compartment each time:
+- almost all injected Common Tools capabilities are explicitly hardened
+- `fetch` should warn and steer authors toward `fetchData()`
+- `secureRandom()` returns a `Math.random()`-like number using
+  `crypto.getRandomValues`
+- `randomUUID()` provides a stable replacement for direct crypto access
+- `createMinimalGlobals()` is useful for narrow evaluation cases that only need
+  `console` and `harden`
+
+### 5.4 String Evaluation
+
+For ad hoc string evaluation, the runtime uses a fresh Compartment after
+lockdown and evaluates code directly:
 
 ```typescript
-function evaluateStringInCompartment(
-  code: string,
-  globals: Record<string, unknown>
-): Function {
-  // Wrap in a function to prevent closure creation
-  const wrappedCode = `(function(__input__) { return (${code})(__input__); })`;
-
-  // Fresh Compartment each time
-  const compartment = new Compartment({
-    ...harden(globals),
+function evaluateStringSync(code: string, globals: Record<string, unknown>): unknown {
+  const compartment = new Compartment(harden(globals), {}, {
+    name: "<eval>",
+    __noNamespaceBox__: true,
   });
-
-  // Evaluate and return the wrapper function
-  return harden(compartment.evaluate(wrappedCode));
+  return compartment.evaluate(code);
 }
-
-// Usage
-const fn = evaluateStringInCompartment(
-  '(x) => x * 2',
-  { Math: harden(Math) }
-);
-const result = fn(21);  // 42
 ```
+
+Two details matter:
+
+- the string-eval path should use a fresh Compartment
+- `evaluateStringSync()` evaluates the provided code directly; the IIFE wrapper
+  pattern is for wrapped module/bundle sources, not a requirement of the
+  string-eval helper itself
+- this helper is a legacy escape hatch for cases that cannot be represented as
+  verified cached exports; it must not become the default execution path
 
 ---
 
 ## 6. Dynamic Import Support (esm.sh)
+
+> **TODO**: Import hooks exist in `packages/runner/src/sandbox/import-hooks.ts`
+> with full implementation (including `ESMCache`, `createResolveHook`, and
+> `createImportHook`) but are not yet wired into the Compartment creation path.
+> This section describes the intended design for future work.
 
 ### 6.1 Requirements
 
@@ -627,26 +894,27 @@ export const BadPattern = pattern((props) => {
 
 #### 7.2.1 No Module-Scope Mutations
 
-The transformer enforces that module-scope variables:
+The verifier enforces that surviving module-scope bindings:
 - Are only assigned at declaration time
 - Are never reassigned
 - Are const (not let/var)
+- Are either trusted direct functions or verified plain data
 
 ```typescript
 // ❌ REJECTED: let at module scope
 let counter = 0;
 
-// ❌ REJECTED: Assignment to module-scope variable
+// ❌ REJECTED: Hidden mutability behind const
 const config = {};
-config.key = "value";  // Rejected (mutation)
+config.key = "value";
 
-// ✅ ALLOWED: const with literal/frozen value
-const CONFIG = Object.freeze({ key: "value" });
+// ✅ ALLOWED: verified plain data
+const CONFIG = freezeVerifiedPlainData({ key: "value" });
 ```
 
-#### 7.2.2 Pattern/Pattern Inner Functions Run at Load Time
+#### 7.2.2 Pattern/Recipe Inner Functions Run at Load Time
 
-When `pattern()` or `pattern()` is called, the inner function executes immediately:
+When `pattern()` or `recipe()` is called, the inner function executes immediately:
 
 ```typescript
 export const MyPattern = pattern((props) => {
@@ -666,19 +934,65 @@ At invocation time:
 - User data flows through the frozen graph
 - No new closures are created
 
-#### 7.2.3 Frozen Implementations
+#### 7.2.3 Function Hardening Is Necessary but Not Sufficient
 
-All `lift` and `handler` implementations are frozen after load:
+All approved top-level functions and builder implementations are frozen after
+load, but freezing the function object alone is not enough:
 
 ```typescript
-const myLift = lift((input) => input * 2);
-// After load: Object.isFrozen(myLift.implementation) === true
-
-// Any attempt to replace the implementation throws
-myLift.implementation = evilFn;  // TypeError: Cannot assign to read only property
+const fn = (() => {
+  let counter = 0;
+  return () => ++counter;
+})();
+harden(fn);
 ```
 
-#### 7.2.4 Fresh Compartments for Strings
+The function object above is frozen, but its closed-over lexical state is still
+mutable shared state. Therefore, this spec requires both:
+
+- function hardening after definition
+- verification that any captured module-level bindings are themselves safe
+  immutable values or trusted hardened capabilities
+
+Safe example:
+
+```typescript
+const TABLE = freezeVerifiedPlainData({ a: 1, b: [2, 3] });
+
+function helper(x: number) {
+  return TABLE.a + x;
+}
+harden(helper);
+```
+
+#### 7.2.4 Custom Plain-Data Checker/Freezer
+
+This spec introduces a runtime helper dedicated to non-function top-level
+values:
+
+```typescript
+type PlainData =
+  | null
+  | undefined
+  | boolean
+  | number
+  | string
+  | PlainData[]
+  | { [key: string]: PlainData };
+
+function assertPlainData(value: unknown, path = "<root>"): asserts value is PlainData;
+
+function freezeVerifiedPlainData<T>(value: T): T {
+  assertPlainData(value);
+  return harden(value);
+}
+```
+
+The verifier may allow a top-level expression to compute data in any way it
+likes, including via an IIFE, but only if the value that escapes module load
+passes `assertPlainData()` and is then hardened.
+
+#### 7.2.5 Fresh Compartments for Strings
 
 For any code evaluated at runtime (string implementations), a fresh Compartment ensures no closure state persists:
 
@@ -721,7 +1035,7 @@ Error: Something went wrong
 TypeError: Cannot read property 'map' of undefined
     at myLift (/patterns/MyPattern.tsx:42:15)
     at invokePattern (runner.ts:1254:12)
-    at SandboxedRunner.invoke (compartment-manager.ts:89:5)
+    at SandboxedRunner.invoke (ses-runtime.ts:89:5)
 ```
 
 - Real file names and line numbers
@@ -873,163 +1187,113 @@ if (inputSourceMap) {
 
 ### 8.4 Error Mapping Implementation
 
-#### 8.4.1 Store Source Maps with Compartments
+#### 8.4.1 ErrorMapper Lifecycle
+
+Error mapping is synchronous and centered on
+`@commontools/js-compiler`'s `SourceMapParser`:
 
 ```typescript
-// packages/runner/src/sandbox/compartment-manager.ts
+class ErrorMapper {
+  private readonly sourceMapParser = new SourceMapParser();
+  private readonly debug: boolean;
 
-interface PatternCompartment {
-  compartment: Compartment;
-  exports: Map<string, FrozenExport>;
-  sourceMap: SourceMap;  // Add source map storage
-  sourceFiles: Map<string, string>;  // Original source for display
-}
+  constructor(debug = false) {
+    this.debug = debug;
+  }
 
-function createPatternCompartment(
-  compiled: JsScript,
-  runtimeGlobals: Record<string, unknown>
-): PatternCompartment {
-  // ... existing compartment creation ...
-
-  return {
-    compartment,
-    exports: frozenExports,
-    sourceMap: compiled.sourceMap,
-    sourceFiles: compiled.sourceFiles,  // From compilation
-  };
+  loadSourceMap(filename: string, sourceMap: SourceMap): void { ... }
+  mapError(error: Error, options: ErrorMappingOptions = {}): MappedError { ... }
+  mapPosition(filename: string, line: number, column: number): MappedPosition | null { ... }
+  parseStack(stack: string): string { ... }
+  clear(): void { ... }
 }
 ```
 
-#### 8.4.2 Error Mapping Utility
+- mapping is synchronous
+- source maps are loaded by filename into the mapper, not required to live on
+  every `PatternCompartment`
+- the same mapper also supports direct `parseStack()` and `mapPosition()` calls
+
+#### 8.4.2 ErrorMappingOptions and MappedError
 
 ```typescript
-// packages/runner/src/sandbox/error-mapping.ts
-
-import { SourceMapConsumer } from 'source-map';
-
-interface MappedFrame {
-  functionName: string;
-  fileName: string;
-  lineNumber: number;
-  columnNumber: number;
-  originalFunctionName?: string;  // e.g., "computed callback"
-  isHoisted: boolean;
+interface ErrorMappingOptions {
+  readonly debug?: boolean;
+  readonly patternId?: string;
+  readonly sourceMap?: SourceMap;
+  readonly filename?: string;
 }
 
-interface MappedError extends Error {
-  originalStack: string;
-  mappedStack: string;
-  mappedFrames: MappedFrame[];
-  patternId?: string;
+interface MappedError {
+  readonly originalError: Error;
+  readonly mappedStack: string;
+  readonly frames: readonly ClassifiedFrame[];
+  readonly patternLocation?: SourceLocation;
+  readonly userMessage: string;
 }
+```
 
-export async function mapError(
+Required behavior:
+
+- if `filename` and `sourceMap` are present, the mapper loads that map before
+  parsing the stack
+- `mappedStack` is the formatted post-classification stack shown to users or
+  logs
+- `patternLocation` comes from the first `pattern` frame after classification
+- `userMessage` is preformatted so callers do not need to rebuild a concise
+  display string
+
+The convenience entrypoint remains synchronous:
+
+```typescript
+function mapError(
   error: Error,
-  sourceMap: SourceMap,
-  patternId: string
-): Promise<MappedError> {
-  const consumer = await new SourceMapConsumer(sourceMap);
-
-  try {
-    const frames = parseStackTrace(error.stack);
-    const mappedFrames: MappedFrame[] = [];
-
-    for (const frame of frames) {
-      if (isPatternFrame(frame, patternId)) {
-        const original = consumer.originalPositionFor({
-          line: frame.lineNumber,
-          column: frame.columnNumber,
-        });
-
-        if (original.source) {
-          mappedFrames.push({
-            functionName: original.name || frame.functionName,
-            fileName: original.source,
-            lineNumber: original.line,
-            columnNumber: original.column,
-            originalFunctionName: getOriginalName(frame.functionName),
-            isHoisted: frame.functionName.startsWith('__'),
-          });
-        } else {
-          mappedFrames.push({ ...frame, isHoisted: false });
-        }
-      } else {
-        // Non-pattern frame, keep as-is
-        mappedFrames.push({ ...frame, isHoisted: false });
-      }
-    }
-
-    const mappedError = error as MappedError;
-    mappedError.originalStack = error.stack;
-    mappedError.mappedStack = formatMappedStack(mappedFrames);
-    mappedError.mappedFrames = mappedFrames;
-    mappedError.patternId = patternId;
-    mappedError.stack = mappedError.mappedStack;
-
-    return mappedError;
-  } finally {
-    consumer.destroy();
-  }
-}
-
-function getOriginalName(hoistedName: string): string | undefined {
-  // __computed_1 → "computed callback"
-  // __action_2 → "action callback"
-  // __derive_3 → "derive callback"
-  if (hoistedName.startsWith('__computed_')) return 'computed callback';
-  if (hoistedName.startsWith('__action_')) return 'action callback';
-  if (hoistedName.startsWith('__derive_')) return 'derive callback';
-  return undefined;
-}
-
-function formatMappedStack(frames: MappedFrame[]): string {
-  return frames.map(frame => {
-    let line = `    at ${frame.functionName} (${frame.fileName}:${frame.lineNumber}:${frame.columnNumber})`;
-    if (frame.isHoisted && frame.originalFunctionName) {
-      line += `\n       └─ (originally: ${frame.originalFunctionName})`;
-    }
-    return line;
-  }).join('\n');
+  options: ErrorMappingOptions = {},
+): MappedError {
+  return new ErrorMapper(options.debug).mapError(error, options);
 }
 ```
 
-#### 8.4.3 Wrap Execution with Error Mapping
+#### 8.4.3 Execution Wrappers
+
+Execution wrappers are required for both sync and async pattern callbacks:
 
 ```typescript
-// packages/runner/src/sandbox/execution-wrapper.ts
-
-export async function executeWithErrorMapping<T>(
-  fn: () => T,
-  patternCompartment: PatternCompartment,
-  patternId: string
-): Promise<T> {
-  try {
-    return fn();
-  } catch (error) {
-    if (error instanceof Error && patternCompartment.sourceMap) {
-      const mappedError = await mapError(
-        error,
-        patternCompartment.sourceMap,
-        patternId
-      );
-      throw mappedError;
-    }
-    throw error;
-  }
+interface ExecutionWrapperOptions {
+  readonly patternId: string;
+  readonly functionName?: string;
+  readonly includeStack?: boolean;
+  readonly debug?: boolean;
 }
 
-// Usage in runner
-invoke(patternId: string, exportName: string, input: unknown): unknown {
-  const pattern = this.patternCompartments.get(patternId);
-  const exp = pattern.exports.get(exportName);
+class PatternExecutionError extends Error {
+  readonly patternId: string;
+  readonly functionName?: string;
+  readonly originalError: Error;
+  readonly sourceLocation?: SourceLocation;
 
-  return executeWithErrorMapping(
-    () => exp.implementation(input),
-    pattern,
-    patternId
-  );
+  toUserMessage(): string { ... }
 }
+
+function wrapExecution<T extends (...args: any[]) => any>(
+  fn: T,
+  options: ExecutionWrapperOptions,
+): WrappedFunction<T> { ... }
+
+function wrapAsyncExecution<T extends (...args: any[]) => Promise<any>>(
+  fn: T,
+  options: ExecutionWrapperOptions,
+): WrappedFunction<T> { ... }
 ```
+
+Required behavior:
+
+- preserve `SandboxSecurityError` unchanged
+- wrap all other thrown values in `PatternExecutionError`
+- attach `patternId`, optional `functionName`, and best-effort `sourceLocation`
+- include the original stack in debug mode
+- expose `isPatternExecutionError()` and `getErrorMessage()` helpers for
+  downstream callers
 
 ### 8.5 Debugging Experience
 
@@ -1043,7 +1307,7 @@ TypeError: Cannot read property 'map' of undefined
     at computed callback (MyPattern.tsx:23:42)
        └─ (originally: computed callback)
     at MyPattern (MyPattern.tsx:22:3)
-    at SandboxedRunner.invoke (compartment-manager.ts:89:5)
+    at SandboxedRunner.invoke (ses-runtime.ts:89:5)
 
 Pattern: my-pattern-id
 Export: MyPattern
@@ -1060,63 +1324,45 @@ Original source (MyPattern.tsx:23):
 ```typescript
 // packages/runner/src/sandbox/error-display.ts
 
-export function formatErrorForDisplay(
-  error: MappedError,
-  sourceFiles: Map<string, string>
-): string {
-  const lines: string[] = [
-    `${error.name}: ${error.message}`,
-    '',
-    error.mappedStack,
-  ];
-
-  // Add pattern context
-  if (error.patternId) {
-    lines.push('', `Pattern: ${error.patternId}`);
-  }
-
-  // Add source context if available
-  const topFrame = error.mappedFrames[0];
-  if (topFrame && sourceFiles.has(topFrame.fileName)) {
-    const source = sourceFiles.get(topFrame.fileName);
-    const context = extractSourceContext(
-      source,
-      topFrame.lineNumber,
-      topFrame.columnNumber
-    );
-    lines.push('', `Original source (${topFrame.fileName}:${topFrame.lineNumber}):`);
-    lines.push(context);
-  }
-
-  return lines.join('\n');
+interface ErrorDisplayOptions {
+  readonly verbose?: boolean;
+  readonly colors?: boolean;
+  readonly maxFrames?: number;
+  readonly showFrameTypes?: boolean;
 }
 
-function extractSourceContext(
-  source: string,
-  line: number,
-  column: number,
-  contextLines: number = 1
-): string {
-  const lines = source.split('\n');
-  const start = Math.max(0, line - 1 - contextLines);
-  const end = Math.min(lines.length, line + contextLines);
+function formatError(
+  mappedError: MappedError,
+  options: ErrorDisplayOptions = {},
+): string { ... }
 
-  const result: string[] = [];
-  for (let i = start; i < end; i++) {
-    const lineNum = i + 1;
-    const prefix = lineNum === line ? '> ' : '  ';
-    const numStr = String(lineNum).padStart(3);
-    result.push(`${prefix}${numStr} │ ${lines[i]}`);
+function formatErrorForConsole(mappedError: MappedError): string { ... }
+function formatErrorForLog(mappedError: MappedError): string { ... }
+function formatUserMessage(mappedError: MappedError): string { ... }
 
-    // Add column pointer for error line
-    if (lineNum === line) {
-      const pointer = ' '.repeat(column + 7) + '^^^';
-      result.push(`     │ ${pointer}`);
-    }
-  }
-
-  return result.join('\n');
+interface ErrorReport {
+  readonly message: string;
+  readonly name: string;
+  readonly patternId?: string;
+  readonly location?: {
+    readonly file: string;
+    readonly line: number;
+    readonly column: number;
+  };
+  readonly stack: string;
+  readonly frameSummary: {
+    readonly total: number;
+    readonly pattern: number;
+    readonly runtime: number;
+    readonly external: number;
+    readonly ses: number;
+  };
 }
+
+function createErrorReport(
+  mappedError: MappedError,
+  patternId?: string,
+): ErrorReport { ... }
 ```
 
 ### 8.6 Layered Stack Trace Filtering
@@ -1131,42 +1377,51 @@ The key insight is that **pattern authors and runtime developers have different 
 ```typescript
 // packages/runner/src/sandbox/frame-classifier.ts
 
-type FrameType = 'pattern' | 'runtime' | 'external';
+type FrameType = "pattern" | "runtime" | "external" | "ses";
 
-interface ClassifiedFrame extends MappedFrame {
-  frameType: FrameType;
+interface ClassifiedFrame {
+  readonly original: string;
+  readonly type: FrameType;
+  readonly functionName?: string;
+  readonly file?: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly isMapped: boolean;
 }
 
-function classifyFrame(frame: MappedFrame, patternId: string): FrameType {
-  // Pattern code - always from the pattern's source files
-  if (isPatternSource(frame.fileName, patternId)) {
-    return 'pattern';
-  }
+const RUNTIME_PATTERNS = [
+  /\/runner\/src\//,
+  /\/harness\//,
+  /\/scheduler\//,
+  /AMDLoader/,
+  /<CT_INTERNAL>/,
+  /\beval\b/,
+];
 
-  // Runtime code - our internal packages
-  if (isRuntimeSource(frame.fileName)) {
-    return 'runtime';
-  }
+const SES_PATTERNS = [
+  /\/ses\//,
+  /Compartment/,
+  /lockdown/,
+  /harden/,
+  /@endo\//,
+];
 
-  // External - third-party libraries, esm.sh imports
-  return 'external';
-}
-
-function isPatternSource(fileName: string, patternId: string): boolean {
-  // Pattern sources are in the virtual filesystem or have pattern markers
-  return fileName.includes(patternId) ||
-         fileName.endsWith('.tsx') ||
-         fileName.startsWith('/patterns/');
-}
-
-function isRuntimeSource(fileName: string): boolean {
-  return fileName.includes('packages/runner/') ||
-         fileName.includes('packages/common-builder/') ||
-         fileName.includes('packages/common-html/') ||
-         fileName.includes('compartment-manager') ||
-         fileName.includes('sandbox/');
-}
+const EXTERNAL_PATTERNS = [
+  /node_modules/,
+  /npm:/,
+  /esm\.sh/,
+  /deno\.land/,
+  /jsr\.io/,
+];
 ```
+
+In non-debug mode, filtering behavior should match the implementation:
+
+- include all `pattern` frames
+- include `external` frames
+- include `runtime` frames only until the first `pattern` frame, to preserve
+  call-site context
+- exclude `ses` frames and later runtime-internal noise
 
 #### 8.6.2 Filtered Stack Trace Output
 
@@ -1198,7 +1453,7 @@ TypeError: Cannot read property 'map' of undefined
        └─ props.value is undefined
     at MyPattern (MyPattern.tsx:22:3)
     ─── runtime frames ───
-    at FrozenExport.implementation (compartment-manager.ts:89:5)
+    at FrozenExport.implementation (ses-runtime.ts:89:5)
     at SandboxedRunner.invoke (runner.ts:1254:12)
     at executeWithErrorMapping (execution-wrapper.ts:15:12)
     at instantiateJavaScriptNode (runner.ts:1174:8)
@@ -1215,12 +1470,14 @@ Pattern: my-pattern-id
 interface StackFilterOptions {
   showRuntimeFrames: boolean;  // false for pattern authors, true for runtime devs
   showExternalFrames: boolean; // usually true
+  showSESFrames: boolean;      // usually false
   maxPatternFrames: number;    // limit depth, default unlimited
 }
 
 const DEFAULT_OPTIONS: StackFilterOptions = {
   showRuntimeFrames: false,
   showExternalFrames: true,
+  showSESFrames: false,
   maxPatternFrames: Infinity,
 };
 
@@ -1245,6 +1502,14 @@ export function filterStack(
 
       case 'runtime':
         if (options.showRuntimeFrames) {
+          visibleFrames.push(frame);
+        } else {
+          hiddenCount++;
+        }
+        break;
+
+      case 'ses':
+        if (options.showSESFrames) {
           visibleFrames.push(frame);
         } else {
           hiddenCount++;
@@ -1276,10 +1541,10 @@ export function formatFilteredStack(
   for (const frame of visibleFrames) {
     // Add section markers for runtime frames in debug mode
     if (options.showRuntimeFrames) {
-      if (frame.frameType === 'runtime' && !inRuntimeSection) {
+      if (frame.type === 'runtime' && !inRuntimeSection) {
         lines.push('    ─── runtime frames ───');
         inRuntimeSection = true;
-      } else if (frame.frameType !== 'runtime' && inRuntimeSection) {
+      } else if (frame.type !== 'runtime' && inRuntimeSection) {
         lines.push('    ─── end runtime frames ───');
         inRuntimeSection = false;
       }
@@ -1300,60 +1565,29 @@ export function formatFilteredStack(
 }
 ```
 
-#### 8.6.4 Debug Mode Activation
+#### 8.6.4 Sandbox Configuration
 
 ```typescript
-// packages/runner/src/sandbox/config.ts
+// packages/runner/src/sandbox/types.ts
 
 export interface SandboxConfig {
-  // For pattern authors (default)
-  errorDisplay: 'pattern-only' | 'full';
-
-  // Environment detection
-  isRuntimeDeveloper: boolean;
-}
-
-// Auto-detect based on environment
-export function detectConfig(): SandboxConfig {
-  return {
-    errorDisplay: process.env.COMMON_TOOLS_DEBUG === 'true'
-      ? 'full'
-      : 'pattern-only',
-
-    isRuntimeDeveloper:
-      process.env.COMMON_TOOLS_DEBUG === 'true' ||
-      process.env.NODE_ENV === 'development' &&
-      isRunningFromSource(),  // e.g., not from node_modules
-  };
-}
-
-function isRunningFromSource(): boolean {
-  // Check if we're running from the monorepo vs installed package
-  return __dirname.includes('/packages/runner/src/');
+  enabled: boolean;
+  debug: boolean;
+  console?: Console;
 }
 ```
+
+The `debug` field controls both lockdown configuration (see Section 5.1) and
+stack trace verbosity. When `debug` is true, full stack traces including runtime
+and SES frames are shown.
 
 ### 8.7 Configuration Summary
 
-| Audience | `errorDisplay` | Runtime Frames | Source Context |
-|----------|----------------|----------------|----------------|
-| Pattern Author | `'pattern-only'` | Hidden | Pattern source shown |
-| Runtime Developer | `'full'` | Visible (marked) | All source shown |
-| Production (logging) | `'pattern-only'` | Hidden | Included in logs |
-
-```typescript
-// Pattern author sees clean errors focused on their code
-CompartmentManager.configure({
-  errorDisplay: 'pattern-only',
-});
-
-// Runtime developer sees everything
-CompartmentManager.configure({
-  errorDisplay: 'full',
-});
-// Or via environment:
-// COMMON_TOOLS_DEBUG=true
-```
+| Audience | `debug` | Runtime Frames | Source Context |
+|----------|---------|----------------|----------------|
+| Pattern Author | `false` | Hidden | Pattern source shown |
+| Runtime Developer | `true` | Visible (marked) | All source shown |
+| Production (logging) | `false` | Hidden | Included in logs |
 
 ### 8.8 Implementation Checklist
 
@@ -1361,226 +1595,212 @@ CompartmentManager.configure({
 |------|----------|-------|
 | Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
 | Source map chaining in js-compiler | High | `js-compiler/typescript/compiler.ts` |
-| Store source maps in PatternCompartment | High | `runner/src/sandbox/compartment-manager.ts` |
+| ErrorMapper source-map lifecycle | High | `runner/src/sandbox/error-mapping.ts` |
 | Error mapping utility | High | `runner/src/sandbox/error-mapping.ts` |
 | Execution wrapper with mapping | High | `runner/src/sandbox/execution-wrapper.ts` |
+| Frame classification and filtering | High | `runner/src/sandbox/frame-classifier.ts` |
 | Enhanced error display | Medium | `runner/src/sandbox/error-display.ts` |
-| Source context extraction | Medium | `runner/src/sandbox/error-display.ts` |
-| Configuration options | Low | `runner/src/sandbox/config.ts` |
+| Structured error report formatting | Medium | `runner/src/sandbox/error-display.ts` |
+| Configuration options | Low | `runner/src/sandbox/types.ts` |
 
 ---
 
-## 9. Implementation Plan
+## 9. Implementation Workstreams
 
-### Phase 1: Transformer Enhancements
+### Phase 1: Non-TCB Compiler Assistance
 
-#### 1.1 Module-Scope Validation (Priority: High)
+#### 1.1 Emit top-level classification hints (Priority: High)
 
-Add `ModuleScopeValidationTransformer`:
+The transformer should help the runtime verifier without becoming trusted.
+Examples:
 
-```typescript
-class ModuleScopeValidationTransformer {
-  // Allowlist of permitted module-scope calls
-  private allowedCalls = new Set([
-    'pattern', 'pattern', 'lift', 'handler',
-    'Object.freeze', 'harden'
-  ]);
+- insert stable sentinel comments before each top-level item
+- normalize trusted builders into canonical forms such as
+  `__ct_builder("lift", function ...)`
+- normalize top-level functions into canonical forms such as
+  `__ct_fn(function ...)`
+- normalize data bindings into canonical forms such as
+  `__ct_data(expr)`
+- rewrite plain-data candidates into `freezeVerifiedPlainData(...)` within the
+  canonical data wrapper
+- normalize export syntax to simple local bindings plus explicit export wiring
 
-  visitCallExpression(node: ts.CallExpression): void {
-    if (this.isModuleScope(node)) {
-      const callee = this.getCalleeName(node);
-      if (!this.allowedCalls.has(callee)) {
-        this.reportError(node, `Call to ${callee} not allowed at module scope`);
-      }
-    }
-  }
-
-  visitVariableDeclaration(node: ts.VariableDeclaration): void {
-    if (this.isModuleScope(node) && node.kind !== ts.SyntaxKind.ConstKeyword) {
-      this.reportError(node, 'Only const declarations allowed at module scope');
-    }
-  }
-}
-```
+These hints are performance aids only. The runner must be able to reject the
+module even if the hints are wrong or missing.
 
 **Files to modify:**
-- `packages/ts-transformers/src/index.ts` - Add new transformer to pipeline
-- New file: `packages/ts-transformers/src/module-scope-validation.ts`
+- `packages/ts-transformers/src/transformers/module-scope-validation.ts`
+- `packages/ts-transformers/src/hoisting/*`
+- compiler pipeline entrypoints that preserve the hints into emitted JS
 
-#### 1.2 Hoist Computed/Action/Derive (Priority: High)
+#### 1.2 Hoist computed/action/derive when useful (Priority: High)
 
-Modify `ComputedTransformer` and `ClosureTransformer`:
+Continue to hoist inline callbacks when external references exist, because that
+reduces the complexity of runtime direct-callback verification.
 
-```typescript
-class HoistingTransformer {
-  private hoistedDeclarations: ts.Statement[] = [];
-  private counter = 0;
+### Phase 2: Trusted Runtime Verification at the AMD Module Boundary
 
-  visitComputedCall(node: ts.CallExpression): ts.Expression {
-    const fn = node.arguments[0];
-    const name = `__computed_${this.counter++}`;
+#### 2.1 Verify module factories before execution (Priority: High)
 
-    // Create hoisted lift
-    const hoisted = ts.factory.createVariableStatement(
-      undefined,
-      ts.factory.createVariableDeclarationList([
-        ts.factory.createVariableDeclaration(
-          name,
-          undefined,
-          undefined,
-          ts.factory.createCallExpression(
-            ts.factory.createIdentifier('lift'),
-            [...typeArgs],
-            [fn]
-          )
-        )
-      ], ts.NodeFlags.Const)
-    );
+The trusted verifier should operate on each AMD module factory, not only on the
+fully wrapped bundle entrypoint. This preserves per-module top-level structure
+and avoids trusting compiler rewrites.
 
-    this.hoistedDeclarations.push(hoisted);
+The verifier must check:
 
-    // Return call to hoisted lift
-    return ts.factory.createCallExpression(
-      ts.factory.createIdentifier(name),
-      undefined,
-      [capturedInputs]
-    );
-  }
-}
-```
+- trusted builders receive direct callbacks only
+- top-level functions are direct functions only
+- all other surviving top-level values are plain data and hardened
+- no unclassified top-level side effects survive
 
-**Files to modify:**
-- `packages/ts-transformers/src/computed.ts`
-- `packages/ts-transformers/src/closure.ts`
-- New file: `packages/ts-transformers/src/hoisting.ts`
+The verifier should be implemented as a minimal recognizer for the canonical
+emitted wrapper grammar, not as a full JavaScript parser. The TCB scanner only
+needs to:
 
-#### 1.3 Export Name Annotation (Priority: Medium)
+- follow balanced `()`, `{}`, and `[]`
+- correctly skip over strings, comments, and template literals
+- split the factory body into top-level items
+- match those items against the small set of canonical wrapper forms
 
-Add annotation to all builder calls:
+If the output deviates from the canonical wrapper language, the verifier should
+fail closed.
 
-```typescript
-class ExportNameAnnotationTransformer {
-  visitExportDeclaration(node: ts.ExportDeclaration): ts.Node {
-    // For: export const MyPattern = pattern(...);
-    // Add: MyPattern.__exportName = "MyPattern";
+**Likely files:**
+- `packages/js-compiler/typescript/bundler/amd-loader.ts`
+- `packages/runner/src/harness/engine.ts`
+- new `packages/runner/src/sandbox/module-verifier.ts`
 
-    const name = this.getExportName(node);
-    const annotation = ts.factory.createExpressionStatement(
-      ts.factory.createAssignment(
-        ts.factory.createPropertyAccessExpression(
-          ts.factory.createIdentifier(name),
-          '__exportName'
-        ),
-        ts.factory.createStringLiteral(name)
-      )
-    );
+#### 2.2 Add custom plain-data checker/freezer (Priority: High)
 
-    return [node, annotation];
-  }
-}
-```
+Implement a runtime helper that proves a value is recursively plain data and
+then hardens it. This helper is stricter than `harden()` alone and stricter
+than Endo pass-style checks.
 
-**Files to modify:**
-- New file: `packages/ts-transformers/src/export-annotation.ts`
+**Likely files:**
+- new `packages/runner/src/sandbox/plain-data.ts`
+- `packages/runner/src/sandbox/mod.ts`
+- tests under `packages/runner/test/sandbox/`
 
-### Phase 2: SES Integration
+#### 2.3 Harden approved functions immediately after load (Priority: High)
 
-#### 2.1 Add SES Dependency
+Direct top-level functions and trusted builder implementations must be hardened
+as soon as they are created, but only after the verifier has constrained the
+environment they may close over.
 
-```bash
-npm install ses
-```
+#### 2.4 Enforce import policy at verification time (Priority: High)
 
-**Files to modify:**
-- `packages/runner/package.json`
+The verifier should explicitly distinguish:
 
-#### 2.2 Create Compartment Manager
+- trusted static imports from runtime modules
+- static imports from other transformed-and-verified local modules
+- all other static imports, which are rejected in v1
 
-New module for managing pattern Compartments:
+External imports beyond the trusted runtime set should remain a v2 dynamic
+import concern rather than a v1 load-time feature.
 
-```typescript
-// packages/runner/src/sandbox/compartment-manager.ts
+### Phase 3: SES Execution Path
 
-import 'ses';
+#### 3.1 Implement one live runtime path (Priority: High)
 
-export class CompartmentManager {
-  private static lockdownApplied = false;
-  private patternCompartments = new Map<string, PatternCompartment>();
+Eliminate the split between parallel SES implementations. The runtime must have
+one authoritative verified SES execution path.
 
-  static applyLockdown(): void {
-    if (this.lockdownApplied) return;
-    lockdown({
-      errorTaming: 'unsafe',
-      stackFiltering: 'verbose',
-      overrideTaming: 'moderate',
-      consoleTaming: 'unsafe',
-    });
-    this.lockdownApplied = true;
-  }
+#### 3.2 Use one Compartment per pattern while keeping verification primary (Priority: High)
 
-  loadPattern(id: string, compiledJS: string): PatternCompartment { ... }
-  getExport(patternId: string, name: string): FrozenExport { ... }
-  evaluateString(code: string): Function { ... }
-}
-```
+The runtime should execute each loaded pattern in its own Compartment. That
+Compartment is a containment boundary, not the primary mechanism that prevents
+callback collusion. Fresh Compartments are still appropriate for string-eval
+fallbacks and future dynamic-import isolation.
 
-**Files to create:**
-- `packages/runner/src/sandbox/compartment-manager.ts`
-- `packages/runner/src/sandbox/pattern-compartment.ts`
-- `packages/runner/src/sandbox/types.ts`
+#### 3.3 Runtime globals and lockdown policy (Priority: Medium)
 
-#### 2.3 Create Runtime Globals Provider
+Keep the runtime globals surface explicit and hardened. Temporary relaxations
+(`fetch`, `Date`, `Math.random`) remain separate migration decisions.
 
-Define the frozen globals available in pattern Compartments:
+#### 3.4 Runtime Globals Provider
+
+The runtime provides a comprehensive set of globals to pattern Compartments.
+These are injected directly as Compartment globals (not via module maps):
 
 ```typescript
 // packages/runner/src/sandbox/runtime-globals.ts
 
-export function createRuntimeGlobals(): Record<string, unknown> {
-  return harden({
-    // Builder functions
-    pattern: createPatternBuilder(),
-    pattern: createPatternBuilder(),
-    lift: createLiftBuilder(),
-    handler: createHandlerBuilder(),
-    derive: createDeriveBuilder(),
+export function createRuntimeGlobals(
+  patternId: string,
+  customConsole?: Console,
+): RuntimeGlobals {
+  const { commontools } = createBuilder();
+  const sandboxedConsole = customConsole ?? createSandboxedConsole({ patternId });
 
-    // Cell/reactive
-    Cell,
-    cell,
-
-    // UI
-    h,
-
-    // Standard globals (frozen)
-    console: createSandboxedConsole(),
-    JSON,
-    Math,
-    Object: {
-      keys: Object.keys,
-      values: Object.values,
-      entries: Object.entries,
-      freeze: Object.freeze,
-      // ... allowlisted methods only
-    },
-    Array: {
-      isArray: Array.isArray,
-      from: Array.from,
-      // ... allowlisted methods only
-    },
-  });
+  return {
+    recipe: harden(commontools.recipe),
+    pattern: harden(commontools.pattern),
+    patternTool: harden(commontools.patternTool),
+    lift: harden(commontools.lift),
+    handler: harden(commontools.handler),
+    action: harden(commontools.action),
+    derive: harden(commontools.derive),
+    computed: harden(commontools.computed),
+    Cell: harden(commontools.Cell),
+    Writable: harden(commontools.Writable),
+    OpaqueCell: harden(commontools.OpaqueCell),
+    Stream: harden(commontools.Stream),
+    ComparableCell: harden(commontools.ComparableCell),
+    ReadonlyCell: harden(commontools.ReadonlyCell),
+    WriteonlyCell: harden(commontools.WriteonlyCell),
+    cell: harden(commontools.cell),
+    equals: harden(commontools.equals),
+    str: harden(commontools.str),
+    ifElse: harden(commontools.ifElse),
+    when: harden(commontools.when),
+    unless: harden(commontools.unless),
+    llm: harden(commontools.llm),
+    llmDialog: harden(commontools.llmDialog),
+    generateObject: harden(commontools.generateObject),
+    generateText: harden(commontools.generateText),
+    fetchData: harden(commontools.fetchData),
+    fetchProgram: harden(commontools.fetchProgram),
+    streamData: harden(commontools.streamData),
+    compileAndRun: harden(commontools.compileAndRun),
+    navigateTo: harden(commontools.navigateTo),
+    wish: harden(commontools.wish),
+    byRef: harden(commontools.byRef),
+    getRecipeEnvironment: harden(commontools.getRecipeEnvironment),
+    getEntityId: harden(commontools.getEntityId),
+    ID: commontools.ID,
+    ID_FIELD: commontools.ID_FIELD,
+    SELF: commontools.SELF,
+    TYPE: commontools.TYPE,
+    NAME: commontools.NAME,
+    UI: commontools.UI,
+    schema: harden(commontools.schema),
+    toSchema: harden(commontools.toSchema),
+    AuthSchema: harden(commontools.AuthSchema),
+    h: harden(commontools.h),
+    console: sandboxedConsole,
+    fetch: ((...args) => {
+      sandboxedConsole.warn(
+        "Direct fetch() is deprecated. Rewrite as several steps in a pattern using fetchData() instead.",
+      );
+      return fetch(...args);
+    }) as typeof fetch,
+    Temporal: harden(Temporal),
+    secureRandom: () =>
+      crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000,
+    randomUUID: () => crypto.randomUUID(),
+    harden: typeof harden === "function" ? harden : Object.freeze,
+  };
 }
 ```
 
-**Files to create:**
-- `packages/runner/src/sandbox/runtime-globals.ts`
-- `packages/runner/src/sandbox/sandboxed-console.ts`
+**Files:**
+- `packages/runner/src/sandbox/runtime-globals.ts` (exists)
 
-### Phase 3: Runner Integration
+### Phase 4: Runner Integration
 
-#### 3.1 Modify instantiateJavaScriptNode
+#### 4.1 Modify instantiateJavaScriptNode
 
-Replace direct eval with Compartment invocation:
+Replace direct eval with the authoritative verified SES execution path:
 
 ```typescript
 // packages/runner/src/runner.ts
@@ -1593,21 +1813,10 @@ private instantiateJavaScriptNode(
   let fn: Function;
 
   if (typeof module.implementation === "string") {
-    // Check if this is a frozen export from a loaded pattern
-    if (module.patternId && module.exportName) {
-      const exp = this.compartmentManager.getExport(
-        module.patternId,
-        module.exportName
-      );
-
-      // Verify it's frozen and module-scope defined
-      verifyFrozen(exp, module.exportName);
-
-      fn = exp.implementation;
-    } else {
-      // Fallback: evaluate in fresh Compartment
-      fn = this.compartmentManager.evaluateString(module.implementation);
-    }
+    // Preferred path: retrieve a previously verified frozen export.
+    // Secondary path: evaluate in a fresh verified Compartment if this string
+    // is not yet represented as a cached export record.
+    fn = getVerifiedFunction(module);
   } else {
     fn = module.implementation;
   }
@@ -1619,28 +1828,37 @@ private instantiateJavaScriptNode(
 **Files to modify:**
 - `packages/runner/src/runner.ts`
 
-#### 3.2 Remove UnsafeEvalIsolate Usage
+#### 4.2 Remove UnsafeEvalIsolate Usage
 
-Replace `harness.getInvocation()` with Compartment-based evaluation:
+Remove the legacy fallback to `harness.getInvocation()` / `UnsafeEvalIsolate`.
+The runtime may keep a harness abstraction, but it must no longer route pattern
+execution through raw eval once SES verification is enabled.
 
 ```typescript
 // Before
 fn = this.runtime.harness.getInvocation(module.implementation);
 
 // After
-fn = this.compartmentManager.evaluateString(module.implementation);
+fn = getVerifiedFunction(module);
 ```
 
 **Files to modify:**
 - `packages/runner/src/harness/engine.ts` (deprecate or remove)
 - `packages/runner/src/harness/eval-runtime.ts` (deprecate or remove)
 
-### Phase 4: Dynamic Import Support
+### Phase 5: Dynamic Import Support (TODO / Future Work)
 
-#### 4.1 Implement Import Hooks
+> **Status**: `import-hooks.ts` exists with full implementation (`ESMCache`,
+> `createResolveHook`, `createImportHook`) but is not yet wired into the
+> Compartment creation path. This phase depends on connecting import hooks to
+> the SESRuntime Compartment creation.
+
+#### 5.1 Wire Up Import Hooks
+
+Connect the existing import hook implementations to Compartment creation:
 
 ```typescript
-// packages/runner/src/sandbox/import-hooks.ts
+// packages/runner/src/sandbox/import-hooks.ts (exists, needs wiring)
 
 export function createImportHooks(
   esmCache: Map<string, string>
@@ -1669,38 +1887,18 @@ export function createImportHooks(
 }
 ```
 
-**Files to create:**
-- `packages/runner/src/sandbox/import-hooks.ts`
-- `packages/runner/src/sandbox/esm-cache.ts`
+#### 5.2 Dynamic Import Compartment (TODO)
 
-#### 4.2 Integrate with Compartment
+Create isolated Compartments for dynamic imports, providing per-invocation
+module instances. This depends on Phase 5.1 (wiring up import hooks).
 
-```typescript
-// packages/runner/src/sandbox/dynamic-import-compartment.ts
+**Files:**
+- `packages/runner/src/sandbox/import-hooks.ts` (exists, not wired)
+- `packages/runner/src/sandbox/dynamic-import-compartment.ts` (to be created)
 
-export async function createDynamicImportCompartment(
-  base: Compartment,
-  esmCache: Map<string, string>
-): Promise<Compartment> {
-  const hooks = createImportHooks(esmCache);
+### Phase 6: Testing & Hardening
 
-  return new Compartment(
-    base.globalThis,
-    {},
-    {
-      resolveHook: hooks.resolveHook,
-      importHook: hooks.importHook,
-    }
-  );
-}
-```
-
-**Files to create:**
-- `packages/runner/src/sandbox/dynamic-import-compartment.ts`
-
-### Phase 5: Testing & Hardening
-
-#### 5.1 Security Tests
+#### 6.1 Security Tests
 
 ```typescript
 // packages/runner/test/sandbox/security.test.ts
@@ -1766,7 +1964,7 @@ describe('SES Sandbox Security', () => {
 - `packages/runner/test/sandbox/compartment.test.ts`
 - `packages/runner/test/sandbox/import-hooks.test.ts`
 
-#### 5.2 Performance Tests
+#### 6.2 Performance Tests
 
 ```typescript
 // packages/runner/test/sandbox/performance.test.ts
@@ -1834,12 +2032,12 @@ export const MyPattern = pattern(() => {
 ```typescript
 // Before
 const runner = new Runner(runtime);
-runner.start(pattern, inputs);
+runner.start(recipe, inputs);
 
 // After (if explicit lockdown control needed)
-CompartmentManager.applyLockdown();  // Call once at startup
+SESRuntime.applyLockdown({ enabled: true, debug: false });
 const runner = new Runner(runtime);
-runner.start(pattern, inputs);
+runner.start(recipe, inputs);
 ```
 
 ---
@@ -1850,11 +2048,13 @@ runner.start(pattern, inputs);
 
 | Threat | Mitigation |
 |--------|------------|
-| Arbitrary code execution | SES Compartment isolation |
+| Arbitrary code execution | SES Compartments plus controlled runtime capability injection |
+| Collusion between callbacks in the same pattern | Runtime module verifier, direct-callback enforcement, verified plain-data freezing |
+| Compiler/transformer compromise | Runner-side verification at the AMD module boundary |
 | Global pollution | Frozen intrinsics, controlled globals |
 | Prototype pollution | Frozen prototypes (SES default) |
-| Closure-based data leakage | No surviving closures, hoisted frozen implementations |
-| State leakage via modules | Fresh Compartments for dynamic imports |
+| Closure-based data leakage | No surviving mutable module bindings; function hardening plus verified environments |
+| State leakage via modules | Verified immutable top-level bindings; fresh Compartments for dynamic imports when needed |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
 | Network access | Future: Control fetch in globals (not in this spec) |
 
@@ -1866,7 +2066,27 @@ runner.start(pattern, inputs);
 
 3. **No network restrictions**: `fetch` is not blocked. Future work: Proxy `fetch` with allowlist.
 
-### 11.3 Escape Hatch Analysis
+4. **Compartments are secondary containment only**: If the verifier is wrong,
+   a shared Compartment increases blast radius. Per-pattern Compartments reduce
+   that blast radius but do not replace verification.
+
+### 11.3 Temporary Relaxations
+
+The following unsafe capabilities are temporarily allowed while existing
+patterns are migrated. Each will be tightened in a future release.
+
+1. **Time and randomness migration**: Do not rely on
+   `mathTaming` / `dateTaming` knobs as the long-term policy surface. The
+   runtime should instead provide explicit helpers such as `Temporal`,
+   `secureRandom()`, and `randomUUID()`, and continue migrating patterns away
+   from ambient time/randomness APIs.
+
+2. **`fetch()`** (provided as a global with deprecation warning): Patterns
+   should use `fetchData()` instead, which is managed by the runtime.
+   Direct `fetch()` logs a console warning and will be removed once all
+   patterns are migrated.
+
+### 11.4 Escape Hatch Analysis
 
 Potential escape routes and their status:
 
@@ -1874,7 +2094,7 @@ Potential escape routes and their status:
 |--------|--------|-------|
 | `eval()` | Blocked | SES removes `eval` from Compartment globals |
 | `Function()` | Blocked | SES removes `Function` constructor |
-| `import()` | Controlled | Via import hooks |
+| `import()` | Controlled | Via import hooks (TODO: not yet wired) |
 | Prototype access | Blocked | Frozen prototypes |
 | `globalThis` | Controlled | Custom Compartment globals |
 | `__proto__` | Blocked | Frozen Object.prototype |
@@ -1907,6 +2127,8 @@ The existing AMD loader in `js-compiler` is compatible with SES Compartments. Th
 - **Lockdown**: Initialize SES, freeze all intrinsics
 - **StaticModuleRecord**: SES's representation of an ES module
 - **Import hooks**: Callbacks for resolving and loading modules
+- **SESIsolate**: Runtime component that creates and manages Compartments with globals injection
+- **SESRuntime**: Runtime harness that integrates SESIsolate into the pattern execution pipeline
 
 ---
 
