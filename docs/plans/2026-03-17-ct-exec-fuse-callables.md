@@ -38,7 +38,7 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
    - handler defaults to `invoke`
    - tool defaults to `run`
 8. `ct exec <file> --help` always prints top-level help for that callable, including schema and the available core command.
-9. After the verb, generated schema flags own the namespace. If the input schema has a `help` field, `ct exec <file> run --help` means `help=true`, not CLI help. Top-level help remains available at `ct exec <file> --help`.
+9. After the verb, generated schema flags own the namespace. If the input schema has a `help` field, `ct exec <file> run --help` is parsed as that schema field using the normal flag rules for its type (`true` for boolean help flags, a required value for non-boolean help fields), not as CLI help. Top-level help remains available at `ct exec <file> --help`.
 10. Tool input flags come from the underlying pattern’s `argumentSchema` minus injected `result` and minus already-bound `extraParams`.
 11. Tool help shows both input schema and a best-effort output schema. The output display is heuristic-only and must not block execution.
 12. Non-mounted paths, stale mounts, non-callable files, and invalid flag/value combinations fail with clear CLI errors instead of stack traces.
@@ -116,6 +116,8 @@ ct exec /tmp/ct/home/pieces/demo/result/search.tool --query "oat milk"
   - Document `.tool`, readable/executable callable files, and `ct exec`.
 - `docs/specs/fuse-filesystem/2-path-scheme.md`
   - Add `.tool` to the mounted layout.
+- `docs/specs/fuse-filesystem/3-json-mapping.md`
+  - Document `/tool` sigils in synthesized `.json` siblings.
 - `docs/specs/fuse-filesystem/4-read-write.md`
   - Update callable file modes and read semantics.
 - `docs/common/workflows/handlers-cli-testing.md`
@@ -516,7 +518,7 @@ Cover these cases in `packages/cli/test/exec.test.ts`:
 
 1. defaulting to `invoke` for handlers and `run` for tools
 2. top-level `--help` always works
-3. post-verb `--help` becomes `help=true` when the schema has a `help` field
+3. post-verb `--help` is treated as an ordinary schema flag when the input schema has a `help` field, including a non-boolean `help` field that requires a value
 4. top-level primitive flags parse correctly
 5. array/object flags parse from JSON strings
 6. `--json` is mutually exclusive with generated flags
@@ -557,13 +559,14 @@ Rules:
 3. booleans support `--flag` and `--no-flag`
 4. `--json <object>` bypasses generated flags
 5. help rendering uses `schemaToTypeString(...)` for compact schema sections
+6. `packages/cli/commands/exec.ts` must hand raw tail args to this parser instead of modeling `invoke` / `run` as Cliffy subcommands, otherwise Cliffy will steal post-verb `--help` before schema parsing can see it
 
 - [ ] **Step 3: Render help in the precedence order the user asked for**
 
 Implement:
 
 1. `ct exec <file> --help` => top-level help
-2. `ct exec <file> [invoke|run] --help` => schema field `help=true` if that field exists
+2. `ct exec <file> [invoke|run] --help` => schema field `help` if that field exists, parsed with the same rules as any other generated flag
 3. otherwise post-verb `--help` falls back to command help
 
 Document that top-level help is the always-available escape hatch.
@@ -591,7 +594,7 @@ git commit -m "feat: add schema-driven exec flags and help"
 **Files:**
 - Create: `packages/cli/commands/exec.ts`
 - Modify: `packages/cli/commands/main.ts`
-- Modify: `packages/cli/lib/exec.ts`
+- Create: `packages/cli/lib/exec.ts`
 
 - [ ] **Step 1: Extend the `ct exec` tests with failing resolution/execution behavior**
 
@@ -638,7 +641,7 @@ Handler:
 
 1. derive input from flags / `--json`
 2. invoke handlers by reusing the same piece-property write semantics as the FUSE flush path (`piece[cellProp].set(value, [cellKey])`)
-3. wait for `manager.synced()` after the write path settles
+3. wait for `manager.runtime.idle()` and then `manager.synced()` so `ct exec` sees the same completed handler effects that `ct piece call` already waits for
 4. exit `0` with no stdout payload unless there is an intentional CLI message on stderr
 
 Tool:
@@ -652,7 +655,7 @@ Do not reimplement this with `runtime.idle()` plus `JSON.stringify(...)`; that p
 
 - [ ] **Step 4: Wire the command into `ct`**
 
-Add `exec` to `packages/cli/commands/main.ts`, keeping the root help terse:
+Add `exec` to `packages/cli/commands/main.ts`, keeping the root help terse. In `packages/cli/commands/exec.ts`, parse the argv tail yourself (or the Cliffy equivalent that preserves raw args) instead of delegating `invoke` / `run` / `--help` handling to nested Cliffy commands:
 
 ```text
 ct exec <mounted-callable-file> [invoke|run] [flags]
@@ -683,6 +686,7 @@ git commit -m "feat: add ct exec for mounted callables"
 - Create: `packages/cli/integration/pattern/fuse-exec.tsx`
 - Modify: `packages/fuse/README.md`
 - Modify: `docs/specs/fuse-filesystem/2-path-scheme.md`
+- Modify: `docs/specs/fuse-filesystem/3-json-mapping.md`
 - Modify: `docs/specs/fuse-filesystem/4-read-write.md`
 - Modify: `docs/common/workflows/handlers-cli-testing.md`
 
@@ -692,7 +696,7 @@ The fixture pattern must expose:
 
 1. one handler with required scalar flags
 2. one pattern tool with one bound `extraParam`
-3. one schema field literally named `help` to prove flag-precedence behavior
+3. one schema field literally named `help` with a non-boolean type to prove post-verb `--help` is treated as a schema flag, not intercepted as CLI help
 
 The script should:
 
@@ -702,7 +706,7 @@ The script should:
 4. assert `.handler` and `.tool` entries exist
 5. `cat` each file and assert the first line starts with `#!` and contains ` exec`
 6. assert both `ct exec <handler-file> --help` / `ct exec <tool-file> --help` and direct `<handler-file> --help` / `<tool-file> --help` show top-level help
-7. assert both `ct exec <tool-file> run --help` and direct `<tool-file> run --help` are passed through as the schema field, not intercepted as CLI help
+7. assert both `ct exec <tool-file> run --help <value>` and direct `<tool-file> run --help <value>` are passed through as the schema field, not intercepted as CLI help
 8. execute the mounted handler file directly
 9. execute the mounted tool file directly
 10. execute `ct exec` against both the handler and tool files with explicit verbs
@@ -728,9 +732,10 @@ Keep the fixture minimal and deterministic. Avoid LLM-backed tools or external H
 Required doc changes:
 
 1. FUSE layout now includes `*.tool`
-2. callable files are readable/executable
-3. direct execution and `ct exec` examples are documented
-4. handler-testing docs mention mounted handler execution as a fast local workflow
+2. synthesized `.json` siblings now render tools as `/tool` sigils instead of exposing raw wrapper internals
+3. callable files are readable/executable
+4. direct execution and `ct exec` examples are documented
+5. handler-testing docs mention mounted handler execution as a fast local workflow
 
 - [ ] **Step 4: Run the focused automated checks**
 
@@ -767,7 +772,7 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/cli/integration/fuse-exec.sh packages/cli/integration/pattern/fuse-exec.tsx packages/fuse/README.md docs/specs/fuse-filesystem/2-path-scheme.md docs/specs/fuse-filesystem/4-read-write.md docs/common/workflows/handlers-cli-testing.md
+git add packages/cli/integration/fuse-exec.sh packages/cli/integration/pattern/fuse-exec.tsx packages/fuse/README.md docs/specs/fuse-filesystem/2-path-scheme.md docs/specs/fuse-filesystem/3-json-mapping.md docs/specs/fuse-filesystem/4-read-write.md docs/common/workflows/handlers-cli-testing.md
 git commit -m "docs: document exec-backed fuse callables"
 ```
 
