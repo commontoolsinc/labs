@@ -208,7 +208,7 @@ export function processDefaultValue(
         const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
         const propSchema =
           (isObject(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)  
+            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)
             : rawPropSchema;
         if (key in defaultValue) {
           result[key] = processDefaultValue(
