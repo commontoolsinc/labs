@@ -5,6 +5,7 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { recordFlowPrecisionOutputSource } from "../cfc/flow-precision.ts";
 
 /**
  * Implementation of built-in filter module. Like map, this is called once at
@@ -62,6 +63,7 @@ export function filter(
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
+    const resultAddress = result.getAsNormalizedFullLink();
     const { list, op } = inputsCell.asSchema(
       {
         type: "object",
@@ -148,6 +150,12 @@ export function filter(
       // Truthy/falsy coercion, not strict boolean.
       const included = elementRuns.get(elementKey)!.resultCell.withTx(tx).get();
       if (included) {
+        const sourceAddress = list[i].getAsNormalizedFullLink();
+        tx.readValueOrThrow(sourceAddress);
+        recordFlowPrecisionOutputSource(tx, {
+          ...resultAddress,
+          path: [...resultAddress.path, String(newArrayValue.length)],
+        }, sourceAddress);
         newArrayValue.push(list[i]); // Original element cell reference
       }
     }

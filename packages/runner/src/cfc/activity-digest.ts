@@ -26,6 +26,8 @@ interface NormalizedReadCfc {
   readonly internalVerifierRead: boolean;
   readonly maxConfidentiality: readonly string[];
   readonly requiredIntegrity: readonly string[];
+  readonly flowPrecisionOutputPath: string | null;
+  readonly flowPrecisionSourcePath: string | null;
 }
 
 type NormalizedReadActivity = {
@@ -73,6 +75,8 @@ function normalizeCfcReadAnnotations(
     internalVerifierRead: cfc?.internalVerifierRead === true,
     maxConfidentiality,
     requiredIntegrity,
+    flowPrecisionOutputPath: cfc?.flowPrecisionOutputPath ?? null,
+    flowPrecisionSourcePath: cfc?.flowPrecisionSourcePath ?? null,
   };
 }
 

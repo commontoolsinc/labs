@@ -5,6 +5,7 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { recordFlowPrecisionOutputSource } from "../cfc/flow-precision.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -64,6 +65,7 @@ export function flatMap(
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
+    const resultAddress = result.getAsNormalizedFullLink();
     const { list, op } = inputsCell.asSchema(
       {
         type: "object",
@@ -152,12 +154,23 @@ export function flatMap(
       // have undefined result cells on the first pass before the pattern runs).
       const elemResult = elementRuns.get(elementKey)!.resultCell.withTx(tx)
         .get();
+      const sourceAddress = list[i].getAsNormalizedFullLink();
       if (Array.isArray(elemResult)) {
+        tx.readValueOrThrow(sourceAddress);
         // forEach skips holes in sub-arrays (sparse-safe)
         elemResult.forEach((v) => {
+          recordFlowPrecisionOutputSource(tx, {
+            ...resultAddress,
+            path: [...resultAddress.path, String(newArrayValue.length)],
+          }, sourceAddress);
           newArrayValue.push(v);
         });
       } else if (elemResult !== undefined) {
+        tx.readValueOrThrow(sourceAddress);
+        recordFlowPrecisionOutputSource(tx, {
+          ...resultAddress,
+          path: [...resultAddress.path, String(newArrayValue.length)],
+        }, sourceAddress);
         newArrayValue.push(elemResult);
       }
     }

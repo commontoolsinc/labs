@@ -1,6 +1,10 @@
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { escapeJsonPointerToken } from "./canonical-activity.ts";
+import {
+  type CanonicalBoundaryRead,
+  canonicalizeStoragePath,
+  escapeJsonPointerToken,
+} from "./canonical-activity.ts";
 import type { ConsumedReadWithEffectiveLabel } from "./consumed-input-labels.ts";
 import type {
   IExtendedStorageTransaction,
@@ -12,7 +16,6 @@ import {
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
 } from "./trust-lattice.ts";
-import { canonicalizeStoragePath } from "./canonical-activity.ts";
 
 type FlowPrecisionClaimType =
   | "PointwisePresencePreserved"
@@ -32,6 +35,7 @@ export interface FlowPrecisionSelection {
   readonly sourcePath?: string;
   readonly usedClaim: boolean;
   readonly trusted: boolean;
+  readonly mode?: "pointwise" | "elementLocalExpansion";
 }
 
 export function recordFlowPrecisionOutputSource(
@@ -120,6 +124,17 @@ function isFlowPrecisionClaimType(
     value === "StableRelativeOrder";
 }
 
+function hasPointwiseClaims(claim: FlowPrecisionClaimSpec): boolean {
+  return claim.claims.includes("PointwisePresencePreserved") &&
+    claim.claims.includes("PointwiseWriteDependency");
+}
+
+function hasElementLocalExpansionClaim(
+  claim: FlowPrecisionClaimSpec,
+): boolean {
+  return claim.claims.includes("ElementLocalExpansion");
+}
+
 function normalizeFlowPrecisionClaimType(
   value: unknown,
 ): FlowPrecisionClaimType | undefined {
@@ -173,8 +188,8 @@ function readFlowPrecisionClaim(
 
   if (
     claims.length === 0 ||
-    !claims.includes("PointwisePresencePreserved") ||
-    !claims.includes("PointwiseWriteDependency")
+    (!hasPointwiseClaims({ concept, sourceCollection, claims }) &&
+      !hasElementLocalExpansionClaim({ concept, sourceCollection, claims }))
   ) {
     return undefined;
   }
@@ -326,11 +341,14 @@ function buildSourcePath(
   ]);
 }
 
-function readEntityKey(
-  consumed: ConsumedReadWithEffectiveLabel,
+function readEntityAddressKey(
+  read: Pick<CanonicalBoundaryRead, "space" | "id" | "type">,
 ): string {
-  const { space, id, type } = consumed.read;
-  return `${space}\u0000${id}\u0000${type}`;
+  return `${read.space}\u0000${read.id}\u0000${read.type}`;
+}
+
+function readEntityKey(consumed: ConsumedReadWithEffectiveLabel): string {
+  return readEntityAddressKey(consumed.read);
 }
 
 function selectSourceEntityKey(
@@ -379,10 +397,37 @@ function findFlowPrecisionClaimForWrite(
   return claims[0];
 }
 
+function selectElementLocalExpansionSourcePath(
+  internalVerifierReads: readonly CanonicalBoundaryRead[],
+  writePath: string,
+  sourceEntityKey: string,
+  sourceCollection: string,
+): string | undefined {
+  const candidatePaths = new Set<string>();
+  for (const read of internalVerifierReads) {
+    const outputPath = read.cfc?.flowPrecisionOutputPath;
+    const sourcePath = read.cfc?.flowPrecisionSourcePath;
+    if (
+      outputPath !== writePath ||
+      sourcePath === undefined ||
+      readEntityAddressKey(read) !== sourceEntityKey ||
+      !isSameOrDescendantCanonicalPath(sourceCollection, sourcePath)
+    ) {
+      continue;
+    }
+    candidatePaths.add(sourcePath);
+  }
+  if (candidatePaths.size !== 1) {
+    return undefined;
+  }
+  return [...candidatePaths][0];
+}
+
 export function selectFlowPrecisionConsumedReads(
   rootSchema: JSONSchema | undefined,
   writePath: string,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  internalVerifierReads: readonly CanonicalBoundaryRead[],
   implementationIdentity: CfcImplementationIdentity | undefined,
   actingPrincipal?: string,
   trustContext?: CfcTrustContext,
@@ -416,10 +461,36 @@ export function selectFlowPrecisionConsumedReads(
     };
   }
 
+  const pointwise = hasPointwiseClaims(claim.claim);
+  const elementLocalExpansion = hasElementLocalExpansionClaim(claim.claim);
+  const retainNonSourceReads = !(
+    elementLocalExpansion &&
+    implementationIdentity?.kind === "builtin" &&
+    implementationIdentity.name === "filter"
+  );
+  const claimSourcePath = pointwise
+    ? claim.sourcePath
+    : elementLocalExpansion
+    ? selectElementLocalExpansionSourcePath(
+      internalVerifierReads,
+      writePath,
+      sourceEntityKey,
+      claim.claim.sourceCollection,
+    )
+    : undefined;
+  if (!claimSourcePath) {
+    return {
+      consumedReadLabels,
+      outputPatternPath: claim.outputPatternPath,
+      usedClaim: false,
+      trusted: false,
+    };
+  }
+
   const claimedConsumedReadLabels = consumedReadLabels.filter((consumed) => {
     const entityKey = readEntityKey(consumed);
     if (entityKey !== sourceEntityKey) {
-      return true;
+      return retainNonSourceReads;
     }
     if (
       !isSameOrDescendantCanonicalPath(
@@ -430,18 +501,20 @@ export function selectFlowPrecisionConsumedReads(
       return true;
     }
     return isSameOrDescendantCanonicalPath(
-      claim.sourcePath,
+      claimSourcePath,
       consumed.read.path,
     );
   });
 
   const sourceLocalReads = claimedConsumedReadLabels.filter((consumed) =>
     readEntityKey(consumed) === sourceEntityKey &&
-    isSameOrDescendantCanonicalPath(claim.sourcePath, consumed.read.path)
+    isSameOrDescendantCanonicalPath(claimSourcePath, consumed.read.path)
   );
   if (sourceLocalReads.length === 0) {
     return {
       consumedReadLabels,
+      outputPatternPath: claim.outputPatternPath,
+      sourcePath: claimSourcePath,
       usedClaim: false,
       trusted: false,
     };
@@ -472,7 +545,7 @@ export function selectFlowPrecisionConsumedReads(
     return {
       consumedReadLabels,
       outputPatternPath: claim.outputPatternPath,
-      sourcePath: claim.sourcePath,
+      sourcePath: claimSourcePath,
       usedClaim: false,
       trusted: false,
     };
@@ -481,8 +554,9 @@ export function selectFlowPrecisionConsumedReads(
   return {
     consumedReadLabels: claimedConsumedReadLabels,
     outputPatternPath: claim.outputPatternPath,
-    sourcePath: claim.sourcePath,
+    sourcePath: claimSourcePath,
     usedClaim: true,
     trusted,
+    mode: pointwise ? "pointwise" : "elementLocalExpansion",
   };
 }

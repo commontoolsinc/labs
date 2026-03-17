@@ -287,7 +287,7 @@ Primary files:
       `KeyLocalWriteDependency`) before applying claim-derived precision.
 - [x] Rename and align claim parsing/validation to
       `PointwisePresencePreserved` / `PointwiseWriteDependency`.
-- [ ] Extend collection-structure handling for prefix-sensitive built-ins
+- [x] Extend collection-structure handling for prefix-sensitive built-ins
       (`filter`, `flatMap`) so membership/domain, order/offset, and
       multiplicity can be tainted independently.
 - [x] Treat missing/unknown implementation identity as untrusted and fall back
@@ -586,8 +586,8 @@ Primary test location:
 - [x] `cfc-flow-precision.test.ts` covers builtin trust resolution from the
       acting principal's trust context, including fail-closed behavior without a
       trusted statement.
-- [ ] `cfc-filter-membership-vs-order-precision.test.ts`
-- [ ] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`
+- [x] `cfc-filter-membership-vs-order-precision.test.ts`
+- [x] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`
 
 ### 11.5 Side-Effect Gating Tests
 
@@ -683,7 +683,7 @@ Primary docs:
       conservative fallback when untrusted.
 - [x] Confirm spec-aligned `PointwisePresencePreserved` /
       `PointwiseWriteDependency` replace legacy `KeyLocal*` claim parsing.
-- [ ] Confirm prefix-sensitive built-ins (`filter`, `flatMap`) taint
+- [x] Confirm prefix-sensitive built-ins (`filter`, `flatMap`) taint
       membership/domain independently from order/offset/multiplicity.
 - [x] Confirm builtin modules can make trusted flow-precision claims via
       `Builtin(name)` identity and share the same trust gate semantics as

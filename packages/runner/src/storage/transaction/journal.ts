@@ -202,6 +202,24 @@ function validateCfcStringList(
   return { ok: values };
 }
 
+function validateCanonicalPathString(
+  key: "flowPrecisionOutputPath" | "flowPrecisionSourcePath",
+  raw: unknown,
+): ValidationResult<string | undefined> {
+  if (raw === undefined) {
+    return { ok: undefined };
+  }
+  if (typeof raw !== "string" || !raw.startsWith("/")) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        `${key} must be a canonical path string`,
+      ),
+    };
+  }
+  return { ok: raw };
+}
+
 function validateCfcAnnotations(
   cfc: unknown,
 ): ValidationResult<ICfcReadAnnotations | undefined> {
@@ -216,6 +234,8 @@ function validateCfcAnnotations(
     "internalVerifierRead",
     "maxConfidentiality",
     "requiredIntegrity",
+    "flowPrecisionOutputPath",
+    "flowPrecisionSourcePath",
   ]);
   for (const key of stringKeys) {
     if (!allowedKeys.has(key)) {
@@ -262,11 +282,29 @@ function validateCfcAnnotations(
 
   const maxConfidentiality = maxConfidentialityResult.ok;
   const requiredIntegrity = requiredIntegrityResult.ok;
+  const flowPrecisionOutputPathResult = validateCanonicalPathString(
+    "flowPrecisionOutputPath",
+    (cfc as { flowPrecisionOutputPath?: unknown }).flowPrecisionOutputPath,
+  );
+  if ("error" in flowPrecisionOutputPathResult) {
+    return { error: flowPrecisionOutputPathResult.error };
+  }
+  const flowPrecisionSourcePathResult = validateCanonicalPathString(
+    "flowPrecisionSourcePath",
+    (cfc as { flowPrecisionSourcePath?: unknown }).flowPrecisionSourcePath,
+  );
+  if ("error" in flowPrecisionSourcePathResult) {
+    return { error: flowPrecisionSourcePathResult.error };
+  }
+  const flowPrecisionOutputPath = flowPrecisionOutputPathResult.ok;
+  const flowPrecisionSourcePath = flowPrecisionSourcePathResult.ok;
   return {
     ok: {
       ...(internalVerifierRead === true ? { internalVerifierRead: true } : {}),
       ...(maxConfidentiality ? { maxConfidentiality } : {}),
       ...(requiredIntegrity ? { requiredIntegrity } : {}),
+      ...(flowPrecisionOutputPath ? { flowPrecisionOutputPath } : {}),
+      ...(flowPrecisionSourcePath ? { flowPrecisionSourcePath } : {}),
     },
   };
 }

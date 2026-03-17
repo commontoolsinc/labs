@@ -30,10 +30,7 @@ import {
   readMaxConfidentialityFromMeta,
   readRequiredIntegrityFromMeta,
 } from "./internal-markers.ts";
-import {
-  ignoreReadForSchedulingMarker,
-  markReadAsPotentialWriteMarker,
-} from "../storage/read-metadata.ts";
+import { markReadAsPotentialWriteMarker } from "../storage/read-metadata.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
 import { cfcSchemaBlobAddress } from "./schema-blob.ts";
@@ -633,6 +630,34 @@ function recordDynamicWriteIntegrity(
   labelsByEntity.set(entityKey, labels);
 }
 
+function recordDynamicContainerClassification(
+  labelsByEntity: Map<string, Record<string, Labels>>,
+  entity: EntityAddress,
+  writePath: string,
+  classification: string,
+): void {
+  if (classification.length === 0 || classification === "unclassified") {
+    return;
+  }
+
+  const ancestorPaths = canonicalAncestorPaths(writePath);
+  if (ancestorPaths.length <= 1) {
+    return;
+  }
+
+  const entityKey = cfcEntityKey(entity);
+  const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
+  for (const path of ancestorPaths.slice(0, -1)) {
+    const merged = mergeLabel(labels[path], {
+      classification: [classification],
+    });
+    if (merged) {
+      labels[path] = merged;
+    }
+  }
+  labelsByEntity.set(entityKey, labels);
+}
+
 async function resolvePreparedWriteSchemas(
   tx: IExtendedStorageTransaction,
   writtenEntities: readonly EntityAddress[],
@@ -774,8 +799,14 @@ function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
   canonical: CanonicalBoundaryActivity,
   options: PrepareBoundaryCommitOptions = {},
-): readonly ConsumedReadWithEffectiveLabel[] {
-  const { consumedReads } = partitionConsumedBoundaryReads(canonical);
+): {
+  readonly consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[];
+  readonly internalVerifierReads: readonly CanonicalBoundaryRead[];
+} {
+  const { consumedReads, internalVerifierReads } =
+    partitionConsumedBoundaryReads(
+      canonical,
+    );
   const labelsByEntity = new Map<string, Record<string, Labels>>();
 
   for (const read of consumedReads) {
@@ -859,7 +890,7 @@ function verifyInputRequirementsForAttempt(
     }
   }
 
-  return consumedReadLabels;
+  return { consumedReadLabels, internalVerifierReads };
 }
 
 function classificationDominates(
@@ -1207,12 +1238,16 @@ function resolveConsumedSourceValue(
 ): ConsumedSourceLookup {
   const seen = new Set<string>();
   let firstValue: unknown = undefined;
+  let firstLabeledExternalValue: unknown = undefined;
   let firstExternalValue: unknown = undefined;
   let preferredValue: unknown = undefined;
+  let preferredLabeledExternalValue: unknown = undefined;
   let preferredExternalValue: unknown = undefined;
   let hasFirstValue = false;
+  let hasFirstLabeledExternalValue = false;
   let hasFirstExternalValue = false;
   let hasPreferredValue = false;
+  let hasPreferredLabeledExternalValue = false;
   let hasPreferredExternalValue = false;
   for (const consumed of consumedReadLabels) {
     if (consumed.read.path !== sourcePath) {
@@ -1240,13 +1275,19 @@ function resolveConsumedSourceValue(
     }
     const isPotentialWriteRead =
       consumed.read.meta?.[markReadAsPotentialWriteMarker] === true;
-    const isIgnoredForScheduling =
-      consumed.read.meta?.[ignoreReadForSchedulingMarker] === true;
-    const isExternalConsumedRead = !isPotentialWriteRead &&
-      !isIgnoredForScheduling;
+    const isExternalConsumedRead = !isPotentialWriteRead;
+    const hasEffectiveLabel = consumed.effectiveLabel !== undefined;
     if (isExternalConsumedRead && !hasFirstExternalValue) {
       firstExternalValue = value;
       hasFirstExternalValue = true;
+    }
+    if (
+      isExternalConsumedRead &&
+      hasEffectiveLabel &&
+      !hasFirstLabeledExternalValue
+    ) {
+      firstLabeledExternalValue = value;
+      hasFirstLabeledExternalValue = true;
     }
     if (preferredEntity && sameEntityAddress(entity, preferredEntity)) {
       if (!hasPreferredValue) {
@@ -1257,7 +1298,21 @@ function resolveConsumedSourceValue(
         preferredExternalValue = value;
         hasPreferredExternalValue = true;
       }
+      if (
+        isExternalConsumedRead &&
+        hasEffectiveLabel &&
+        !hasPreferredLabeledExternalValue
+      ) {
+        preferredLabeledExternalValue = value;
+        hasPreferredLabeledExternalValue = true;
+      }
     }
+  }
+  if (hasPreferredLabeledExternalValue) {
+    return { found: true, value: preferredLabeledExternalValue };
+  }
+  if (hasFirstLabeledExternalValue) {
+    return { found: true, value: firstLabeledExternalValue };
   }
   if (hasPreferredExternalValue) {
     return { found: true, value: preferredExternalValue };
@@ -2044,6 +2099,7 @@ function evaluatePolicyDowngradeDecision(
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  internalVerifierReads: readonly CanonicalBoundaryRead[],
   canonical: CanonicalBoundaryActivity,
   options: PrepareBoundaryCommitOptions = {},
   rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
@@ -2079,14 +2135,17 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
-    const effectiveConsumedReadLabels = selectFlowPrecisionConsumedReads(
+    const flowPrecisionSelection = selectFlowPrecisionConsumedReads(
       rootSchema,
       write.path,
       consumedReadLabels,
+      internalVerifierReads,
       options.implementationIdentity,
       options.actingPrincipal,
       options.trustContext,
-    ).consumedReadLabels;
+    );
+    const effectiveConsumedReadLabels =
+      flowPrecisionSelection.consumedReadLabels;
     const minClassification = strongestConsumedClassification(
       effectiveConsumedReadLabels,
       cfc,
@@ -2132,6 +2191,26 @@ function verifyOutputTransitionsForAttempt(
       write.path,
       collectDynamicWriteIntegrity(effectiveConsumedReadLabels),
     );
+    if (flowPrecisionSelection.mode === "elementLocalExpansion") {
+      const conservativeClassification = strongestConsumedClassification(
+        consumedReadLabels,
+        cfc,
+      );
+      if (
+        !classificationDominates(
+          minClassification,
+          conservativeClassification,
+          cfc,
+        )
+      ) {
+        recordDynamicContainerClassification(
+          dynamicLabelsByEntity,
+          entity,
+          write.path,
+          conservativeClassification,
+        );
+      }
+    }
 
     const statePrecondition = readStatePrecondition(schemaAtWritePath);
     if (statePrecondition) {
@@ -2385,14 +2464,16 @@ export async function prepareBoundaryCommit(
     );
   }
 
-  const consumedReadLabels = verifyInputRequirementsForAttempt(
-    tx,
-    canonical,
-    effectiveOptions,
-  );
+  const { consumedReadLabels, internalVerifierReads } =
+    verifyInputRequirementsForAttempt(
+      tx,
+      canonical,
+      effectiveOptions,
+    );
   const dynamicOutputLabels = verifyOutputTransitionsForAttempt(
     tx,
     consumedReadLabels,
+    internalVerifierReads,
     canonical,
     effectiveOptions,
     preparedRootSchemasByEntity,
