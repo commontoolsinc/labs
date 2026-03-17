@@ -924,8 +924,9 @@ function benchmark(
 ): number {
   // Pre-generate cloned objects to exclude clone time from measurement
   // Use structuredClone to preserve sparse arrays and other non-JSON types
-  const objects = Array.from({ length: iterations }, () =>
-    structuredClone(templateData)
+  const objects = Array.from(
+    { length: iterations },
+    () => structuredClone(templateData),
   );
 
   // Warmup with fresh objects
