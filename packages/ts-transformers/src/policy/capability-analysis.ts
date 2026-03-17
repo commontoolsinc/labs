@@ -876,14 +876,22 @@ export function analyzeFunctionCapabilities(
               // alias name so the identifier handler can skip redundant
               // blanket reads.  Only suppress for actual .get() bases —
               // ordinary member reads (e.g. state.foo) must not be tagged.
-              const innerExpr = node.expression;
+              // Walk through intermediate member accesses to find the .get()
+              // call (handles chains like notes.get().meta.length).
+              let getBaseExpr: ts.Expression = node.expression;
+              while (
+                ts.isPropertyAccessExpression(getBaseExpr) ||
+                ts.isElementAccessExpression(getBaseExpr)
+              ) {
+                getBaseExpr = getBaseExpr.expression;
+              }
               if (
-                ts.isCallExpression(innerExpr) &&
-                resolvedGetCalls.has(innerExpr)
+                ts.isCallExpression(getBaseExpr) &&
+                resolvedGetCalls.has(getBaseExpr)
               ) {
                 // Unwrap the .get() call to find the root identifier:
                 // notes.get() → notes.get (PropertyAccess) → notes (Identifier)
-                const calleeExpr = innerExpr.expression;
+                const calleeExpr = getBaseExpr.expression;
                 let rootExpr: ts.Expression = ts.isPropertyAccessExpression(
                     calleeExpr,
                   )

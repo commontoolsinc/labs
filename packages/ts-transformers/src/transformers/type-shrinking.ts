@@ -16,6 +16,22 @@ import { isAnyOrUnknownType, typeToSchemaTypeNode } from "../ast/mod.ts";
 
 export type CapabilitySummaryApplicationMode = "full" | "defaults_only";
 
+/**
+ * Properties on array-like types that don't require item-level data.
+ * When all accessed paths are in this set, array items can be shrunk
+ * to `unknown` to avoid fetching full item schemas.
+ *
+ * Includes Cell/reactive method names that leak through capability
+ * analysis when parent pointers are absent on synthetic AST nodes.
+ */
+const NON_ITEM_PROPS = new Set([
+  "length",
+  "get",
+  "set",
+  "key",
+  "update",
+]);
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -142,16 +158,6 @@ function buildShrunkTypeNodeFromType(
     typeChecker.isTupleType?.(type) ||
     !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   if (isArrayLike) {
-    // Properties that don't require item-level data.
-    const NON_ITEM_PROPS = new Set([
-      "length",
-      // Cell/reactive method names that leak through capability analysis
-      // when parent pointers are absent on synthetic AST nodes.
-      "get",
-      "set",
-      "key",
-      "update",
-    ]);
     const allNonItem = normalized.every(
       (path) =>
         path.length === 1 && path[0] !== undefined &&
@@ -354,16 +360,6 @@ function buildShrunkTypeNodeFromTypeNode(
       isArray = !!tc.isArrayType?.(resolvedType);
     }
     if (isArray) {
-      // Properties that don't require item-level data.
-      const NON_ITEM_PROPS = new Set([
-        "length",
-        // Cell/reactive method names that leak through capability analysis
-        // when parent pointers are absent on synthetic AST nodes.
-        "get",
-        "set",
-        "key",
-        "update",
-      ]);
       const allNonItem = normalized.every(
         (path) =>
           path.length === 1 && path[0] !== undefined &&
