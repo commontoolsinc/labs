@@ -12,7 +12,7 @@ _deno.lock
 .bg-charm-service.pid
 .pr-desc.tmp
 dist/
-.agents/settings.local.json
+.claude/settings.local.json
 claude-research.key
 *.key
 .passphrase
@@ -28,13 +28,14 @@ tools/ralph/smoketest/
 .worktrees
 
 # Claude Code blackboard
-.agents/blackboard.db
+.claude/blackboard.db
 
 .agent
 PROMPT.md
 ralph.yml
-.agents/blackboard.db-shm
-.agents/blackboard.db-wal
+.claude/blackboard.db-shm
+.claude/blackboard.db-wal
+.claude/worktrees/
 .commands
 tour-screenshots
 CLAUDE.local.md
