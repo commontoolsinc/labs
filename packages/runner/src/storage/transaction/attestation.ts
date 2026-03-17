@@ -136,11 +136,9 @@ const setAtPath = (
     if (rest.length === 0) {
       if (root[index] === value) return { ok: root }; // noop
       const newArray = sparseArrayCopy(root);
-      if (value === undefined) {
-        delete newArray[index]; // creates hole, not splice
-      } else {
-        newArray[index] = value;
-      }
+      // We just set the values here. If you need to delete elements from an
+      // array, set the array to another array without those elements.
+      newArray[index] = value;
       return { ok: newArray };
     }
 
@@ -168,11 +166,8 @@ const setAtPath = (
   // Terminal case
   if (rest.length === 0) {
     if (obj[key] === value) return { ok: root }; // noop
-    if (value === undefined) {
-      if (!(key in obj)) return { ok: root }; // delete non-existent = noop
-      const { [key]: _, ...without } = obj;
-      return { ok: without as StorableDatum };
-    }
+    // We just set the values here. If you need to delete keys from an object,
+    // set the object to another object without those keys.
     return { ok: { ...obj, [key]: value } };
   }
 
