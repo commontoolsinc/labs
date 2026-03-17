@@ -121,9 +121,13 @@ describe("Memory v2 pull reactivity", () => {
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
   });
 
-  it.ignore("marks pull-mode graph computations dirty when a 64-node frontier expands", async () => {
+  it("marks pull-mode graph computations dirty when a 64-node frontier expands", async () => {
     runtime.scheduler.enablePullMode();
     const fixture = createGraphFixture(space);
+    const expandedChildId = "of:test-node-33" as URI;
+    const expandedChildValue = structuredClone(
+      fixture.docs.find((doc) => doc.id === expandedChildId)?.value,
+    );
     const observer = storageManager.open(space) as unknown as {
       get(uri: URI): { value: unknown } | undefined;
       sync(
@@ -144,9 +148,14 @@ describe("Memory v2 pull reactivity", () => {
       }),
     ).toEqual({ ok: {} });
 
-    const root = runtime.getCell<any>(
+    if (!expandedChildValue) {
+      throw new Error(`Missing graph fixture doc ${expandedChildId}`);
+    }
+
+    const root = runtime.getCellFromEntityId<any>(
       space,
       fixture.rootId,
+      [],
       fixture.schema as any,
       tx,
     );
@@ -175,7 +184,7 @@ describe("Memory v2 pull reactivity", () => {
     const computation: Action = (actionTx) => {
       computationRuns++;
       const current = root.withTx(actionTx).get();
-      const next = current?.alternate?.["/"]?.["link@1"]?.id ?? "missing";
+      const next = current?.alternate?.children?.[0]?.name ?? "missing";
       result.withTx(actionTx).send(next);
     };
 
@@ -190,7 +199,7 @@ describe("Memory v2 pull reactivity", () => {
     );
 
     await result.pull();
-    expect(result.get()).toBe("of:test-node-28");
+    expect(result.get()).toBe("Node 29");
     expect(computationRuns).toBe(1);
     expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
       fixture.initialReachableIds,
@@ -214,11 +223,30 @@ describe("Memory v2 pull reactivity", () => {
     expect(computationRuns).toBe(1);
 
     await result.pull();
-    expect(result.get()).toBe("of:test-node-32");
+    expect(result.get()).toBe("Node 33");
     expect(computationRuns).toBe(2);
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
     expect(visibleIds(observer, fixture.expandedReachableIds)).toEqual(
       fixture.expandedReachableIds,
     );
+
+    expandedChildValue.name = "Expanded Node 33";
+    expect(
+      await storageManager.session().mount(space).transact({
+        changes: Changes.from([Fact.assert({
+          the: "application/json",
+          of: expandedChildId,
+          is: expandedChildValue,
+        })]),
+      }),
+    ).toEqual({ ok: {} });
+
+    await waitFor(() => runtime.scheduler.isDirty(computation));
+    expect(computationRuns).toBe(2);
+
+    await result.pull();
+    expect(result.get()).toBe("Expanded Node 33");
+    expect(computationRuns).toBe(3);
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
   });
 });
