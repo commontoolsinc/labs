@@ -253,7 +253,7 @@ async function computeGitFingerprint(
     }
     return sha256(head + contentHash);
   } catch {
-    // Not in a git repository and no explicit SHA — cache disabled
+    // Not in a git repository — cache disabled
     return undefined;
   }
 }
