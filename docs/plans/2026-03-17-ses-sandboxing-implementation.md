@@ -140,6 +140,8 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 
 - Modify: `deno.json`
   Add the SES package import used by the new sandbox subsystem, or document the deliberate choice to use direct `npm:ses` imports so the dependency contract is explicit in the repo.
+- Modify: `packages/runner/deno.json`
+  Expand the runner package `test` task to include the new `test/sandbox/*.test.ts` suite so package-level and root workspace test runs exercise the SES coverage.
 
 ### Compiler / transformer
 
@@ -360,10 +362,12 @@ git commit -m "feat: canonicalize SES module scope output"
 ### Task 2: Add Trusted Bundle Preflight And AMD Verification Hooks
 
 **Files:**
+- Modify: `packages/runner/deno.json`
 - Modify: `packages/js-compiler/typescript/options.ts`
 - Modify: `packages/js-compiler/typescript/bundler/bundle.ts`
 - Modify: `packages/js-compiler/typescript/bundler/amd-loader.ts`
 - Modify: `packages/js-compiler/typescript/compiler.ts`
+- Create: `packages/runner/src/sandbox/abi.ts`
 - Create: `packages/runner/src/sandbox/token-scanner.ts`
 - Create: `packages/runner/src/sandbox/bundle-preflight.ts`
 - Create: `packages/runner/src/sandbox/module-verifier.ts`
@@ -412,6 +416,11 @@ Keep the public bundle contract the same:
 
 `token-scanner.ts` should do only balanced-delimiter and literal/comment skipping.
 
+`abi.ts` should be the single runner-side source of truth for:
+- wrapper helper names
+- sentinel prefixes / parsing constants
+- verifier-visible metadata field names
+
 `bundle-preflight.ts` should:
 - verify exact trusted prefix/suffix structure
 - isolate the untrusted source region
@@ -430,6 +439,8 @@ Keep the public bundle contract the same:
 - [ ] **Step 5: Keep source maps intact through the bundler change**
 
 Update js-compiler tests so wrapper markers, preserved sentinels, and AMD hook injection do not break line/column mapping back to authored code.
+
+Also update `packages/runner/deno.json` here so `deno task --cwd packages/runner test` includes `test/sandbox/*.test.ts`; otherwise the new security suite will never run under the package task or the root workspace runner.
 
 - [ ] **Step 6: Re-run targeted tests and the js-compiler suite**
 
@@ -454,6 +465,8 @@ git add packages/js-compiler/typescript/options.ts \
   packages/js-compiler/typescript/bundler/bundle.ts \
   packages/js-compiler/typescript/bundler/amd-loader.ts \
   packages/js-compiler/typescript/compiler.ts \
+  packages/runner/deno.json \
+  packages/runner/src/sandbox/abi.ts \
   packages/js-compiler/test/source-map.test.ts \
   packages/runner/src/sandbox/token-scanner.ts \
   packages/runner/src/sandbox/bundle-preflight.ts \
@@ -465,7 +478,7 @@ git commit -m "feat: verify SES bundles before execution"
 ### Task 3: Implement Plain-Data Validation And Runtime Wrapper Helpers
 
 **Files:**
-- Create: `packages/runner/src/sandbox/abi.ts`
+- Modify: `packages/runner/src/sandbox/abi.ts`
 - Create: `packages/runner/src/sandbox/plain-data.ts`
 - Create: `packages/runner/src/sandbox/runtime-helpers.ts`
 - Create: `packages/runner/src/sandbox/types.ts`
@@ -737,7 +750,7 @@ Do **not** eagerly stringify authored functions into `pattern.nodes`.
 In `instantiateJavaScriptNode()`:
 - if `module.implementation` is a function, assert/accept it
 - otherwise resolve `module.implementationRef` through the sandbox registry
-- reject authored strings outright when sandboxing is enabled
+- reject authored strings outright in the steady-state runtime
 
 This is the actual removal of the eval escape hatch. Treat it as a release-blocking change.
 
