@@ -880,6 +880,60 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     assertEquals(errors[0]!.type, "pattern-context:builder-placement");
   });
 
+  await t.step(
+    "does not report builder placement for shadowed lift helper",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      const lift = (fn: () => number) => fn();
+
+      export default pattern(() => {
+        const doubled = lift(() => 1);
+        return <div>{doubled}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:builder-placement"
+        ),
+        false,
+        "shadowed local helpers named lift should not be treated as builder calls",
+      );
+    },
+  );
+
+  await t.step("errors on aliased lift() inside pattern body", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, lift, h } from "commontools";
+
+      interface Item { price: number; }
+
+      const alias = lift;
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const doubled = alias(({ x }: { x: number }) => x * 2)({ x: item.price });
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(
+      errors.some((error) =>
+        error.type === "pattern-context:builder-placement"
+      ),
+      true,
+      "aliases to lift() should still obey module-scope placement rules",
+    );
+  });
+
   await t.step("allows lift() at module scope", async () => {
     const source = `/// <cts-enable />
       import { pattern, lift, h } from "commontools";

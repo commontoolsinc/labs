@@ -6,43 +6,29 @@
  *
  * ## Detection Strategy
  *
- * Detection uses a layered approach with name-based fallbacks:
+ * Detection is provenance-first:
  *
- * 1. **Identifier check**: For direct calls like `derive(...)`, we match by
- *    function name. This is the fast path for the common case.
+ * 1. **Symbol resolution**: Resolve the callee symbol and verify it comes from
+ *    CommonTools declarations or imports.
  *
- * 2. **Symbol resolution**: For property access and aliased calls, we resolve
- *    the symbol and check if it originates from `commontools.d.ts` via
- *    `isCommonToolsSymbol()`.
+ * 2. **Alias following**: Follow stable const aliases and call signatures to
+ *    preserve detection for `const alias = derive` and `declare const alias:
+ *    typeof ifElse` style code.
  *
- * 3. **Name-based fallback**: If symbol resolution fails or the symbol doesn't
- *    come from CommonTools declarations, we fall back to name matching.
+ * 3. **Synthetic helper support**: Recognize internal `__ctHelpers.*` calls
+ *    introduced by the transformer pipeline when symbol resolution is not
+ *    available on synthetic nodes.
  *
- * ## Why Fallbacks Exist
+ * ## Narrow Exceptions
  *
- * The name-based fallbacks are intentional and necessary for:
- *
- * - **Test environments**: Tests use synthetic type declarations that don't
- *   come from `commontools.d.ts`, so `isCommonToolsSymbol()` returns false.
- *
- * - **Synthetic nodes**: During transformation, we create synthetic AST nodes
- *   that lack proper source file associations.
- *
- * - **Incomplete type information**: Some edge cases where TypeScript's type
- *   checker can't fully resolve symbols.
- *
- * ## False Positive Risk
- *
- * Name-based detection could theoretically match user-defined functions with
- * the same names (e.g., a custom `derive` function). In practice:
- *
- * - These names are domain-specific and unlikely to collide
- * - A false positive would still produce valid (if unexpected) transformations
- * - The `isCommonToolsSymbol` check catches most production cases correctly
+ * The remaining syntactic fallback is intentionally limited to synthetic
+ * `__ctHelpers.*` calls and unresolved bare builder identifiers. Local helpers
+ * or object methods that merely share a CommonTools name should not be
+ * classified as CommonTools calls.
  */
 import ts from "typescript";
 
-import { isCommonToolsSymbol } from "../core/mod.ts";
+import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 const ARRAY_METHOD_NAMES = new Set([
@@ -86,6 +72,16 @@ const CELL_LIKE_CLASSES = new Set([
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
+const COMMONTOOLS_CALL_NAMES = new Set([
+  "derive",
+  "ifElse",
+  "when",
+  "unless",
+  "cell",
+  "wish",
+  "generateObject",
+  "patternTool",
+]);
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
@@ -119,6 +115,19 @@ export function detectCallKind(
   return resolveExpressionKind(call.expression, checker, new Set());
 }
 
+export function detectDirectBuilderCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): Extract<CallKind, { kind: "builder" }> | undefined {
+  const builderKind = resolveBuilderExpressionKind(
+    call.expression,
+    checker,
+    new Set(),
+    { followFactoryResults: false },
+  );
+  return builderKind?.kind === "builder" ? builderKind : undefined;
+}
+
 export function isReactiveOriginCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -134,39 +143,13 @@ function resolveExpressionKind(
 ): CallKind | undefined {
   const target = stripWrappers(expression);
 
-  // Fast path: match identifier names directly without symbol resolution.
-  // This handles the common case of direct calls like `derive(...)`.
-  // See module documentation for why name-based detection is acceptable.
-  if (ts.isIdentifier(target)) {
-    const name = target.text;
-    if (name === "derive") {
-      return { kind: "derive" };
-    }
-    if (name === "ifElse") {
-      return { kind: "ifElse" };
-    }
-    if (name === "when") {
-      return { kind: "when" };
-    }
-    if (name === "unless") {
-      return { kind: "unless" };
-    }
-    if (name === "cell") {
-      return { kind: "cell-factory", factoryName: "cell" };
-    }
-    if (name === "wish") {
-      return { kind: "wish" };
-    }
-    if (name === "generateObject") {
-      return { kind: "generate-object" };
-    }
-    if (name === "patternTool") {
-      return { kind: "pattern-tool" };
-    }
-    if (BUILDER_SYMBOL_NAMES.has(name)) {
-      return { kind: "builder", builderName: name };
-    }
-  }
+  const builderKind = resolveBuilderExpressionKind(target, checker, new Set(), {
+    followFactoryResults: true,
+  });
+  if (builderKind) return builderKind;
+
+  const syntheticHelperKind = getSyntheticHelperCallKind(target);
+  if (syntheticHelperKind) return syntheticHelperKind;
 
   if (ts.isCallExpression(target)) {
     return resolveExpressionKind(target.expression, checker, seen);
@@ -200,30 +183,6 @@ function resolveExpressionKind(
       if (isOpaqueRefType(receiverType, checker)) {
         return { kind: "array-method" };
       }
-    }
-    if (name === "derive") {
-      return { kind: "derive" };
-    }
-    if (name === "ifElse") {
-      return { kind: "ifElse" };
-    }
-    if (name === "when") {
-      return { kind: "when" };
-    }
-    if (name === "unless") {
-      return { kind: "unless" };
-    }
-    if (name === "wish") {
-      return { kind: "wish" };
-    }
-    if (name === "generateObject") {
-      return { kind: "generate-object" };
-    }
-    if (name === "patternTool") {
-      return { kind: "pattern-tool" };
-    }
-    if (BUILDER_SYMBOL_NAMES.has(name)) {
-      return { kind: "builder", builderName: name };
     }
   }
 
@@ -261,11 +220,253 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
   return current;
 }
 
+function resolveBuilderExpressionKind(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Symbol>,
+  options: { followFactoryResults: boolean },
+): Extract<CallKind, { kind: "builder" }> | undefined {
+  const target = stripWrappers(expression);
+
+  if (ts.isCallExpression(target)) {
+    if (!options.followFactoryResults) {
+      return undefined;
+    }
+    return resolveBuilderExpressionKind(
+      target.expression,
+      checker,
+      seen,
+      options,
+    );
+  }
+
+  const symbol = getExpressionSymbol(target, checker);
+  if (symbol) {
+    const kind = resolveBuilderSymbolKind(symbol, checker, seen, options);
+    if (kind) return kind;
+  } else {
+    const fallbackName = getDirectBuilderName(target);
+    if (fallbackName) {
+      return { kind: "builder", builderName: fallbackName };
+    }
+  }
+
+  if (!symbol || canUseBuilderSignatureFallback(symbol)) {
+    const type = checker.getTypeAtLocation(target);
+    const signatures = checker.getSignaturesOfType(type, ts.SignatureKind.Call);
+    for (const signature of signatures) {
+      const signatureSymbol = getSignatureSymbol(signature);
+      if (!signatureSymbol) continue;
+      const kind = resolveBuilderSymbolKind(
+        signatureSymbol,
+        checker,
+        seen,
+        options,
+      );
+      if (kind) return kind;
+    }
+  }
+
+  return undefined;
+}
+
+function getExpressionSymbol(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if (ts.isPropertyAccessExpression(expression)) {
+    return checker.getSymbolAtLocation(expression.name);
+  }
+  if (ts.isElementAccessExpression(expression)) {
+    const argument = expression.argumentExpression;
+    if (argument && ts.isExpression(argument)) {
+      return checker.getSymbolAtLocation(argument);
+    }
+  }
+  return checker.getSymbolAtLocation(expression);
+}
+
+function getDirectBuilderName(expression: ts.Expression): string | undefined {
+  if (
+    ts.isIdentifier(expression) && BUILDER_SYMBOL_NAMES.has(expression.text)
+  ) {
+    return expression.text;
+  }
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === CT_HELPERS_IDENTIFIER &&
+    BUILDER_SYMBOL_NAMES.has(expression.name.text)
+  ) {
+    return expression.name.text;
+  }
+  return undefined;
+}
+
+function getSyntheticHelperCallKind(
+  expression: ts.Expression,
+):
+  | Exclude<CallKind, { kind: "builder" | "array-method" | "cell-for" }>
+  | undefined {
+  if (!ts.isPropertyAccessExpression(expression)) {
+    return undefined;
+  }
+  if (
+    !ts.isIdentifier(expression.expression) ||
+    expression.expression.text !== CT_HELPERS_IDENTIFIER
+  ) {
+    return undefined;
+  }
+  return createNamedCallKind(expression.name.text);
+}
+
+function resolveBuilderSymbolKind(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Symbol>,
+  options: { followFactoryResults: boolean },
+): Extract<CallKind, { kind: "builder" }> | undefined {
+  const importedBuilderName = getImportedCommonToolsNamedExport(
+    symbol,
+    BUILDER_SYMBOL_NAMES,
+  );
+  if (importedBuilderName) {
+    return { kind: "builder", symbol, builderName: importedBuilderName };
+  }
+
+  const resolved = resolveAlias(symbol, checker, seen);
+  if (!resolved) return undefined;
+  if (seen.has(resolved)) return undefined;
+  seen.add(resolved);
+
+  const name = resolved.getName();
+  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
+    return { kind: "builder", symbol: resolved, builderName: name };
+  }
+  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonTools(resolved)) {
+    return { kind: "builder", symbol: resolved, builderName: name };
+  }
+  if (BUILDER_SYMBOL_NAMES.has(name) && isAmbientSymbol(resolved)) {
+    return { kind: "builder", symbol: resolved, builderName: name };
+  }
+
+  for (const declaration of resolved.declarations ?? []) {
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      isConstVariableDeclaration(declaration) &&
+      declaration.initializer &&
+      shouldFollowBuilderInitializer(declaration.initializer, options)
+    ) {
+      const nested = resolveBuilderExpressionKind(
+        declaration.initializer,
+        checker,
+        seen,
+        options,
+      );
+      if (nested) return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function isConstVariableDeclaration(
+  declaration: ts.VariableDeclaration,
+): boolean {
+  return (
+    ts.isVariableDeclarationList(declaration.parent) &&
+    (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+  );
+}
+
+function shouldFollowBuilderInitializer(
+  initializer: ts.Expression,
+  options: { followFactoryResults: boolean },
+): boolean {
+  const target = stripWrappers(initializer);
+  return ts.isIdentifier(target) ||
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target) ||
+    (options.followFactoryResults && ts.isCallExpression(target));
+}
+
+function canUseBuilderSignatureFallback(symbol: ts.Symbol): boolean {
+  const declarations = symbol.declarations ?? [];
+  if (declarations.length === 0) return true;
+
+  return declarations.every((declaration) =>
+    !ts.isVariableDeclaration(declaration) ||
+    (isConstVariableDeclaration(declaration) && !declaration.initializer)
+  );
+}
+
+function isImportedFromCommonTools(symbol: ts.Symbol): boolean {
+  return (symbol.declarations ?? []).some((declaration) => {
+    let current: ts.Node | undefined = declaration;
+    while (current) {
+      if (ts.isImportDeclaration(current)) {
+        return ts.isStringLiteral(current.moduleSpecifier) &&
+          (current.moduleSpecifier.text === "commontools" ||
+            current.moduleSpecifier.text === "@commontools/common");
+      }
+      current = current.parent;
+    }
+    return false;
+  });
+}
+
+function getImportedCommonToolsNamedExport(
+  symbol: ts.Symbol,
+  allowedNames: ReadonlySet<string>,
+): string | undefined {
+  for (const declaration of symbol.declarations ?? []) {
+    if (!ts.isImportSpecifier(declaration)) continue;
+    let current: ts.Node | undefined = declaration;
+    while (current && !ts.isImportDeclaration(current)) {
+      current = current.parent;
+    }
+    if (
+      !current ||
+      !ts.isImportDeclaration(current) ||
+      !ts.isStringLiteral(current.moduleSpecifier) ||
+      (current.moduleSpecifier.text !== "commontools" &&
+        current.moduleSpecifier.text !== "@commontools/common")
+    ) {
+      continue;
+    }
+
+    const importedName = declaration.propertyName?.text ??
+      declaration.name.text;
+    if (allowedNames.has(importedName)) {
+      return importedName;
+    }
+  }
+  return undefined;
+}
+
+function isAmbientSymbol(symbol: ts.Symbol): boolean {
+  const declarations = symbol.declarations ?? [];
+  return declarations.length > 0 &&
+    declarations.every((declaration) =>
+      declaration.getSourceFile().isDeclarationFile ||
+      (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Ambient) !==
+        0
+    );
+}
+
 function resolveSymbolKind(
   symbol: ts.Symbol,
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
+  const importedName = getImportedCommonToolsNamedExport(
+    symbol,
+    COMMONTOOLS_CALL_NAMES,
+  );
+  if (importedName) {
+    return createNamedCallKind(importedName, symbol);
+  }
+
   const resolved = resolveAlias(symbol, checker, seen);
   if (!resolved) return undefined;
   if (seen.has(resolved)) return undefined;
@@ -275,9 +476,6 @@ function resolveSymbolKind(
   const name = resolved.getName();
 
   for (const declaration of declarations) {
-    const builderKind = detectBuilderFromDeclaration(resolved, declaration);
-    if (builderKind) return builderKind;
-
     const cellKind = detectCellMethodFromDeclaration(resolved, declaration);
     if (cellKind) return cellKind;
 
@@ -297,88 +495,64 @@ function resolveSymbolKind(
         checker,
         seen,
       );
-      if (nested) return nested;
+      if (!nested) continue;
+      if (
+        nested.kind === "builder" &&
+        !isConstVariableDeclaration(declaration)
+      ) {
+        continue;
+      }
+      return nested;
     }
   }
 
-  if (name === "ifElse" && isCommonToolsSymbol(resolved)) {
-    return { kind: "ifElse", symbol: resolved };
-  }
-
-  if (name === "when" && isCommonToolsSymbol(resolved)) {
-    return { kind: "when", symbol: resolved };
-  }
-
-  if (name === "unless" && isCommonToolsSymbol(resolved)) {
-    return { kind: "unless", symbol: resolved };
-  }
-
-  if (name === "derive" && isCommonToolsSymbol(resolved)) {
-    return { kind: "derive", symbol: resolved };
-  }
-
-  if (name === "cell" && isCommonToolsSymbol(resolved)) {
-    return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
-  }
-
-  if (name === "wish" && isCommonToolsSymbol(resolved)) {
-    return { kind: "wish", symbol: resolved };
-  }
-
-  if (name === "generateObject" && isCommonToolsSymbol(resolved)) {
-    return { kind: "generate-object", symbol: resolved };
-  }
-
-  if (name === "patternTool" && isCommonToolsSymbol(resolved)) {
-    return { kind: "pattern-tool", symbol: resolved };
-  }
-
-  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName: name };
-  }
-
-  // Name-based fallback (see module documentation for rationale)
-  if (name === "ifElse") {
-    return { kind: "ifElse", symbol: resolved };
-  }
-
-  if (name === "when") {
-    return { kind: "when", symbol: resolved };
-  }
-
-  if (name === "unless") {
-    return { kind: "unless", symbol: resolved };
-  }
-
-  if (name === "derive") {
-    return { kind: "derive", symbol: resolved };
-  }
-
-  if (name === "cell") {
-    return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
-  }
-
-  if (name === "wish") {
-    return { kind: "wish", symbol: resolved };
-  }
-
-  if (name === "generateObject") {
-    return { kind: "generate-object", symbol: resolved };
-  }
-
-  if (name === "patternTool") {
-    return { kind: "pattern-tool", symbol: resolved };
-  }
-
-  if (BUILDER_SYMBOL_NAMES.has(name)) {
-    return { kind: "builder", symbol: resolved, builderName: name };
-  }
-
-  if (ARRAY_METHOD_NAMES.has(name)) {
-    return { kind: "array-method", symbol: resolved };
+  const namedCallKind = createNamedCallKind(name, resolved);
+  if (
+    namedCallKind &&
+    (
+      isCommonToolsSymbol(resolved) ||
+      isImportedFromCommonTools(resolved) ||
+      isAmbientSymbol(resolved)
+    )
+  ) {
+    return namedCallKind;
   }
 
   return undefined;
+}
+
+function createNamedCallKind(
+  name: string,
+  symbol?: ts.Symbol,
+):
+  | Exclude<CallKind, { kind: "builder" | "array-method" | "cell-for" }>
+  | undefined {
+  switch (name) {
+    case "derive":
+      return symbol ? { kind: "derive", symbol } : { kind: "derive" };
+    case "ifElse":
+      return symbol ? { kind: "ifElse", symbol } : { kind: "ifElse" };
+    case "when":
+      return symbol ? { kind: "when", symbol } : { kind: "when" };
+    case "unless":
+      return symbol ? { kind: "unless", symbol } : { kind: "unless" };
+    case "cell":
+      return symbol
+        ? { kind: "cell-factory", symbol, factoryName: "cell" }
+        : { kind: "cell-factory", factoryName: "cell" };
+    case "wish":
+      return symbol ? { kind: "wish", symbol } : { kind: "wish" };
+    case "generateObject":
+      return symbol
+        ? { kind: "generate-object", symbol }
+        : { kind: "generate-object" };
+    case "patternTool":
+      return symbol
+        ? { kind: "pattern-tool", symbol }
+        : { kind: "pattern-tool" };
+    default:
+      return undefined;
+  }
 }
 
 function resolveAlias(
@@ -395,22 +569,6 @@ function resolveAlias(
     current = aliased;
   }
   return current;
-}
-
-function detectBuilderFromDeclaration(
-  symbol: ts.Symbol,
-  declaration: ts.Declaration,
-): CallKind | undefined {
-  if (!hasIdentifierName(declaration)) return undefined;
-
-  const name = declaration.name.text;
-  if (!BUILDER_SYMBOL_NAMES.has(name)) return undefined;
-
-  return {
-    kind: "builder",
-    symbol,
-    builderName: name,
-  };
 }
 
 function detectCellMethodFromDeclaration(

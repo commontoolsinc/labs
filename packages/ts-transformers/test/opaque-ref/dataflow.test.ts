@@ -1,7 +1,18 @@
+import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 
+import { detectCallKind, isReactiveOriginCall } from "../../src/ast/mod.ts";
 import { analyzeExpression } from "./harness.ts";
+
+function getCallExpression(
+  source: string,
+  options?: Parameters<typeof analyzeExpression>[1],
+) {
+  const { expression, checker } = analyzeExpression(source, options);
+  assert(ts.isCallExpression(expression), "Expected a call expression");
+  return { call: expression, checker };
+}
 
 describe("data flow analyzer", () => {
   it("marks ifElse predicate for selective rewriting", () => {
@@ -50,5 +61,47 @@ describe("data flow analyzer", () => {
       analysis.rewriteHint && analysis.rewriteHint.kind === "skip-call-rewrite",
     );
     assertEquals(analysis.rewriteHint.reason, "builder");
+  });
+
+  it("does not classify a shadowed local derive helper as reactive", () => {
+    const { call, checker } = getCallExpression(
+      "derive(() => 1)",
+      {
+        prelude: "function derive<T>(fn: () => T): T { return fn(); }",
+      },
+    );
+
+    assertEquals(detectCallKind(call, checker), undefined);
+    assertEquals(isReactiveOriginCall(call, checker), false);
+  });
+
+  it("does not classify a shadowed property helper named ifElse", () => {
+    const { call, checker } = getCallExpression(
+      "helpers.ifElse(state.count > 3, 'hi', 'bye')",
+      {
+        prelude: `
+declare const helpers: {
+  ifElse<T>(predicate: boolean, whenTrue: T, whenFalse: T): T;
+};
+        `,
+      },
+    );
+
+    assertEquals(detectCallKind(call, checker), undefined);
+  });
+
+  it("does not classify plain object map methods as reactive array calls", () => {
+    const { call, checker } = getCallExpression(
+      "collection.map((item) => item + 1)",
+      {
+        prelude: `
+declare const collection: {
+  map<T>(fn: (item: number) => T): T[];
+};
+        `,
+      },
+    );
+
+    assertEquals(detectCallKind(call, checker), undefined);
   });
 });

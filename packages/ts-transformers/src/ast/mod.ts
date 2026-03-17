@@ -1,6 +1,7 @@
 export {
   type CallKind,
   detectCallKind,
+  detectDirectBuilderCall,
   isReactiveOriginCall,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";

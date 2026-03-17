@@ -38,6 +38,7 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
   detectCallKind,
+  detectDirectBuilderCall,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
@@ -487,18 +488,16 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Only check direct calls to lift/handler, not calls to functions returned by them
-    // detectCallKind can incorrectly match calls to lift-returned functions
+    const builderCall = detectDirectBuilderCall(node, checker);
     if (
-      !this.isDirectBuilderCall(node, "lift") &&
-      !this.isDirectBuilderCall(node, "handler")
+      !builderCall ||
+      (builderCall.builderName !== "lift" &&
+        builderCall.builderName !== "handler")
     ) {
       return;
     }
 
-    const builderName = this.isDirectBuilderCall(node, "lift")
-      ? "lift"
-      : "handler";
+    const builderName = builderCall.builderName;
 
     // Only error if inside restricted context
     if (!isInsideRestrictedContext(node, checker, context)) return;
@@ -530,31 +529,6 @@ export class PatternContextValidationTransformer extends Transformer {
         node,
       });
     }
-  }
-
-  /**
-   * Checks if a call expression is a direct call to a builder (lift, handler, etc.)
-   * by checking if the callee is literally the builder name.
-   */
-  private isDirectBuilderCall(
-    node: ts.CallExpression,
-    builderName: string,
-  ): boolean {
-    const callee = node.expression;
-
-    // Direct call: lift(...) or handler(...)
-    if (ts.isIdentifier(callee) && callee.text === builderName) {
-      return true;
-    }
-
-    // Property access call: something.lift(...) or something.handler(...)
-    if (
-      ts.isPropertyAccessExpression(callee) && callee.name.text === builderName
-    ) {
-      return true;
-    }
-
-    return false;
   }
 
   /**
