@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export LOG_TO_STDERR=1
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+
+error() {
+  >&2 echo "ERROR: $1"
+  exit 1
+}
+
+success() {
+  echo "✓ $1"
+}
+
+if [ -n "${CT_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
+  ct() {
+    deno task cli "$@"
+  }
+fi
+
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+
+  if [[ "$haystack" != *"$needle"* ]]; then
+    error "$message"
+  fi
+}
+
+assert_not_exists() {
+  local path="$1"
+  local message="$2"
+
+  if [ -e "$path" ]; then
+    error "$message"
+  fi
+}
+
+assert_json_eq() {
+  local actual="$1"
+  local expected="$2"
+  local message="$3"
+
+  local actual_json expected_json
+  actual_json=$(printf '%s\n' "$actual" | jq -S -c .)
+  expected_json=$(printf '%s\n' "$expected" | jq -S -c .)
+
+  if [ "$actual_json" != "$expected_json" ]; then
+    error "$message. Expected: $expected_json, got: $actual_json"
+  fi
+}
+
+wait_for_path() {
+  local path="$1"
+  local timeout_seconds="${2:-10}"
+  local attempts=$((timeout_seconds * 10))
+
+  for _ in $(seq 1 "$attempts"); do
+    if [ -e "$path" ]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  error "Timed out waiting for path: $path"
+}
+
+wait_for_piece_value() {
+  local path="$1"
+  local expected="$2"
+  local timeout_seconds="${3:-5}"
+  local attempts=$((timeout_seconds * 10))
+
+  for _ in $(seq 1 "$attempts"); do
+    local actual
+    actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+    if [ "$actual" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  local actual
+  actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+  error "Timed out waiting for piece path '$path'. Expected: $expected, got: $actual"
+}
+
+cleanup() {
+  set +e
+  if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
+    ct fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${MOUNTPOINT:-}" ]; then
+    rm -rf "$MOUNTPOINT"
+  fi
+  if [ -n "${IDENTITY:-}" ]; then
+    rm -f "$IDENTITY"
+  fi
+}
+
+trap cleanup EXIT
+
+if ! command -v jq >/dev/null 2>&1; then
+  error "jq must be installed."
+fi
+
+if [ -z "${API_URL:-}" ]; then
+  error "API_URL must be defined."
+fi
+
+SPACE=$(mktemp -u XXXXXXXXXX)
+IDENTITY=$(mktemp)
+MOUNTPOINT=$(mktemp -d)
+SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
+PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
+CUSTOM_EXPORT="customPatternExport"
+
+echo "API_URL=$API_URL"
+echo "SPACE=$SPACE"
+echo "IDENTITY=$IDENTITY"
+echo "MOUNTPOINT=$MOUNTPOINT"
+
+ct id new >"$IDENTITY"
+
+PIECE_ID=$(ct piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
+echo "Created piece: $PIECE_ID"
+
+ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background
+
+wait_for_path "$MOUNTPOINT/$SPACE/pieces"
+
+PIECE_DIR=""
+for _ in $(seq 1 100); do
+  PIECE_DIR=$(find "$MOUNTPOINT/$SPACE/pieces" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)
+  if [ -n "$PIECE_DIR" ]; then
+    break
+  fi
+  sleep 0.1
+done
+
+if [ -z "$PIECE_DIR" ]; then
+  error "Mounted piece directory was not created."
+fi
+
+RESULT_DIR="$PIECE_DIR/result"
+RESULT_JSON="$PIECE_DIR/result.json"
+META_JSON="$PIECE_DIR/meta.json"
+wait_for_path "$RESULT_DIR"
+wait_for_path "$RESULT_JSON"
+wait_for_path "$META_JSON"
+
+ENTITY_ID=$(jq -r '.entityId' "$META_JSON")
+if [ -z "$ENTITY_ID" ] || [ "$ENTITY_ID" = "null" ]; then
+  error "Mounted meta.json did not include an entityId."
+fi
+
+ENTITY_DIR="$MOUNTPOINT/$SPACE/entities/$ENTITY_ID"
+ENTITY_RESULT_DIR="$ENTITY_DIR/result"
+wait_for_path "$ENTITY_RESULT_DIR"
+
+HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
+LEGACY_HANDLER_FILE="$RESULT_DIR/legacyWrite.handler"
+TOOL_FILE="$RESULT_DIR/search.tool"
+ENTITY_HANDLER_FILE="$ENTITY_RESULT_DIR/recordMessage.handler"
+ENTITY_TOOL_FILE="$ENTITY_RESULT_DIR/search.tool"
+
+wait_for_path "$HANDLER_FILE"
+wait_for_path "$LEGACY_HANDLER_FILE"
+wait_for_path "$TOOL_FILE"
+wait_for_path "$ENTITY_HANDLER_FILE"
+wait_for_path "$ENTITY_TOOL_FILE"
+
+ls "$RESULT_DIR" | grep -q '^recordMessage.handler$' || error "recordMessage.handler was not mounted."
+ls "$RESULT_DIR" | grep -q '^legacyWrite.handler$' || error "legacyWrite.handler was not mounted."
+ls "$RESULT_DIR" | grep -q '^search.tool$' || error "search.tool was not mounted."
+success "Mounted callable entries exist"
+
+assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."
+jq -e '.recordMessage == {"/handler":"recordMessage"}' "$RESULT_JSON" >/dev/null ||
+  error "result.json should render recordMessage as a handler sigil."
+jq -e '.legacyWrite == {"/handler":"legacyWrite"}' "$RESULT_JSON" >/dev/null ||
+  error "result.json should render legacyWrite as a handler sigil."
+jq -e '.search == {"/tool":"search"}' "$RESULT_JSON" >/dev/null ||
+  error "result.json should render search as a tool sigil."
+success "Mounted JSON surface hides callable internals"
+
+HANDLER_FIRST_LINE=$(head -n 1 "$HANDLER_FILE")
+TOOL_FIRST_LINE=$(head -n 1 "$TOOL_FILE")
+assert_contains "$HANDLER_FIRST_LINE" "#!" "Handler file should start with a shebang."
+assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke ct exec."
+assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
+assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke ct exec."
+success "Callable files are readable and expose ct exec shebangs"
+
+COUNT_BEFORE_HELP=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+HANDLER_HELP=$(ct exec "$HANDLER_FILE" --help)
+TOOL_HELP=$(ct exec "$TOOL_FILE" --help)
+assert_contains "$HANDLER_HELP" "Callable: handler" "Handler help should describe a handler callable."
+assert_contains "$HANDLER_HELP" "Verb: invoke" "Handler help should show the invoke verb."
+assert_contains "$TOOL_HELP" "Callable: tool" "Tool help should describe a tool callable."
+assert_contains "$TOOL_HELP" "Verb: run" "Tool help should show the run verb."
+assert_contains "$TOOL_HELP" "Output:" "Tool help should show an output summary."
+wait_for_piece_value "messageCount" "$COUNT_BEFORE_HELP"
+success "Top-level ct exec --help prints help without invoking callables"
+
+ct exec "$HANDLER_FILE" invoke --message "piece-explicit"
+wait_for_piece_value "lastMessage" '"piece-explicit"'
+wait_for_piece_value "messageCount" "1"
+success "ct exec invokes mounted handlers with the explicit verb"
+
+ct exec "$HANDLER_FILE" --message "piece-implicit"
+wait_for_piece_value "lastMessage" '"piece-implicit"'
+wait_for_piece_value "messageCount" "2"
+success "ct exec defaults mounted handlers to invoke"
+
+TOOL_EXPLICIT=$(ct exec "$TOOL_FILE" run --query "explicit" --help "schema-field")
+assert_json_eq \
+  "$TOOL_EXPLICIT" \
+  '{"help":"schema-field","query":"explicit","source":"bound-source","summary":"bound-source:explicit:schema-field"}' \
+  "Explicit tool execution returned unexpected JSON"
+success "ct exec runs mounted tools with schema-derived flags"
+
+HELP_FIELD_OUTPUT=$(ct exec "$TOOL_FILE" run --help "literal-help" --query "help-field")
+assert_json_eq \
+  "$HELP_FIELD_OUTPUT" \
+  '{"help":"literal-help","query":"help-field","source":"bound-source","summary":"bound-source:help-field:literal-help"}' \
+  "Post-verb --help should be parsed as the tool schema field"
+success "Post-verb --help is parsed as the schema field when present"
+
+TOOL_IMPLICIT=$(ct exec "$TOOL_FILE" --query "implicit")
+assert_json_eq \
+  "$TOOL_IMPLICIT" \
+  '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
+  "Implicit tool execution returned unexpected JSON"
+success "ct exec defaults mounted tools to run"
+
+COUNT_BEFORE_PIECES_SHARED=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+ct exec "$HANDLER_FILE" invoke --message "shared-message"
+wait_for_piece_value "lastMessage" '"shared-message"'
+wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
+
+COUNT_BEFORE_ENTITIES_SHARED=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" messageCount)
+ct exec "$ENTITY_HANDLER_FILE" invoke --message "shared-message"
+wait_for_piece_value "lastMessage" '"shared-message"'
+wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
+success "Handler execution through pieces/ and entities/ reaches the same backing cell"
+
+PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" run --query "shared-tool" --help "entity-compare")
+ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" run --query "shared-tool" --help "entity-compare")
+assert_json_eq \
+  "$PIECES_TOOL_SHARED" \
+  "$ENTITIES_TOOL_SHARED" \
+  "Tool output should match between pieces/ and entities/ paths"
+success "Tool execution through pieces/ and entities/ is identical"
+
+LEGACY_COUNT_BEFORE=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" legacyCount)
+echo '{}' > "$LEGACY_HANDLER_FILE"
+wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
+success "Legacy handler write-through still works"
+
+echo "FUSE exec integration passed."

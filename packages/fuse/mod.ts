@@ -185,6 +185,9 @@ async function main() {
     ) => {
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
+      if (debug) {
+        console.log(`[fuse] lookup parent=${parent} name=${name}`);
+      }
       const ino = tree.lookup(parent, name);
 
       if (ino !== undefined) {
@@ -257,6 +260,9 @@ async function main() {
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
       const inode = BigInt(ino);
+      if (debug) {
+        console.log(`[fuse] getattr ino=${inode}`);
+      }
       const node = tree.getNode(inode);
 
       if (!node) {
@@ -307,6 +313,9 @@ async function main() {
       fi: Deno.PointerValue,
     ) => {
       const inode = BigInt(ino);
+      if (debug) {
+        console.log(`[fuse] open ino=${inode}`);
+      }
       const node = tree.getNode(inode);
       if (!node) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -379,6 +388,11 @@ async function main() {
       fi: Deno.PointerValue,
     ) => {
       const inode = BigInt(ino);
+      if (debug) {
+        console.log(
+          `[fuse] read ino=${inode} size=${size} offset=${offset}`,
+        );
+      }
 
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
@@ -438,6 +452,9 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      if (debug) {
+        console.log(`[fuse] opendir ino=${ino}`);
+      }
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "dir") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -462,6 +479,11 @@ async function main() {
       _fi: Deno.PointerValue,
     ) => {
       const inode = BigInt(ino);
+      if (debug) {
+        console.log(
+          `[fuse] readdir ino=${inode} size=${size} offset=${offset}`,
+        );
+      }
       const node = tree.getNode(inode);
       if (!node || node.kind !== "dir") {
         fuse.symbols.fuse_reply_err(req, ENOENT);

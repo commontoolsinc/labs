@@ -1,7 +1,11 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import { buildCallableScript, isPatternToolValue } from "./callables.ts";
+import {
+  buildCallableScript,
+  classifyCallableEntry,
+  isPatternToolValue,
+} from "./callables.ts";
 import {
   buildJsonTree,
   isHandlerCell,
@@ -436,6 +440,58 @@ Deno.test("buildJsonTree - .json sibling replaces streams with handler sigils", 
   const parsed = JSON.parse(json);
   assertEquals(parsed.items, ["a"]);
   assertEquals(parsed.addItem, { "/handler": "addItem" });
+});
+
+Deno.test("classifyCallableEntry does not treat ordinary data as a tool when linked schema disagrees", () => {
+  const value = {
+    pattern: "just-data",
+    extraParams: {
+      source: "still-data",
+    },
+  };
+  const schema = {
+    type: "object",
+    properties: {
+      pattern: { type: "string" },
+      extraParams: {
+        type: "object",
+        properties: {
+          source: { type: "string" },
+        },
+      },
+    },
+  } as const;
+
+  assertEquals(classifyCallableEntry(value, schema), null);
+});
+
+Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {
+  const tree = new FsTree();
+  const data = {
+    nested: {
+      config: {
+        pattern: "literal-pattern",
+        extraParams: {
+          mode: "keep",
+        },
+      },
+    },
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const resultIno = tree.lookup(tree.rootIno, "result");
+  if (resultIno === undefined) throw new Error("result dir not found");
+
+  const nestedJson = JSON.parse(getFileContent(tree, resultIno, "nested.json"));
+  assertEquals(nestedJson, {
+    config: {
+      pattern: "literal-pattern",
+      extraParams: {
+        mode: "keep",
+      },
+    },
+  });
 });
 
 Deno.test("FsTree - addCallable creates callable handler node", () => {

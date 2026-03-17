@@ -2,14 +2,14 @@ import type { JSONSchema } from "@commontools/api";
 import { PiecesController } from "@commontools/piece/ops";
 import { dirname, join, relative, resolve } from "@std/path";
 import {
-  parseMountedCallablePath,
   type MountedCallablePath,
+  parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
 import {
-  parseExecArgs,
-  renderExecHelp,
   type ExecCommandSpec,
   type ParsedExecArgs,
+  parseExecArgs,
+  renderExecHelp,
 } from "./exec-schema.ts";
 import { findMountForPath, type MountStateEntry } from "./fuse.ts";
 import { loadManager, type SpaceConfig } from "./piece.ts";
@@ -53,7 +53,8 @@ function isSchemaObject(schema: JSONSchema | undefined): schema is Record<
   string,
   unknown
 > {
-  return typeof schema === "object" && schema !== null && !Array.isArray(schema);
+  return typeof schema === "object" && schema !== null &&
+    !Array.isArray(schema);
 }
 
 function cloneWithoutBoundToolKeys(
@@ -123,7 +124,9 @@ async function defaultLoadPiece(manager: any, pieceId: string) {
   return await new PiecesController(manager).get(pieceId, false);
 }
 
-async function readMountedPieceMeta(absFilePath: string): Promise<MountedPieceMeta> {
+async function readMountedPieceMeta(
+  absFilePath: string,
+): Promise<MountedPieceMeta> {
   const metaPath = join(dirname(dirname(absFilePath)), "meta.json");
   let parsed: unknown;
   try {
@@ -151,15 +154,32 @@ async function readMountedPieceMeta(absFilePath: string): Promise<MountedPieceMe
   };
 }
 
+async function assertMountedCallableFileExists(absPath: string): Promise<void> {
+  let stat: Deno.FileInfo;
+  try {
+    stat = await Deno.stat(absPath);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new Error(`Mounted callable file not found: ${absPath}`);
+    }
+    throw error;
+  }
+
+  if (!stat.isFile) {
+    throw new Error(`Mounted callable file not found: ${absPath}`);
+  }
+}
+
 function mergeToolInput(
   input: unknown,
   extraParams: Record<string, unknown>,
 ): Record<string, unknown> {
-  const base = typeof input === "object" && input !== null && !Array.isArray(input)
-    ? input as Record<string, unknown>
-    : input === undefined
-    ? {}
-    : { value: input };
+  const base =
+    typeof input === "object" && input !== null && !Array.isArray(input)
+      ? input as Record<string, unknown>
+      : input === undefined
+      ? {}
+      : { value: input };
 
   return {
     ...base,
@@ -189,7 +209,9 @@ export async function resolveMountedCallableFile(
   const absPath = resolve(filePath);
   const mount = await findMountForPath(absPath, deps.stateDir);
   if (!mount) {
-    throw new Error(`Path is not within a mounted ct fuse filesystem: ${absPath}`);
+    throw new Error(
+      `Path is not within a mounted ct fuse filesystem: ${absPath}`,
+    );
   }
 
   const relativePath = relative(mount.entry.mountpoint, absPath);
@@ -198,13 +220,17 @@ export async function resolveMountedCallableFile(
     throw new Error(`Path is not a mounted callable file: ${absPath}`);
   }
 
+  await assertMountedCallableFileExists(absPath);
   const pieceMeta = await readMountedPieceMeta(absPath);
   const manager = await (deps.loadManager ?? loadManager)({
     apiUrl: mount.entry.apiUrl,
     identity: mount.entry.identity,
     space: callablePath.spaceName,
   });
-  const piece = await (deps.loadPiece ?? defaultLoadPiece)(manager, pieceMeta.id);
+  const piece = await (deps.loadPiece ?? defaultLoadPiece)(
+    manager,
+    pieceMeta.id,
+  );
   const rootCell = await piece[callablePath.cellProp].getCell();
   const callableCell = rootCell.key(callablePath.cellKey).asSchemaFromLinks();
 

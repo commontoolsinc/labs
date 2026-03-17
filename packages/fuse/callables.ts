@@ -8,7 +8,34 @@ function isSchemaRecord(schema: JSONSchema | undefined): schema is Record<
   string,
   unknown
 > {
-  return typeof schema === "object" && schema !== null && !Array.isArray(schema);
+  return typeof schema === "object" && schema !== null &&
+    !Array.isArray(schema);
+}
+
+function isPatternSchemaValue(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const pattern = value as Record<string, unknown>;
+  return "argumentSchema" in pattern || "resultSchema" in pattern ||
+    "nodes" in pattern;
+}
+
+function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
+  if (!isSchemaRecord(schema)) return false;
+  if (schema.asCell === true) return true;
+
+  const properties = schema.properties;
+  if (
+    typeof properties !== "object" || properties === null ||
+    Array.isArray(properties)
+  ) {
+    return false;
+  }
+
+  return "argumentSchema" in properties || "resultSchema" in properties ||
+    "nodes" in properties;
 }
 
 export function isStreamValue(v: unknown): boolean {
@@ -33,7 +60,8 @@ export function isHandlerCell(v: unknown): boolean {
 export function isPatternToolValue(v: unknown): boolean {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const obj = v as Record<string, unknown>;
-  return "pattern" in obj && "extraParams" in obj;
+  return "pattern" in obj && "extraParams" in obj &&
+    isPatternSchemaValue(obj.pattern);
 }
 
 export function isPatternToolSchema(schema: JSONSchema | undefined): boolean {
@@ -46,19 +74,24 @@ export function isPatternToolSchema(schema: JSONSchema | undefined): boolean {
     return false;
   }
 
-  return "pattern" in properties && "extraParams" in properties;
+  return "pattern" in properties && "extraParams" in properties &&
+    isPatternSchemaSchema(properties.pattern as JSONSchema | undefined);
 }
 
 export function classifyCallableEntry(
   value: unknown,
   schema?: JSONSchema,
 ): CallableKind | null {
-  if (isPatternToolSchema(schema) || isPatternToolValue(value)) {
+  if (isPatternToolSchema(schema)) {
     return "tool";
   }
 
   if (isStreamValue(value) || isHandlerCell(value)) {
     return "handler";
+  }
+
+  if (schema === undefined && isPatternToolValue(value)) {
+    return "tool";
   }
 
   return null;

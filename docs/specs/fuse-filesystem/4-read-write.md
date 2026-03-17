@@ -14,7 +14,8 @@ Every path must resolve to a valid `stat` result:
 | Scalar value file | `-rw-rw-r--` (0664) | byte length of string repr |
 | `.json` file | `-rw-rw-r--` (0664) | byte length of JSON |
 | `meta.json` | `-r--r--r--` (0444) | byte length |
-| `.handler` file | `--w--w----` (0220) | 0 |
+| `.handler` file | `-rw-r--r--` (0644) | byte length of shebang text |
+| `.tool` file | `-r--r--r--` (0444) | byte length of shebang text |
 | Symlink (cell ref) | `lrwxrwxrwx` | target path length |
 
 **Timestamps**: `mtime` reflects the cell's last modification time (from the
@@ -35,14 +36,18 @@ For object values: keys become entries, plus any `.json` siblings.
 For array values: indices become entries, plus `.json` sibling.
 
 Piece directories always contain: `input.json`, `input/`, `result.json`,
-`result/`, `meta.json`. Stream cells appear as `*.handler` files in `result/`.
+`result/`, `meta.json`. Top-level callable children appear as `*.handler` or
+`*.tool` files under `input/` and `result/`.
 
 ### `read`
 
 1. Resolve the path to a cell reference + JSON path.
 2. `cell.get()` (or `cell.sample()` if reading from cache).
 3. Navigate the JSON path.
-4. Serialize the value (string repr for scalars, JSON for `.json` files).
+4. Serialize the value:
+   - string repr for scalars
+   - JSON for `.json` files
+   - synthetic shebang text for `.handler` / `.tool` files
 5. Return the requested byte range (offset + size from the read call).
 
 Reads are served from a cache. The cache is populated eagerly for subscribed
@@ -96,6 +101,14 @@ target path parsing rules and examples.
 2. On flush: parse the buffer as JSON (the event payload).
 3. Send via `stream.send(payload)`.
 4. Return success (fire-and-forget; handler execution is async).
+
+Handlers remain writable so legacy flows like
+`echo '{"message":"hi"}' > result/addItem.handler` keep working.
+
+### `write` to `.tool` File
+
+Mounted `.tool` files are read-only. Writes fail with `EACCES`. Execute them
+through `ct exec <mounted-tool-file> [run] [flags]` instead.
 
 ### `create` (New File)
 

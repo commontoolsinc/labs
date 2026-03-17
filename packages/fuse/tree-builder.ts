@@ -1,6 +1,7 @@
 // tree-builder.ts — Convert JSON values to FsTree nodes
 
 import {
+  type CallableKind,
   isHandlerCell,
   isStreamValue,
   transformCallableValues,
@@ -90,6 +91,7 @@ export function buildJsonTree(
   resolveLink?: (value: unknown, depth: number) => string | null,
   depth?: number,
   skipEntry?: (value: unknown) => boolean,
+  classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
 ): bigint {
   const d = depth ?? 0;
 
@@ -166,6 +168,7 @@ export function buildJsonTree(
         resolveLink,
         d + 1,
         skipEntry,
+        classifyCallableEntry,
       );
     }
 
@@ -177,10 +180,16 @@ export function buildJsonTree(
     const dirIno = tree.addDir(parentIno, name, "object");
 
     // Add .json sibling, replacing stream/handler values with handler sigils
+    const jsonValue = d === 0
+      ? transformCallableValues(
+        value,
+        classifyCallableEntry,
+      )
+      : value;
     tree.addFile(
       parentIno,
       `${name}.json`,
-      safeStringify(transformCallableValues(value)),
+      safeStringify(jsonValue),
       "object",
     );
 
@@ -197,6 +206,7 @@ export function buildJsonTree(
         resolveLink,
         d + 1,
         skipEntry,
+        classifyCallableEntry,
       );
     }
 

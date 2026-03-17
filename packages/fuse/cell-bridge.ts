@@ -8,20 +8,14 @@ import type { Cell } from "@commontools/runner";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
-  classifyCallableEntry,
   type CallableKind,
+  classifyCallableEntry,
   isHandlerCell,
 } from "./callables.ts";
 import { parseMountedCallablePath } from "./callable-path.ts";
-import {
-  buildJsonTree,
-  isSigilLink,
-} from "./tree-builder.ts";
+import { buildJsonTree, isSigilLink } from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
-import type {
-  PieceController,
-  PiecesController,
-} from "@commontools/piece/ops";
+import type { PieceController, PiecesController } from "@commontools/piece/ops";
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
 // import { loadManager } from "../cli/lib/piece.ts";
@@ -554,6 +548,11 @@ export class CellBridge {
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
+    console.log(
+      `[${spaceName}] Piece children ${name}:`,
+      this.tree.getChildren(pieceIno).map(([childName]) => childName),
+    );
+
     return name;
   }
 
@@ -688,24 +687,30 @@ export class CellBridge {
   ): {
     callables: Array<{ key: string; callableKind: CallableKind }>;
     skipEntry: (value: unknown) => boolean;
+    classifyEntry: (key: string, value: unknown) => CallableKind | null;
   } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       return {
         callables: [],
         skipEntry: () => false,
+        classifyEntry: () => null,
       };
     }
 
     const callableValues = new WeakSet<object>();
+    const callableKinds = new Map<string, CallableKind>();
     const callables: Array<{ key: string; callableKind: CallableKind }> = [];
-    for (const [key, candidate] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
+    for (
+      const [key, candidate] of Object.entries(
+        value as Record<string, unknown>,
+      )
+    ) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       const callableKind = classifyCallableEntry(candidate, childCell.schema);
       if (!callableKind) continue;
 
       callables.push({ key, callableKind });
+      callableKinds.set(key, callableKind);
       if (typeof candidate === "object" && candidate !== null) {
         callableValues.add(candidate);
       }
@@ -716,6 +721,11 @@ export class CellBridge {
       skipEntry: (candidate: unknown) =>
         typeof candidate === "object" && candidate !== null &&
         callableValues.has(candidate),
+      classifyEntry: (key: string, candidate: unknown) =>
+        typeof candidate === "object" && candidate !== null &&
+          callableValues.has(candidate)
+          ? callableKinds.get(key) ?? null
+          : null,
     };
   }
 
@@ -779,10 +789,11 @@ export class CellBridge {
 
               // Rebuild
               if (newValue !== undefined && newValue !== null) {
-                const { callables, skipEntry } = this.discoverCallableEntries(
-                  cell,
-                  newValue,
-                );
+                const { callables, classifyEntry, skipEntry } = this
+                  .discoverCallableEntries(
+                    cell,
+                    newValue,
+                  );
                 const propIno = buildJsonTree(
                   this.tree,
                   pieceIno,
@@ -792,6 +803,7 @@ export class CellBridge {
                   resolveLink,
                   0,
                   skipEntry,
+                  classifyEntry,
                 );
                 this.addCallableFiles(propIno, callables, propName);
               }
@@ -803,6 +815,10 @@ export class CellBridge {
 
               console.log(
                 `[${spaceName}] Updated ${pieceName}/${propName}`,
+              );
+              console.log(
+                `[${spaceName}] Piece children ${pieceName}:`,
+                this.tree.getChildren(pieceIno).map(([childName]) => childName),
               );
             } catch (e) {
               console.error(
@@ -919,10 +935,11 @@ export class CellBridge {
       const inputCell = await piece.input.getCell();
       const input = await piece.input.get();
       if (input !== undefined && input !== null) {
-        const { callables, skipEntry } = this.discoverCallableEntries(
-          inputCell,
-          input,
-        );
+        const { callables, classifyEntry, skipEntry } = this
+          .discoverCallableEntries(
+            inputCell,
+            input,
+          );
         const inputIno = buildJsonTree(
           this.tree,
           pieceIno,
@@ -932,6 +949,7 @@ export class CellBridge {
           resolveLink,
           0,
           skipEntry,
+          classifyEntry,
         );
         this.addCallableFiles(inputIno, callables, "input");
       }
@@ -940,10 +958,11 @@ export class CellBridge {
       const resultCell = await piece.result.getCell();
       const result = await piece.result.get();
       if (result !== undefined && result !== null) {
-        const { callables, skipEntry } = this.discoverCallableEntries(
-          resultCell,
-          result,
-        );
+        const { callables, classifyEntry, skipEntry } = this
+          .discoverCallableEntries(
+            resultCell,
+            result,
+          );
         const resultIno = buildJsonTree(
           this.tree,
           pieceIno,
@@ -953,6 +972,7 @@ export class CellBridge {
           resolveLink,
           0,
           skipEntry,
+          classifyEntry,
         );
         this.addCallableFiles(resultIno, callables, "result");
       }

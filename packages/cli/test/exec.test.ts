@@ -307,6 +307,42 @@ describe("mounted callable resolution and execution", () => {
     ).rejects.toThrow(/not a mounted callable file/i);
   });
 
+  it("rejects fabricated mounted callable paths whose file is missing", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const pieceDir = join(mountpoint, "home/pieces/notes-2");
+    const filePath = join(pieceDir, "result", "title.handler");
+    await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(
+      join(pieceDir, "meta.json"),
+      JSON.stringify({
+        id: "of:piece-123",
+        entityId: "of:piece-123",
+        name: "Fixture Piece",
+        patternName: "fixture",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      resolveMountedCallableFile(filePath, {
+        stateDir,
+        loadManager: async () => harness.manager,
+        loadPiece: async () => harness.piece,
+      }),
+    ).rejects.toThrow(/mounted callable file not found/i);
+  });
+
   it("resolves the correct mount by longest-prefix lookup", async () => {
     const parentMount = join(tmpDir, "mount");
     const nestedMount = join(parentMount, "nested");
@@ -562,7 +598,9 @@ describe("mounted callable resolution and execution", () => {
 
     expect(
       Object.keys(
-        (resolved.commandSpec.inputSchema as { properties?: Record<string, unknown> })
+        (resolved.commandSpec.inputSchema as {
+          properties?: Record<string, unknown>;
+        })
           .properties ?? {},
       ),
     ).toEqual(["query"]);
@@ -640,18 +678,18 @@ function createExecHarness(options: {
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
     ? {
-        type: "object",
-        properties: {
-          pattern: { type: "object" },
-          extraParams: { type: "object" },
-        },
-      }
+      type: "object",
+      properties: {
+        pattern: { type: "object" },
+        extraParams: { type: "object" },
+      },
+    }
     : options.inputSchema;
   const callableValue = options.callableKind === "tool"
     ? {
-        pattern: options.pattern,
-        extraParams: options.extraParams ?? {},
-      }
+      pattern: options.pattern,
+      extraParams: options.extraParams ?? {},
+    }
     : {};
   const rootCell = createMockCell(
     {
