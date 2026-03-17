@@ -29,4 +29,6 @@ export interface ICfcReadAnnotations {
   readonly internalVerifierRead?: true;
   readonly maxConfidentiality?: readonly string[];
   readonly requiredIntegrity?: readonly string[];
+  readonly flowPrecisionOutputPath?: string;
+  readonly flowPrecisionSourcePath?: string;
 }

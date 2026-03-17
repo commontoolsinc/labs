@@ -1257,6 +1257,8 @@ export type JSONSchemaObj = {
         readonly type?:
           | "PointwisePresencePreserved"
           | "PointwiseWriteDependency"
+          | "ElementLocalExpansion"
+          | "StableRelativeOrder"
           | "KeyLocalShapePreserved"
           | "KeyLocalWriteDependency";
       }[];

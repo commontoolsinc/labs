@@ -2,16 +2,23 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { escapeJsonPointerToken } from "./canonical-activity.ts";
 import type { ConsumedReadWithEffectiveLabel } from "./consumed-input-labels.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../storage/interface.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 import type { CfcTrustContext } from "./integrity-trust.ts";
 import {
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
 } from "./trust-lattice.ts";
+import { canonicalizeStoragePath } from "./canonical-activity.ts";
 
 type FlowPrecisionClaimType =
   | "PointwisePresencePreserved"
-  | "PointwiseWriteDependency";
+  | "PointwiseWriteDependency"
+  | "ElementLocalExpansion"
+  | "StableRelativeOrder";
 
 export interface FlowPrecisionClaimSpec {
   readonly concept: string;
@@ -25,6 +32,20 @@ export interface FlowPrecisionSelection {
   readonly sourcePath?: string;
   readonly usedClaim: boolean;
   readonly trusted: boolean;
+}
+
+export function recordFlowPrecisionOutputSource(
+  tx: IExtendedStorageTransaction,
+  output: IMemorySpaceAddress,
+  source: IMemorySpaceAddress,
+): void {
+  tx.readValueOrThrow(source, {
+    cfc: {
+      internalVerifierRead: true,
+      flowPrecisionOutputPath: canonicalizeStoragePath(output.path),
+      flowPrecisionSourcePath: canonicalizeStoragePath(source.path),
+    },
+  });
 }
 
 type FlowPrecisionClaimMatch = {
@@ -94,7 +115,9 @@ function isFlowPrecisionClaimType(
   value: unknown,
 ): value is FlowPrecisionClaimType {
   return value === "PointwisePresencePreserved" ||
-    value === "PointwiseWriteDependency";
+    value === "PointwiseWriteDependency" ||
+    value === "ElementLocalExpansion" ||
+    value === "StableRelativeOrder";
 }
 
 function normalizeFlowPrecisionClaimType(
