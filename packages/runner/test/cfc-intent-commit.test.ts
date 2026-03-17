@@ -102,7 +102,12 @@ describe("CFC intent commit helper", () => {
     const intent = createShortIntent(now + 4_000, 3);
 
     const seedTx = runtime.edit();
-    claimCfcIntentConsumed(runtime, seedTx, space, intent.id);
+    claimCfcIntentConsumed(runtime, seedTx, space, intent.id, {
+      committedResult: {
+        success: true,
+        result: { messageId: "m-1" },
+      },
+    });
     await seedTx.commit();
 
     let executions = 0;
@@ -117,11 +122,11 @@ describe("CFC intent commit helper", () => {
       { now: () => now },
     );
 
-    expect(executions).toBe(1);
+    expect(executions).toBe(0);
     expect(result).toEqual({
       success: true,
       deduplicated: true,
-      attemptNumber: 1,
+      result: { messageId: "m-1" },
     });
   });
 
