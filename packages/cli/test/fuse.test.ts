@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
+import { fuse } from "../commands/fuse.ts";
 import {
   buildDenoArgs,
+  ensureExecShim,
+  findMountForPath,
   isAlive,
   mountpointHash,
-  readAllPidFiles,
-  readPidFile,
-  writePidFile,
+  readAllMountStates,
+  readMountState,
+  writeMountState,
 } from "../lib/fuse.ts";
 
 describe("mountpointHash", () => {
@@ -29,7 +32,7 @@ describe("mountpointHash", () => {
   });
 });
 
-describe("PID file operations", () => {
+describe("mount state operations", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -40,115 +43,190 @@ describe("PID file operations", () => {
     await Deno.remove(tmpDir, { recursive: true });
   });
 
-  it("writePidFile creates file and readPidFile reads it back", async () => {
+  it("writeMountState creates file and readMountState reads it back", async () => {
     const entry = {
       pid: 12345,
       mountpoint: "/tmp/test-mount",
       apiUrl: "http://localhost:8000",
+      identity: "./fixtures/test-key.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     };
 
-    const path = await writePidFile(tmpDir, entry);
+    const path = await writeMountState(tmpDir, entry);
     expect(path).toContain(tmpDir);
     expect(path).toMatch(/\.json$/);
 
-    const result = await readPidFile(tmpDir, "/tmp/test-mount");
+    const result = await readMountState(tmpDir, "/tmp/test-mount");
     expect(result).not.toBeNull();
-    expect(result!.entry).toEqual(entry);
+    expect(result!.entry).toEqual({
+      ...entry,
+      identity: resolve(entry.identity),
+    });
     expect(result!.path).toBe(path);
   });
 
-  it("readPidFile returns null for missing mountpoint", async () => {
-    const result = await readPidFile(tmpDir, "/nonexistent/path");
+  it("readMountState returns null for missing mountpoint", async () => {
+    const result = await readMountState(tmpDir, "/nonexistent/path");
     expect(result).toBeNull();
   });
 
-  it("readPidFile returns null when state dir does not exist", async () => {
-    const result = await readPidFile(
+  it("readMountState returns null when state dir does not exist", async () => {
+    const result = await readMountState(
       join(tmpDir, "nonexistent"),
       "/tmp/test",
     );
     expect(result).toBeNull();
   });
 
-  it("readAllPidFiles returns all entries", async () => {
-    await writePidFile(tmpDir, {
+  it("readAllMountStates returns all entries", async () => {
+    await writeMountState(tmpDir, {
       pid: 111,
       mountpoint: "/tmp/mount-a",
       apiUrl: "http://localhost:8000",
+      identity: "/tmp/id-a.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
-    await writePidFile(tmpDir, {
+    await writeMountState(tmpDir, {
       pid: 222,
       mountpoint: "/tmp/mount-b",
       apiUrl: "http://localhost:9000",
+      identity: "/tmp/id-b.pem",
       startedAt: "2026-02-24T01:00:00.000Z",
     });
 
-    const all = await readAllPidFiles(tmpDir);
+    const all = await readAllMountStates(tmpDir);
     expect(all.length).toBe(2);
 
     const pids = all.map((r) => r.entry.pid).sort();
     expect(pids).toEqual([111, 222]);
   });
 
-  it("readAllPidFiles returns empty for nonexistent dir", async () => {
-    const all = await readAllPidFiles(join(tmpDir, "nope"));
+  it("readAllMountStates returns empty for nonexistent dir", async () => {
+    const all = await readAllMountStates(join(tmpDir, "nope"));
     expect(all).toEqual([]);
   });
 
-  it("readAllPidFiles skips corrupt JSON files", async () => {
+  it("readAllMountStates skips corrupt JSON files", async () => {
     // Write a valid entry
-    await writePidFile(tmpDir, {
+    await writeMountState(tmpDir, {
       pid: 333,
       mountpoint: "/tmp/mount-ok",
       apiUrl: "",
+      identity: "/tmp/id-ok.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
 
     // Write a corrupt file
     await Deno.writeTextFile(join(tmpDir, "corrupt.json"), "not json{{{");
 
-    const all = await readAllPidFiles(tmpDir);
+    const all = await readAllMountStates(tmpDir);
     expect(all.length).toBe(1);
     expect(all[0].entry.pid).toBe(333);
   });
 
-  it("readAllPidFiles ignores non-json files", async () => {
-    await writePidFile(tmpDir, {
+  it("readAllMountStates ignores non-json files", async () => {
+    await writeMountState(tmpDir, {
       pid: 444,
       mountpoint: "/tmp/mount-x",
       apiUrl: "",
+      identity: "/tmp/id-x.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
     await Deno.writeTextFile(join(tmpDir, "readme.txt"), "ignore me");
 
-    const all = await readAllPidFiles(tmpDir);
+    const all = await readAllMountStates(tmpDir);
     expect(all.length).toBe(1);
   });
 
-  it("writePidFile overwrites existing entry for same mountpoint", async () => {
+  it("writeMountState overwrites existing entry for same mountpoint", async () => {
     const mp = "/tmp/same-mount";
-    await writePidFile(tmpDir, {
+    await writeMountState(tmpDir, {
       pid: 100,
       mountpoint: mp,
       apiUrl: "",
+      identity: "/tmp/original.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
-    await writePidFile(tmpDir, {
+    await writeMountState(tmpDir, {
       pid: 200,
       mountpoint: mp,
       apiUrl: "http://new",
+      identity: "./relative.pem",
       startedAt: "2026-02-24T01:00:00.000Z",
     });
 
-    const result = await readPidFile(tmpDir, mp);
+    const result = await readMountState(tmpDir, mp);
     expect(result!.entry.pid).toBe(200);
     expect(result!.entry.apiUrl).toBe("http://new");
+    expect(result!.entry.identity).toBe(resolve("./relative.pem"));
 
     // Only one file should exist for this mountpoint
-    const all = await readAllPidFiles(tmpDir);
+    const all = await readAllMountStates(tmpDir);
     expect(all.length).toBe(1);
+  });
+
+  it("findMountForPath prefers the longest matching mountpoint", async () => {
+    await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      mountpoint: "/tmp/ct-fuse",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/base.pem",
+      startedAt: "2026-02-24T00:00:00.000Z",
+    });
+    await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      mountpoint: "/tmp/ct-fuse/nested",
+      apiUrl: "http://localhost:9000",
+      identity: "/tmp/nested.pem",
+      startedAt: "2026-02-24T01:00:00.000Z",
+    });
+
+    const match = await findMountForPath(
+      "/tmp/ct-fuse/nested/space/pieces/example/result/add.handler",
+      tmpDir,
+    );
+
+    expect(match).not.toBeNull();
+    expect(match!.entry.mountpoint).toBe("/tmp/ct-fuse/nested");
+    expect(match!.entry.apiUrl).toBe("http://localhost:9000");
+  });
+
+  it("findMountForPath ignores stale entries and removes them", async () => {
+    const stalePath = await writeMountState(tmpDir, {
+      pid: 1073741824,
+      mountpoint: "/tmp/ct-fuse",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/stale.pem",
+      startedAt: "2026-02-24T00:00:00.000Z",
+    });
+
+    const match = await findMountForPath(
+      "/tmp/ct-fuse/space/pieces/example/result/add.handler",
+      tmpDir,
+    );
+
+    expect(match).toBeNull();
+    await expect(Deno.stat(stalePath)).rejects.toThrow();
+  });
+
+  it("ensureExecShim creates a shim that targets packages/cli/mod.ts", async () => {
+    const shimPath = await ensureExecShim(tmpDir);
+    const shim = await Deno.readTextFile(shimPath);
+
+    expect(shimPath).toContain(tmpDir);
+    expect(shim).toContain("#!/usr/bin/env bash");
+    expect(shim).toContain("deno run");
+    expect(shim).toContain("/packages/cli/mod.ts");
+    expect(shim).toContain("\"$@\"");
+  });
+});
+
+describe("fuse help", () => {
+  it("mentions readable .handler files and .tool entries", () => {
+    const help = fuse.getHelp();
+    expect(help).toContain("readable");
+    expect(help).toContain("*.handler");
+    expect(help).toContain("*.tool");
   });
 });
 
@@ -170,6 +248,7 @@ describe("buildDenoArgs", () => {
       mountpoint: "/mnt",
       apiUrl: "",
       identity: "",
+      execCli: "",
     });
     expect(args).toEqual([
       "run",
@@ -190,21 +269,26 @@ describe("buildDenoArgs", () => {
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",
       identity: "./key.pem",
+      execCli: "/tmp/ct-exec",
     });
     expect(args).toContain("--api-url");
     expect(args).toContain("http://localhost:8000");
     expect(args).toContain("--identity");
     expect(args).toContain("./key.pem");
+    expect(args).toContain("--exec-cli");
+    expect(args).toContain("/tmp/ct-exec");
   });
 
-  it("omits api-url and identity when empty", () => {
+  it("omits api-url, identity, and exec-cli when empty", () => {
     const args = buildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
       identity: "",
+      execCli: "",
     });
     expect(args).not.toContain("--api-url");
     expect(args).not.toContain("--identity");
+    expect(args).not.toContain("--exec-cli");
   });
 });
