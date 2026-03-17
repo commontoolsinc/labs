@@ -3,6 +3,7 @@ import { ContextualFlowControl } from "../cfc.ts";
 import { escapeJsonPointerToken } from "./canonical-activity.ts";
 import type { ConsumedReadWithEffectiveLabel } from "./consumed-input-labels.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+import type { CfcTrustContext } from "./integrity-trust.ts";
 import {
   FLOW_TAINT_PRECISION_CONCEPT,
   isImplementationTrustedForConcept,
@@ -360,6 +361,8 @@ export function selectFlowPrecisionConsumedReads(
   writePath: string,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   implementationIdentity: CfcImplementationIdentity | undefined,
+  actingPrincipal?: string,
+  trustContext?: CfcTrustContext,
 ): FlowPrecisionSelection {
   if (!rootSchema || consumedReadLabels.length === 0) {
     return {
@@ -439,6 +442,7 @@ export function selectFlowPrecisionConsumedReads(
     isImplementationTrustedForConcept(
       implementationIdentity,
       FLOW_TAINT_PRECISION_CONCEPT,
+      { actingPrincipal, trustContext },
     );
 
   if (!trusted) {

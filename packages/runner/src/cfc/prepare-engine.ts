@@ -2084,6 +2084,8 @@ function verifyOutputTransitionsForAttempt(
       write.path,
       consumedReadLabels,
       options.implementationIdentity,
+      options.actingPrincipal,
+      options.trustContext,
     ).consumedReadLabels;
     const minClassification = strongestConsumedClassification(
       effectiveConsumedReadLabels,

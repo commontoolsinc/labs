@@ -336,6 +336,30 @@ describe("CFC flow precision", () => {
     );
   });
 
+  it("resolves builtin trust from the acting principal's trust context", () => {
+    const identity = deriveImplementationIdentity(
+      runtime.moduleRegistry.getModule("map"),
+    );
+    const trustContext = createFlowPrecisionTrustContext(
+      signer.did(),
+      encodeImplementationIdentity(identity),
+    );
+
+    expect(
+      isImplementationTrustedForConcept(
+        identity,
+        FLOW_TAINT_PRECISION_CONCEPT,
+      ),
+    ).toBe(false);
+    expect(
+      isImplementationTrustedForConcept(
+        identity,
+        FLOW_TAINT_PRECISION_CONCEPT,
+        { actingPrincipal: signer.did(), trustContext },
+      ),
+    ).toBe(true);
+  });
+
   it("does not trust custom map overrides without the builtin marker", () => {
     runtime.moduleRegistry.addModuleByRef(
       "map",

@@ -292,6 +292,9 @@ Primary files:
       multiplicity can be tainted independently.
 - [x] Treat missing/unknown implementation identity as untrusted and fall back
       to conservative labels (fail closed for trust-sensitive claims).
+- [x] Resolve `CodeHash(...)` / `Builtin(name)` flow-precision trust from the
+      acting principal's trust context; do not hardcode a global builtin
+      allowlist.
 - [x] Implement flow-precision evaluation in
       `packages/runner/src/cfc/prepare-engine.ts` by extending
       `verifyOutputTransitionsForAttempt` to compute default/claimed labels
@@ -580,7 +583,9 @@ Primary test location:
 - [x] `cfc-policy-concept-guard-does-not-require-materialized-concept-atom.test.ts`
 - [ ] `cfc-clause-local-release-does-not-release-other-user-clause.test.ts`
 - [x] `cfc-trust-context-change-invalidates-prepare.test.ts`
-- [ ] `cfc-flow-precision-builtin-trust-resolution.test.ts`
+- [x] `cfc-flow-precision.test.ts` covers builtin trust resolution from the
+      acting principal's trust context, including fail-closed behavior without a
+      trusted statement.
 - [ ] `cfc-filter-membership-vs-order-precision.test.ts`
 - [ ] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`
 

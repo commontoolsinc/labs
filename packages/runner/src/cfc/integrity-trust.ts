@@ -221,6 +221,36 @@ function reachesConcept(
   return false;
 }
 
+function integrityRequirementSatisfiedWithEdges(
+  actual: string | undefined,
+  requirement: string,
+  trustedEdges: readonly CfcTrustConceptEdge[],
+): boolean {
+  if (!actual || requirement.length === 0) {
+    return false;
+  }
+  if (actual === requirement) {
+    return true;
+  }
+  return reachesConcept(actual, requirement, trustedEdges);
+}
+
+export function integrityRequirementSatisfied(
+  actual: string | undefined,
+  requirement: string,
+  options: CfcIntegrityTrustOptions = {},
+): boolean {
+  const trustedEdges = trustedEdgesForActingPrincipal(
+    options.actingPrincipal,
+    options.trustContext,
+  );
+  return integrityRequirementSatisfiedWithEdges(
+    actual,
+    requirement,
+    trustedEdges,
+  );
+}
+
 export function integritySatisfiesRequiredIntegrity(
   actualIntegrity: readonly string[] | undefined,
   requiredIntegrity: readonly string[],
@@ -233,18 +263,18 @@ export function integritySatisfiesRequiredIntegrity(
     return false;
   }
 
-  const actualSet = new Set(actualIntegrity);
   const trustedEdges = trustedEdgesForActingPrincipal(
     options.actingPrincipal,
     options.trustContext,
   );
 
   return requiredIntegrity.every((requirement) => {
-    if (actualSet.has(requirement)) {
-      return true;
-    }
     return actualIntegrity.some((actual) =>
-      reachesConcept(actual, requirement, trustedEdges)
+      integrityRequirementSatisfiedWithEdges(
+        actual,
+        requirement,
+        trustedEdges,
+      )
     );
   });
 }
