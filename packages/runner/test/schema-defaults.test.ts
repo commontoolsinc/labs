@@ -689,5 +689,37 @@ describe("Schema - Default Values", () => {
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
     });
+
+    it("should make immutable cells if they provide the default value", () => {
+      const schema = {
+        $defs: {
+          NameEntry: { type: "string", default: "Default Name", asCell: true },
+        },
+        type: "object",
+        properties: {
+          name: { $ref: "#/$defs/NameEntry" },
+        },
+        default: {},
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<any>(
+        space,
+        "should make immutable cells if they provide the default value 1",
+        undefined,
+        tx,
+      );
+      c.set(undefined);
+      const cell = c.asSchema(schema);
+      const value = cell.get();
+      expect(isCell(value.name)).toBe(true);
+      expect(value?.name?.get()).toBe("Default Name");
+
+      cell.set(
+        runtime.getImmutableCell(space, { name: "Updated Name" }),
+      );
+
+      // Expect the cell to be immutable
+      expect(value?.name?.get()).toBe("Default Name");
+    });
   });
 });

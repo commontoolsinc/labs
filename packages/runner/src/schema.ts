@@ -204,9 +204,12 @@ export function processDefaultValue(
 
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
-      for (
-        const [key, propSchema] of Object.entries(resolvedSchema.properties)
-      ) {
+      for (const key of Object.keys(resolvedSchema.properties)) {
+        const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
+        const propSchema =
+          (isObject(rawPropSchema) && typeof rawPropSchema.$ref === "string")
+            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)  
+            : rawPropSchema;
         if (key in defaultValue) {
           result[key] = processDefaultValue(
             runtime,
