@@ -44,3 +44,41 @@ Deno.test("memory v2 chronicle retracts an empty JSON envelope", async () => {
     await storage.close();
   }
 });
+
+Deno.test("memory v2 chronicle keeps empty objects for user values with value siblings", async () => {
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+
+  try {
+    const replica = storage.open(space).replica;
+    await replica.commit({
+      facts: [
+        assert({
+          the: "application/json",
+          of: "test:keep-empty-object",
+          is: { value: { value: "hello", other: true } },
+        }),
+      ],
+      claims: [],
+    });
+
+    const chronicle = Chronicle.open(replica);
+    chronicle.write({
+      id: "test:keep-empty-object",
+      type: "application/json",
+      path: [],
+    }, {});
+
+    const commitResult = chronicle.commit();
+    const transaction = commitResult.ok!;
+
+    assertEquals(commitResult.error, undefined);
+    assertEquals(transaction.facts.length, 1);
+    assertEquals(transaction.facts[0].of, "test:keep-empty-object");
+    assertEquals(transaction.facts[0].is, { value: {} });
+  } finally {
+    await storage.close();
+  }
+});

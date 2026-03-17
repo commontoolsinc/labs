@@ -40,12 +40,19 @@ import * as Edit from "./edit.ts";
 const isStoredDocumentEnvelope = (
   value: StorableValue | undefined,
 ): value is { value?: StorableValue; source?: StorableValue } =>
-  isRecord(value) && ("value" in value || "source" in value);
+  isRecord(value) &&
+  Object.keys(value).length > 0 &&
+  Object.keys(value).every((key) => key === "value" || key === "source") &&
+  ("value" in value || "source" in value);
 
 const alignRootWriteWithLoadedShape = (
+  type: string,
   loaded: StorableValue | undefined,
   merged: StorableValue | undefined,
 ): StorableValue | undefined => {
+  if (type !== "application/json") {
+    return merged;
+  }
   if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
     return merged;
   }
@@ -298,6 +305,7 @@ export class Chronicle {
         const normalizedLoaded = storableFromNativeValue(loaded.is);
 
         const alignedMerged = alignRootWriteWithLoadedShape(
+          changes.address.type,
           normalizedLoaded,
           normalizedMerged,
         );

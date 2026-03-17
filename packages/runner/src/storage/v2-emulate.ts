@@ -25,6 +25,10 @@ class EmulatedSessionFactory implements SessionFactory {
 const toStoredDocument = (value: StorableDatum) => {
   if (
     value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).every((key) =>
+      key === "value" || key === "source" || key === "labels"
+    ) &&
     ("value" in value || "source" in value)
   ) {
     return {

@@ -946,6 +946,52 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
   }
 });
 
+Deno.test("memory v2 engine preserves root objects with value siblings", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const invocation = {
+      iss: "did:key:alice",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: "did:key:space",
+      args: { localSeq: 1 },
+    };
+    const authorization = {
+      signature: "sig:alice",
+      access: { "proof:1": {} },
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:value-siblings",
+      invocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:value-siblings",
+          value: {
+            value: "hello",
+            other: "data",
+          } as any,
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:value-siblings" }), {
+      value: {
+        value: "hello",
+        other: "data",
+      },
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", async () => {
   const { engine, path } = await createEngine();
 

@@ -80,4 +80,27 @@ describe("Memory v2 emulation", () => {
       value: { hello: "labels" },
     });
   });
+
+  it("preserves root objects whose data includes a value key plus siblings", async () => {
+    const provider = storageManager.open(space) as unknown as TestProvider;
+    const uri = `of:memory-v2-value-siblings-${Date.now()}` as const;
+
+    const result = await provider.send([{
+      uri,
+      value: {
+        value: {
+          value: "hello",
+          other: "data",
+        },
+      },
+    }]);
+
+    expect(result).toEqual({ ok: {} });
+    expect(provider.get(uri)).toEqual({
+      value: {
+        value: "hello",
+        other: "data",
+      },
+    });
+  });
 });

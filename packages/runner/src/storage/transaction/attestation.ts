@@ -604,6 +604,8 @@ export const StateInconsistency = (source: {
 
 const isDocumentEnvelope = (value: StorableValue): value is StorableObject => {
   return isRecord(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).every((key) => key === "value" || key === "source") &&
     (
       Object.hasOwn(value, "value") ||
       Object.hasOwn(value, "source")

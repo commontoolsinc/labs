@@ -1298,15 +1298,20 @@ const emptyEntityDocument = (): EntityDocument => ({ value: {} });
 const isEntityDocument = (
   value: JSONValue | EntityDocument,
 ): value is EntityDocument => {
-  return value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (
+    keys.length === 0 ||
+    !keys.every((key) => key === "value" || key === "source")
+  ) {
+    return false;
+  }
+  return Object.hasOwn(value, "value") ||
     (
-      Object.hasOwn(value, "value") ||
-      (
-        Object.hasOwn(value, "source") &&
-        isSourceLink((value as { source?: unknown }).source)
-      )
+      Object.hasOwn(value, "source") &&
+      isSourceLink((value as { source?: unknown }).source)
     );
 };
 

@@ -1195,6 +1195,10 @@ const toStoredDocument = (
 ): StorableDatum => {
   if (
     isRecord(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).every((key) =>
+      key === "value" || key === "source" || key === "labels"
+    ) &&
     ("value" in value || "source" in value)
   ) {
     return {
