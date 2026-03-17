@@ -448,6 +448,19 @@ Primary file:
 - [x] Add tests covering stable claim/once ids, accumulated integrity, and
       repeated refinement dedup against committed claim cells.
 
+### 6.9 Short IntentOnce Shape Helpers
+
+- [x] Extend runner-internal `IntentOnce` helpers with bound request semantics
+      (`audience`, `endpoint`, `payloadDigest`, `idempotencyKey`).
+- [x] Derive payload digest from canonicalized parameters and idempotency key
+      from `(sourceIntentId, operation)`.
+- [x] Carry `exp`, `maxAttempts`, and `duration` on runner-internal
+      `IntentOnce` values.
+- [x] Add a fail-closed short-intent verifier for the <=5s window used by the
+      spec profile.
+- [x] Add tests for idempotency-key derivation, request-shape construction, and
+      short-intent window verification.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -765,6 +778,8 @@ Primary docs:
 - [x] Step J.3: add deterministic refinement-claim helpers so semantic intent
       refinement can use ordinary transaction conflicts before sink commit
       machinery exists.
+- [x] Step J.4: add short `IntentOnce` structure helpers and deterministic
+      request bindings before introducing commit-point execution.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

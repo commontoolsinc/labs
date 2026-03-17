@@ -73,6 +73,16 @@ On top of that, runner internals now expose deterministic refinement helpers:
 3. Refined intent values accumulate source intent integrity plus a
    `RefinedBy` atom, but still stop short of sink commit / consumption logic.
 
+Runner internals also now expose the short-intent value shape needed for later
+commit points:
+
+1. `IntentOnce` helpers bind `audience`, `endpoint`, `payloadDigest`, and
+   `idempotencyKey` onto the derived value.
+2. Payload digests are canonical over parameters; idempotency keys are stable
+   from `(sourceIntentId, operation)`.
+3. Short-intent verification is currently limited to the spec's <=5s duration
+   window and does not yet execute or consume the intent.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

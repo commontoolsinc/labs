@@ -22,7 +22,14 @@ export interface CfcIntentRefinementClaimMarker {
 export interface CfcIntentOnce<T = unknown> {
   readonly id: string;
   readonly operation: string;
+  readonly audience: string;
+  readonly endpoint: string;
   readonly parameters: T;
+  readonly payloadDigest: string;
+  readonly idempotencyKey: string;
+  readonly exp: number;
+  readonly maxAttempts: number;
+  readonly duration: "short" | "long";
   readonly sourceIntentId: string;
   readonly refinerHash: string;
   readonly integrity: readonly unknown[];
@@ -31,7 +38,12 @@ export interface CfcIntentOnce<T = unknown> {
 export interface CreateCfcIntentOnceOptions<T> {
   readonly refinerHash: string;
   readonly operation: string;
+  readonly audience: string;
+  readonly endpoint: string;
   readonly parameters: T;
+  readonly exp: number;
+  readonly maxAttempts: number;
+  readonly duration: "short" | "long";
   readonly additionalIntegrity?: readonly unknown[];
 }
 
@@ -61,6 +73,26 @@ export function deriveCfcIntentOnceId(
   return `cfc:intent-once:${hashIntentRefinement(options, "once")}`;
 }
 
+export function computeCfcIntentPayloadDigest(parameters: unknown): string {
+  const hash = canonicalHash(storableFromNativeValue(parameters));
+  return `cfc:intent-payload:${toHex(hash.hash)}`;
+}
+
+export function deriveCfcIntentIdempotencyKey(
+  options: {
+    readonly sourceIntentId: string;
+    readonly operation: string;
+  },
+): string {
+  const hash = canonicalHash(
+    storableFromNativeValue({
+      sourceIntentId: options.sourceIntentId,
+      operation: options.operation,
+    }),
+  );
+  return `cfc:intent-idempotency:${toHex(hash.hash)}`;
+}
+
 export function createCfcIntentOnce<T>(
   sourceIntent: Pick<
     CfcEventEnvelope<CfcIntentEventPayload>,
@@ -74,7 +106,17 @@ export function createCfcIntentOnce<T>(
       refinerHash: options.refinerHash,
     }),
     operation: options.operation,
+    audience: options.audience,
+    endpoint: options.endpoint,
     parameters: options.parameters,
+    payloadDigest: computeCfcIntentPayloadDigest(options.parameters),
+    idempotencyKey: deriveCfcIntentIdempotencyKey({
+      sourceIntentId: sourceIntent.id,
+      operation: options.operation,
+    }),
+    exp: options.exp,
+    maxAttempts: options.maxAttempts,
+    duration: options.duration,
     sourceIntentId: sourceIntent.id,
     refinerHash: options.refinerHash,
     integrity: [
@@ -87,6 +129,19 @@ export function createCfcIntentOnce<T>(
       ...(options.additionalIntegrity ?? []),
     ],
   };
+}
+
+export function verifyCfcShortIntentOnce(
+  intent: Pick<CfcIntentOnce, "duration" | "exp">,
+  now = Date.now(),
+): boolean {
+  if (intent.duration !== "short") {
+    return false;
+  }
+  if (intent.exp <= now) {
+    return false;
+  }
+  return intent.exp - now <= 5_000;
 }
 
 function getIntentRefinementClaimCell(

@@ -98,15 +98,21 @@ describe("CFC intent refinement", () => {
 
   it("creates refined intent-once values with accumulated integrity", () => {
     const sourceIntent = createSourceIntent();
+    const now = 1_700_000_000_000;
     const intentOnce = createCfcIntentOnce(sourceIntent, {
       refinerHash: "sha256:gmail-forward-refiner",
       operation: "Gmail.Forward",
+      audience: "https://gmail.googleapis.com",
+      endpoint: "gmail.messages.send",
       parameters: {
         audience: "https://gmail.googleapis.com",
         endpoint: "gmail.messages.send",
         emailId: "m-22",
         recipientSet: ["a@example.com"],
       },
+      exp: now + 4_000,
+      maxAttempts: 3,
+      duration: "short",
     });
 
     expect(intentOnce.id).toBe(
