@@ -21,10 +21,13 @@ interface FlagDescriptor {
 }
 
 function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
-  return typeof schema === "object" && schema !== null && !Array.isArray(schema);
+  return typeof schema === "object" && schema !== null &&
+    !Array.isArray(schema);
 }
 
-function objectProperties(schema: JSONSchema): Record<string, JSONSchema> | null {
+function objectProperties(
+  schema: JSONSchema,
+): Record<string, JSONSchema> | null {
   if (!isSchemaObject(schema)) return null;
   if (schema.type !== "object" && !schema.properties) return null;
   const properties = schema.properties;
@@ -280,7 +283,9 @@ export function parseExecArgs(
   if (args[0] === "invoke" || args[0] === "run") {
     if (args[0] !== spec.defaultVerb) {
       throw new Error(
-        `Invalid verb ${args[0]} for ${spec.callableKind}; use ${spec.defaultVerb}`,
+        `Invalid verb ${
+          args[0]
+        } for ${spec.callableKind}; use ${spec.defaultVerb}`,
       );
     }
     verb = args.shift() as "invoke" | "run";

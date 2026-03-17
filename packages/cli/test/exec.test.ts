@@ -372,8 +372,8 @@ describe("mounted callable resolution and execution", () => {
     await expect(
       resolveMountedCallableFile(filePath, {
         stateDir,
-        loadManager: async () => harness.manager,
-        loadPiece: async () => harness.piece,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
       }),
     ).rejects.toThrow(/mounted callable file not found/i);
   });
@@ -412,8 +412,8 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
 
     expect(resolved.mount.entry.mountpoint).toBe(nestedMount);
@@ -452,8 +452,8 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
 
     expect(resolved.pieceId).toBe("of:canonical-piece");
@@ -484,13 +484,13 @@ describe("mounted callable resolution and execution", () => {
 
     const piecesResolved = await resolveMountedCallableFile(piecesPath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
     const entitiesResolved = await resolveMountedCallableFile(entitiesPath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
 
     expect(piecesResolved.callablePath.rootKind).toBe("pieces");
@@ -520,8 +520,8 @@ describe("mounted callable resolution and execution", () => {
 
     await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
 
     expect(harness.tracker.asSchemaFromLinksCalls).toBeGreaterThan(0);
@@ -560,10 +560,14 @@ describe("mounted callable resolution and execution", () => {
     };
 
     try {
-      await executeMountedCallableFile(filePath, ["invoke", "--query", "milk"], {
-        stateDir,
-        loadManager: async () => harness.manager,
-      });
+      await executeMountedCallableFile(
+        filePath,
+        ["invoke", "--query", "milk"],
+        {
+          stateDir,
+          loadManager: () => Promise.resolve(harness.manager),
+        },
+      );
     } finally {
       PiecesController.prototype.get = originalGet;
     }
@@ -596,8 +600,8 @@ describe("mounted callable resolution and execution", () => {
       ["invoke", "--query", "milk"],
       {
         stateDir,
-        loadManager: async () => harness.manager,
-        loadPiece: async () => harness.piece,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
       },
     );
 
@@ -661,16 +665,16 @@ describe("mounted callable resolution and execution", () => {
 
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
-      loadManager: async () => harness.manager,
-      loadPiece: async () => harness.piece,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
     });
     const result = await executeMountedCallableFile(
       filePath,
       ["run", "--query", "tea"],
       {
         stateDir,
-        loadManager: async () => harness.manager,
-        loadPiece: async () => harness.piece,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
     );
@@ -740,8 +744,8 @@ describe("mounted callable resolution and execution", () => {
       ["run", "--query", "tea"],
       {
         stateDir,
-        loadManager: async () => harness.manager,
-        loadPiece: async () => harness.piece,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
     );
@@ -852,15 +856,17 @@ function createExecHarness(options: {
   const piece = {
     id: options.pieceId,
     input: {
-      getCell: async () => rootCell,
-      set: async (value: unknown, path?: (string | number)[]) => {
+      getCell: () => Promise.resolve(rootCell),
+      set: (value: unknown, path?: (string | number)[]) => {
         tracker.handlerWrites.push({ cellProp: "input", path, value });
+        return Promise.resolve();
       },
     },
     result: {
-      getCell: async () => rootCell,
-      set: async (value: unknown, path?: (string | number)[]) => {
+      getCell: () => Promise.resolve(rootCell),
+      set: (value: unknown, path?: (string | number)[]) => {
         tracker.handlerWrites.push({ cellProp: "result", path, value });
+        return Promise.resolve();
       },
     },
   };

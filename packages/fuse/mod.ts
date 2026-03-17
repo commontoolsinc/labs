@@ -616,10 +616,10 @@ async function main() {
 
       return 0;
     } catch (e) {
-      const logPrefix =
-        callableNode?.kind === "callable" && callableNode.callableKind === "handler"
-          ? "[fuse] handler flush error"
-          : "[fuse] flush error";
+      const logPrefix = callableNode?.kind === "callable" &&
+          callableNode.callableKind === "handler"
+        ? "[fuse] handler flush error"
+        : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
       return EIO;
     } finally {

@@ -14,9 +14,9 @@ export type FsNode =
   | { kind: "file"; content: Uint8Array; jsonType: JsonType }
   | { kind: "symlink"; target: string }
   | {
-      kind: "callable";
-      callableKind: CallableKind;
-      cellKey: string;
-      cellProp: "input" | "result";
-      script: Uint8Array;
-    };
+    kind: "callable";
+    callableKind: CallableKind;
+    cellKey: string;
+    cellProp: "input" | "result";
+    script: Uint8Array;
+  };

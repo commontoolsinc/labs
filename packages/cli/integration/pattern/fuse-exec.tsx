@@ -4,9 +4,9 @@ import {
   NAME,
   pattern,
   patternTool,
+  type PatternToolResult,
   schema,
   str,
-  type PatternToolResult,
   type Stream,
 } from "commontools";
 import "commontools/schema";

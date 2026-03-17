@@ -222,7 +222,7 @@ describe("mount state operations", () => {
     expect(shim).toContain("#!/usr/bin/env bash");
     expect(shim).toContain("deno run");
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
-    expect(shim).toContain("\"$@\"");
+    expect(shim).toContain('"$@"');
   });
 
   it("always removes foreground mount state files before exiting", async () => {

@@ -675,13 +675,15 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   const piece = {
     id: "of:entity-123",
     input: {
-      set: async (value: unknown, path?: (string | number)[]) => {
+      set: (value: unknown, path?: (string | number)[]) => {
         calls.push({ channel: "input", value, path });
+        return Promise.resolve();
       },
     },
     result: {
-      set: async (value: unknown, path?: (string | number)[]) => {
+      set: (value: unknown, path?: (string | number)[]) => {
         calls.push({ channel: "result", value, path });
+        return Promise.resolve();
       },
     },
   };

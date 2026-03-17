@@ -703,13 +703,13 @@ export class CellBridge {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let resolvedCandidate = candidate;
       try {
-        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ?? candidate;
+        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ??
+          candidate;
       } catch {
         resolvedCandidate = candidate;
       }
 
-      let callableKind =
-        classifyCallableEntry(candidate, childCell.schema) ??
+      let callableKind = classifyCallableEntry(candidate, childCell.schema) ??
         classifyCallableEntry(resolvedCandidate, childCell.schema);
 
       if (!callableKind) {
