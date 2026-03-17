@@ -9,6 +9,7 @@ import {
   encodeImplementationIdentity,
 } from "../src/cfc/implementation-identity.ts";
 import type { CfcImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 import {
@@ -75,6 +76,26 @@ const pointwiseFlowPrecisionItemSchema = {
   },
 } as const satisfies JSONSchema;
 
+function createFlowPrecisionTrustContext(
+  delegator: string,
+  concrete: string,
+): CfcTrustContext {
+  return {
+    delegations: [{
+      delegator,
+      verifier: "did:key:cfc-flow-precision-verifier",
+      scope: {
+        concepts: [FLOW_TAINT_PRECISION_CONCEPT],
+      },
+    }],
+    statements: [{
+      verifier: "did:key:cfc-flow-precision-verifier",
+      concrete,
+      concept: FLOW_TAINT_PRECISION_CONCEPT,
+    }],
+  };
+}
+
 describe("CFC flow precision", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -123,6 +144,8 @@ describe("CFC flow precision", () => {
       readonly targetId: URI;
       readonly itemSchema: JSONSchema;
       readonly implementationIdentity?: CfcImplementationIdentity;
+      readonly actingPrincipal?: string;
+      readonly trustContext?: CfcTrustContext;
     },
   ): Promise<unknown> {
     const tx = runtime.edit();
@@ -156,6 +179,8 @@ describe("CFC flow precision", () => {
     try {
       await prepareCfcCommitIfNeeded(tx, {
         implementationIdentity: options.implementationIdentity,
+        actingPrincipal: options.actingPrincipal,
+        trustContext: options.trustContext,
       });
       const { error } = await tx.commit();
       thrown = error;
@@ -193,6 +218,33 @@ describe("CFC flow precision", () => {
   it("uses trusted Builtin(map) flow precision when claim is less restrictive", async () => {
     const sourceId = "cfc-flow-precision-trusted-source" as URI;
     const targetId = "cfc-flow-precision-trusted-target" as URI;
+    const implementationIdentity = deriveImplementationIdentity(
+      runtime.moduleRegistry.getModule("map"),
+    );
+    await seedDocument(sourceId, [11, 22], {
+      "/0": { classification: ["secret"] },
+      "/1": { classification: ["confidential"] },
+    });
+    await seedDocument(targetId, [0, 0]);
+
+    const thrown = await runFlowPrecisionPrepare({
+      sourceId,
+      targetId,
+      itemSchema: confidentialFlowPrecisionItemSchema,
+      implementationIdentity,
+      actingPrincipal: signer.did(),
+      trustContext: createFlowPrecisionTrustContext(
+        signer.did(),
+        encodeImplementationIdentity(implementationIdentity),
+      ),
+    });
+
+    expect(thrown).toBeUndefined();
+  });
+
+  it("falls back to conservative flow when Builtin(map) has no trusted statement", async () => {
+    const sourceId = "cfc-flow-precision-builtin-untrusted-source" as URI;
+    const targetId = "cfc-flow-precision-builtin-untrusted-target" as URI;
     await seedDocument(sourceId, [11, 22], {
       "/0": { classification: ["secret"] },
       "/1": { classification: ["confidential"] },
@@ -208,12 +260,20 @@ describe("CFC flow precision", () => {
       ),
     });
 
-    expect(thrown).toBeUndefined();
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcOutputTransitionViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("confidentialityMonotonicity");
   });
 
   it("uses trusted Builtin(map) flow precision with Pointwise claims", async () => {
     const sourceId = "cfc-flow-precision-pointwise-source" as URI;
     const targetId = "cfc-flow-precision-pointwise-target" as URI;
+    const implementationIdentity = deriveImplementationIdentity(
+      runtime.moduleRegistry.getModule("map"),
+    );
     await seedDocument(sourceId, [11, 22], {
       "/0": { classification: ["secret"] },
       "/1": { classification: ["confidential"] },
@@ -224,8 +284,11 @@ describe("CFC flow precision", () => {
       sourceId,
       targetId,
       itemSchema: pointwiseFlowPrecisionItemSchema,
-      implementationIdentity: deriveImplementationIdentity(
-        runtime.moduleRegistry.getModule("map"),
+      implementationIdentity,
+      actingPrincipal: signer.did(),
+      trustContext: createFlowPrecisionTrustContext(
+        signer.did(),
+        encodeImplementationIdentity(implementationIdentity),
       ),
     });
 

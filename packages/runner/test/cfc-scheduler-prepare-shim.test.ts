@@ -5,7 +5,12 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { deriveImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import {
+  builtinImplementationIdentity,
+  deriveImplementationIdentity,
+  encodeImplementationIdentity,
+} from "../src/cfc/implementation-identity.ts";
+import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
 import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
 import { FLOW_TAINT_PRECISION_CONCEPT } from "../src/cfc/trust-lattice.ts";
@@ -67,6 +72,25 @@ const flowPrecisionNumberSchema = {
   },
 } as const satisfies JSONSchema;
 
+function createFlowPrecisionTrustContext(delegator: string): CfcTrustContext {
+  return {
+    delegations: [{
+      delegator,
+      verifier: "did:key:cfc-scheduler-flow-precision-verifier",
+      scope: {
+        concepts: [FLOW_TAINT_PRECISION_CONCEPT],
+      },
+    }],
+    statements: [{
+      verifier: "did:key:cfc-scheduler-flow-precision-verifier",
+      concrete: encodeImplementationIdentity(
+        builtinImplementationIdentity("map"),
+      ),
+      concept: FLOW_TAINT_PRECISION_CONCEPT,
+    }],
+  };
+}
+
 describe("CFC scheduler prepare shim", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -122,6 +146,14 @@ describe("CFC scheduler prepare shim", () => {
   });
 
   it("passes builtin identity through scheduler prepare for trusted flow precision claims", async () => {
+    await runtime.dispose();
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL(import.meta.url),
+      cfcTrustContext: createFlowPrecisionTrustContext(signer.did()),
+    });
+    runtime.scheduler.disablePullMode();
+
     let tx = runtime.edit();
     const sourceCell = runtime.getCell<number[]>(
       space,
