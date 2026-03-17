@@ -10,7 +10,7 @@ describe("computeGitFingerprint", () => {
     expect(fingerprint).toBeDefined();
     expect(typeof fingerprint).toBe("string");
     // Clean tree → raw HEAD SHA (40 hex chars), dirty → sha256 (64 hex chars)
-    expect(fingerprint!.length).toBeGreaterThanOrEqual(40);
+    expect([40, 64]).toContain(fingerprint!.length);
   });
 
   it("returns the same value on consecutive calls (clean tree)", async () => {
