@@ -23,8 +23,8 @@ FILESYSTEM LAYOUT:
       pieces/
         <piece-name>/           # each piece gets a directory
           result/               # exploded JSON tree (dirs, files, symlinks)
-          result/*.handler      # readable callables; writing still invokes handlers
-          result/*.tool         # readable tools surfaced as mounted callables
+          result/*.handler      # executable callables; writing still invokes handlers
+          result/*.tool         # executable tools surfaced as mounted callables
           result.json           # full JSON blob
           input/
           input/*.handler

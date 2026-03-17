@@ -25,6 +25,8 @@ import {
   EXDEV,
   FILE_MODE,
   FILE_MODE_RW,
+  FILE_MODE_RWX,
+  FILE_MODE_RX,
   FUSE_SET_ATTR_SIZE,
   O_RDWR,
   O_TRUNC,
@@ -133,7 +135,7 @@ async function main() {
     if (node.kind === "dir") return DIR_MODE;
     if (node.kind === "symlink") return SYMLINK_MODE;
     if (node.kind === "callable") {
-      return node.callableKind === "handler" ? FILE_MODE_RW : FILE_MODE;
+      return node.callableKind === "handler" ? FILE_MODE_RWX : FILE_MODE_RX;
     }
     // Files in writable piece data get 644, others stay 444
     if (bridge && ino !== undefined && bridge.resolveWritePath(ino)) {

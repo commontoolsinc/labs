@@ -4,6 +4,10 @@ const encoder = new TextEncoder();
 
 export type CallableKind = "handler" | "tool";
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function isSchemaRecord(schema: JSONSchema | undefined): schema is Record<
   string,
   unknown
@@ -99,7 +103,11 @@ export function classifyCallableEntry(
 
 export function buildCallableScript(execCli: string): Uint8Array {
   const shim = execCli || "/usr/bin/false";
-  return encoder.encode(`#!${shim} exec\n`);
+  // Some environments fall back to running mounted files through the shell
+  // instead of honoring the nested shebang interpreter directly.
+  return encoder.encode(
+    `#!${shim} exec\nexec ${shellQuote(shim)} exec "$0" "$@"\n`,
+  );
 }
 
 export function transformCallableValues(

@@ -44,8 +44,8 @@ ct fuse unmount /tmp/ct
               text                    # file: Walk dog
               done                    # file: true
           items.json                  # [{"text":"Buy milk","done":false}, ...]
-          addItem.handler             # readable+writable mounted handler
-          search.tool                 # readable mounted pattern tool
+          addItem.handler             # executable+writable mounted handler
+          search.tool                 # executable mounted pattern tool
         input.json                    # full input cell as JSON
         input/                        # exploded input tree
           submit.handler              # handlers/tools can exist under input too
@@ -103,7 +103,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 cat home/pieces/todo-app/meta.json
 # => {"id":"of:ba4j...","entityId":"ba4j...","patternName":"todo-app"}
 
-# Mounted callables are readable and start with a ct exec shebang
+# Mounted callables are executable and start with a ct exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
 head -n1 home/pieces/todo-app/result/search.tool
 
@@ -135,6 +135,10 @@ ct exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 
 # Run a mounted pattern tool (tool input flags come from the pattern schema)
 ct exec home/pieces/todo-app/result/search.tool --query "oat milk"
+
+# Or execute either mounted callable directly through its shebang shim
+home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
+home/pieces/todo-app/result/search.tool --query "oat milk"
 
 # Top-level help describes the mounted callable instead of invoking it
 ct exec home/pieces/todo-app/result/search.tool --help
@@ -216,8 +220,8 @@ ct exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
 
 Environment variables `CT_API_URL` and `CT_IDENTITY` are also supported.
 
-Handlers remain writable through the mounted `.handler` file. Tools surface as
-read-only `.tool` files and must be executed through `ct exec`.
+Handlers remain writable through the mounted `.handler` file. Both mounted
+`.handler` and `.tool` files can be executed directly or via `ct exec`.
 
 ## Architecture
 

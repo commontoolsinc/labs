@@ -200,11 +200,13 @@ success "Mounted JSON surface hides callable internals"
 
 HANDLER_FIRST_LINE=$(head -n 1 "$HANDLER_FILE")
 TOOL_FIRST_LINE=$(head -n 1 "$TOOL_FILE")
+test -x "$HANDLER_FILE" || error "Handler file should be executable."
+test -x "$TOOL_FILE" || error "Tool file should be executable."
 assert_contains "$HANDLER_FIRST_LINE" "#!" "Handler file should start with a shebang."
 assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke ct exec."
 assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
 assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke ct exec."
-success "Callable files are readable and expose ct exec shebangs"
+success "Callable files are executable and expose ct exec shebangs"
 
 COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
 HANDLER_HELP=$(ct exec "$HANDLER_FILE" --help)
@@ -220,14 +222,24 @@ if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
 fi
 success "Top-level ct exec --help prints help without invoking callables"
 
+"$HANDLER_FILE" invoke --message "piece-direct"
+wait_for_piece_value "lastMessage" '"piece-direct"'
+wait_for_piece_value "messageCount" "1"
+DIRECT_TOOL=$("$TOOL_FILE" --query "direct" --help "via-shebang")
+assert_json_eq \
+  "$DIRECT_TOOL" \
+  '{"help":"via-shebang","query":"direct","source":"bound-source","summary":"bound-source:direct:via-shebang"}' \
+  "Direct tool execution returned unexpected JSON"
+success "Mounted callables can be executed directly through their shebangs"
+
 ct exec "$HANDLER_FILE" invoke --message "piece-explicit"
 wait_for_piece_value "lastMessage" '"piece-explicit"'
-wait_for_piece_value "messageCount" "1"
+wait_for_piece_value "messageCount" "2"
 success "ct exec invokes mounted handlers with the explicit verb"
 
 ct exec "$HANDLER_FILE" --message "piece-implicit"
 wait_for_piece_value "lastMessage" '"piece-implicit"'
-wait_for_piece_value "messageCount" "2"
+wait_for_piece_value "messageCount" "3"
 success "ct exec defaults mounted handlers to invoke"
 
 TOOL_EXPLICIT=$(ct exec "$TOOL_FILE" run --query "explicit" --help "schema-field")

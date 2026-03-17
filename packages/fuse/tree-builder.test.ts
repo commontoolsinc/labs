@@ -643,7 +643,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   assertEquals(parsed.search, { "/tool": "search" });
 });
 
-Deno.test("callable scripts begin with a ct exec shebang", () => {
+Deno.test("callable scripts begin with a ct exec shebang and shell fallback", () => {
   const tree = new FsTree();
   const resultIno = tree.addDir(tree.rootIno, "result", "object");
   const callableIno = tree.addCallable(
@@ -658,9 +658,10 @@ Deno.test("callable scripts begin with a ct exec shebang", () => {
   const node = tree.getNode(callableIno);
   assertEquals(node?.kind, "callable");
   if (node?.kind === "callable") {
-    const firstLine = decoder.decode(node.script).split("\n")[0];
+    const [firstLine, secondLine] = decoder.decode(node.script).split("\n");
     assertEquals(firstLine.startsWith("#!"), true);
     assertEquals(firstLine.includes(" exec"), true);
+    assertEquals(secondLine.includes(' exec "$0" "$@"'), true);
   }
 });
 
@@ -803,7 +804,8 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     name: () => "Sparse Fixture",
     getPatternMeta: async () => ({ patternName: "Sparse Fixture" }),
     input: {
-      getCell: async () => makeCell(undefined, { type: "object", properties: {} }),
+      getCell: async () =>
+        makeCell(undefined, { type: "object", properties: {} }),
       get: async () => undefined,
     },
     result: {
@@ -839,7 +841,10 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
-  assertEquals(tree.lookup(resultIno!, "recordMessage.handler") !== undefined, true);
+  assertEquals(
+    tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
+    true,
+  );
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));

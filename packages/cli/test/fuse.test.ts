@@ -255,9 +255,9 @@ describe("mount state operations", () => {
 });
 
 describe("fuse help", () => {
-  it("mentions readable .handler files and .tool entries", () => {
+  it("mentions executable .handler files and .tool entries", () => {
     const help = fuse.getHelp();
-    expect(help).toContain("readable");
+    expect(help).toContain("executable");
     expect(help).toContain("*.handler");
     expect(help).toContain("*.tool");
   });

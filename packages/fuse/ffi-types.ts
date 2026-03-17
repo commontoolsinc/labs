@@ -147,6 +147,8 @@ export const S_IRWXO = 0o007;
 export const DIR_MODE = S_IFDIR | 0o755;
 export const FILE_MODE = S_IFREG | 0o444;
 export const FILE_MODE_RW = S_IFREG | 0o644;
+export const FILE_MODE_RX = S_IFREG | 0o555;
+export const FILE_MODE_RWX = S_IFREG | 0o755;
 export const FILE_MODE_WO = S_IFREG | 0o200; // write-only (handlers)
 export const SYMLINK_MODE = S_IFLNK | 0o777;
 
