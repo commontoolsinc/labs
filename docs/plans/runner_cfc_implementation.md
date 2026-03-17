@@ -502,6 +502,16 @@ Primary file:
       default `METHOD path` endpoint derivation, and missing-URL fail-closed
       behavior.
 
+### 6.14 Intent-Aware Fetch Commit Wrapper
+
+- [x] Add a thin CFC helper that derives fetch request semantics, requires an
+      exact `IntentOnce` binding match, and then delegates retries/consumption
+      to the generic intent commit helper.
+- [x] Fail closed on missing fetch semantics or binding mismatch before any
+      request attempt executes.
+- [x] Add tests covering matching retry/consume behavior and fail-closed
+      binding mismatch cases.
+
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
 Primary files:
@@ -830,6 +840,8 @@ Primary docs:
       need before touching `fetchData` or other commit points.
 - [x] Step J.8: derive concrete fetch request semantics from the existing
       `fetchData` input model before adding intent-aware fetch execution.
+- [x] Step J.9: add a fetch-specific intent commit wrapper before wiring the
+      live `fetchData` builtin to use it.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

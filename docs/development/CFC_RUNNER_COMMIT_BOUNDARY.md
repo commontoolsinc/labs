@@ -115,6 +115,14 @@ semantics derivation path:
 3. Endpoint class can be supplied explicitly when a sink policy/refiner needs a
    logical endpoint name instead of the default `METHOD path` shape.
 
+There is now also a thin intent-aware fetch commit wrapper:
+
+1. It derives fetch request semantics from normalized inputs.
+2. It requires an exact `IntentOnce` binding match before any request attempt
+   executes.
+3. On success it reuses the generic intent retry/consume helper; on mismatch it
+   fails closed without starting the side effect.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
