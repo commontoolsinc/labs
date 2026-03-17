@@ -246,15 +246,20 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
 ### Tests
 
 - Create: `packages/runner/test/sandbox/bundle-preflight.test.ts`
+- Create: `packages/runner/test/sandbox/differential-runtime.test.ts`
 - Create: `packages/runner/test/sandbox/plain-data.test.ts`
 - Create: `packages/runner/test/sandbox/security.test.ts`
 - Create: `packages/runner/test/sandbox/compartment.test.ts`
+- Create: `packages/runner/test/support/runtime-compare.ts`
 - Modify: `packages/runner/test/engine.test.ts`
 - Modify: `packages/runner/test/pattern-manager.test.ts`
+- Modify: `packages/runner/test/runner.test.ts`
 - Modify: `packages/runner/test/runtime.test.ts`
 - Modify: `packages/runner/test/module.test.ts`
 - Modify: `packages/runner/test/pattern.test.ts`
 - Modify: `packages/runner/test/function-cache.test.ts`
+- Modify: `packages/runner/test/json-utils.test.ts`
+- Modify: `packages/runner/test/compilation-cache.test.ts`
 - Modify: `packages/runner/test/stack-trace.test.ts`
 - Modify: `packages/runner/test/stack-trace-patterns.test.ts`
 - Create: `packages/generated-patterns/integration/patterns/ses-sandbox-smoke.test.ts`
@@ -631,13 +636,12 @@ At the same time:
 
 Do not broaden the capability surface during the move.
 
-- [ ] **Step 5: Retire the low-level unsafe-eval helper**
+- [ ] **Step 5: Remove the low-level unsafe-eval helper from authored/runtime code paths**
 
-Either:
-- delete `packages/runner/src/harness/eval-runtime.ts` and update direct tests to use the sandbox runtime helpers, or
-- replace it with a clearly named SES-backed adapter that delegates to the same sandbox/runtime code used by `Engine`
-
-Do not keep a live `UnsafeEvalRuntime` abstraction around after the cutover.
+After this task:
+- `Engine`, `Runtime`, `PatternManager`, and `Runner` must no longer depend on `UnsafeEvalRuntime`
+- if the legacy eval helper remains temporarily for the differential comparison tests in the next task, keep it isolated behind a clearly test-only seam
+- do not leave a live unsafe-eval abstraction reachable from authored execution paths
 
 - [ ] **Step 6: Wire the runtime lifecycle into `Runtime`**
 
@@ -674,7 +678,72 @@ git add deno.json \
 git commit -m "feat: add SES runtime and pattern compartments"
 ```
 
-### Task 5: Cut The Harness, Pattern Manager, Builder, And Runner Over To Verified Function Refs
+### Task 5: Add Differential Runtime Comparison Coverage Before Final Cutover
+
+**Files:**
+- Create: `packages/runner/test/support/runtime-compare.ts`
+- Create: `packages/runner/test/sandbox/differential-runtime.test.ts`
+- Modify: `packages/runner/test/engine.test.ts`
+- Modify: `packages/runner/test/stack-trace.test.ts` only if a shared mapped-error comparison helper is needed
+
+- [ ] **Step 1: Write failing differential tests while both runtimes are still available**
+
+Cover:
+- representative valid authored programs produce the same observable exports / pattern outputs under the legacy eval runtime and the new SES runtime
+- representative authored runtime failures map back to the same authored file/line under both runtimes
+- the comparison stays at the user-visible boundary: exports, result cells, and mapped errors, not internal object identity
+
+Use a curated set of programs that stress:
+- module-scope hoisted `lift(...)`
+- hoisted `handler(...)`
+- inline derive/computed that stay inline after prior transforms
+- a nested/local-module import case
+
+- [ ] **Step 2: Run the comparison tests to verify they fail**
+
+Run:
+
+```bash
+ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/sandbox/differential-runtime.test.ts
+```
+
+Expected: FAIL because there is not yet a test helper that can execute the same program against both runtimes.
+
+- [ ] **Step 3: Implement a test-only runtime comparison helper**
+
+`runtime-compare.ts` should:
+- compile once and execute the same authored program against both runtimes
+- use the real runner/harness surfaces rather than mocking internals
+- keep the legacy eval path test-only and clearly isolated from authored/runtime production code
+- expose helpers for comparing either exported values or result-cell behavior, plus mapped errors
+
+Do not reintroduce the legacy runtime into production code to make the tests easy.
+
+- [ ] **Step 4: Re-run the differential tests**
+
+Run:
+
+```bash
+ENV=test deno test --allow-ffi --allow-env --allow-read \
+  --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/sandbox/differential-runtime.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/runner/test/support/runtime-compare.ts \
+  packages/runner/test/sandbox/differential-runtime.test.ts \
+  packages/runner/test/engine.test.ts \
+  packages/runner/test/stack-trace.test.ts
+git commit -m "test: compare SES runtime against legacy behavior"
+```
+
+### Task 6: Cut The Harness, Pattern Manager, Builder, And Runner Over To Verified Function Refs
 
 **Files:**
 - Modify: `packages/runner/src/harness/types.ts`
@@ -687,12 +756,15 @@ git commit -m "feat: add SES runtime and pattern compartments"
 - Modify: `packages/runner/src/builder/module.ts`
 - Modify: `packages/runner/src/builder/pattern.ts`
 - Modify: `packages/runner/src/builder/json-utils.ts`
+- Test: `packages/runner/test/runner.test.ts`
 - Test: `packages/runner/test/engine.test.ts`
 - Test: `packages/runner/test/pattern-manager.test.ts`
 - Test: `packages/runner/test/runtime.test.ts`
 - Test: `packages/runner/test/module.test.ts`
 - Test: `packages/runner/test/pattern.test.ts`
 - Test: `packages/runner/test/function-cache.test.ts`
+- Test: `packages/runner/test/json-utils.test.ts`
+- Test: `packages/runner/test/compilation-cache.test.ts`
 - Test: `packages/runner/test/sandbox/security.test.ts`
 
 - [ ] **Step 1: Write failing cutover tests**
@@ -705,6 +777,8 @@ Cover:
 - saved/reloaded patterns still execute after recompilation + verified ref rebinding
 - nested/passed-through patterns keep working
 - existing serialization-oriented tests stop asserting authored function strings and instead assert the new `implementationRef` / preview contract
+- direct serialization helpers preserve `implementationRef` metadata and do not stringify authored functions for re-execution
+- cached compile/evaluate flows still work when the same compiled JS is evaluated into a fresh verified-function registry
 - any remaining function cache behavior is keyed by stable verified identity rather than `JSON.stringify(module)`
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -714,12 +788,15 @@ Run:
 ```bash
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/runner.test.ts \
   packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
   packages/runner/test/pattern.test.ts \
   packages/runner/test/function-cache.test.ts \
+  packages/runner/test/json-utils.test.ts \
+  packages/runner/test/compilation-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
@@ -763,12 +840,15 @@ Run:
 ```bash
 ENV=test deno test --allow-ffi --allow-env --allow-read \
   --allow-write=/tmp,/var/folders --allow-run=git \
+  packages/runner/test/runner.test.ts \
   packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
   packages/runner/test/pattern.test.ts \
   packages/runner/test/function-cache.test.ts \
+  packages/runner/test/json-utils.test.ts \
+  packages/runner/test/compilation-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 ```
 
@@ -787,17 +867,20 @@ git add packages/runner/src/harness/types.ts \
   packages/runner/src/builder/module.ts \
   packages/runner/src/builder/pattern.ts \
   packages/runner/src/builder/json-utils.ts \
+  packages/runner/test/runner.test.ts \
   packages/runner/test/engine.test.ts \
   packages/runner/test/pattern-manager.test.ts \
   packages/runner/test/runtime.test.ts \
   packages/runner/test/module.test.ts \
   packages/runner/test/pattern.test.ts \
   packages/runner/test/function-cache.test.ts \
+  packages/runner/test/json-utils.test.ts \
+  packages/runner/test/compilation-cache.test.ts \
   packages/runner/test/sandbox/security.test.ts
 git commit -m "feat: replace authored eval with verified function refs"
 ```
 
-### Task 6: Restore Error Mapping, Stack Filtering, And User-Facing Error Surfaces On The SES Path
+### Task 7: Restore Error Mapping, Stack Filtering, And User-Facing Error Surfaces On The SES Path
 
 **Files:**
 - Create: `packages/runner/src/sandbox/error-mapping.ts`
@@ -870,7 +953,7 @@ git add packages/runner/src/sandbox/error-mapping.ts \
 git commit -m "feat: restore mapped stack traces for SES runtime"
 ```
 
-### Task 7: Add End-To-End Security Coverage And Final Regression Pass
+### Task 8: Add End-To-End Security Coverage And Final Regression Pass
 
 **Files:**
 - Create: `packages/generated-patterns/integration/patterns/ses-sandbox-smoke.test.ts`
@@ -959,6 +1042,7 @@ Before declaring the implementation done, verify all of the following:
 - [ ] One Compartment is reused per loaded pattern, and different patterns do not share one.
 - [ ] Mapped stack traces still point to authored files/lines for top-level, lift, and handler failures.
 - [ ] No low-level `UnsafeEvalRuntime` helper remains reachable from the authored execution path or from runner tests that are supposed to validate the SES path.
+- [ ] Any remaining legacy eval helper exists only in clearly marked differential-test support and is not reachable from production/runtime code.
 - [ ] Existing generated-pattern behavior remains unchanged for valid patterns.
 
 ## Notes For The Implementer
