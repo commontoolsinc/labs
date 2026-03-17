@@ -5,12 +5,8 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { setPatternEnvironment } from "../src/env.ts";
-import {
-  claimCfcIntentConsumed,
-} from "../src/cfc/intent-consumption.ts";
-import {
-  createCfcIntentEventEnvelope,
-} from "../src/cfc/intent-event.ts";
+import { claimCfcIntentConsumed } from "../src/cfc/intent-consumption.ts";
+import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
 import { createCfcIntentOnce } from "../src/cfc/intent-refinement.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -99,16 +95,18 @@ describe("fetchData commit-point intent wiring", () => {
       operation: "Gmail.Forward",
       audience: "https://gmail.googleapis.com",
       endpoint: "gmail.messages.send",
-      parameters: {
+      parameters: JSON.stringify({
         raw: "base64url-rfc2822",
-      },
+      }),
       exp: now + 4_000,
       maxAttempts: 3,
       duration: "short",
     });
   }
 
-  async function pullFinalResult(resultCell: { pull: () => Promise<unknown>; get: () => unknown }) {
+  async function pullFinalResult(
+    resultCell: { pull: () => Promise<unknown>; get: () => unknown },
+  ) {
     for (let attempt = 0; attempt < 8; attempt++) {
       await resultCell.pull();
       await delay(50);
@@ -130,9 +128,15 @@ describe("fetchData commit-point intent wiring", () => {
       fetchData({
         url: "http://mock-test-server.local/api/legacy",
         mode: "json",
-      }));
+      })
+    );
 
-    const resultCell = runtime.getCell(space, "fetch-legacy-live", undefined, tx);
+    const resultCell = runtime.getCell(
+      space,
+      "fetch-legacy-live",
+      undefined,
+      tx,
+    );
     const result = runtime.run(tx, testPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
@@ -150,7 +154,7 @@ describe("fetchData commit-point intent wiring", () => {
   });
 
   it("reuses the stored committed result for an already-consumed intent", async () => {
-    const now = 1_700_000_000_000;
+    const now = Date.now();
     const intent = createIntent(now);
     const fetchData = byRef("fetchData") as (params: unknown) => unknown;
     const testPattern = pattern(() =>
@@ -171,7 +175,8 @@ describe("fetchData commit-point intent wiring", () => {
           intent,
           endpoint: "gmail.messages.send",
         },
-      }));
+      })
+    );
 
     const firstResultCell = runtime.getCell(
       space,
@@ -224,7 +229,7 @@ describe("fetchData commit-point intent wiring", () => {
   });
 
   it("blocks network execution when the request does not match the bound intent", async () => {
-    const now = 1_700_000_000_000;
+    const now = Date.now();
     const intent = createIntent(now);
     const fetchData = byRef("fetchData") as (params: unknown) => unknown;
     const testPattern = pattern(() =>
@@ -245,7 +250,8 @@ describe("fetchData commit-point intent wiring", () => {
           intent,
           endpoint: "gmail.messages.insert",
         },
-      }));
+      })
+    );
 
     const resultCell = runtime.getCell(
       space,
@@ -265,7 +271,7 @@ describe("fetchData commit-point intent wiring", () => {
   });
 
   it("blocks network execution when the auth token appears outside Authorization", async () => {
-    const now = 1_700_000_000_000;
+    const now = Date.now();
     const intent = createIntent(now);
     const fetchData = byRef("fetchData") as (params: unknown) => unknown;
     const testPattern = pattern(() =>
@@ -287,7 +293,8 @@ describe("fetchData commit-point intent wiring", () => {
           intent,
           endpoint: "gmail.messages.send",
         },
-      }));
+      })
+    );
 
     const resultCell = runtime.getCell(
       space,

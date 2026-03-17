@@ -2,7 +2,10 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import {
   computeInputHashFromValue,
@@ -10,6 +13,10 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import {
+  fetchAuthorizationHeaderPlacementAllowed,
+} from "../cfc/fetch-auth-structure.ts";
+import { commitCfcFetchIntentWithRetries } from "../cfc/fetch-intent-commit.ts";
 import {
   type FetchDataInputs,
   type NormalizedFetchDataInputs,
@@ -205,7 +212,8 @@ export function fetchData(
             return;
           }
 
-          const { url, mode, options } = inputs as NormalizedFetchDataInputs;
+          const normalizedInputs = inputs as NormalizedFetchDataInputs;
+          const { url } = normalizedInputs;
 
           // Clear any previous result/error when starting a new fetch
           // This ensures observers see a clean pending state
@@ -237,10 +245,9 @@ export function fetchData(
           myRequestId = newRequestId;
           startFetch(
             runtime,
+            parentCell.space,
             inputsCell,
-            url,
-            mode,
-            options,
+            normalizedInputs,
             inputHash,
             pending,
             result,
@@ -256,10 +263,9 @@ export function fetchData(
 
 async function startFetch(
   runtime: Runtime,
+  space: MemorySpace,
   inputsCell: Cell<FetchDataInputs>,
-  url: string,
-  mode: "text" | "json" | undefined,
-  options: NormalizedFetchDataInputs["options"],
+  inputs: NormalizedFetchDataInputs,
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
@@ -267,6 +273,11 @@ async function startFetch(
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
 ) {
+  const { url, mode, options, cfc } = inputs;
+  if (!url) {
+    return;
+  }
+
   const processResponse = async (r: Response) => {
     if (!r.ok) {
       throw new Error(`HTTP ${r.status}: ${r.statusText}`);
@@ -274,9 +285,99 @@ async function startFetch(
     return (mode || "json") === "json" ? await r.json() : await r.text();
   };
 
+  const writeIntentFailure = async (failure: string) => {
+    await runtime.editWithRetry((tx) => {
+      const currentHash = computeInputHashFromValue(
+        snapshotFetchDataInputs(inputsCell.withTx(tx)),
+      );
+      pending.withTx(tx).set(false);
+      result.withTx(tx).set(undefined);
+      if (currentHash === inputHash) {
+        error.withTx(tx).set(failure);
+        internal.withTx(tx).update({ inputHash });
+      }
+    });
+  };
+
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
+    const intent = cfc?.intent;
+    if (intent) {
+      const authorization = options?.headers?.Authorization ??
+        options?.headers?.authorization;
+      if (
+        authorization &&
+        !fetchAuthorizationHeaderPlacementAllowed(inputs, authorization)
+      ) {
+        await writeIntentFailure("authorization_header_placement_invalid");
+        return;
+      }
+
+      const commitResult = await commitCfcFetchIntentWithRetries(
+        runtime,
+        space,
+        intent,
+        inputs,
+        async (attemptNumber) => {
+          try {
+            const response = await fetch(
+              new URL(url, getPatternEnvironment().apiUrl),
+              {
+                signal: abortSignal,
+                ...options,
+              },
+            );
+            const data = await processResponse(response);
+            return {
+              success: true,
+              attemptNumber,
+              result: data,
+            };
+          } catch (err) {
+            if (abortSignal.aborted) {
+              return {
+                success: false,
+                error: "aborted",
+              };
+            }
+            return {
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+        },
+        {
+          endpoint: cfc.endpoint,
+        },
+      );
+
+      if (abortSignal.aborted) {
+        return;
+      }
+
+      await runtime.idle();
+
+      if (commitResult.success) {
+        await tryWriteResult(
+          runtime,
+          internal,
+          inputsCell,
+          inputHash,
+          (tx) => {
+            pending.withTx(tx).set(false);
+            result.withTx(tx).set(commitResult.result);
+            error.withTx(tx).set(undefined);
+          },
+          snapshotFetchDataInputs,
+        );
+        return;
+      }
+
+      await writeIntentFailure(commitResult.error ?? "intent_commit_failed");
+      return;
+    }
+
     const response = await fetch(
       new URL(url, getPatternEnvironment().apiUrl),
       {

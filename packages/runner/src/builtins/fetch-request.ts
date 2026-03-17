@@ -1,5 +1,11 @@
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import type { CfcIntentOnce } from "../cfc/intent-refinement.ts";
+
+export interface FetchDataCfcOptions {
+  readonly intent?: CfcIntentOnce<unknown>;
+  readonly endpoint?: string;
+}
 
 /** The shape of fetchData's input cell. */
 export type FetchDataInputs = {
@@ -10,6 +16,7 @@ export type FetchDataInputs = {
     method?: string;
     headers?: Record<string, string>;
   };
+  cfc?: FetchDataCfcOptions;
 };
 
 export type NormalizedFetchDataInputs = {
@@ -20,6 +27,7 @@ export type NormalizedFetchDataInputs = {
     method?: string;
     headers?: Record<string, string>;
   };
+  cfc?: FetchDataCfcOptions;
 };
 
 /**
@@ -43,6 +51,33 @@ export const fetchDataInputSchema = {
         },
       },
     },
+    cfc: {
+      type: "object",
+      properties: {
+        endpoint: { type: "string" },
+        intent: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            operation: { type: "string" },
+            audience: { type: "string" },
+            endpoint: { type: "string" },
+            parameters: {},
+            payloadDigest: { type: "string" },
+            idempotencyKey: { type: "string" },
+            exp: { type: "number" },
+            maxAttempts: { type: "number" },
+            duration: { type: "string" },
+            sourceIntentId: { type: "string" },
+            refinerHash: { type: "string" },
+            integrity: {
+              type: "array",
+              items: {},
+            },
+          },
+        },
+      },
+    },
   },
 } as const satisfies JSONSchema;
 
@@ -61,7 +96,12 @@ export function normalizeFetchDataInputs(
         : body,
     }
     : undefined;
-  return { url: snapshot?.url, mode, options };
+  return {
+    url: snapshot?.url,
+    mode,
+    options,
+    cfc: snapshot?.cfc,
+  };
 }
 
 export function snapshotFetchDataInputs(

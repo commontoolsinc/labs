@@ -29,6 +29,7 @@ import type {
 } from "commontools";
 import { isRecord } from "@commontools/utils/types";
 import { isCell } from "../cell.ts";
+import type { FetchDataCfcOptions } from "../builtins/fetch-request.ts";
 
 /**
  * Signature detection for ifElse/when/unless backward compatibility.
@@ -115,6 +116,7 @@ export const fetchData = createNodeFactory({
     url: string;
     mode?: "json" | "text";
     options?: FetchOptions;
+    cfc?: FetchDataCfcOptions;
     result?: T;
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
