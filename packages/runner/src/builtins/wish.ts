@@ -410,6 +410,7 @@ function resolveSpaceTarget(
 
     "#allPieces": ["defaultPattern", "allPieces"],
     "#recent": ["defaultPattern", "recentPieces"],
+    "#suggestions": ["defaultPattern", "suggestionHistory"],
   };
 
   const pathPrefix = pathForKey[parsed.key];

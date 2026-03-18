@@ -29,6 +29,7 @@ import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
+import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
@@ -2504,6 +2505,50 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               );
             },
           );
+
+          // Record suggestion history separately so conflicts don't break the
+          // main result write. Uses its own editWithRetry with tx-aware get().
+          if (
+            success && cellifiedResult !== undefined &&
+            queueName === "suggestions"
+          ) {
+            const snapshotMessages = messagesCell.get() ?? [];
+            const timestamp = new Date().toISOString();
+            runtime.editWithRetry((tx) => {
+              try {
+                const spaceCell = runtime.getCell(
+                  space,
+                  space,
+                  spaceCellSchema,
+                  tx,
+                );
+                const historyCell = spaceCell
+                  .key("defaultPattern")
+                  .key("suggestionHistory");
+                const current =
+                  (historyCell.withTx(tx).get() as unknown[] | undefined) ??
+                    [];
+                historyCell.withTx(tx).set([
+                  ...current,
+                  {
+                    result: (cellifiedResult as any)?.cell ?? cellifiedResult,
+                    messages: snapshotMessages,
+                    timestamp,
+                  },
+                ]);
+                return true;
+              } catch (e) {
+                logger.warn(
+                  "llm",
+                  "Failed to record suggestion history entry",
+                  e,
+                );
+                return false;
+              }
+            }).catch((e) =>
+              logger.warn("llm", "History editWithRetry failed", e)
+            );
+          }
 
           if (success) {
             logger.info("llm", "Continuing conversation after tool calls...");
