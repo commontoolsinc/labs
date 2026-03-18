@@ -7,11 +7,16 @@ import type {
   MemorySpace,
   URI,
 } from "../storage/interface.ts";
+import { computeCfcActivityDigest } from "./activity-digest.ts";
 import {
   normalizeConfidentialityLabel,
   normalizeIntegrityLabel,
 } from "./label-algebra.ts";
-import { toHex } from "./shared.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+  toHex,
+} from "./shared.ts";
 
 const CFC_CAS_BLOB_MEDIA_TYPE = "application/json";
 const CFC_CAS_LABEL_BINDING_MEDIA_TYPE = "application/json";
@@ -38,6 +43,13 @@ export interface ReadCfcCasBlobByExpectedLabelOptions {
   ) => boolean | Promise<boolean>;
 }
 
+export interface WriteCfcCasBlobFromPreparedPathOptions {
+  readonly space: MemorySpace;
+  readonly payload: Uint8Array;
+  readonly source: Pick<IMemorySpaceAddress, "space" | "id" | "type">;
+  readonly sourcePath?: string;
+}
+
 export interface CfcCasBlobRecord {
   readonly blobHash: string;
   readonly bytes: readonly number[];
@@ -61,6 +73,18 @@ function normalizeCasLabel(label: Labels): Labels {
 
 function casLabelKey(label: Labels): string {
   return JSON.stringify(normalizeCasLabel(label));
+}
+
+function refreshPreparedDigestIfNeeded(tx: IExtendedStorageTransaction): void {
+  if (!tx.cfcPrepared) {
+    return;
+  }
+  tx.markCfcPrepared(
+    computeCfcActivityDigest(
+      tx.journal.activity(),
+      tx.resolveCfcPrepareScopeSnapshot(),
+    ),
+  );
 }
 
 export function computeCfcCasBlobHash(payload: Uint8Array): string {
@@ -134,12 +158,39 @@ export async function writeCfcCasBlobWithBoundary(
   const effectiveLabel = await options.evaluateEffectiveLabel(
     options.proposedLabel,
   );
-  return writeCfcCasBlob(
+  const result = writeCfcCasBlob(
     tx,
     options.space,
     options.payload,
     effectiveLabel,
   );
+  refreshPreparedDigestIfNeeded(tx);
+  return result;
+}
+
+export function writeCfcCasBlobFromPreparedPath(
+  tx: IExtendedStorageTransaction,
+  options: WriteCfcCasBlobFromPreparedPathOptions,
+): CfcCasWriteResult {
+  const sourcePath = options.sourcePath ?? "/";
+  const labelsByPath = normalizePersistedLabels(
+    tx.readOrThrow(cfcLabelsAddress(options.source)),
+  );
+  const effectiveLabel = labelsByPath[sourcePath];
+  if (!effectiveLabel) {
+    throw new Error(
+      `No prepared CFC label found for CAS source path ${sourcePath}`,
+    );
+  }
+
+  const result = writeCfcCasBlob(
+    tx,
+    options.space,
+    options.payload,
+    effectiveLabel,
+  );
+  refreshPreparedDigestIfNeeded(tx);
+  return result;
 }
 
 export function readCfcCasBlob(
