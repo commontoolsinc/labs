@@ -226,7 +226,17 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/ct
-          CT_BINARY=./common-binaries/ct deno task integration pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          mkdir -p test-results
+          CT_BINARY=./common-binaries/ct deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+
+      - name: 📤 Upload test timing data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-pattern-unit-${{ matrix.chunk }}
+          path: test-results/
+          retention-days: 90
+          if-no-files-found: ignore
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests"
