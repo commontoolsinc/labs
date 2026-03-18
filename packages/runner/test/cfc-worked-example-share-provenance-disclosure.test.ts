@@ -1,24 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import { deriveCfcPolicyStateId } from "../src/cfc/policy-state.ts";
-import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import {
   deriveCfcShareGrantFromIntent,
   deriveCfcShareGrantPolicyKey,
 } from "../src/cfc/share-grant-intent.ts";
-import type {
-  IExtendedStorageTransaction,
-  Labels,
-} from "../src/storage/interface.ts";
+import type { Labels } from "../src/storage/interface.ts";
+import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example share provenance disclosure test",
@@ -118,43 +109,19 @@ function createShareIntent(
 }
 
 describe("CFC worked example: provenance disclosure before sharing", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let phaseOneRuntime: Runtime | undefined;
-  let tx: IExtendedStorageTransaction;
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
+      disablePullMode: true,
     });
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
   });
 
   afterEach(async () => {
-    if (phaseOneRuntime && phaseOneRuntime !== runtime) {
-      phaseOneRuntime.runner.stopAll();
-      phaseOneRuntime.moduleRegistry.clear();
-      phaseOneRuntime.scheduler.dispose();
-      phaseOneRuntime.harness.dispose();
-      phaseOneRuntime = undefined;
-    }
-    await tx.abort();
-    await runtime.dispose();
+    await harness.dispose();
   });
-
-  async function readPersistedLabels(id: string) {
-    const readTx = runtime.edit();
-    const raw = readTx.readOrThrow(cfcLabelsAddress({
-      space,
-      id: id as `${string}:${string}`,
-      type: "application/json",
-    }));
-    await readTx.abort();
-    return normalizePersistedLabels(raw);
-  }
 
   it("refuses to mint a durable ShareGrant when disclosure evidence is missing", () => {
     const shareIntent = createShareIntent(
@@ -172,37 +139,18 @@ describe("CFC worked example: provenance disclosure before sharing", () => {
   });
 
   it("persists a disclosed ShareGrant and authorizes the later shared read after restart", async () => {
-    const photo = runtime.getCell<{ id: string; title: string }>(
-      space,
-      "worked-example-share-provenance-photo",
-      undefined,
-      tx,
-    );
-    const sharedPhoto = runtime.getCell<{ id: string; title: string }>(
-      space,
-      "worked-example-share-provenance-output",
-      undefined,
-      tx,
-    );
-    photo.set({
-      id: "photo-42",
-      title: "Alice private photo",
-    });
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: photo.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": {
-          classification: [userAliceAtom],
-          integrity: [],
-        } satisfies Labels,
+    const photo = await harness.seedLabeledValue({
+      id: "worked-example-share-provenance-photo",
+      schema: sourceSchema,
+      value: {
+        id: "photo-42",
+        title: "Alice private photo",
       },
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+      labels: {
+        classification: [userAliceAtom],
+        integrity: [],
+      } satisfies Labels,
+    });
 
     const resourceRef = photo.getAsNormalizedFullLink().id;
     const shareIntent = createShareIntent(resourceRef, [
@@ -231,57 +179,44 @@ describe("CFC worked example: provenance disclosure before sharing", () => {
       throw new Error("Expected share grant to be derived");
     }
 
-    tx = runtime.edit();
-    const persistedShareGrant = { ...shareGrant };
     const policyKey = deriveCfcShareGrantPolicyKey(shareGrant);
-    tx.writeOrThrow({
+    await harness.writeDocumentValue({
       space,
       id: deriveCfcPolicyStateId(policyKey),
       type: "application/json",
       path: ["value"],
-    }, persistedShareGrant);
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    }, { ...shareGrant });
 
-    phaseOneRuntime = runtime;
-    runtime = new Runtime({
-      storageManager,
-      apiUrl: new URL(import.meta.url),
+    await harness.restart();
+
+    const sharedPhoto = await harness.withCommittedEdit((tx) => {
+      const persistedPhoto = harness.getCellFromEntityId<{
+        id: string;
+        title: string;
+      }>(
+        photo.getAsNormalizedFullLink().id,
+        sourceSchema,
+        tx,
+      );
+      const persistedSharedPhoto = harness.getCell<{
+        id: string;
+        title: string;
+      }>(
+        "worked-example-share-provenance-output",
+        undefined,
+        tx,
+      );
+      const value = persistedPhoto.withTx(tx).asSchema(sourceSchema).get();
+      persistedSharedPhoto.withTx(tx).asSchema(
+        shareGrantSchema(resourceRef),
+      ).set(value);
+      return persistedSharedPhoto;
+    }, {
+      prepare: "cfc",
     });
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
 
-    const persistedPhoto = runtime.getCellFromEntityId<{
-      id: string;
-      title: string;
-    }>(
-      space,
-      photo.getAsNormalizedFullLink().id,
-      [],
-      sourceSchema,
-      tx,
-    );
-    const persistedSharedPhoto = runtime.getCellFromEntityId<{
-      id: string;
-      title: string;
-    }>(
-      space,
+    const labels = await harness.readLabels(
       sharedPhoto.getAsNormalizedFullLink().id,
-      [],
-      undefined,
-      tx,
-    );
-    const value = persistedPhoto.withTx(tx).asSchema(sourceSchema).get();
-    persistedSharedPhoto.withTx(tx).asSchema(
-      shareGrantSchema(resourceRef),
-    ).set(value);
-
-    await prepareCfcCommitIfNeeded(tx);
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    const labels = await readPersistedLabels(
-      persistedSharedPhoto.getAsNormalizedFullLink().id,
     );
     expect(labels["/"]?.classification).toEqual([[userBobAtom, userAliceAtom]]);
   });

@@ -259,8 +259,8 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
 2. Gmail send/read, return-to-sender, and agentic-email worked-example tests
    now run mostly as patterns, with the harness keeping only trust/runtime
    setup outside the pattern body.
-3. Durable share-grant tests also use the harness for labeled seeding, policy
-   state setup, and restart.
+3. Durable share-grant and provenance-disclosure tests also use the harness
+   for labeled seeding, policy-state setup, and restart.
 4. There is still a known gap for some policy-rewrite cases through pattern
    output materialization: root/property output rewrites in worked-example
    scenarios do not yet consistently persist the same integrity additions that
