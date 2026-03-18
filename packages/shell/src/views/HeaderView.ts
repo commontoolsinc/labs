@@ -1,10 +1,19 @@
-import { css, html, nothing } from "lit";
+import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { navigate } from "../../shared/mod.ts";
+import { Task } from "@lit/task";
+import { NAME, type PageHandle, type CellHandle } from "@commontools/runtime-client";
+import type { FavoriteEntry } from "@commontools/home-schemas";
 import "../components/Flex.ts";
 import "../components/Spinner.ts";
+
+interface PieceItem {
+  id: string;
+  name: string;
+}
 
 type ConnectionStatus =
   | "connecting"
@@ -160,7 +169,7 @@ export class XHeaderView extends BaseView {
       .menu-panel {
         width: 100%;
         padding: 80px 24px 24px;
-        border-radius: 16px;
+        border-radius: 0 0 16px 16px;
         overflow: hidden;
         transform: translateY(-100%);
         transition: transform 0.25s ease;
@@ -182,7 +191,7 @@ export class XHeaderView extends BaseView {
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 6px;
+      padding: 4px 16px;
     }
 
     .breadcrumb-icon {
@@ -190,6 +199,8 @@ export class XHeaderView extends BaseView {
       height: 12px;
       color: var(--gray-300, #8a909b);
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
 
     .breadcrumb-text {
@@ -208,20 +219,28 @@ export class XHeaderView extends BaseView {
       color: var(--gray-300, #8a909b);
       opacity: 0.5;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
 
     .piece-title-row {
       display: flex;
       align-items: center;
       gap: 0;
-      padding: 8px 10px;
+      padding: 8px 16px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .piece-title-row:hover {
+      background: rgba(0, 0, 0, 0.03);
     }
 
     .piece-title-text {
       font-family: "JetBrains Mono", monospace;
       font-weight: 500;
       font-size: 16px;
-      line-height: 16px;
+      line-height: 24px;
       color: var(--gray-800, #2c3138);
       letter-spacing: -0.32px;
       white-space: nowrap;
@@ -235,6 +254,51 @@ export class XHeaderView extends BaseView {
       color: var(--gray-800, #2c3138);
       flex-shrink: 0;
       margin-left: 2px;
+      display: flex;
+      align-items: center;
+      transition: transform 0.15s ease;
+    }
+
+    .piece-title-chevron.expanded {
+      transform: rotate(180deg);
+    }
+
+    /* Piece list */
+    .piece-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 16px;
+    }
+
+    .piece-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
+      border: 1px solid var(--layer-2-divider, #e1e3e8);
+      border-radius: 20px;
+      background: none;
+      cursor: pointer;
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--gray-800, #2c3138);
+      letter-spacing: -0.22px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: left;
+      transition: background 0.1s ease;
+    }
+
+    .piece-pill:hover {
+      background: rgba(0, 0, 0, 0.03);
+    }
+
+    .piece-pill.active {
+      border-color: var(--accent-blue, #4979fa);
+      color: var(--accent-blue, #4979fa);
     }
 
     /* Menu items */
@@ -374,6 +438,99 @@ export class XHeaderView extends BaseView {
   @state()
   private menuOpen = false;
 
+  @state()
+  private pieceListExpanded = false;
+
+  @state()
+  private _serverFavorites: readonly FavoriteEntry[] = [];
+
+  @state()
+  private _localIsFavorite: boolean | undefined = undefined;
+
+  private _unsubscribeFavorites: (() => void) | undefined;
+
+  private _setupFavoritesSubscription(): void {
+    this._cleanupFavoritesSubscription();
+    if (!this.rt) return;
+    this._unsubscribeFavorites = this.rt.favorites().subscribeFavorites(
+      (favorites) => {
+        this._serverFavorites = favorites;
+        this._localIsFavorite = undefined;
+        this.requestUpdate();
+      },
+    );
+  }
+
+  private _cleanupFavoritesSubscription(): void {
+    if (this._unsubscribeFavorites) {
+      this._unsubscribeFavorites();
+      this._unsubscribeFavorites = undefined;
+    }
+  }
+
+  private _isFavorite(): boolean {
+    if (this._localIsFavorite !== undefined) {
+      return this._localIsFavorite;
+    }
+    if (!this.pieceId) return false;
+    return this._serverFavorites.some(
+      (f) =>
+        (f.cell as unknown as CellHandle<unknown>).id() === this.pieceId,
+    );
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this._setupFavoritesSubscription();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._cleanupFavoritesSubscription();
+  }
+
+  protected override willUpdate(changedProperties: PropertyValues): void {
+    if (changedProperties.has("rt")) {
+      this._serverFavorites = [];
+      this._localIsFavorite = undefined;
+      this._setupFavoritesSubscription();
+    }
+    if (changedProperties.has("pieceId")) {
+      this._localIsFavorite = undefined;
+    }
+  }
+
+  private _pieces = new Task(this, {
+    task: async ([rt]): Promise<PieceItem[]> => {
+      if (!rt) return [];
+      await rt.synced();
+      const piecesListCell = await rt.getPiecesListCell();
+      await piecesListCell.sync();
+      const piecesList = piecesListCell.get() as any[];
+      if (!piecesList) return [];
+
+      const items: PieceItem[] = [];
+      for (const pieceData of piecesList) {
+        const id = pieceData?.id?.() ?? pieceData?.$ID;
+        if (!id) continue;
+        try {
+          const page = await rt.getPattern(id);
+          // Sync the cell to ensure name data is available
+          await page.cell().sync();
+          const name = page.name();
+          items.push({
+            id: page.id(),
+            name: name ?? `Piece #${page.id().slice(0, 6)}`,
+          });
+        } catch {
+          // Skip pieces that can't be resolved
+        }
+      }
+      return items;
+    },
+    args: () => [this.rt],
+  });
+
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -437,10 +594,30 @@ export class XHeaderView extends BaseView {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = false;
+    this.pieceListExpanded = false;
   }
 
   private handleBackdropClick() {
     this.menuOpen = false;
+    this.pieceListExpanded = false;
+  }
+
+  private handleTogglePieceList(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.pieceListExpanded = !this.pieceListExpanded;
+  }
+
+  private handlePieceClick(piece: PieceItem) {
+    return (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.menuOpen = false;
+      this.pieceListExpanded = false;
+      if (this.spaceName) {
+        navigate({ spaceName: this.spaceName, pieceId: piece.id });
+      }
+    };
   }
 
   private handleGoToWorkspace(e: Event) {
@@ -461,21 +638,28 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
-  private async handleAddToFavorites(e: Event) {
+  private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (this.rt && this.pieceId) {
-      try {
+    if (!this.rt || !this.pieceId) return;
+
+    const currentlyFavorite = this._isFavorite();
+    this._localIsFavorite = !currentlyFavorite;
+
+    try {
+      if (currentlyFavorite) {
+        await this.rt.favorites().removeFavorite(this.pieceId);
+      } else {
         await this.rt.favorites().addFavorite(
           this.pieceId,
           undefined,
           this.rt.spaceName(),
         );
-      } catch (err) {
-        console.error("[HeaderView] Error adding favorite:", err);
       }
+    } catch (err) {
+      console.error("[HeaderView] Error toggling favorite:", err);
+      this._localIsFavorite = undefined;
     }
-    this.menuOpen = false;
   }
 
   private getConnectionStatus(): ConnectionStatus {
@@ -533,9 +717,10 @@ export class XHeaderView extends BaseView {
     `;
   }
 
-  private iconStar() {
+  private iconStar(filled = false) {
     return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}"
+        xmlns="http://www.w3.org/2000/svg">
         <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
           stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round"/>
@@ -585,6 +770,27 @@ export class XHeaderView extends BaseView {
         <path d="M21 12H9" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
+    `;
+  }
+
+  private renderPieceList() {
+    const pieces = this._pieces.value ?? [];
+    if (pieces.length === 0) {
+      return html`
+        <div class="piece-list">
+          <span class="breadcrumb-text">No pieces found</span>
+        </div>
+      `;
+    }
+    return html`
+      <div class="piece-list">
+        ${pieces.map((piece) => html`
+          <button
+            class="piece-pill ${piece.id === this.pieceId ? "active" : ""}"
+            @click="${this.handlePieceClick(piece)}"
+          >${piece.name}</button>
+        `)}
+      </div>
     `;
   }
 
@@ -651,14 +857,16 @@ export class XHeaderView extends BaseView {
               `
         : nothing
     }
-            <div class="piece-title-row">
+            <div class="piece-title-row"
+              @click="${this.handleTogglePieceList}">
               <span class="piece-title-text">
                 ${this.pieceTitle || "Untitled"}
               </span>
-              <span class="piece-title-chevron">
+              <span class="piece-title-chevron ${this.pieceListExpanded ? "expanded" : ""}">
                 ${this.iconChevronDown()}
               </span>
             </div>
+            ${this.pieceListExpanded ? this.renderPieceList() : nothing}
           </div>
 
           <div class="menu-rows">
@@ -674,9 +882,9 @@ export class XHeaderView extends BaseView {
       this.pieceId
         ? html`
                 <button class="menu-item"
-                  @click="${this.handleAddToFavorites}">
-                  <span class="menu-item-icon">${this.iconStar()}</span>
-                  <span class="menu-item-label">Add to Favorites</span>
+                  @click="${this.handleToggleFavorite}">
+                  <span class="menu-item-icon">${this.iconStar(this._isFavorite())}</span>
+                  <span class="menu-item-label">${this._isFavorite() ? "Remove from Favorites" : "Add to Favorites"}</span>
                 </button>
               `
         : nothing
