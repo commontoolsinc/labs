@@ -857,6 +857,12 @@ Primary docs:
       live `fetchData` builtin to use it.
 - [x] Step J.10: add the conservative fetch auth placement guard that the sink
       gate will need before live builtin wiring.
+- [x] Step J.11: propagate successful `fetchData` result labels from persisted
+      request labels, using sink-scoped request rewrite rules loaded from the
+      request schema blob rather than only link-local schema hints.
+- [x] Step J.12: mint `AuthorizedRequest` and `NetworkProvenance` integrity on
+      fetch results and expose those labels on the resolved result cell the
+      runtime returns.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

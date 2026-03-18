@@ -1,6 +1,9 @@
+import { canonicalHash } from "@commontools/memory/canonical-hash";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type { NormalizedFetchDataInputs } from "../builtins/fetch-request.ts";
 import type { CfcIntentRequestSemantics } from "./intent-binding.ts";
 import { computeCfcIntentPayloadDigest } from "./intent-refinement.ts";
+import { toHex } from "./shared.ts";
 
 export interface DeriveCfcFetchRequestSemanticsOptions {
   readonly endpoint?: string;
@@ -40,4 +43,11 @@ export function deriveCfcFetchRequestSemantics(
       "X-Idempotency-Key",
     ),
   };
+}
+
+export function computeCfcFetchRequestDigest(
+  semantics: CfcIntentRequestSemantics,
+): string {
+  const hash = canonicalHash(storableFromNativeValue(semantics));
+  return `cfc:fetch-request:${toHex(hash.hash)}`;
 }

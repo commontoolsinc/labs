@@ -131,8 +131,19 @@ The fetch path also now has a conservative authorization-placement guard:
 1. The same auth token must appear in `Authorization` and nowhere else in the
    normalized request.
 2. Query-string reuse, body reuse, or reuse in another header fails closed.
-3. This is intentionally only the structural half of the sink gate; it does not
-   yet mint `AuthorizedRequest` or perform full endpoint policy rewriting.
+3. This remains only the structural half of the sink gate for request-shape
+   validation; broader sink policies like error sanitization are still deferred.
+
+`fetchData` now also propagates result labels from persisted request labels:
+
+1. The fetch sink loads request labels from the resolved request cell and loads
+   sink-scoped rewrite rules from the persisted schema-hash/blob path.
+2. Successful fetches aggregate request confidentiality, apply any matching
+   `allowedSink = "fetchData"` rewrites, and preserve unmatched request taint.
+3. The runtime mints `AuthorizedRequest` when a sink rule fires and always mints
+   `NetworkProvenance` for labeled fetch responses.
+4. Those labels are written onto the resolved result cell, so callers observe
+   the same CFC state through `result.key("result").resolveAsCell()`.
 
 ## Internal Verifier Read Marker
 

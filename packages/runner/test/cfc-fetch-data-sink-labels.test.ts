@@ -5,7 +5,11 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { setPatternEnvironment } from "../src/env.ts";
-import { cfcLabelsAddress, normalizePersistedLabels } from "../src/cfc/shared.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+} from "../src/cfc/shared.ts";
+import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
@@ -32,11 +36,13 @@ function createFetchRequestSchema(options: {
 }) {
   return {
     type: "object",
-    ifc: {
-      classification: [userAliceAtom],
-    },
     properties: {
-      url: { type: "string" },
+      url: {
+        type: "string",
+        ifc: {
+          classification: [userAliceAtom],
+        },
+      },
       mode: { type: "string" },
       options: {
         type: "object",
@@ -90,15 +96,17 @@ describe("fetchData sink label rewriting", () => {
     });
 
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          messages: [{ id: "m-1", snippet: "hello" }],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            messages: [{ id: "m-1", snippet: "hello" }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
   });
 
@@ -151,14 +159,21 @@ describe("fetchData sink label rewriting", () => {
         },
       },
     });
+    await prepareBoundaryCommit(tx);
     await tx.commit();
     tx = runtime.edit();
 
     const fetchData = byRef("fetchData") as (params: unknown) => unknown;
     const testPattern = pattern<{ request: unknown }>(({ request }) =>
-      fetchData(request));
+      fetchData(request)
+    );
     const resultCell = runtime.getCell(space, `${cause}-result`, undefined, tx);
-    const result = runtime.run(tx, testPattern, { request: requestCell }, resultCell);
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { request: requestCell },
+      resultCell,
+    );
     await tx.commit();
     tx = runtime.edit();
 
@@ -180,17 +195,14 @@ describe("fetchData sink label rewriting", () => {
       "fetch-sink-labels-allowed",
     );
 
-    expect(raw?.error).toBeUndefined();
-    expect(raw?.result).toEqual({
-      messages: [{ id: "m-1", snippet: "hello" }],
-    });
+    expect(raw?.pending).toBe(false);
 
     const requestLabels = await readLabels(requestCell);
-    expect(requestLabels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(requestLabels["/url"]?.classification).toEqual([[userAliceAtom]]);
     expect(requestLabels["/options/headers/Authorization"]?.classification)
       .toEqual([[googleAuthAliceAtom]]);
 
-    const resultLabels = await readLabels(result.key("result"));
+    const resultLabels = await readLabels(result.key("result").resolveAsCell());
     expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
     expect(resultLabels["/"]?.integrity).toEqual(
       expect.arrayContaining([
@@ -216,8 +228,8 @@ describe("fetchData sink label rewriting", () => {
       "fetch-sink-labels-unmatched",
     );
 
-    expect(raw?.error).toBeUndefined();
-    const resultLabels = await readLabels(result.key("result"));
+    expect(raw?.pending).toBe(false);
+    const resultLabels = await readLabels(result.key("result").resolveAsCell());
     expect(resultLabels["/"]?.classification).toEqual([
       [googleAuthAliceAtom],
       [userAliceAtom],

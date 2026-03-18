@@ -16,7 +16,7 @@ export function consumedReadEntityKey(read: CanonicalBoundaryRead): string {
   return cfcEntityKey(read);
 }
 
-function effectiveLabelForPath(
+export function effectiveLabelForPath(
   labelsByPath: Record<string, Labels>,
   path: string,
 ): Labels | undefined {

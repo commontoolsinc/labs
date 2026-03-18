@@ -18,6 +18,10 @@ import {
 } from "../cfc/fetch-auth-structure.ts";
 import { commitCfcFetchIntentWithRetries } from "../cfc/fetch-intent-commit.ts";
 import {
+  deriveFetchSinkResultLabels,
+  writeFetchResultLabels,
+} from "../cfc/fetch-sink-labels.ts";
+import {
   type FetchDataInputs,
   type NormalizedFetchDataInputs,
   snapshotFetchDataInputs,
@@ -246,6 +250,7 @@ export function fetchData(
           startFetch(
             runtime,
             parentCell.space,
+            parentCell,
             inputsCell,
             normalizedInputs,
             inputHash,
@@ -264,6 +269,7 @@ export function fetchData(
 async function startFetch(
   runtime: Runtime,
   space: MemorySpace,
+  parentCell: Cell<any>,
   inputsCell: Cell<FetchDataInputs>,
   inputs: NormalizedFetchDataInputs,
   inputHash: string,
@@ -359,6 +365,12 @@ async function startFetch(
       await runtime.idle();
 
       if (commitResult.success) {
+        const sinkLabels = await deriveFetchSinkResultLabels(
+          runtime,
+          inputsCell,
+          inputs,
+          { endpoint: cfc.endpoint },
+        );
         await tryWriteResult(
           runtime,
           internal,
@@ -368,6 +380,17 @@ async function startFetch(
             pending.withTx(tx).set(false);
             result.withTx(tx).set(commitResult.result);
             error.withTx(tx).set(undefined);
+            writeFetchResultLabels(tx, result, sinkLabels);
+            writeFetchResultLabels(tx, parentCell, sinkLabels, "/result");
+            const publicResultCell = parentCell.getSourceCell();
+            if (publicResultCell) {
+              writeFetchResultLabels(
+                tx,
+                publicResultCell,
+                sinkLabels,
+                "/result",
+              );
+            }
           },
           snapshotFetchDataInputs,
         );
@@ -387,6 +410,12 @@ async function startFetch(
     );
 
     const data = await processResponse(response);
+    const sinkLabels = await deriveFetchSinkResultLabels(
+      runtime,
+      inputsCell,
+      inputs,
+      { endpoint: cfc?.endpoint },
+    );
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
@@ -399,6 +428,12 @@ async function startFetch(
         pending.withTx(tx).set(false);
         result.withTx(tx).set(data);
         error.withTx(tx).set(undefined);
+        writeFetchResultLabels(tx, result, sinkLabels);
+        writeFetchResultLabels(tx, parentCell, sinkLabels, "/result");
+        const publicResultCell = parentCell.getSourceCell();
+        if (publicResultCell) {
+          writeFetchResultLabels(tx, publicResultCell, sinkLabels, "/result");
+        }
       },
       snapshotFetchDataInputs,
     );
