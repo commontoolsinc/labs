@@ -22,7 +22,11 @@ import {
   deriveFetchSinkResultLabels,
   writeFetchResultLabels,
 } from "../cfc/fetch-sink-labels.ts";
-import type { CfcAtom } from "../cfc/label-algebra.ts";
+import {
+  type CfcAtom,
+  joinIntegrityLabels,
+  normalizeIntegrityLabel,
+} from "../cfc/label-algebra.ts";
 import {
   type FetchDataInputs,
   type NormalizedFetchDataInputs,
@@ -330,7 +334,9 @@ async function startFetch(
         inputs,
         async (attemptNumber) => {
           try {
-            let additionalRequestIntegrity: readonly CfcAtom[] = [];
+            let additionalRequestIntegrity = normalizeIntegrityLabel(
+              intent.integrity,
+            ) ?? [];
             if (intent.targetPrincipal) {
               const requestAudience = new URL(
                 url,
@@ -350,13 +356,17 @@ async function startFetch(
                   terminal: true,
                 };
               }
-              additionalRequestIntegrity = [
-                {
-                  type: "https://commonfabric.org/cfc/atom/AudienceRepresents",
-                  principal: intent.targetPrincipal,
-                  audience: requestAudience,
-                },
-              ];
+              additionalRequestIntegrity = joinIntegrityLabels(
+                additionalRequestIntegrity,
+                [
+                  {
+                    type:
+                      "https://commonfabric.org/cfc/atom/AudienceRepresents",
+                    principal: intent.targetPrincipal,
+                    audience: requestAudience,
+                  },
+                ],
+              ) ?? additionalRequestIntegrity;
             }
 
             const requestAuthorized = await authorizeFetchSinkRequest(

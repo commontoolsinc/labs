@@ -14,7 +14,10 @@ import {
 } from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
-import type { IExtendedStorageTransaction, Labels } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  Labels,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example agentic email test",
@@ -205,7 +208,12 @@ describe("CFC worked example: agentic email send", () => {
   }
 
   async function runEmailSend(intent = createEmailSendIntent()) {
-    const requestCell = runtime.getCell(space, "agentic-email-request", emailRequestSchema, tx);
+    const requestCell = runtime.getCell(
+      space,
+      "agentic-email-request",
+      emailRequestSchema,
+      tx,
+    );
     requestCell.withTx(tx).set({
       url: `${sinkAudience}/send`,
       mode: "json",
@@ -233,8 +241,18 @@ describe("CFC worked example: agentic email send", () => {
     const testPattern = pattern<{ request: unknown }>(({ request }) =>
       fetchData(request)
     );
-    const resultCell = runtime.getCell(space, "agentic-email-result", undefined, tx);
-    const result = runtime.run(tx, testPattern, { request: requestCell }, resultCell);
+    const resultCell = runtime.getCell(
+      space,
+      "agentic-email-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { request: requestCell },
+      resultCell,
+    );
     const committed = await tx.commit();
     expect(committed.error).toBeUndefined();
     tx = runtime.edit();
@@ -257,8 +275,10 @@ describe("CFC worked example: agentic email send", () => {
     });
     expect(fetchCalls.length).toBe(1);
 
-    const resultLabels = await readLabels(result.key("result").resolveAsCell()
-      .getAsNormalizedFullLink());
+    const resultLabels = await readLabels(
+      result.key("result").resolveAsCell()
+        .getAsNormalizedFullLink(),
+    );
     expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
     expect(resultLabels["/"]?.integrity).toEqual(
       expect.arrayContaining([

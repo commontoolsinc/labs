@@ -209,6 +209,10 @@ Intent-backed fetch sends now also have a live request-side sink gate:
 4. The same fresh `AudienceRepresents(...)` atom is persisted onto successful
    fetch results alongside the existing `AuthorizedRequest` and
    `NetworkProvenance` evidence.
+5. Trusted integrity carried on the refined intent itself is also included in
+   that request-side gate and persisted result integrity. This lets agentic
+   email body rules require disclaimer/acknowledgment atoms without treating
+   the untrusted report text as routing authority.
 
 That is now covered by a return-to-sender slice:
 
@@ -219,6 +223,16 @@ That is now covered by a return-to-sender slice:
 3. With a matching rule and a fresh `AudienceRepresents(hotel, audience)`
    verification, only the `AuthoredBy(...)` clause is cleared for the send,
    while the result still carries `User(Alice)` confidentiality.
+
+That same mechanism now covers a narrow agentic email slice too:
+
+1. A refined email-send intent may carry trusted
+   `SinkContentDisclaimerAttached(...)` integrity.
+2. A request-body field tainted with `Caveat(kind = PROMPT_INFLUENCE, ...)`
+   remains blocked unless the request schema's fetch sink rule sees that
+   disclaimer atom.
+3. The recipient field stays controlled by the trusted intent binding, while
+   body release is authorized separately through the disclaimer evidence.
 
 A fact-check assurance slice is also now covered:
 

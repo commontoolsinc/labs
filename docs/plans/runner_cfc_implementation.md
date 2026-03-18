@@ -727,6 +727,7 @@ Primary test location:
       once-per-handler dedup, and unchanged legacy raw-event behavior.
 - [x] `cfc-worked-example-return-to-sender.test.ts`
 - [x] `cfc-direct-command-intent.test.ts`
+- [x] `cfc-worked-example-agentic-email.test.ts`
 
 ### 11.6 Schema Hash Tests
 
@@ -839,6 +840,10 @@ Primary docs:
 - [x] Confirm only a trusted direct-command surface can refine a root
       agent-side `IntentOnce`; same-user context surfaces and other-user text
       fail closed.
+- [x] Confirm live fetch sink authorization can consume trusted disclaimer /
+      acknowledgment atoms carried on the refined intent integrity chain, so
+      agentic email body release does not require reading untrusted content in
+      the orchestrator.
 - [-] Confirm direct CAS writes append boundary-computed effective labels only.
 - [-] Confirm direct CAS reads require exact `expectedLabel` match plus
       principal readability.
@@ -929,6 +934,9 @@ Primary docs:
 - [x] Step J.25: add a direct-command authority helper that only refines root
       agent intents from trusted `UserSurfaceInput` +
       `PromptSlotBound(role = "direct-command")` + trusted kernel evidence.
+- [x] Step J.26: include refined-intent integrity in the live fetch sink gate
+      so agentic email body rules can require disclaimer/acknowledgment atoms
+      without routing authority through the untrusted report text.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
