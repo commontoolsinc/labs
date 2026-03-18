@@ -12,11 +12,7 @@ import {
   normalizeConfidentialityLabel,
   normalizeIntegrityLabel,
 } from "./label-algebra.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-  toHex,
-} from "./shared.ts";
+import { cfcLabelsAddress, normalizePersistedLabels, toHex } from "./shared.ts";
 
 const CFC_CAS_BLOB_MEDIA_TYPE = "application/json";
 const CFC_CAS_LABEL_BINDING_MEDIA_TYPE = "application/json";

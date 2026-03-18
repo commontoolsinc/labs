@@ -59,8 +59,9 @@ export async function commitCfcIntentWithRetries<T>(
     return {
       success: true,
       deduplicated: true,
-      result: (consumedRecord.committedResult as CfcIntentCommitResult | undefined)
-        ?.result,
+      result:
+        (consumedRecord.committedResult as CfcIntentCommitResult | undefined)
+          ?.result,
     };
   }
 
@@ -110,9 +111,10 @@ export async function commitCfcIntentWithRetries<T>(
       return {
         success: true,
         deduplicated: true,
-        result:
-          (consumedClaim.record as { committedResult?: CfcIntentCommitResult } | undefined)
-            ?.committedResult?.result,
+        result: (consumedClaim.record as
+          | { committedResult?: CfcIntentCommitResult }
+          | undefined)
+          ?.committedResult?.result,
       };
     }
 
@@ -127,9 +129,10 @@ export async function commitCfcIntentWithRetries<T>(
         return {
           success: true,
           deduplicated: true,
-          result:
-            (consumedClaim.record as { committedResult?: CfcIntentCommitResult } | undefined)
-              ?.committedResult?.result,
+          result: (consumedClaim.record as
+            | { committedResult?: CfcIntentCommitResult }
+            | undefined)
+            ?.committedResult?.result,
         };
       }
       return {

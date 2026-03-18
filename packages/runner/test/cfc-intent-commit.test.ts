@@ -72,10 +72,12 @@ describe("CFC intent commit helper", () => {
       intent,
       (attemptNumber: number) => {
         seenAttempts.push(attemptNumber);
-        return Promise.resolve({
-          success: attemptNumber === 3,
-          error: attemptNumber === 3 ? undefined : "temporary_failure",
-        } satisfies CfcIntentCommitResult);
+        return Promise.resolve(
+          {
+            success: attemptNumber === 3,
+            error: attemptNumber === 3 ? undefined : "temporary_failure",
+          } satisfies CfcIntentCommitResult,
+        );
       },
       { now: () => now },
     );
@@ -117,7 +119,9 @@ describe("CFC intent commit helper", () => {
       intent,
       () => {
         executions++;
-        return Promise.resolve({ success: true } satisfies CfcIntentCommitResult);
+        return Promise.resolve(
+          { success: true } satisfies CfcIntentCommitResult,
+        );
       },
       { now: () => now },
     );
@@ -141,7 +145,9 @@ describe("CFC intent commit helper", () => {
       intent,
       () => {
         executions++;
-        return Promise.resolve({ success: true } satisfies CfcIntentCommitResult);
+        return Promise.resolve(
+          { success: true } satisfies CfcIntentCommitResult,
+        );
       },
       { now: () => now },
     );

@@ -1,12 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
+import { createCfcIntentOnce } from "../src/cfc/intent-refinement.ts";
 import {
-  createCfcIntentOnce,
-} from "../src/cfc/intent-refinement.ts";
-import {
-  intentRequestSemanticsMatch,
   type CfcIntentRequestSemantics,
+  intentRequestSemanticsMatch,
 } from "../src/cfc/intent-binding.ts";
 
 describe("CFC intent request binding", () => {

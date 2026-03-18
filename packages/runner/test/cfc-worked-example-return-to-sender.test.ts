@@ -210,7 +210,12 @@ describe("CFC worked example: return-to-sender", () => {
     entityId: string,
   ) {
     const intent = createReturnIntent(Date.now());
-    const requestCell = runtime.getCell(space, `${entityId}-request`, schema, tx);
+    const requestCell = runtime.getCell(
+      space,
+      `${entityId}-request`,
+      schema,
+      tx,
+    );
     requestCell.withTx(tx).set({
       url: `${hotelAudience}/membership/return`,
       mode: "json",
@@ -237,8 +242,18 @@ describe("CFC worked example: return-to-sender", () => {
     const testPattern = pattern<{ request: unknown }>(({ request }) =>
       fetchData(request)
     );
-    const resultCell = runtime.getCell(space, `${entityId}-result`, undefined, tx);
-    const result = runtime.run(tx, testPattern, { request: requestCell }, resultCell);
+    const resultCell = runtime.getCell(
+      space,
+      `${entityId}-result`,
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { request: requestCell },
+      resultCell,
+    );
     const committed = await tx.commit();
     expect(committed.error).toBeUndefined();
     tx = runtime.edit();
@@ -288,8 +303,10 @@ describe("CFC worked example: return-to-sender", () => {
     });
     expect(fetchCalls.length).toBe(1);
 
-    const resultLabels = await readLabels(result.key("result").resolveAsCell()
-      .getAsNormalizedFullLink());
+    const resultLabels = await readLabels(
+      result.key("result").resolveAsCell()
+        .getAsNormalizedFullLink(),
+    );
     expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
     expect(resultLabels["/"]?.integrity).toEqual(
       expect.arrayContaining([

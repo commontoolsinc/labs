@@ -51,7 +51,7 @@ async function seedRuntime(
   sourceName: string,
   targetName: string,
 ): Promise<{ source: Cell<number>; target: Cell<number> }> {
-  let tx = runtime.edit();
+  const tx = runtime.edit();
   const source = runtime.getCell<number>(space, sourceName, undefined, tx);
   const target = runtime.getCell<number>(space, targetName, undefined, tx);
   source.set(1);
