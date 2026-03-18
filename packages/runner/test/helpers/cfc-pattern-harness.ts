@@ -3,9 +3,14 @@ import type { Signer } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createBuilder } from "../../src/builder/factory.ts";
 import type { JSONSchema, Pattern } from "../../src/builder/types.ts";
+import type { Cell } from "../../src/cell.ts";
+import { effectiveLabelForPath } from "../../src/cfc/consumed-input-labels.ts";
+import { canonicalizeStoragePath } from "../../src/cfc/canonical-activity.ts";
+import { internalVerifierReadAnnotations } from "../../src/cfc/internal-markers.ts";
 import { setPatternEnvironment } from "../../src/env.ts";
 import { prepareBoundaryCommit } from "../../src/cfc/prepare-engine.ts";
 import { prepareCfcCommitIfNeeded } from "../../src/cfc/prepare-shim.ts";
+import { resolveLink } from "../../src/link-resolution.ts";
 import {
   cfcLabelsAddress,
   normalizePersistedLabels,
@@ -16,6 +21,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   Labels,
+  MediaType,
   MemorySpace,
   URI,
 } from "../../src/storage/interface.ts";
@@ -232,6 +238,38 @@ export class CfcPatternTestHarness {
     );
     await tx.abort("label-inspection-complete");
     return normalizePersistedLabels(raw);
+  }
+
+  async readEffectiveLabel<T>(
+    cell: Cell<T>,
+    schema?: JSONSchema,
+  ): Promise<Labels | undefined> {
+    const tx = this.runtime.edit();
+    try {
+      const resolved = resolveLink(
+        this.runtime,
+        tx,
+        cell.withTx(tx).asSchema(schema).getAsNormalizedFullLink(),
+      );
+      const labelsByPath = normalizePersistedLabels(
+        tx.readOrThrow(
+          cfcLabelsAddress({
+            space: resolved.space as MemorySpace,
+            id: resolved.id as URI,
+            type: resolved.type as MediaType,
+          }),
+          {
+            cfc: internalVerifierReadAnnotations,
+          },
+        ),
+      );
+      return effectiveLabelForPath(
+        labelsByPath,
+        canonicalizeStoragePath(resolved.path),
+      );
+    } finally {
+      await tx.abort("effective-label-inspection-complete");
+    }
   }
 
   async runPattern<TInputs extends Record<string, unknown>>(

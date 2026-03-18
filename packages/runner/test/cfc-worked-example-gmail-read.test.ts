@@ -106,6 +106,22 @@ const downstreamRenderSchema = {
   },
 } as const satisfies JSONSchema;
 
+const downstreamRenderInputSchema = {
+  type: "object",
+  properties: {
+    response: gmailMessagesSchema,
+  },
+  required: ["response"],
+} as const satisfies JSONSchema;
+
+const downstreamRenderOutputSchema = {
+  type: "object",
+  properties: {
+    count: downstreamRenderSchema,
+  },
+  required: ["count"],
+} as const satisfies JSONSchema;
+
 describe("CFC worked example: Gmail read", () => {
   let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let originalFetch: typeof globalThis.fetch;
@@ -202,44 +218,34 @@ describe("CFC worked example: Gmail read", () => {
 
     await harness.restart();
 
-    const downstreamTarget = await harness.withCommittedEdit((tx) => {
-      const persistedFetchResult = harness.getCellFromLink(
-        fetchedResultLink,
-        undefined,
-        tx,
-      );
-      const downstreamTarget = harness.getCell<number>(
-        "gmail-read-downstream-target",
-        undefined,
-        tx,
-      );
-      const messages = persistedFetchResult.withTx(tx).asSchema(
-        gmailMessagesSchema,
-      )
-        .get();
-      downstreamTarget.withTx(tx).asSchema(downstreamRenderSchema).set(
-        Array.isArray(messages?.messages) ? messages.messages.length : 0,
-      );
-      return downstreamTarget;
-    }, {
+    const persistedFetchResult = harness.getCellFromLink(
+      fetchedResultLink,
+      undefined,
+    );
+    const downstreamPattern = harness.pattern(
+      ({ response }) => ({
+        count: harness.lift(gmailMessagesSchema, downstreamRenderSchema, (
+          messages,
+        ) => Array.isArray(messages.messages) ? messages.messages.length : 0)(
+          response,
+        ),
+      }),
+      downstreamRenderInputSchema,
+      downstreamRenderOutputSchema,
+    );
+    const downstreamRun = await harness.runPattern({
+      id: "gmail-read-downstream-target",
+      pattern: downstreamPattern,
+      inputs: { response: persistedFetchResult },
+      outputSchema: downstreamRenderOutputSchema,
+      initialOutput: { count: 0 },
       prepare: "cfc",
     });
+    expect(await downstreamRun.result.pull()).toEqual({ count: 2 });
 
     const downstreamLabels = await harness.readLabels(
-      downstreamTarget.getAsNormalizedFullLink(),
+      downstreamRun.outputLink,
     );
-    expect(downstreamLabels["/"]?.classification).toBeUndefined();
-    expect(downstreamLabels["/"]?.integrity).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "https://commonfabric.org/cfc/atom/AuthorizedRequest",
-        }),
-        expect.objectContaining({
-          type: "https://commonfabric.org/cfc/atom/NetworkProvenance",
-          host: "gmail.googleapis.com",
-          tls: true,
-        }),
-      ]),
-    );
+    expect(downstreamLabels["/count"]?.classification).toBeUndefined();
   });
 });

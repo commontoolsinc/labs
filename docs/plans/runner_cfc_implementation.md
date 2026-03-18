@@ -1055,17 +1055,23 @@ Primary files:
 
 - [x] Add a reusable worked-example test harness for pattern-oriented runner
       tests (`packages/runner/test/helpers/cfc-pattern-harness.ts`).
-- [x] Cover fetch/send worked examples with harness-managed runtime setup,
-      fetch stubs, restarts, and label inspection while keeping the main logic
-      inside patterns where the current runner path supports it
-      (`gmail-read`, `gmail-send`, `gmail-error`, `safe-probing`,
-      `return-to-sender`, `return-to-sender-provider-trust`,
-      `agentic-email`, `agentic-fact-checked-email`).
-- [x] Cover durable share-grant worked-example setup/restart via the same
-      harness, including the provenance-disclosure variant.
-- [ ] Close the remaining gap where some policy-rewrite worked-example phases
-      still need harness-managed direct schema writes because pattern output
-      materialization does not yet persist the same integrity additions as the
-      direct schema-write path.
+- [x] Convert the worked-example slices that already map cleanly to real
+      `pattern(...)` programs with harness-managed runtime setup and restarts
+      (`gmail-read`, `gmail-send`, `return-to-sender`,
+      `return-to-sender-provider-trust`, `agentic-email`,
+      `agentic-fact-checked-email`, `fact-check`).
+- [x] Keep durable share-grant/provenance-disclosure setup and restart under
+      the same harness so those tests are ready once pattern-output rewrite
+      propagation is fixed.
+- [ ] Close the remaining pattern-output rewrite propagation gap for policy
+      rewrites that must remain reusable across later pattern reads. Known
+      blocked worked-example conversions:
+      `safe-probing` (lift output declassify not reflected in effective
+      downstream labels),
+      `gmail-error` operator views (sanitizer integrity on direct output vs
+      request/provenance evidence on effective reads diverge),
+      `share-grant` / `share-provenance-disclosure` (policy-state share rewrite
+      succeeds for the produced value but does not yet carry the recipient-added
+      confidentiality into downstream effective labels).
 - [-] `calendar-release` / `runtime-placement` remain direct
       prepare-boundary/runtime-scope tests rather than pattern-flow tests.
