@@ -45,6 +45,47 @@ function hint(message: string, showQuietTip = true) {
   }
 }
 
+function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
+  if (literalArgs.length > 0) {
+    if (literalArgs[0] === "--json") {
+      throw new ValidationError(
+        'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
+      );
+    }
+    return literalArgs;
+  }
+
+  if (tail.length === 0) {
+    return ["--json"];
+  }
+
+  if (tail[0] === "--help") {
+    if (tail.length === 1) {
+      return tail;
+    }
+    if (tail.length === 2 && tail[1] === "--json") {
+      return tail;
+    }
+    throw new ValidationError(
+      'Use "-- --help <value>" to set an input field named "help".',
+    );
+  }
+
+  if (tail[0] === "--json") {
+    throw new ValidationError(
+      'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
+    );
+  }
+
+  if (tail.length > 1) {
+    throw new ValidationError(
+      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    );
+  }
+
+  return ["--json", tail[0]];
+}
+
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
@@ -616,14 +657,12 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
-  .arguments("<callable:string> [args:string]")
-  .action(async (options, callableName, argsJson) => {
+  .stopEarly()
+  .arguments("<callable:string> [tail...:string]")
+  .action(async function (options, callableName, ...tail) {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    const delimiterIndex = Deno.args.indexOf("--");
-    const rawArgs = delimiterIndex === -1
-      ? argsJson ? ["--json", argsJson] : ["--json"]
-      : Deno.args.slice(delimiterIndex + 1);
+    const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
     const result = await executePieceCallable(
       pieceConfig,
       callableName,

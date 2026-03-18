@@ -23,8 +23,8 @@ import {
   normalizeCallableInputForExecution,
   type ParsedExecArgs,
   parseExecArgs,
-  renderExecHelp,
   renderExecHelpJson,
+  renderPieceCallHelp,
 } from "./exec-schema.ts";
 
 export interface EntryConfig {
@@ -461,10 +461,10 @@ export async function executePieceCallable(
     return {
       helpText: parsed.showHelpJson
         ? renderExecHelpJson(resolved.commandSpec)
-        : renderExecHelp(callableName, resolved.commandSpec, {
-          commandPrefix: deps.helpCommandPrefix ??
-            `ct piece call ... ${callableName}`,
-        }),
+        : renderPieceCallHelp(
+          deps.helpCommandPrefix ?? `ct piece call ... ${callableName}`,
+          resolved.commandSpec,
+        ),
       parsed,
       resolved,
     };

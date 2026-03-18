@@ -289,6 +289,23 @@ CALLABLE_PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
 CALLABLE_PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $CALLABLE_PATTERN_SRC)
 echo "Created callable piece: $CALLABLE_PIECE_ID"
 
+CALL_HELP=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
+echo "$CALL_HELP" | grep -q "ct piece call ... search --help" ||
+  error "Top-level callable help should work without the delimiter"
+echo "$CALL_HELP" | grep -q "ct piece call ... search <json>" ||
+  error "Piece-call help should describe JSON input without --json"
+
+CALL_HELP_JSON=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
+echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
+  error "Top-level --help --json should return the machine-readable schema"
+
+REDUNDANT_JSON_ERR=$(mktemp)
+if ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json > /dev/null 2>"$REDUNDANT_JSON_ERR"; then
+  error "Explicit --json should be rejected on ct piece call"
+fi
+grep -q "reads JSON by default" "$REDUNDANT_JSON_ERR" ||
+  error "Redundant --json should explain that piece call already reads JSON by default"
+
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
 if [ "$RESULT" != '"piece-flags"' ]; then

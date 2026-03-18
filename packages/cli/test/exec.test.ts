@@ -8,6 +8,7 @@ import {
   parseExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  renderPieceCallHelp,
 } from "../lib/exec-schema.ts";
 import {
   executeMountedCallableFile,
@@ -464,6 +465,45 @@ describe("renderExecHelpJson", () => {
     expect(schema.callableKind).toBe("tool");
     expect(schema.inputSchema.required).toEqual(["query"]);
     expect(schema.outputSchema.properties.summary.type).toBe("string");
+  });
+});
+
+describe("renderPieceCallHelp", () => {
+  it("renders piece-call help with top-level help lines and JSON input", () => {
+    const help = renderPieceCallHelp(
+      "ct piece call ... search",
+      makeSpec(
+        "tool",
+        {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+          },
+          required: ["query"],
+        },
+        {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      ),
+    );
+
+    expect(help).toContain("ct piece call ... search --help");
+    expect(help).toContain("ct piece call ... search --help --json");
+    expect(help).toContain("ct piece call ... search <json>");
+    expect(help).toContain(
+      "ct piece call ... search -- [run] --query <string>",
+    );
+    expect(help).toContain("JSON input:");
+    expect(help).toContain("Pass inline JSON as the next argument");
+    expect(help).toContain("query: string");
+    expect(help).toContain("help?: string");
+    expect(help).toContain("Flags after `--`:");
+    expect(help).not.toContain("Read the full input object from stdin.");
+    expect(help).not.toContain("ct piece call ... search -- [run] --help");
   });
 });
 

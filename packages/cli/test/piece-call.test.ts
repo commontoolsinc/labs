@@ -148,7 +148,20 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.helpText).toContain(
-      "ct piece call ... search [run] --query <string>",
+      "ct piece call ... search --help",
+    );
+    expect(result.helpText).toContain(
+      "ct piece call ... search -- [run] --query <string>",
+    );
+    expect(result.helpText).toContain("JSON input:");
+    expect(result.helpText).toContain("Pass inline JSON as the next argument");
+    expect(result.helpText).toContain("query: string");
+    expect(result.helpText).toContain("Flags after `--`:");
+    expect(result.helpText).not.toContain(
+      "Read the full input object from stdin.",
+    );
+    expect(result.helpText).not.toContain(
+      "ct piece call ... search -- [run] --help",
     );
     expect(result.helpText).not.toContain("ct exec");
   });

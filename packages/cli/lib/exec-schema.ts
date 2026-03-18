@@ -732,3 +732,135 @@ export function renderExecHelp(
 
   return lines.join("\n");
 }
+
+function schemaShapeString(
+  schema: JSONSchema,
+  depth = 0,
+): string {
+  if (depth >= 4) {
+    return "{...}";
+  }
+
+  if (!isSchemaObject(schema)) {
+    return "unknown";
+  }
+
+  if (Array.isArray(schema.enum)) {
+    return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
+  }
+
+  const unionSchemas = Array.isArray(schema.anyOf)
+    ? schema.anyOf
+    : Array.isArray(schema.oneOf)
+    ? schema.oneOf
+    : null;
+  if (unionSchemas) {
+    return unionSchemas.map((variant) =>
+      schemaShapeString(variant as JSONSchema, depth + 1)
+    ).join(" | ");
+  }
+
+  const type = schemaType(schema);
+  if (type === "string") return "string";
+  if (type === "number" || type === "integer") return "number";
+  if (type === "boolean") return "boolean";
+  if (type === "null") return "null";
+
+  if (type === "array") {
+    const items = isSchemaObject(schema)
+      ? schema.items as JSONSchema
+      : undefined;
+    return `${items ? schemaShapeString(items, depth + 1) : "unknown"}[]`;
+  }
+
+  const properties = objectProperties(schema);
+  if (!properties) {
+    return "unknown";
+  }
+
+  const keys = Object.keys(properties).filter((key) => !key.startsWith("$"));
+  if (keys.length === 0) {
+    return "{}";
+  }
+
+  const required = requiredFlags(schema);
+  const lines = keys.map((key) => {
+    const propSchema = properties[key];
+    return `${"  ".repeat(depth + 1)}${key}${required.has(key) ? "" : "?"}: ${
+      schemaShapeString(propSchema, depth + 1)
+    }`;
+  });
+
+  return `{\n${lines.join("\n")}\n${"  ".repeat(depth)}}`;
+}
+
+function pieceJsonUsageLine(commandPrefix: string): string {
+  return `${commandPrefix} <json>`;
+}
+
+function pieceFlagUsageLine(
+  commandPrefix: string,
+  spec: ExecCommandSpec,
+): string {
+  return usageLine(commandPrefix, spec, "ct", `${commandPrefix} --`);
+}
+
+function pieceUsageLines(
+  commandPrefix: string,
+  spec: ExecCommandSpec,
+): string[] {
+  return [
+    `  ${commandPrefix} --help`,
+    `  ${commandPrefix} --help --json`,
+    `  ${pieceJsonUsageLine(commandPrefix)}`,
+    `  ${pieceFlagUsageLine(commandPrefix, spec)}`,
+  ];
+}
+
+function pieceJsonInputLines(schema: JSONSchema): string[] {
+  return [
+    "  Pass inline JSON as the next argument, or pipe JSON on stdin.",
+    ...schemaShapeString(schema).split("\n").map((line) => `  ${line}`),
+  ];
+}
+
+export function renderPieceCallHelp(
+  commandPrefix: string,
+  spec: ExecCommandSpec,
+): string {
+  const specificFlags = specificFlagLines(spec.inputSchema);
+  const lines = [
+    "Usage:",
+    ...pieceUsageLines(commandPrefix, spec),
+    "",
+    "JSON input:",
+    ...pieceJsonInputLines(spec.inputSchema),
+  ];
+
+  if (specificFlags.length > 0) {
+    lines.push("");
+    lines.push("Flags after `--`:");
+    lines.push(...specificFlags);
+  }
+
+  if (spec.callableKind === "handler") {
+    lines.push("");
+    lines.push("Output:");
+    lines.push("  No output on success.");
+    lines.push("");
+    lines.push("Alternatively, write JSON to this file to invoke the handler.");
+    if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
+      lines.push("Invoke alone will call the handler without any inputs.");
+    }
+  } else if (spec.outputSchemaSummary !== undefined) {
+    lines.push("");
+    lines.push("Output:");
+    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
+  } else if (spec.callableKind === "tool") {
+    lines.push("");
+    lines.push("Output:");
+    lines.push("  JSON on success.");
+  }
+
+  return lines.join("\n");
+}
