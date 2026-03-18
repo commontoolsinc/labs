@@ -601,26 +601,42 @@ export class Runtime {
   }
 
   /**
-   * Returns the given transaction if it is ready, otherwise returns a read-only
-   * transaction for fallback reads.
+   * Returns the given transaction if it is ready, otherwise creates a new
+   * ambient read transaction.
    */
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
     if (tx?.status().status === "ready") {
       return tx;
     }
     if (this.memoryVersion !== "v2") {
-      return createReadOnlyTransaction(this.edit());
+      return this.edit();
     }
-    if (
-      this.#ambientReadTx?.status().status === "ready" &&
-      this.#ambientReadOnlyTx
-    ) {
-      return this.#ambientReadOnlyTx;
+    if (this.#ambientReadTx?.status().status === "ready") {
+      return this.#ambientReadTx;
     }
     const ambient = this.edit();
     this.#ambientReadTx = ambient;
-    this.#ambientReadOnlyTx = createReadOnlyTransaction(ambient);
-    return this.#ambientReadOnlyTx;
+    return ambient;
+  }
+
+  /**
+   * Returns a read-only wrapper around a readable transaction. Use this when a
+   * caller should be able to read through the runtime fallback path but should
+   * never be able to mutate or commit the returned transaction.
+   */
+  readOnlyTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
+    if (tx?.status().status === "ready") {
+      return createReadOnlyTransaction(tx);
+    }
+    const ambient = this.readTx(tx);
+    if (ambient === this.#ambientReadTx) {
+      if (this.#ambientReadOnlyTx?.status().status === "ready") {
+        return this.#ambientReadOnlyTx;
+      }
+      this.#ambientReadOnlyTx = createReadOnlyTransaction(ambient);
+      return this.#ambientReadOnlyTx;
+    }
+    return createReadOnlyTransaction(ambient);
   }
 
   private clearAmbientReadTx(): void {

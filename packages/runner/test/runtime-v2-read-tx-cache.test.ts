@@ -250,15 +250,14 @@ describe("Runtime v2 ambient read transaction", () => {
       cell.set(3);
       await seed.commit();
 
-      const readTx = runtime.readTx();
+      const readTx = runtime.readOnlyTx();
 
       expect(cell.withTx(readTx).get()).toBe(3);
-      expect(() =>
-        readTx.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4)
-      ).toThrow(/runtime\.edit\(\)/);
-      expect(() =>
-        readTx.tx.write(cell.getAsNormalizedFullLink(), 4)
-      ).toThrow(/runtime\.edit\(\)/);
+      expect(() => readTx.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4))
+        .toThrow(/runtime\.edit\(\)/);
+      expect(() => readTx.tx.write(cell.getAsNormalizedFullLink(), 4)).toThrow(
+        /runtime\.edit\(\)/,
+      );
       expect(() => readTx.abort()).toThrow(/runtime\.edit\(\)/);
       await expect(readTx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
       await expect(readTx.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);

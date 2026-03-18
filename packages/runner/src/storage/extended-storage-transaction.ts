@@ -48,7 +48,7 @@ const logger = getLogger("extended-storage-transaction", {
 
 function createReadOnlyTransactionError(method: string): Error {
   return new Error(
-    `Cannot call ${method} on a read-only transaction returned by runtime.readTx(); ` +
+    `Cannot call ${method} on a read-only transaction returned by runtime.readOnlyTx(); ` +
       "use runtime.edit() to create an owned writable transaction.",
   );
 }

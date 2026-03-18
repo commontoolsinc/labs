@@ -1,5 +1,5 @@
+import { deepFreeze } from "@commontools/data-model/deep-freeze";
 import { unclaimed } from "@commontools/memory/fact";
-import { deepFreeze } from "@commontools/memory/deep-freeze";
 import type { PatchOp } from "@commontools/memory/v2";
 import {
   getExperimentalStorableConfig,
