@@ -1,12 +1,13 @@
-import type { JSONSchema } from "@commontools/api";
 import { PiecesController } from "@commontools/piece/ops";
 import { dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
   parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
+import { callableCommandSpec, executeResolvedCallable } from "./callable.ts";
 import {
   type ExecCommandSpec,
+  normalizeCallableInputForExecution,
   type ParsedExecArgs,
   parseExecArgs,
   renderExecHelp,
@@ -54,77 +55,6 @@ export interface ExecutedMountedCallableFile {
   outputText?: string;
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
-}
-
-function isSchemaObject(schema: JSONSchema | undefined): schema is Record<
-  string,
-  unknown
-> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
-}
-
-function cloneWithoutBoundToolKeys(
-  schema: JSONSchema,
-  extraParams: Record<string, unknown>,
-): JSONSchema {
-  if (!isSchemaObject(schema)) return schema;
-  if (schema.type !== "object" && !schema.properties) return schema;
-
-  const rawProperties = schema.properties;
-  if (
-    typeof rawProperties !== "object" || rawProperties === null ||
-    Array.isArray(rawProperties)
-  ) {
-    return schema;
-  }
-
-  const properties = {
-    ...(rawProperties as Record<string, JSONSchema>),
-  };
-  delete properties.result;
-  for (const key of Object.keys(extraParams)) {
-    delete properties[key];
-  }
-
-  const required = Array.isArray(schema.required)
-    ? (schema.required as string[]).filter((key) =>
-      key !== "result" && !(key in extraParams)
-    )
-    : undefined;
-
-  return {
-    ...schema,
-    properties,
-    ...(required ? { required } : {}),
-  };
-}
-
-function callableCommandSpec(
-  callablePath: MountedCallablePath,
-  callableCell: any,
-): ExecCommandSpec {
-  if (callablePath.callableKind === "handler") {
-    return {
-      callableKind: "handler",
-      defaultVerb: "invoke",
-      inputSchema: callableCell.schema ?? true,
-    };
-  }
-
-  const pattern = callableCell.key("pattern").getRaw?.() ??
-    callableCell.key("pattern").get();
-  const extraParams = callableCell.key("extraParams").get() ?? {};
-
-  return {
-    callableKind: "tool",
-    defaultVerb: "run",
-    inputSchema: cloneWithoutBoundToolKeys(
-      pattern?.argumentSchema ?? true,
-      extraParams,
-    ),
-    outputSchemaSummary: pattern?.resultSchema,
-  };
 }
 
 async function defaultLoadPiece(manager: any, pieceId: string) {
@@ -175,38 +105,6 @@ async function assertMountedCallableFileExists(absPath: string): Promise<void> {
   if (!stat.isFile) {
     throw new Error(`Mounted callable file not found: ${absPath}`);
   }
-}
-
-function mergeToolInput(
-  input: unknown,
-  extraParams: Record<string, unknown>,
-): Record<string, unknown> {
-  const base =
-    typeof input === "object" && input !== null && !Array.isArray(input)
-      ? input as Record<string, unknown>
-      : input === undefined
-      ? {}
-      : { value: input };
-
-  return {
-    ...base,
-    ...extraParams,
-  };
-}
-
-async function defaultWaitForResult(
-  resultCell: { get: () => unknown },
-  timeoutMs: number,
-): Promise<unknown> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const value = resultCell.get();
-    if (value !== undefined) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for tool result after ${timeoutMs}ms`);
 }
 
 async function defaultReadJsonInput(): Promise<unknown> {
@@ -261,7 +159,7 @@ export async function resolveMountedCallableFile(
     absPath,
     callablePath,
     callableCell,
-    commandSpec: callableCommandSpec(callablePath, callableCell),
+    commandSpec: callableCommandSpec(callableCell, callablePath.callableKind),
     manager,
     mount,
     piece,
@@ -295,48 +193,26 @@ export async function executeMountedCallableFile(
   const input = parsed.readJsonFromStdin
     ? await (deps.readJsonInput ?? defaultReadJsonInput)()
     : parsed.input;
-
-  if (resolved.callablePath.callableKind === "handler") {
-    await resolved.piece[resolved.callablePath.cellProp].set(
-      input,
-      [resolved.callablePath.cellKey],
-    );
-    await resolved.manager.runtime.idle();
-    await resolved.manager.synced();
-
-    return {
-      parsed,
-      resolved,
-    };
-  }
-
-  const pattern = resolved.callableCell.key("pattern").getRaw?.() ??
-    resolved.callableCell.key("pattern").get();
-  const extraParams = resolved.callableCell.key("extraParams").get() ?? {};
-  const tx = resolved.manager.runtime.edit();
-  const resultCell = resolved.manager.runtime.getCell(
-    resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
-    deps.uuid?.() ?? crypto.randomUUID(),
-    pattern?.resultSchema,
-    tx,
+  const normalizedInput = normalizeCallableInputForExecution(
+    resolved.commandSpec,
+    input,
   );
-  resolved.manager.runtime.run(
-    tx,
-    pattern,
-    mergeToolInput(input, extraParams),
-    resultCell,
-  );
-  await tx.commit();
-  await resolved.manager.runtime.idle();
-  await resolved.manager.synced();
-
-  const outputValue = await (deps.waitForResult ?? defaultWaitForResult)(
-    resultCell,
-    deps.timeoutMs ?? 5000,
+  const executed = await executeResolvedCallable(
+    {
+      callableCell: resolved.callableCell,
+      callableKind: resolved.callablePath.callableKind,
+      cellKey: resolved.callablePath.cellKey,
+      cellProp: resolved.callablePath.cellProp,
+      manager: resolved.manager,
+      piece: resolved.piece,
+      space: resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
+    },
+    normalizedInput,
+    deps,
   );
 
   return {
-    outputText: JSON.stringify(outputValue, null, 2),
+    outputText: executed.outputText,
     parsed,
     resolved,
   };

@@ -862,6 +862,7 @@ describe("mounted callable resolution and execution", () => {
         type: "object",
         properties: {
           query: { type: "string" },
+          help: { type: "string" },
         },
         required: ["query"],
       },
@@ -870,6 +871,7 @@ describe("mounted callable resolution and execution", () => {
           type: "object",
           properties: {
             query: { type: "string" },
+            help: { type: "string" },
             source: { type: "string" },
             result: { type: "string" },
           },
@@ -918,9 +920,10 @@ describe("mounted callable resolution and execution", () => {
         })
           .properties ?? {},
       ),
-    ).toEqual(["query"]);
+    ).toEqual(["query", "help"]);
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
+      help: "",
       source: "bound-source",
       result: "bound-result",
     });

@@ -16,6 +16,7 @@ export interface ParsedExecArgs {
 }
 
 export interface RenderExecHelpOptions {
+  commandPrefix?: string;
   invocationStyle?: "ct" | "direct";
 }
 
@@ -334,6 +335,32 @@ function hasHelpField(schema: JSONSchema): boolean {
   return properties ? "help" in properties : false;
 }
 
+export function normalizeCallableInputForExecution(
+  spec: ExecCommandSpec,
+  input: unknown,
+): unknown {
+  if (spec.callableKind !== "tool") {
+    return input;
+  }
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return input;
+  }
+
+  const properties = objectProperties(spec.inputSchema);
+  const helpSchema = properties?.help;
+  if (!helpSchema || schemaType(helpSchema) !== "string") {
+    return input;
+  }
+  if ("help" in (input as Record<string, unknown>)) {
+    return input;
+  }
+
+  return {
+    ...(input as Record<string, unknown>),
+    help: "",
+  };
+}
+
 function schemaDescription(schema: JSONSchema): string | undefined {
   return isSchemaObject(schema) && typeof schema.description === "string"
     ? schema.description
@@ -485,7 +512,11 @@ function outputPropertyLines(schema: JSONSchema): string[] {
 function usageCommandPrefix(
   mountedFilePath: string,
   invocationStyle: "ct" | "direct",
+  commandPrefix?: string,
 ): string {
+  if (commandPrefix) {
+    return commandPrefix;
+  }
   const displayedPath = displayCommandPath(mountedFilePath);
   return invocationStyle === "direct"
     ? displayedPath
@@ -500,8 +531,13 @@ function usageLine(
   mountedFilePath: string,
   spec: ExecCommandSpec,
   invocationStyle: "ct" | "direct",
+  commandPrefix?: string,
 ): string {
-  const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  const prefix = usageCommandPrefix(
+    mountedFilePath,
+    invocationStyle,
+    commandPrefix,
+  );
   const verb = optionalVerbUsage(spec);
   const properties = objectProperties(spec.inputSchema);
 
@@ -532,11 +568,16 @@ function helpUsageLines(
   mountedFilePath: string,
   spec: ExecCommandSpec,
   invocationStyle: "ct" | "direct",
+  commandPrefix?: string,
 ): string[] {
-  const prefix = usageCommandPrefix(mountedFilePath, invocationStyle);
+  const prefix = usageCommandPrefix(
+    mountedFilePath,
+    invocationStyle,
+    commandPrefix,
+  );
   const verb = optionalVerbUsage(spec);
   return [
-    `  ${usageLine(mountedFilePath, spec, invocationStyle)}`,
+    `  ${usageLine(mountedFilePath, spec, invocationStyle, commandPrefix)}`,
     `  ${prefix} ${verb} --json`,
     `  ${prefix} ${verb} --help`,
     `  ${prefix} ${verb} --help --json`,
@@ -655,13 +696,14 @@ export function renderExecHelp(
   spec: ExecCommandSpec,
   options: RenderExecHelpOptions = {},
 ): string {
+  const commandPrefix = options.commandPrefix;
   const invocationStyle = options.invocationStyle ?? "ct";
   const specificFlags = specificFlagLines(spec.inputSchema);
   const genericFlags = genericFlagLines(spec.inputSchema);
 
   const lines = [
     "Usage:",
-    ...helpUsageLines(mountedFilePath, spec, invocationStyle),
+    ...helpUsageLines(mountedFilePath, spec, invocationStyle, commandPrefix),
     "",
     "Flags:",
     ...specificFlags,
