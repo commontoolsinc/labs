@@ -25,6 +25,13 @@ const bobLabel = {
   }]],
 } as const;
 
+const aliceLabelReordered = {
+  classification: [[{
+    subject: space,
+    type: "https://commonfabric.org/cfc/atom/User",
+  }]],
+} as const;
+
 describe("CFC direct CAS read contract", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -108,5 +115,25 @@ describe("CFC direct CAS read contract", () => {
     await readTx.abort();
 
     expect(read).toBeUndefined();
+  });
+
+  it("matches expected labels by canonical structure rather than atom key order", async () => {
+    const payload = new Uint8Array([9, 9, 9, 9]);
+
+    const tx = runtime.edit();
+    const { blobHash } = writeCfcCasBlob(tx, space, payload, aliceLabel);
+    const committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const readTx = runtime.edit();
+    const read = await readCfcCasBlobByExpectedLabel(readTx, {
+      space,
+      blobHash,
+      expectedLabel: aliceLabelReordered,
+      canReadLabel: () => true,
+    });
+    await readTx.abort();
+
+    expect(Array.from(read ?? [])).toEqual([9, 9, 9, 9]);
   });
 });

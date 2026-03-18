@@ -38,6 +38,17 @@ const attestedLabel = {
   }],
 } as const;
 
+const attestedLabelReordered = {
+  integrity: [{
+    profile: "approved-profile",
+    type: "https://commonfabric.org/cfc/atom/RuntimeProfile",
+  }],
+  classification: [[{
+    subject: space,
+    type: "https://commonfabric.org/cfc/atom/User",
+  }]],
+} as const;
+
 const preparedSourceSchema = {
   type: "object",
   properties: {
@@ -135,6 +146,31 @@ describe("CFC direct CAS write substrate", () => {
 
     tx = runtime.edit();
     writeCfcCasBlob(tx, space, payload, attestedLabel);
+    committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const verifyTx = runtime.edit();
+    const storedBindings = verifyTx.readOrThrow(
+      cfcCasLabelBindingsAddress(space, blobHash),
+    ) as {
+      blobHash: string;
+      bindings: Array<{ label: unknown }>;
+    };
+    await verifyTx.abort();
+
+    expect(storedBindings.bindings).toEqual([{ label: attestedLabel }]);
+  });
+
+  it("does not append duplicate bindings when the same label arrives with reordered atom keys", async () => {
+    const payload = new Uint8Array([6, 6, 6, 6]);
+
+    let tx = runtime.edit();
+    const { blobHash } = writeCfcCasBlob(tx, space, payload, attestedLabel);
+    let committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    tx = runtime.edit();
+    writeCfcCasBlob(tx, space, payload, attestedLabelReordered);
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
