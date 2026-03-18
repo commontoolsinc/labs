@@ -64,6 +64,17 @@ Runner internals now also expose a semantic `IntentEvent` helper layer:
    or runtime code can mint semantic events without adding a second event
    mechanism.
 
+There is now also a narrow direct-command authority helper for agent kernels:
+
+1. Root agent intents may only be refined from source events whose integrity
+   contains `UserSurfaceInput(user = actingUser)`,
+   `PromptSlotBound(role = "direct-command", subject = actingUser,
+   kernelName = ...)`, and a trusted builtin marker for that kernel.
+2. Same-user note/context surfaces fail closed because their
+   `PromptSlotBound.role` is not `direct-command`.
+3. Other-user text also fails closed because the submission subject does not
+   match the acting user.
+
 On top of that, runner internals now expose deterministic refinement helpers:
 
 1. Refinement claim cells are keyed by `(sourceIntentId, refinerHash)` and use

@@ -726,6 +726,7 @@ Primary test location:
 - [x] `cfc-event-envelope.test.ts` covers current-event tx context, explicit
       once-per-handler dedup, and unchanged legacy raw-event behavior.
 - [x] `cfc-worked-example-return-to-sender.test.ts`
+- [x] `cfc-direct-command-intent.test.ts`
 
 ### 11.6 Schema Hash Tests
 
@@ -835,6 +836,9 @@ Primary docs:
       minting `AudienceRepresents(...)` integrity on the result.
 - [x] Confirm schema `writeAuthorizedBy` is enforced against the executing
       `CodeHash(...)` / `Builtin(...)` identity in prepare.
+- [x] Confirm only a trusted direct-command surface can refine a root
+      agent-side `IntentOnce`; same-user context surfaces and other-user text
+      fail closed.
 - [-] Confirm direct CAS writes append boundary-computed effective labels only.
 - [-] Confirm direct CAS reads require exact `expectedLabel` match plus
       principal readability.
@@ -922,6 +926,9 @@ Primary docs:
       `AudienceRepresents(principal, audience)` is freshly verified at commit.
 - [x] Step J.24: enforce schema-declared `writeAuthorizedBy` against
       implementation identity and cover the counter-pattern worked example.
+- [x] Step J.25: add a direct-command authority helper that only refines root
+      agent intents from trusted `UserSurfaceInput` +
+      `PromptSlotBound(role = "direct-command")` + trusted kernel evidence.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

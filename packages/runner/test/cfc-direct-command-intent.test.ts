@@ -60,12 +60,10 @@ describe("CFC direct-command intent refinement", () => {
           subject: options.user,
           surface: directSurface,
         },
-        ...(options.includeKernelMarker === false
-          ? []
-          : [{
-            type: "https://commonfabric.org/cfc/atom/Builtin",
-            name: kernelName,
-          }]),
+        ...(options.includeKernelMarker === false ? [] : [{
+          type: "https://commonfabric.org/cfc/atom/Builtin",
+          name: kernelName,
+        }]),
       ],
     });
   }
