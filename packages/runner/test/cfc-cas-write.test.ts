@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import {
   cfcCasLabelBindingsAddress,
   readCfcCasBlob,
+  writeCfcCasBlobWithBoundary,
   writeCfcCasBlob,
 } from "../src/cfc/cas-storage.ts";
 
@@ -125,5 +126,78 @@ describe("CFC direct CAS write substrate", () => {
     await verifyTx.abort();
 
     expect(storedBindings.bindings).toEqual([{ label: attestedLabel }]);
+  });
+
+  it("appends the trusted boundary's effective label rather than the caller proposal", async () => {
+    const payload = new Uint8Array([2, 4, 6, 8]);
+    const elevatedLabel = {
+      classification: [[{
+        type: "https://commonfabric.org/cfc/atom/User",
+        subject: "did:example:reviewer",
+      }]],
+      integrity: [{
+        type: "https://commonfabric.org/cfc/atom/RuntimeProfile",
+        profile: "boundary-approved",
+      }],
+    } as const;
+
+    const tx = runtime.edit();
+    const { blobHash } = await writeCfcCasBlobWithBoundary(tx, {
+      space,
+      payload,
+      proposedLabel: aliceLabel,
+      evaluateEffectiveLabel: () => Promise.resolve(elevatedLabel),
+    });
+    const committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const verifyTx = runtime.edit();
+    const storedBindings = verifyTx.readOrThrow(
+      cfcCasLabelBindingsAddress(space, blobHash),
+    ) as {
+      blobHash: string;
+      bindings: Array<{ label: unknown }>;
+    };
+    await verifyTx.abort();
+
+    expect(storedBindings.bindings).toEqual([{ label: elevatedLabel }]);
+  });
+
+  it("does not write blob or label bindings when trusted boundary evaluation rejects", async () => {
+    const payload = new Uint8Array([3, 1, 4, 1]);
+    const blobHash = "will-be-replaced-by-helper";
+    const boundaryError = new Error("cfc policy rejected");
+
+    const tx = runtime.edit();
+    await expect(
+      writeCfcCasBlobWithBoundary(tx, {
+        space,
+        payload,
+        proposedLabel: aliceLabel,
+        evaluateEffectiveLabel: () => {
+          throw boundaryError;
+        },
+      }),
+    ).rejects.toBe(boundaryError);
+    await tx.abort();
+
+    const verifyTx = runtime.edit();
+    const { blobHash: computedBlobHash } = writeCfcCasBlob(
+      verifyTx,
+      space,
+      payload,
+      aliceLabel,
+    );
+    await verifyTx.abort();
+
+    const readTx = runtime.edit();
+    const storedPayload = readCfcCasBlob(readTx, space, computedBlobHash);
+    const storedBindings = readTx.readOrThrow(
+      cfcCasLabelBindingsAddress(space, computedBlobHash),
+    );
+    await readTx.abort();
+
+    expect(storedPayload).toBeUndefined();
+    expect(storedBindings).toBeUndefined();
   });
 });
