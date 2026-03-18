@@ -349,7 +349,10 @@ integrity too:
    acting principal and trust-context snapshot.
 3. Policy `integrityPre` rules can match those ambient runtime facts without
    persisting them onto the output label unless the schema explicitly adds them.
-4. This is enough for the exact-device, owner-tier, and shared-CC calendar
+4. The acting user’s trust context can now also upgrade structured attestation
+   atoms into concept guards; trust statements are no longer limited to
+   legacy string concretes.
+5. This is enough for the exact-device, owner-tier, and shared-CC calendar
    placement slices plus the device-constrained audio-trigger slice from the
    worked examples; full destination-confinement enforcement remains a later
    layer.

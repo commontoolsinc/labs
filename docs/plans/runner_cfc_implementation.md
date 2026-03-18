@@ -1024,7 +1024,8 @@ Primary files:
 - [x] Prove exact-device lock, owner-tier lock, shared-CC calendar release,
       and triggered-audio release worked-example slices with runtime
       attestation facts provided by the runtime.
-- [-] Principal-scoped trust-set evaluation of attestation evidence.
+- [x] Principal-scoped trust-set evaluation of structured attestation
+      evidence for concept guards.
 - [-] Full domain-confinement policy checks for actual runtime/device
       destinations beyond prepare-time release guards (device-locked vs
       CC-locked data).

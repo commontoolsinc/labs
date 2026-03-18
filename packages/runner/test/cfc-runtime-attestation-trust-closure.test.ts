@@ -5,6 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcIntegrityLabel } from "../src/cfc/label-algebra.ts";
 import type { URI } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -62,7 +63,7 @@ describe("CFC structured attestation trust closure", () => {
   async function seedInputWithIntegrity(
     id: URI,
     value: number,
-    integrity: readonly unknown[],
+    integrity: CfcIntegrityLabel,
   ): Promise<void> {
     const tx = runtime.edit();
     tx.writeOrThrow({

@@ -19,7 +19,7 @@ export interface CfcVerifierDelegation {
 
 export interface CfcTrustStatement {
   readonly verifier: string;
-  readonly concrete: string;
+  readonly concrete: CfcAtom;
   readonly concept: string;
 }
 
@@ -43,7 +43,7 @@ export interface CfcTrustContextSnapshot {
   }[];
   readonly statements: readonly {
     readonly verifier: string;
-    readonly concrete: string;
+    readonly concrete: CfcAtom;
     readonly concept: string;
   }[];
   readonly conceptEdges: readonly {
@@ -72,6 +72,11 @@ export type CfcExecutionIntegritySource =
 export interface CfcIntegrityTrustOptions {
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+}
+
+function atomTrustKey(atom: CfcAtom): string {
+  const normalized = normalizeIntegrityLabel([atom])?.[0] ?? atom;
+  return JSON.stringify(normalized);
 }
 
 export function resolveCfcTrustContextSnapshot(
@@ -125,7 +130,7 @@ export function snapshotCfcTrustContext(
     }))
     .sort((a, b) =>
       a.verifier.localeCompare(b.verifier) ||
-      a.concrete.localeCompare(b.concrete) ||
+      atomTrustKey(a.concrete).localeCompare(atomTrustKey(b.concrete)) ||
       a.concept.localeCompare(b.concept)
     );
 
@@ -194,7 +199,7 @@ function trustedEdgesForActingPrincipal(
       )
     )
     .map((statement) => ({
-      from: statement.concrete,
+      from: atomTrustKey(statement.concrete),
       to: statement.concept,
     }));
 
@@ -247,15 +252,11 @@ function integrityRequirementSatisfiedWithEdges(
   if (actual === undefined) {
     return false;
   }
-  if (
-    typeof actual === "string" &&
-    typeof requirement === "string" &&
-    requirement.length > 0
-  ) {
-    if (actual === requirement) {
+  if (typeof requirement === "string" && requirement.length > 0) {
+    if (typeof actual === "string" && actual === requirement) {
       return true;
     }
-    return reachesConcept(actual, requirement, trustedEdges);
+    return reachesConcept(atomTrustKey(actual), requirement, trustedEdges);
   }
   return matchesCfcAtomPattern(actual, requirement);
 }
