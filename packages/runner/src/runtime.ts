@@ -61,7 +61,10 @@ import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import {
+  createReadOnlyTransaction,
+  ExtendedStorageTransaction,
+} from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
@@ -262,6 +265,7 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   #ambientReadTx?: IExtendedStorageTransaction;
+  #ambientReadOnlyTx?: IExtendedStorageTransaction;
   #ambientReadSubscription?: IStorageNotification;
 
   constructor(options: RuntimeOptions) {
@@ -597,27 +601,32 @@ export class Runtime {
   }
 
   /**
-   * Returns the given transaction if it is ready, otherwise creates a new
-   * transaction.
+   * Returns the given transaction if it is ready, otherwise returns a read-only
+   * transaction for fallback reads.
    */
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
     if (tx?.status().status === "ready") {
       return tx;
     }
     if (this.memoryVersion !== "v2") {
-      return this.edit();
+      return createReadOnlyTransaction(this.edit());
     }
-    if (this.#ambientReadTx?.status().status === "ready") {
-      return this.#ambientReadTx;
+    if (
+      this.#ambientReadTx?.status().status === "ready" &&
+      this.#ambientReadOnlyTx
+    ) {
+      return this.#ambientReadOnlyTx;
     }
     const ambient = this.edit();
     this.#ambientReadTx = ambient;
-    return ambient;
+    this.#ambientReadOnlyTx = createReadOnlyTransaction(ambient);
+    return this.#ambientReadOnlyTx;
   }
 
   private clearAmbientReadTx(): void {
     const ambient = this.#ambientReadTx;
     this.#ambientReadTx = undefined;
+    this.#ambientReadOnlyTx = undefined;
     if (ambient?.status().status === "ready") {
       ambient.abort();
     }

@@ -227,4 +227,43 @@ describe("Runtime v2 ambient read transaction", () => {
       await runtime.dispose();
     }
   });
+
+  it("returns a read-only wrapper for fallback ambient reads", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const seed = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "runtime-v2-read-only-ambient-read",
+        { type: "number" } as const,
+        seed,
+      );
+      cell.set(3);
+      await seed.commit();
+
+      const readTx = runtime.readTx();
+
+      expect(cell.withTx(readTx).get()).toBe(3);
+      expect(() =>
+        readTx.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4)
+      ).toThrow(/runtime\.edit\(\)/);
+      expect(() =>
+        readTx.tx.write(cell.getAsNormalizedFullLink(), 4)
+      ).toThrow(/runtime\.edit\(\)/);
+      expect(() => readTx.abort()).toThrow(/runtime\.edit\(\)/);
+      await expect(readTx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
+      await expect(readTx.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });
