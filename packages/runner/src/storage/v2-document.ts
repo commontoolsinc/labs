@@ -28,8 +28,10 @@ const storageReconstructionContext: ReconstructionContext = {
   },
 };
 
-const encodeDocumentValue = (value: StorableValue): JSONValue =>
-  JSON.parse(jsonFromValue(value)) as JSONValue;
+const encodeDocumentValue = (value: StorableValue): JSONValue | undefined =>
+  value === undefined
+    ? undefined
+    : JSON.parse(jsonFromValue(value)) as JSONValue;
 
 const decodeDocumentValue = (value: JSONValue): StorableValue =>
   valueFromJson(JSON.stringify(value), storageReconstructionContext);

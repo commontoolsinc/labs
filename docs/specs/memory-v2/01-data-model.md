@@ -55,6 +55,9 @@ like `source` that travel with the value but are not part of it.
 fact (section 2.2). A missing `value` field is NOT used as a tombstone in v2.
 Supporting a live "undefined" cell value is deferred; if we need it later, it
 should use an explicit sentinel rather than overloading deletion semantics.
+An empty JSON object `{}` is still an ordinary live value, not a delete. A
+marked document may also omit `value` entirely for metadata-only cases such as
+source-only documents; that is still not a tombstone.
 
 **Source links**: The `source` property uses the short-link form
 `{"/":"<short-id>"}`. The runtime resolves this to `of:<short-id>` in the same
@@ -136,6 +139,9 @@ Deletion is therefore a **reachability change**, not a metadata rewrite:
 - Earlier facts remain part of history until retention/GC policy says otherwise.
 - A delete of one entity MUST NOT implicitly delete or rewrite any other entity,
   including `urn:blob-meta:<hash>` entities.
+- Implementations MUST NOT infer deletion from an empty object `{}` or from a
+  marked document that omits `value`; only an explicit `Delete` fact removes the
+  entity's current value.
 - If a future extension attaches label/policy metadata directly to a surviving
   tombstone fact, that metadata should default from the deleted head's effective
   metadata unless a higher-layer API explicitly supplies replacement metadata.
