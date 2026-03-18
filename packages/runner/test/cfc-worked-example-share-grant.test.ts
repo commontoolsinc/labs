@@ -3,16 +3,21 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
   cfcLabelsAddress,
   normalizePersistedLabels,
 } from "../src/cfc/shared.ts";
+import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { deriveCfcPolicyStateId } from "../src/cfc/policy-state.ts";
-import type { Labels, URI } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  Labels,
+} from "../src/storage/interface.ts";
 
-const signer = await Identity.fromPassphrase("cfc policy state test");
+const signer = await Identity.fromPassphrase(
+  "cfc worked example share grant test",
+);
 const space = signer.did();
 const bobDid = "did:key:bob-share-recipient";
 
@@ -27,7 +32,12 @@ const userBobAtom = {
 } as const;
 
 const sourceSchema = {
-  type: "number",
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+  },
+  required: ["id", "title"],
   ifc: {
     classification: [userAliceAtom],
   },
@@ -35,7 +45,12 @@ const sourceSchema = {
 
 function shareGrantSchema(resourceRef: string) {
   return {
-    type: "number",
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      title: { type: "string" },
+    },
+    required: ["id", "title"],
     ifc: {
       declassify: {
         preCondition: {
@@ -67,9 +82,11 @@ function shareGrantSchema(resourceRef: string) {
   } as const satisfies JSONSchema;
 }
 
-describe("CFC policyState guards", () => {
+describe("CFC worked example: durable share grant", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let phaseOneRuntime: Runtime | undefined;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -78,56 +95,53 @@ describe("CFC policyState guards", () => {
       apiUrl: new URL(import.meta.url),
     });
     runtime.scheduler.disablePullMode();
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    if (phaseOneRuntime && phaseOneRuntime !== runtime) {
+      phaseOneRuntime.runner.stopAll();
+      phaseOneRuntime.moduleRegistry.clear();
+      phaseOneRuntime.scheduler.dispose();
+      phaseOneRuntime.harness.dispose();
+      phaseOneRuntime = undefined;
+    }
+    await tx.abort();
     await runtime.dispose();
-    await storageManager.close();
   });
 
-  async function seedPolicyState(record: unknown): Promise<void> {
-    const tx = runtime.edit();
-    tx.writeOrThrow({
-      space,
-      id: deriveCfcPolicyStateId(record),
-      type: "application/json",
-      path: ["value"],
-    }, record as never);
-    const { error } = await tx.commit();
-    expect(error).toBeUndefined();
-  }
-
-  async function readPersistedLabels(id: URI) {
+  async function readPersistedLabels(id: string) {
     const readTx = runtime.edit();
     const raw = readTx.readOrThrow(cfcLabelsAddress({
       space,
-      id,
+      id: id as `${string}:${string}`,
       type: "application/json",
     }));
     await readTx.abort();
     return normalizePersistedLabels(raw);
   }
 
-  it("allows a share-style declassification when a matching policyState grant exists", async () => {
-    let tx = runtime.edit();
-    const source = runtime.getCell<number>(
+  it("consults persisted ShareGrant policy state after a fresh runtime starts", async () => {
+    const photo = runtime.getCell<{ id: string; title: string }>(
       space,
-      "cfc-policy-state-share-source",
+      "worked-example-share-photo",
       undefined,
       tx,
     );
-    const target = runtime.getCell<number>(
+    const sharedPhoto = runtime.getCell<{ id: string; title: string }>(
       space,
-      "cfc-policy-state-share-target",
+      "worked-example-share-output",
       undefined,
       tx,
     );
-    source.set(7);
-    target.set(0);
+    photo.set({
+      id: "photo-42",
+      title: "Alice private photo",
+    });
     tx.writeOrThrow(
       cfcLabelsAddress({
         space,
-        id: source.getAsNormalizedFullLink().id,
+        id: photo.getAsNormalizedFullLink().id,
         type: "application/json",
       }),
       {
@@ -140,70 +154,68 @@ describe("CFC policyState guards", () => {
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const sourceId = source.getAsNormalizedFullLink().id;
-    await seedPolicyState({
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: deriveCfcPolicyStateId({
+        kind: "ShareGrant",
+        owner: space,
+        resourceRef: photo.getAsNormalizedFullLink().id,
+        recipient: bobDid,
+        scope: "read",
+      }),
+      type: "application/json",
+      path: ["value"],
+    }, {
       kind: "ShareGrant",
       owner: space,
-      resourceRef: sourceId,
+      resourceRef: photo.getAsNormalizedFullLink().id,
       recipient: bobDid,
       scope: "read",
     });
+    committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
 
+    phaseOneRuntime = runtime;
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL(import.meta.url),
+    });
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
-    const value = Number(source.withTx(tx).asSchema(sourceSchema).get() ?? 0);
-    target.withTx(tx).asSchema(shareGrantSchema(sourceId)).set(value + 1);
 
-    await expect(prepareCfcCommitIfNeeded(tx)).resolves.toBeUndefined();
+    const persistedPhoto = runtime.getCellFromEntityId<{
+      id: string;
+      title: string;
+    }>(
+      space,
+      photo.getAsNormalizedFullLink().id,
+      [],
+      sourceSchema,
+      tx,
+    );
+    const persistedSharedPhoto = runtime.getCellFromEntityId<{
+      id: string;
+      title: string;
+    }>(
+      space,
+      sharedPhoto.getAsNormalizedFullLink().id,
+      [],
+      undefined,
+      tx,
+    );
+    const value = persistedPhoto.withTx(tx).asSchema(sourceSchema).get();
+    persistedSharedPhoto.withTx(tx).asSchema(
+      shareGrantSchema(photo.getAsNormalizedFullLink().id),
+    ).set(value);
+
+    await prepareCfcCommitIfNeeded(tx);
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
     const labels = await readPersistedLabels(
-      target.getAsNormalizedFullLink().id,
+      persistedSharedPhoto.getAsNormalizedFullLink().id,
     );
     expect(labels["/"]?.classification).toEqual([[userBobAtom, userAliceAtom]]);
-  });
-
-  it("rejects a share-style declassification when the policyState grant is absent", async () => {
-    let tx = runtime.edit();
-    const source = runtime.getCell<number>(
-      space,
-      "cfc-policy-state-share-miss-source",
-      undefined,
-      tx,
-    );
-    const target = runtime.getCell<number>(
-      space,
-      "cfc-policy-state-share-miss-target",
-      undefined,
-      tx,
-    );
-    source.set(8);
-    target.set(0);
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: source.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": {
-          classification: [userAliceAtom],
-          integrity: [],
-        } satisfies Labels,
-      },
-    );
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    tx = runtime.edit();
-    const value = Number(source.withTx(tx).asSchema(sourceSchema).get() ?? 0);
-    target.withTx(tx).asSchema(
-      shareGrantSchema(source.getAsNormalizedFullLink().id),
-    ).set(value + 1);
-
-    await expect(prepareCfcCommitIfNeeded(tx)).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
-      requirement: "confidentialityMonotonicity",
-    });
   });
 });

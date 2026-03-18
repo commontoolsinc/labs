@@ -46,7 +46,12 @@ import {
   type CfcTrustContext,
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
-import { matchesCfcAtomPattern } from "./atom-patterns.ts";
+import {
+  type CfcPatternBindings,
+  matchPatternWithBindings,
+  resolvePatternWithBindings,
+} from "./policy-bindings.ts";
+import { cfcPolicyStateAddress } from "./policy-state.ts";
 import {
   type CfcAtom,
   type CfcConfidentialityLabel,
@@ -627,6 +632,27 @@ function recordDynamicWriteIntegrity(
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
   for (const path of canonicalAncestorPaths(writePath)) {
     const merged = mergeLabel(labels[path], { integrity });
+    if (merged) {
+      labels[path] = merged;
+    }
+  }
+  labelsByEntity.set(entityKey, labels);
+}
+
+function recordDynamicWriteClassification(
+  labelsByEntity: Map<string, Record<string, Labels>>,
+  entity: EntityAddress,
+  writePath: string,
+  classification: CfcConfidentialityLabel | undefined,
+): void {
+  if (!classification || classification.length === 0) {
+    return;
+  }
+
+  const entityKey = cfcEntityKey(entity);
+  const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
+  for (const path of canonicalAncestorPaths(writePath)) {
+    const merged = mergeLabel(labels[path], { classification });
     if (merged) {
       labels[path] = merged;
     }
@@ -1557,6 +1583,7 @@ type PolicyRewriteRule = {
   readonly confidentialityPre: readonly CfcAtom[];
   readonly integrityPre: CfcIntegrityLabel;
   readonly preConfScope: PolicyPreConfScope;
+  readonly policyState: readonly unknown[];
   readonly addAlternatives: readonly CfcAtom[];
   readonly addIntegrity: CfcIntegrityLabel;
   readonly removeMatchedClauses: boolean;
@@ -1577,15 +1604,22 @@ type PolicyFixpointResult =
   | { readonly nonConverged: true; readonly fuel: number }
   | {
     readonly nonConverged: false;
+    readonly changed: boolean;
     readonly label: PolicyLabelState;
     readonly fuel: number;
   };
 
 type PolicyDowngradeDecision = {
   readonly allowed: boolean;
+  readonly changed: boolean;
   readonly nonConverged: boolean;
   readonly fuel: number;
   readonly label?: PolicyLabelState;
+};
+
+type PolicyConfidentialityMatch = {
+  readonly bindings: CfcPatternBindings;
+  readonly targetIndex: number;
 };
 
 const DEFAULT_POLICY_FUEL = 8;
@@ -1673,6 +1707,19 @@ function parsePolicyRule(
     (rawRule as { preConfScope?: unknown }).preConfScope,
     defaultScope,
   );
+  const policyState = Array.isArray(
+      (rawRule as { policyState?: unknown }).policyState,
+    )
+    ? (rawRule as { policyState: readonly unknown[] }).policyState
+    : Array.isArray(
+        (rawRule as { guard?: { policyState?: unknown } }).guard?.policyState,
+      )
+    ? (
+      rawRule as {
+        guard: { policyState: readonly unknown[] };
+      }
+    ).guard.policyState
+    : [];
   const releaseCondition =
     (rawRule as { releaseCondition?: unknown }).releaseCondition ??
       (rawRule as { guard?: { releaseCondition?: unknown } }).guard
@@ -1689,6 +1736,7 @@ function parsePolicyRule(
     confidentialityPre,
     integrityPre,
     preConfScope,
+    policyState,
     addAlternatives,
     addIntegrity,
     removeMatchedClauses,
@@ -1815,50 +1863,87 @@ function buildPolicyLabelFromConsumedReads(
   };
 }
 
-function policyRuleConfidentialityMatches(
+function findMatchingPolicyConditionBindings(
+  candidates: readonly CfcAtom[],
+  pattern: CfcAtom,
+  bindings: CfcPatternBindings,
+): CfcPatternBindings | undefined {
+  for (const candidate of candidates) {
+    const matched = matchPatternWithBindings(candidate, pattern, bindings);
+    if (matched) {
+      return matched;
+    }
+  }
+  return undefined;
+}
+
+function policyRuleConfidentialityMatch(
   label: PolicyLabelState,
   clauseIndex: number,
   rule: PolicyRewriteRule,
-): boolean {
+): PolicyConfidentialityMatch | undefined {
   const clause = label.confidentiality[clauseIndex];
   const targetAtom = rule.confidentialityPre[0];
-  const clauseContains = (atom: CfcAtom) =>
-    clause?.some((entry) => matchesCfcAtomPattern(entry, atom)) ??
-      false;
-  if (!clause || !clauseContains(targetAtom)) {
-    return false;
+  if (!clause) {
+    return undefined;
   }
 
-  for (const sideCondition of rule.confidentialityPre.slice(1)) {
-    if (rule.preConfScope === "anywhere") {
-      const found = label.confidentiality.some((candidateClause) =>
-        candidateClause.some((entry) =>
-          matchesCfcAtomPattern(entry, sideCondition)
-        )
-      );
-      if (!found) {
-        return false;
-      }
+  for (let targetIndex = 0; targetIndex < clause.length; targetIndex++) {
+    const targetMatch = matchPatternWithBindings(
+      clause[targetIndex],
+      targetAtom,
+    );
+    if (!targetMatch) {
       continue;
     }
-    if (!clauseContains(sideCondition)) {
-      return false;
+
+    let bindings = targetMatch;
+    let matched = true;
+    for (const sideCondition of rule.confidentialityPre.slice(1)) {
+      const candidates = rule.preConfScope === "anywhere"
+        ? label.confidentiality.flat()
+        : clause;
+      const nextBindings = findMatchingPolicyConditionBindings(
+        candidates,
+        sideCondition,
+        bindings,
+      );
+      if (!nextBindings) {
+        matched = false;
+        break;
+      }
+      bindings = nextBindings;
+    }
+
+    if (matched) {
+      return {
+        bindings,
+        targetIndex,
+      };
     }
   }
-  return true;
+  return undefined;
 }
 
 function policyRuleIntegrityMatches(
   label: PolicyLabelState,
   rule: PolicyRewriteRule,
+  bindings: CfcPatternBindings,
   options: PrepareBoundaryCommitOptions = {},
 ): boolean {
-  if (rule.integrityPre.length === 0) {
+  const resolvedIntegrity = resolvePatternWithBindings(
+    rule.integrityPre,
+    bindings,
+  );
+  if (!resolvedIntegrity) {
+    return rule.integrityPre.length === 0;
+  }
+  if (resolvedIntegrity.length === 0) {
     return true;
   }
   return integritySatisfiesRequiredIntegrity(
     label.integrity,
-    rule.integrityPre,
+    resolvedIntegrity,
     {
       actingPrincipal: options.actingPrincipal,
       trustContext: options.trustContext,
@@ -1926,6 +2011,29 @@ function addPolicyIntegrity(
   return joinIntegrityLabels(integrity, additions) ?? integrity;
 }
 
+function policyRuleStateMatches(
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  rule: PolicyRewriteRule,
+  bindings: CfcPatternBindings,
+): boolean {
+  for (const policyStatePattern of rule.policyState) {
+    const resolved = resolvePatternWithBindings(policyStatePattern, bindings);
+    if (!resolved) {
+      return false;
+    }
+
+    const record = tx.readOrThrow(
+      cfcPolicyStateAddress(entity.space, resolved),
+      { cfc: internalVerifierReadAnnotations },
+    );
+    if (record === undefined || !deepEqual(record, resolved)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function applyPolicyRuleOnce(
   label: PolicyLabelState,
   rule: PolicyRewriteRule,
@@ -1934,9 +2042,6 @@ function applyPolicyRuleOnce(
   writePath: string,
   options: PrepareBoundaryCommitOptions = {},
 ): { readonly changed: boolean; readonly label: PolicyLabelState } {
-  if (!policyRuleIntegrityMatches(label, rule, options)) {
-    return { changed: false, label };
-  }
   if (
     !evaluatePolicyReleaseCondition(
       rule.releaseCondition,
@@ -1948,25 +2053,43 @@ function applyPolicyRuleOnce(
     return { changed: false, label };
   }
 
-  const target = rule.confidentialityPre[0];
   for (
     let clauseIndex = 0;
     clauseIndex < label.confidentiality.length;
     clauseIndex++
   ) {
-    if (!policyRuleConfidentialityMatches(label, clauseIndex, rule)) {
+    const match = policyRuleConfidentialityMatch(label, clauseIndex, rule);
+    if (!match) {
+      continue;
+    }
+    if (!policyRuleIntegrityMatches(label, rule, match.bindings, options)) {
+      continue;
+    }
+    if (!policyRuleStateMatches(tx, entity, rule, match.bindings)) {
       continue;
     }
     const clause = [...label.confidentiality[clauseIndex]];
-    const targetIndex = clause.findIndex((atom) =>
-      matchesCfcAtomPattern(atom, target)
+    if (match.targetIndex < 0 || match.targetIndex >= clause.length) {
+      continue;
+    }
+
+    const resolvedAlternatives = resolvePatternWithBindings(
+      rule.addAlternatives,
+      match.bindings,
     );
-    if (targetIndex < 0) {
+    if (rule.addAlternatives.length > 0 && !resolvedAlternatives) {
+      continue;
+    }
+    const resolvedIntegrity = resolvePatternWithBindings(
+      rule.addIntegrity,
+      match.bindings,
+    );
+    if (rule.addIntegrity.length > 0 && !resolvedIntegrity) {
       continue;
     }
 
     if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
-      clause.splice(targetIndex, 1);
+      clause.splice(match.targetIndex, 1);
       const nextConfidentiality = label.confidentiality.map((
         entry,
       ) => [...entry]);
@@ -1981,13 +2104,16 @@ function applyPolicyRuleOnce(
         changed: true,
         label: {
           confidentiality: normalizedConfidentiality,
-          integrity: addPolicyIntegrity(label.integrity, rule.addIntegrity),
+          integrity: addPolicyIntegrity(
+            label.integrity,
+            resolvedIntegrity ?? [],
+          ),
         },
       };
     }
 
     let clauseChanged = false;
-    for (const alternative of rule.addAlternatives) {
+    for (const alternative of resolvedAlternatives ?? []) {
       if (!clause.some((atom) => deepEqual(atom, alternative))) {
         clause.push(alternative);
         clauseChanged = true;
@@ -1995,7 +2121,7 @@ function applyPolicyRuleOnce(
     }
     const nextIntegrity = addPolicyIntegrity(
       label.integrity,
-      rule.addIntegrity,
+      resolvedIntegrity ?? [],
     );
     const integrityChanged = !deepEqual(nextIntegrity, label.integrity);
     if (!clauseChanged && !integrityChanged) {
@@ -2070,6 +2196,7 @@ function evaluatePolicyFixpoint(
 ): PolicyFixpointResult {
   let current = label;
   let remainingFuel = config.fuel;
+  let changed = false;
 
   while (true) {
     const next = evaluatePolicyOnce(
@@ -2082,8 +2209,14 @@ function evaluatePolicyFixpoint(
       options,
     );
     if (!next.changed) {
-      return { nonConverged: false, label: current, fuel: config.fuel };
+      return {
+        nonConverged: false,
+        changed,
+        label: current,
+        fuel: config.fuel,
+      };
     }
+    changed = true;
     remainingFuel = next.remainingFuel;
     if (remainingFuel <= 0) {
       return { nonConverged: true, fuel: config.fuel };
@@ -2110,7 +2243,7 @@ function evaluatePolicyDowngradeDecision(
 ): PolicyDowngradeDecision {
   const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
   if (!policyConfig) {
-    return { allowed: false, nonConverged: false, fuel: 0 };
+    return { allowed: false, changed: false, nonConverged: false, fuel: 0 };
   }
   const initialLabel = buildPolicyLabelFromConsumedReads(consumedReadLabels);
   const policyResult = evaluatePolicyFixpoint(
@@ -2122,13 +2255,25 @@ function evaluatePolicyDowngradeDecision(
     options,
   );
   if (policyResult.nonConverged) {
-    return { allowed: false, nonConverged: true, fuel: policyResult.fuel };
+    return {
+      allowed: false,
+      changed: false,
+      nonConverged: true,
+      fuel: policyResult.fuel,
+    };
   }
+  const effectiveOutputClassification = policyResult.changed
+    ? joinConfidentialityLabels(
+      outputClassification,
+      policyResult.label.confidentiality,
+    )
+    : outputClassification;
   return {
     allowed: policyAllowsClassification(
       policyResult.label,
-      outputClassification,
+      effectiveOutputClassification,
     ),
+    changed: policyResult.changed,
     nonConverged: false,
     fuel: policyResult.fuel,
     label: policyResult.label,
@@ -2228,6 +2373,17 @@ function verifyOutputTransitionsForAttempt(
           write.path,
           minClassification,
           actualClassification,
+        );
+      }
+      if (
+        decision.changed &&
+        (!actualClassification || actualClassification.length === 0)
+      ) {
+        recordDynamicWriteClassification(
+          dynamicLabelsByEntity,
+          entity,
+          write.path,
+          decision.label?.confidentiality,
         );
       }
       policyIntegrity = joinIntegrityLabels(

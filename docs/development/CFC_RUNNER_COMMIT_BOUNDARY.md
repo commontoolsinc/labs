@@ -191,6 +191,16 @@ A fact-check assurance slice is also now covered:
 2. The same rewrite persists structured assurance atoms like `FactChecked` and
    `SourcesDisclosed` onto the output label.
 
+A durable sharing slice is now covered too:
+
+1. Policy rewrites can capture variables from structured confidentiality atoms,
+   substitute them into `guard.policyState` entries, and resolve those guards
+   against deterministic on-disk policy-state records.
+2. When a matching `ShareGrant` exists, the rewrite can synthesize the output
+   confidentiality label if the target schema has no base classification.
+3. A fresh runtime instance can consult that persisted `ShareGrant` and still
+   complete the share-style declassification without relying on warm caches.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

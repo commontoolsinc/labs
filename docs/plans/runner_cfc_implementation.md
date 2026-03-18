@@ -883,6 +883,9 @@ Primary docs:
       rewrites both authorize a public audience classification and persist
       structured assurance atoms (`FactChecked`, `SourcesDisclosed`) onto the
       output label.
+- [x] Step J.16: add deterministic `policyState` guard lookups plus policy-rule
+      variable substitution, then prove a durable `ShareGrant` worked-example
+      slice across a fresh runtime instance.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
