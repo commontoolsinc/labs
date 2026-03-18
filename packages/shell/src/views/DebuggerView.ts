@@ -901,6 +901,9 @@ export class XDebuggerView extends LitElement {
     visible: boolean;
   } | null = null;
 
+  @state()
+  private diagnosisDurationMs = 5000;
+
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
     minHeight: 150,
@@ -2576,6 +2579,28 @@ export class XDebuggerView extends LitElement {
         <div
           style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;"
         >
+          <label
+            style="display: flex; align-items: center; gap: 0.375rem; color: #94a3b8; font-size: 0.75rem;"
+          >
+            <span>Duration</span>
+            <select
+              style="background-color: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.25rem; padding: 0.25rem 0.375rem;"
+              .value="${String(this.diagnosisDurationMs)}"
+              @change="${(event: Event) => {
+                const value = Number(
+                  (event.target as HTMLSelectElement).value,
+                );
+                this.diagnosisDurationMs = Number.isFinite(value) && value > 0
+                  ? value
+                  : 5000;
+              }}"
+              ?disabled="${isDiagnosing}"
+            >
+              <option value="3000">3s</option>
+              <option value="5000">5s</option>
+              <option value="10000">10s</option>
+            </select>
+          </label>
           <button
             type="button"
             class="action-button"
@@ -2584,7 +2609,7 @@ export class XDebuggerView extends LitElement {
               : "background-color: #3b82f6; color: white;"}"
             @click="${() => {
               if (!isDiagnosing) {
-                this.debuggerController?.runDiagnosis();
+                this.debuggerController?.runDiagnosis(this.diagnosisDurationMs);
               }
             }}"
             ?disabled="${isDiagnosing}"

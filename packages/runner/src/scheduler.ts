@@ -59,6 +59,11 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+const triggerFlowLogger = getLogger("scheduler.trigger-flow", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -175,7 +180,70 @@ export interface SettleStats {
   initialSeedCount: number;
 }
 
+/** One recorded settle stats entry from execute() history. */
+export interface SettleStatsHistoryEntry {
+  recordedAt: number;
+  stats: SettleStats;
+}
+
+export type TriggerTraceValueKind =
+  | "undefined"
+  | "null"
+  | "boolean"
+  | "number"
+  | "string"
+  | "array"
+  | "object"
+  | "other";
+
+export interface TriggerTraceValueSummary {
+  kind: TriggerTraceValueKind;
+  size?: number;
+  preview?: string | number | boolean | null;
+}
+
+export interface TriggerTraceScheduledEffect {
+  actionId: string;
+  pendingBefore: boolean;
+  dirtyBefore: boolean;
+  debounceMs?: number;
+}
+
+export interface TriggerTraceActionRecord {
+  actionId: string;
+  actionType: "effect" | "computation";
+  mode: "pull" | "push";
+  decision:
+    | "schedule-push"
+    | "schedule-effect"
+    | "mark-dirty"
+    | "already-dirty"
+    | "skip-same-change-group";
+  pendingBefore: boolean;
+  pendingAfter: boolean;
+  dirtyBefore: boolean;
+  dirtyAfter: boolean;
+  scheduledEffects: TriggerTraceScheduledEffect[];
+}
+
+export interface TriggerTraceEntry {
+  recordedAt: number;
+  notificationType: string;
+  changeIndex: number;
+  matchedActionCount: number;
+  mode: "pull" | "push";
+  writerActionId?: string;
+  space: MemorySpace;
+  entityId: URI;
+  path: string[];
+  before: TriggerTraceValueSummary;
+  after: TriggerTraceValueSummary;
+  triggered: TriggerTraceActionRecord[];
+}
+
 const MAX_ITERATIONS_PER_RUN = 100;
+const MAX_SETTLE_STATS_HISTORY = 20;
+const MAX_TRIGGER_TRACE_HISTORY = 400;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
 const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
@@ -303,6 +371,9 @@ export class Scheduler {
   // Settle stats for performance analysis (opt-in via enableSettleStats())
   private collectSettleStats = false;
   private lastSettleStats: SettleStats | null = null;
+  private settleStatsHistory: SettleStatsHistoryEntry[] = [];
+  private collectTriggerTrace = false;
+  private triggerTrace: TriggerTraceEntry[] = [];
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -435,6 +506,13 @@ export class Scheduler {
       reads: reads?.length ? reads : undefined,
       writes: writes?.length ? writes : undefined,
     };
+  }
+
+  private recordTriggerTrace(entry: TriggerTraceEntry): void {
+    this.triggerTrace.push(entry);
+    if (this.triggerTrace.length > MAX_TRIGGER_TRACE_HISTORY) {
+      this.triggerTrace.shift();
+    }
   }
 
   private getOptionalName(value: unknown): string | undefined {
@@ -1160,7 +1238,7 @@ export class Scheduler {
         const space = notification.space;
 
         // Log notification details
-        logger.debug("schedule-notification", () => [
+        triggerFlowLogger.debug("schedule-notification", () => [
           `Type: ${notification.type}`,
           `Space: ${space}`,
           `Has source: ${
@@ -1181,7 +1259,7 @@ export class Scheduler {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            logger.debug("schedule-change", () => [
+            triggerFlowLogger.debug("schedule-change", () => [
               `Change #${changeIndex}`,
               `Address: ${change.address.id}/${change.address.path.join("/")}`,
               `Before: ${JSON.stringify(change.before)}`,
@@ -1193,7 +1271,7 @@ export class Scheduler {
             });
 
             if (change.address.type !== "application/json") {
-              logger.debug("schedule-change-skip", () => [
+              triggerFlowLogger.debug("schedule-change-skip", () => [
                 `Change #${changeIndex} skipping non-JSON type: ${change.address.type}`,
               ]);
               continue;
@@ -1206,7 +1284,7 @@ export class Scheduler {
             );
 
             if (paths || nonRecursivePaths) {
-              logger.debug("schedule-change-match", () => [
+              triggerFlowLogger.debug("schedule-change-match", () => [
                 `Change #${changeIndex} found ${
                   (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
                 } registered actions for ${spaceAndURI}`,
@@ -1239,8 +1317,29 @@ export class Scheduler {
                 }
               }
               const triggeredActions = [...triggeredActionSet];
+              const writerActionId = hasSourceChangeGroup &&
+                  sourceChangeGroup !== undefined
+                ? this.changeGroupToActionId.get(sourceChangeGroup)
+                : undefined;
+              const triggerTraceEntry: TriggerTraceEntry | null =
+                this.collectTriggerTrace
+                  ? {
+                    recordedAt: performance.now(),
+                    notificationType: notification.type,
+                    changeIndex,
+                    matchedActionCount: triggeredActions.length,
+                    mode: this.pullMode ? "pull" : "push",
+                    writerActionId,
+                    space,
+                    entityId: change.address.id,
+                    path: [...change.address.path],
+                    before: summarizeTriggerTraceValue(change.before),
+                    after: summarizeTriggerTraceValue(change.after),
+                    triggered: [] as TriggerTraceActionRecord[],
+                  } satisfies TriggerTraceEntry
+                  : null;
 
-              logger.debug("schedule-change-trigger", () => [
+              triggerFlowLogger.debug("schedule-change-trigger", () => [
                 `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
               ]);
 
@@ -1264,43 +1363,83 @@ export class Scheduler {
                 }
 
                 const actionChangeGroup = this.actionChangeGroups.get(action);
+                const actionId = this.getActionId(action);
+                const actionType = this.effects.has(action)
+                  ? "effect"
+                  : "computation";
+                const pendingBefore = this.pending.has(action);
+                const dirtyBefore = this.dirty.has(action);
                 if (
                   hasSourceChangeGroup &&
                   actionChangeGroup !== undefined &&
                   Object.is(actionChangeGroup, sourceChangeGroup)
                 ) {
-                  logger.debug("schedule-change-skip-group", () => [
+                  triggerFlowLogger.debug("schedule-change-skip-group", () => [
                     `Change #${changeIndex} skipped action change group`,
-                    `Action: ${this.getActionId(action)}`,
+                    `Action: ${actionId}`,
                   ]);
+                  triggerTraceEntry?.triggered.push({
+                    actionId,
+                    actionType,
+                    mode: this.pullMode ? "pull" : "push",
+                    decision: "skip-same-change-group",
+                    pendingBefore,
+                    pendingAfter: this.pending.has(action),
+                    dirtyBefore,
+                    dirtyAfter: this.dirty.has(action),
+                    scheduledEffects: [],
+                  });
                   continue;
                 }
 
-                logger.debug("schedule-trigger", () => [
+                triggerFlowLogger.debug("schedule-trigger", () => [
                   `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
-                  `Action: ${this.getActionId(action)}`,
+                  `Action: ${actionId}`,
                   `Mode: ${this.pullMode ? "pull" : "push"}`,
-                  `Type: ${
-                    this.effects.has(action) ? "effect" : "computation"
-                  }`,
+                  `Type: ${actionType}`,
                 ]);
 
+                let decision: TriggerTraceActionRecord["decision"];
+                let scheduledEffects: TriggerTraceScheduledEffect[] = [];
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
                     this.scheduleWithDebounce(action);
+                    decision = "schedule-effect";
                   } else {
                     // Mark computation as dirty and schedule affected effects
                     this.markDirty(action);
-                    this.scheduleAffectedEffects(action);
+                    scheduledEffects = this.scheduleAffectedEffects(action);
+                    decision = dirtyBefore ? "already-dirty" : "mark-dirty";
                   }
                 } else {
                   // Push mode: existing behavior - schedule all triggered actions
                   this.scheduleWithDebounce(action);
+                  decision = "schedule-push";
                 }
+
+                triggerTraceEntry?.triggered.push({
+                  actionId,
+                  actionType,
+                  mode: this.pullMode ? "pull" : "push",
+                  decision,
+                  pendingBefore,
+                  pendingAfter: this.pending.has(action),
+                  dirtyBefore,
+                  dirtyAfter: this.dirty.has(action),
+                  scheduledEffects,
+                });
+              }
+
+              if (
+                triggerTraceEntry &&
+                (triggerTraceEntry.triggered.length > 0 ||
+                  triggerTraceEntry.matchedActionCount > 0)
+              ) {
+                this.recordTriggerTrace(triggerTraceEntry);
               }
             } else {
-              logger.debug("schedule", () => [
+              triggerFlowLogger.debug("schedule", () => [
                 `[CHANGE ${changeIndex}] No registered actions for ${spaceAndURI}`,
               ]);
             }
@@ -2196,8 +2335,11 @@ export class Scheduler {
   /**
    * Finds and schedules all effects that transitively depend on the given computation.
    */
-  private scheduleAffectedEffects(computation: Action): void {
+  private scheduleAffectedEffects(
+    computation: Action,
+  ): TriggerTraceScheduledEffect[] {
     const start = performance.now();
+    const scheduledEffects: TriggerTraceScheduledEffect[] = [];
 
     try {
       const visited = new Set<Action>();
@@ -2222,11 +2364,21 @@ export class Scheduler {
       findEffects(computation);
 
       for (const effect of toSchedule) {
+        const pendingBefore = this.pending.has(effect);
+        const dirtyBefore = this.dirty.has(effect);
+        const debounceMs = this.actionDebounce.get(effect);
         this.scheduleWithDebounce(effect);
+        scheduledEffects.push({
+          actionId: this.getActionId(effect),
+          pendingBefore,
+          dirtyBefore,
+          debounceMs,
+        });
       }
     } finally {
       logger.time(start, "scheduler", "scheduleAffectedEffects");
     }
+    return scheduledEffects;
   }
 
   // ============================================================
@@ -2475,7 +2627,19 @@ export class Scheduler {
    * Call this once before running patterns to opt in to the overhead.
    */
   enableSettleStats(): void {
-    this.collectSettleStats = true;
+    this.setSettleStatsEnabled(true);
+  }
+
+  /**
+   * Enables or disables collection of per-iteration settle stats during execute().
+   * Disabling also clears the last collected stats to avoid stale reads.
+   */
+  setSettleStatsEnabled(enabled: boolean): void {
+    this.collectSettleStats = enabled;
+    if (!enabled) {
+      this.lastSettleStats = null;
+      this.settleStatsHistory = [];
+    }
   }
 
   /**
@@ -2483,6 +2647,31 @@ export class Scheduler {
    */
   getSettleStats(): SettleStats | null {
     return this.lastSettleStats;
+  }
+
+  /**
+   * Returns recent settle stats history from execute() calls, oldest first.
+   */
+  getSettleStatsHistory(): SettleStatsHistoryEntry[] {
+    return [...this.settleStatsHistory];
+  }
+
+  /**
+   * Enables or disables collection of structured trigger-trace entries.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setTriggerTraceEnabled(enabled: boolean): void {
+    this.collectTriggerTrace = enabled;
+    if (!enabled) {
+      this.triggerTrace = [];
+    }
+  }
+
+  /**
+   * Returns recent structured trigger-trace entries, oldest first.
+   */
+  getTriggerTrace(): TriggerTraceEntry[] {
+    return [...this.triggerTrace];
   }
 
   // ============================================================
@@ -3332,12 +3521,20 @@ export class Scheduler {
 
     // Store settle stats for external access (only when enabled)
     if (settleIterStats) {
-      this.lastSettleStats = {
+      const settleStats = {
         iterations: settleIterStats,
         totalDurationMs: performance.now() - settleStartTime,
         settledEarly,
         initialSeedCount: initialSeeds.size,
       };
+      this.lastSettleStats = settleStats;
+      this.settleStatsHistory.push({
+        recordedAt: performance.now(),
+        stats: settleStats,
+      });
+      if (this.settleStatsHistory.length > MAX_SETTLE_STATS_HISTORY) {
+        this.settleStatsHistory.shift();
+      }
     }
 
     logger.timeEnd("scheduler", "execute", "settle");
@@ -3677,6 +3874,27 @@ export function txToReactivityLog(
     }
   }
   return log;
+}
+
+function summarizeTriggerTraceValue(value: unknown): TriggerTraceValueSummary {
+  if (value === undefined) return { kind: "undefined" };
+  if (value === null) return { kind: "null", preview: null };
+  if (typeof value === "boolean") return { kind: "boolean", preview: value };
+  if (typeof value === "number") return { kind: "number", preview: value };
+  if (typeof value === "string") {
+    return {
+      kind: "string",
+      size: value.length,
+      preview: value.length > 80 ? `${value.slice(0, 77)}...` : value,
+    };
+  }
+  if (Array.isArray(value)) {
+    return { kind: "array", size: value.length };
+  }
+  if (isRecord(value)) {
+    return { kind: "object", size: Object.keys(value).length };
+  }
+  return { kind: "other", preview: Object.prototype.toString.call(value) };
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {

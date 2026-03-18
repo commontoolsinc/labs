@@ -4,6 +4,9 @@ import type {
   NormalizedFullLink,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  TriggerTraceEntry,
 } from "@commontools/runner/shared";
 import type { DID, KeyPairRaw } from "@commontools/identity";
 import { type Program } from "@commontools/js-compiler/interface";
@@ -43,6 +46,11 @@ export enum RequestType {
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
+  GetSettleStats = "runtime:getSettleStats",
+  GetSettleStatsHistory = "runtime:getSettleStatsHistory",
+  SetSettleStatsEnabled = "runtime:setSettleStatsEnabled",
+  GetTriggerTrace = "runtime:getTriggerTrace",
+  SetTriggerTraceEnabled = "runtime:setTriggerTraceEnabled",
   DetectNonIdempotent = "runtime:detectNonIdempotent",
 
   // Page operations (main -> worker)
@@ -213,9 +221,43 @@ export interface ResetLoggerBaselinesRequest extends BaseRequest {
   type: RequestType.ResetLoggerBaselines;
 }
 
+export interface GetSettleStatsRequest extends BaseRequest {
+  type: RequestType.GetSettleStats;
+}
+
+export interface SetSettleStatsEnabledRequest extends BaseRequest {
+  type: RequestType.SetSettleStatsEnabled;
+  enabled: boolean;
+}
+
+export interface GetSettleStatsHistoryRequest extends BaseRequest {
+  type: RequestType.GetSettleStatsHistory;
+}
+
+export interface GetTriggerTraceRequest extends BaseRequest {
+  type: RequestType.GetTriggerTrace;
+}
+
+export interface SetTriggerTraceEnabledRequest extends BaseRequest {
+  type: RequestType.SetTriggerTraceEnabled;
+  enabled: boolean;
+}
+
 export interface DetectNonIdempotentRequest extends BaseRequest {
   type: RequestType.DetectNonIdempotent;
   durationMs?: number;
+}
+
+export interface SettleStatsResponse {
+  stats: SettleStats | null;
+}
+
+export interface SettleStatsHistoryResponse {
+  history: SettleStatsHistoryEntry[];
+}
+
+export interface TriggerTraceResponse {
+  trace: TriggerTraceEntry[];
 }
 
 export interface DetectNonIdempotentResponse {
@@ -423,6 +465,11 @@ export type IPCClientRequest =
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
   | ResetLoggerBaselinesRequest
+  | GetSettleStatsRequest
+  | GetSettleStatsHistoryRequest
+  | SetSettleStatsEnabledRequest
+  | GetTriggerTraceRequest
+  | SetTriggerTraceEnabledRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -552,6 +599,9 @@ export type RemoteResponse =
   | CellResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
+  | SettleStatsResponse
+  | SettleStatsHistoryResponse
+  | TriggerTraceResponse
   | PageResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse;
@@ -615,6 +665,26 @@ export type Commands = {
   };
   [RequestType.ResetLoggerBaselines]: {
     request: ResetLoggerBaselinesRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetSettleStats]: {
+    request: GetSettleStatsRequest;
+    response: SettleStatsResponse;
+  };
+  [RequestType.GetSettleStatsHistory]: {
+    request: GetSettleStatsHistoryRequest;
+    response: SettleStatsHistoryResponse;
+  };
+  [RequestType.SetSettleStatsEnabled]: {
+    request: SetSettleStatsEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetTriggerTrace]: {
+    request: GetTriggerTraceRequest;
+    response: TriggerTraceResponse;
+  };
+  [RequestType.SetTriggerTraceEnabled]: {
+    request: SetTriggerTraceEnabledRequest;
     response: EmptyResponse;
   };
   // Cell requests

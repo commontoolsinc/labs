@@ -5,6 +5,13 @@ import { Identity } from "@commontools/identity";
 import { assert } from "@std/assert";
 
 const { FRONTEND_URL } = env;
+const CAPTURE_TRIGGER_TRACE = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_TRIGGER_TRACE") === "1";
+  } catch {
+    return false;
+  }
+})();
 
 describe("default-app flow test", () => {
   const shell = new ShellIntegration();
@@ -24,6 +31,13 @@ describe("default-app flow test", () => {
       view: { spaceName },
       identity,
     });
+
+    if (CAPTURE_TRIGGER_TRACE) {
+      console.log("Enable trigger trace...");
+      await waitFor(async () => {
+        return await armTriggerTrace(page);
+      });
+    }
 
     // Wait for "Notes" dropdown button to appear and click it
     console.log("Click notes drop down...");
@@ -72,8 +86,89 @@ describe("default-app flow test", () => {
       noteFound,
       "List should contain '📝 New Note #<hash>' after creating a note",
     );
+
+    if (CAPTURE_TRIGGER_TRACE) {
+      const triggerSummary = await collectTriggerTraceSummary(page);
+      assert(triggerSummary, "Expected trigger trace summary to be available");
+      console.log(
+        "Trigger trace summary:",
+        JSON.stringify(triggerSummary, null, 2),
+      );
+    }
   });
 });
+
+async function armTriggerTrace(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commontools?.rt;
+    if (!rt) return false;
+    await rt.setTriggerTraceEnabled(false);
+    await rt.setTriggerTraceEnabled(true);
+    return true;
+  });
+}
+
+async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commontools?.rt;
+    if (!rt) return null;
+
+    const trace = await rt.getTriggerTrace();
+    type TriggerSample = {
+      writerActionId?: string;
+      change: string;
+      decision: string;
+      scheduledEffects: string[];
+    };
+
+    const counts = new Map<string, number>();
+    const samples = new Map<string, TriggerSample[]>();
+
+    const pushSample = (actionId: string, sample: TriggerSample) => {
+      counts.set(actionId, (counts.get(actionId) ?? 0) + 1);
+      const existing = samples.get(actionId) ?? [];
+      if (existing.length < 3) {
+        existing.push(sample);
+      }
+      samples.set(actionId, existing);
+    };
+
+    for (const entry of trace) {
+      const change = `${entry.space}/${entry.entityId}/${entry.path.join("/")}`;
+      for (const action of entry.triggered) {
+        pushSample(action.actionId, {
+          writerActionId: entry.writerActionId,
+          change,
+          decision: action.decision,
+          scheduledEffects: action.scheduledEffects.map((effect) =>
+            effect.actionId
+          ),
+        });
+        for (const effect of action.scheduledEffects) {
+          pushSample(effect.actionId, {
+            writerActionId: entry.writerActionId,
+            change,
+            decision: `scheduled-by:${action.actionId}`,
+            scheduledEffects: [],
+          });
+        }
+      }
+    }
+
+    return {
+      entryCount: trace.length,
+      repeatedActions: [...counts.entries()]
+        .filter(([, count]) => count > 1)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([actionId, count]) => ({
+          actionId,
+          count,
+          samples: samples.get(actionId) ?? [],
+        })),
+    };
+  });
+}
 
 // Helper to find and click a button by text using piercing selectors
 async function clickButtonWithText(

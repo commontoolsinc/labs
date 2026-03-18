@@ -143,6 +143,129 @@ await commontools.rt.setLoggerEnabled(true)            // enable all
 await commontools.rt.setLoggerEnabled(false, "runner") // disable one
 ```
 
+## Worker Settle Stats
+
+Capture per-`execute()` settle-loop stats from the worker scheduler:
+
+```javascript
+// Enable settle stats collection
+await commontools.rt.setSettleStatsEnabled(true)
+
+// Inspect the most recent execute() settle data
+await commontools.rt.getSettleStats()
+// {
+//   iterations: [
+//     {
+//       workSetSize: 27,
+//       orderSize: 27,
+//       actionsRun: 27,
+//       actions: [{ id, type }, ...],
+//       durationMs: 348.4
+//     },
+//     ...
+//   ],
+//   totalDurationMs: 702.9,
+//   settledEarly: true,
+//   initialSeedCount: 0
+// }
+
+// Disable collection and clear the last captured value
+await commontools.rt.setSettleStatsEnabled(false)
+```
+
+If you need the recent wave sequence rather than just the last settle result,
+read the bounded history buffer:
+
+```javascript
+await commontools.rt.setSettleStatsEnabled(true)
+await commontools.rt.getSettleStatsHistory()
+// [
+//   { recordedAt, stats: { ... } },
+//   { recordedAt, stats: { ... } },
+//   ...
+// ]
+```
+
+`getSettleStats()` still returns only the **last** `execute()` call, so a
+trailing empty settle pass can overwrite the interesting interaction. Prefer
+`getSettleStatsHistory()` for note creation, reload, or navigation flows.
+
+If you need live sampling while the interaction is still in progress, polling is
+still useful:
+
+```javascript
+await commontools.rt.setSettleStatsEnabled(true)
+
+globalThis.__settleSamples = []
+globalThis.__lastSettleSig = null
+globalThis.__settlePoll = setInterval(() => {
+  void commontools.rt.getSettleStats().then((stats) => {
+    const sig = JSON.stringify(stats)
+    if (sig !== globalThis.__lastSettleSig) {
+      globalThis.__lastSettleSig = sig
+      globalThis.__settleSamples.push({ at: performance.now(), stats })
+    }
+  })
+}, 25)
+
+// ... perform the interaction ...
+
+clearInterval(globalThis.__settlePoll)
+globalThis.__settleSamples
+```
+
+## Worker Trigger Trace
+
+Capture structured change-to-action scheduling data from the worker scheduler:
+
+```javascript
+// Reset and enable trigger tracing
+await commontools.rt.setTriggerTraceEnabled(false)
+await commontools.rt.setTriggerTraceEnabled(true)
+
+// ... perform the interaction ...
+
+// Read the bounded ring buffer
+const trace = await commontools.rt.getTriggerTrace()
+trace.slice(-5)
+```
+
+Each trace entry contains:
+
+- the changed `space`, `entityId`, and `path`
+- compact `before` / `after` value summaries
+- the scheduling mode (`push` or `pull`)
+- the source writer action id when available
+- each directly triggered action, its scheduling decision, and any downstream
+  scheduled effects
+
+To find repeated actions quickly:
+
+```javascript
+const trace = await commontools.rt.getTriggerTrace()
+const counts = new Map()
+
+for (const entry of trace) {
+  for (const action of entry.triggered) {
+    counts.set(action.actionId, (counts.get(action.actionId) ?? 0) + 1)
+    for (const effect of action.scheduledEffects) {
+      counts.set(effect.actionId, (counts.get(effect.actionId) ?? 0) + 1)
+    }
+  }
+}
+
+[...counts.entries()]
+  .filter(([, count]) => count > 1)
+  .sort((a, b) => b[1] - a[1])
+  .slice(0, 10)
+```
+
+To disable tracing and clear the buffer:
+
+```javascript
+await commontools.rt.setTriggerTraceEnabled(false)
+```
+
 ## Non-Idempotent Detection
 
 Diagnose non-settling scheduler behavior and find non-idempotent actions. See
@@ -162,6 +285,10 @@ result.cycles          // causal cycles (A -> B -> A)
 result.busyTime        // ms the scheduler was busy during the window
 result.duration        // total wall-clock duration of the diagnosis
 ```
+
+This now runs a real timed diagnosis window in the worker. In the settle-wave
+investigation, a 3-second note-creation window reported `busyTime` around
+`1062 ms` with no non-idempotent actions or cycles.
 
 The same functionality is available via `RuntimeClient`:
 
@@ -307,6 +434,11 @@ agent-browser eval "window._cancel()"
 | `commontools.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
 | `commontools.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
 | `commontools.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |
+| `commontools.rt.setSettleStatsEnabled(on)` | Enable/disable worker settle stats |
+| `commontools.rt.getSettleStats()` | Get the last worker settle stats payload |
+| `commontools.rt.getSettleStatsHistory()` | Get recent worker settle stats history |
+| `commontools.rt.setTriggerTraceEnabled(on)` | Enable/disable worker trigger tracing |
+| `commontools.rt.getTriggerTrace()` | Get recent worker trigger-trace entries |
 | `commontools.vdom.renders()` | List active renderings |
 | `commontools.vdom.tree(el?)` | Raw VDOM tree object |
 | `commontools.vdom.dump(el?)` | Pretty-print VDOM tree |

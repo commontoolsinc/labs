@@ -52,6 +52,9 @@ import {
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
+  type GetSettleStatsHistoryRequest,
+  type GetSettleStatsRequest,
+  type GetTriggerTraceRequest,
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
@@ -72,7 +75,12 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
+  type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
+  type SettleStatsHistoryResponse,
+  type SettleStatsResponse,
+  type SetTriggerTraceEnabledRequest,
+  type TriggerTraceResponse,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
@@ -750,10 +758,48 @@ export class RuntimeProcessor {
   }
 
   async detectNonIdempotent(
-    _request: DetectNonIdempotentRequest,
+    request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
-    const result = await this.runtime.scheduler.runIdempotencyCheck();
+    const result = await this.runtime.scheduler.runDiagnosis(
+      request.durationMs,
+    );
     return { result };
+  }
+
+  getSettleStats(
+    _request: GetSettleStatsRequest,
+  ): SettleStatsResponse {
+    return {
+      stats: this.runtime.scheduler.getSettleStats(),
+    };
+  }
+
+  getSettleStatsHistory(
+    _request: GetSettleStatsHistoryRequest,
+  ): SettleStatsHistoryResponse {
+    return {
+      history: this.runtime.scheduler.getSettleStatsHistory(),
+    };
+  }
+
+  setSettleStatsEnabled(
+    request: SetSettleStatsEnabledRequest,
+  ): void {
+    this.runtime.scheduler.setSettleStatsEnabled(request.enabled);
+  }
+
+  getTriggerTrace(
+    _request: GetTriggerTraceRequest,
+  ): TriggerTraceResponse {
+    return {
+      trace: this.runtime.scheduler.getTriggerTrace(),
+    };
+  }
+
+  setTriggerTraceEnabled(
+    request: SetTriggerTraceEnabledRequest,
+  ): void {
+    this.runtime.scheduler.setTriggerTraceEnabled(request.enabled);
   }
 
   async handleRequest(
@@ -820,6 +866,16 @@ export class RuntimeProcessor {
         return this.setTelemetryEnabled(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
+      case RequestType.GetSettleStats:
+        return this.getSettleStats(request);
+      case RequestType.GetSettleStatsHistory:
+        return this.getSettleStatsHistory(request);
+      case RequestType.SetSettleStatsEnabled:
+        return this.setSettleStatsEnabled(request);
+      case RequestType.GetTriggerTrace:
+        return this.getTriggerTrace(request);
+      case RequestType.SetTriggerTraceEnabled:
+        return this.setTriggerTraceEnabled(request);
       case RequestType.DetectNonIdempotent:
         return await this.detectNonIdempotent(request);
       case RequestType.VDomEvent:

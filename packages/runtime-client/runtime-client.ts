@@ -11,6 +11,9 @@ import type {
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  TriggerTraceEntry,
 } from "@commontools/runner/shared";
 import { Program } from "@commontools/js-compiler/interface";
 import { CellHandle } from "./cell-handle.ts";
@@ -309,12 +312,70 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
+   * Enable or disable collection of settle stats in the worker scheduler.
+   * When disabled, the last captured settle stats are cleared.
+   */
+  async setSettleStatsEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetSettleStatsEnabled>({
+      type: RequestType.SetSettleStatsEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Return settle stats captured during the last worker scheduler execute() call.
+   * Returns null if settle stats are disabled or no execute() has been captured yet.
+   */
+  async getSettleStats(): Promise<SettleStats | null> {
+    const res = await this.#conn.request<RequestType.GetSettleStats>({
+      type: RequestType.GetSettleStats,
+    });
+    return res.stats;
+  }
+
+  /**
+   * Return recent settle stats history captured from worker execute() calls.
+   * Entries are ordered oldest first.
+   */
+  async getSettleStatsHistory(): Promise<SettleStatsHistoryEntry[]> {
+    const res = await this.#conn.request<RequestType.GetSettleStatsHistory>({
+      type: RequestType.GetSettleStatsHistory,
+    });
+    return res.history;
+  }
+
+  /**
+   * Enable or disable collection of structured trigger-trace entries in the worker scheduler.
+   * When disabled, the current trigger trace buffer is cleared.
+   */
+  async setTriggerTraceEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetTriggerTraceEnabled>({
+      type: RequestType.SetTriggerTraceEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Return recent structured trigger-trace entries captured from worker storage changes.
+   * Entries are ordered oldest first.
+   */
+  async getTriggerTrace(): Promise<TriggerTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetTriggerTrace>({
+      type: RequestType.GetTriggerTrace,
+    });
+    return res.trace;
+  }
+
+  /**
    * Run non-idempotent computation detection.
    * Returns a report of non-idempotent actions found.
    */
-  async detectNonIdempotent(): Promise<SchedulerDiagnosisResult> {
+  async detectNonIdempotent(
+    durationMs?: number,
+  ): Promise<SchedulerDiagnosisResult> {
     const res = await this.#conn.request<RequestType.DetectNonIdempotent>({
       type: RequestType.DetectNonIdempotent,
+      durationMs,
     });
     return res.result;
   }

@@ -31,6 +31,15 @@ await commontools.detectNonIdempotent(10000) // 10 seconds
 This prints a table of non-idempotent actions and any cycles found, then returns
 the full result object.
 
+The result also includes a timed diagnosis window:
+
+- `duration`: total wall-clock length of the window
+- `busyTime`: how much of that window the scheduler spent executing work
+
+If `busyTime / duration` is high but `nonIdempotent` and `cycles` are empty,
+you are likely looking at broad fan-out or slow convergence rather than a true
+non-idempotent loop.
+
 ## How It Works
 
 The detection system has three layers:
@@ -52,6 +61,13 @@ await commontools.rt.request({
   type: "runtime:detectNonIdempotent",
   durationMs: 3000
 })
+```
+
+The higher-level console helpers now use the same timed diagnosis path:
+
+```javascript
+await commontools.detectNonIdempotent(3000)
+await commontools.rt.detectNonIdempotent(3000)
 ```
 
 ### 2. Idempotency Diagnosis (On-Demand)
@@ -185,6 +201,28 @@ if (result.nonIdempotent.length > 0) {
   console.warn("Non-idempotent actions detected:", result.nonIdempotent);
 }
 ```
+
+## Recent Example
+
+During the settle-wave investigation on March 18, 2026, a 3-second diagnosis
+window around note creation returned:
+
+```json
+{
+  "nonIdempotent": [],
+  "cycles": [],
+  "duration": 3001.6,
+  "busyTime": 1062.4
+}
+```
+
+Interpretation:
+
+- the scheduler was busy about 35% of the time during the window
+- the system was clearly doing significant work
+- the work was not explained by non-idempotent actions or causal cycles
+- the remaining hypothesis was broad scheduler fan-out and repeated settle
+  passes
 
 ## Common Patterns That Cause Non-Idempotency
 
