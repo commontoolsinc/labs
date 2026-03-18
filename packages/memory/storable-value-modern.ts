@@ -4,14 +4,12 @@ import type {
   StorableValue,
   StorableValueLayer,
 } from "./interface.ts";
-import {
-  isStorableInstance,
-  type StorableInstance,
-} from "./storable-protocol.ts";
-import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import type { StorableInstance } from "@commontools/data-model/storable-instance";
+import { isStorableInstance } from "./storable-protocol.ts";
+import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
+import { StorableEpochNsec } from "@commontools/data-model/storable-epoch";
 import {
   isConvertibleNativeInstance,
-  StorableEpochNsec,
   StorableError,
   StorableRegExp,
   UNSAFE_KEYS,

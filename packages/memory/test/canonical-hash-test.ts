@@ -9,6 +9,8 @@ import { StorableContentId } from "../storable-content-id.ts";
 import {
   StorableEpochDays,
   StorableEpochNsec,
+} from "@commontools/data-model/storable-epoch";
+import {
   StorableError,
   StorableUint8Array,
 } from "../storable-native-instances.ts";

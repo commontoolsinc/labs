@@ -1,19 +1,15 @@
 import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
-  isStorableInstance,
   RECONSTRUCT,
-  type ReconstructionContext,
   StorableInstance,
+} from "@commontools/data-model/storable-instance";
+import {
+  isStorableInstance,
+  type ReconstructionContext,
 } from "./storable-protocol.ts";
-import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
 
-// Canonical definitions now live in `@commontools/data-model`. Re-exported here
-// for backward compatibility.
-export {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "@commontools/data-model/storable-epoch";
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 

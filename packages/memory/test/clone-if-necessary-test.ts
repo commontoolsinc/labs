@@ -6,10 +6,8 @@ import {
   setStorableValueConfig,
 } from "../storable-value.ts";
 import type { StorableValue } from "../interface.ts";
-import {
-  StorableEpochNsec,
-  StorableError,
-} from "../storable-native-instances.ts";
+import { StorableEpochNsec } from "@commontools/data-model/storable-epoch";
+import { StorableError } from "../storable-native-instances.ts";
 
 // ============================================================================
 // Tests

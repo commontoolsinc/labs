@@ -1,5 +1,5 @@
 import type { StorableValue } from "./interface.ts";
-import { StorableInstance } from "./storable-protocol.ts";
+import { StorableInstance } from "@commontools/data-model/storable-instance";
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.

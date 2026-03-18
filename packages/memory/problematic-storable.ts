@@ -2,8 +2,8 @@ import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  type ReconstructionContext,
-} from "./storable-protocol.ts";
+} from "@commontools/data-model/storable-instance";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 
 /**

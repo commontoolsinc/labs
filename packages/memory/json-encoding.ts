@@ -1,10 +1,12 @@
 import type { StorableValue } from "./interface.ts";
 import {
   RECONSTRUCT,
+  type StorableInstance,
+} from "@commontools/data-model/storable-instance";
+import {
   type ReconstructionContext,
   type SerializationContext,
   type StorableClass,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { deepFreeze } from "@commontools/data-model/deep-freeze";

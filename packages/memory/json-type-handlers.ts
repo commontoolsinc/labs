@@ -1,9 +1,11 @@
 import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
+  type StorableInstance,
+} from "@commontools/data-model/storable-instance";
+import {
   isStorableInstance,
   type ReconstructionContext,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
@@ -23,7 +25,7 @@ export type JsonWireValue =
 import {
   StorableEpochDays,
   StorableEpochNsec,
-} from "./storable-native-instances.ts";
+} from "@commontools/data-model/storable-epoch";
 import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,

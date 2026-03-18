@@ -13,7 +13,10 @@ import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
 import { StorableContentId } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
-import { DECONSTRUCT, type StorableInstance } from "./storable-protocol.ts";
+import {
+  DECONSTRUCT,
+  type StorableInstance,
+} from "@commontools/data-model/storable-instance";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
