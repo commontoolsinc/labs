@@ -1057,7 +1057,8 @@ Primary files:
       tests (`packages/runner/test/helpers/cfc-pattern-harness.ts`).
 - [x] Cover fetch/send worked examples with harness-managed runtime setup,
       fetch stubs, restarts, and label inspection while keeping the main logic
-      inside patterns where the current runner path supports it.
+      inside patterns where the current runner path supports it
+      (`gmail-read`, `gmail-send`, `return-to-sender`, `agentic-email`).
 - [x] Cover durable share-grant worked-example setup/restart via the same
       harness.
 - [ ] Close the remaining gap where some policy-rewrite worked-example phases

@@ -1,23 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { setPatternEnvironment } from "../src/env.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
 import { createCfcIntentOnce } from "../src/cfc/intent-refinement.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { NormalizedFullLink } from "../src/link-types.ts";
-import type {
-  IExtendedStorageTransaction,
-  Labels,
-} from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example agentic email test",
@@ -87,38 +74,29 @@ const emailRequestSchema = {
   },
 } as const satisfies JSONSchema;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe("CFC worked example: agentic email send", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 
+  type SettledFetchResult = {
+    pending?: boolean;
+    result?: unknown;
+    error?: unknown;
+  } | undefined;
+
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
-    });
-    tx = runtime.edit();
-
-    const { commontools } = createBuilder();
-    pattern = commontools.pattern;
-    byRef = commontools.byRef;
-
-    setPatternEnvironment({
-      apiUrl: new URL("http://mock-test-server.local"),
+      patternEnvironment: {
+        apiUrl: new URL("http://mock-test-server.local"),
+      },
     });
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (
+    harness.stubFetch((
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -140,14 +118,12 @@ describe("CFC worked example: agentic email send", () => {
           },
         ),
       );
-    };
+    });
   });
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    await tx.abort();
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
   function createEmailSendIntent(additionalIntegrity: readonly unknown[] = []) {
@@ -180,85 +156,46 @@ describe("CFC worked example: agentic email send", () => {
     });
   }
 
-  async function pullFinalResult(
-    resultCell: { pull: () => Promise<unknown>; get: () => unknown },
-  ) {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await resultCell.pull();
-      await delay(50);
-      const value = resultCell.get() as
-        | { pending?: boolean; result?: unknown; error?: unknown }
-        | undefined;
-      if (value?.pending === false) {
-        return value;
-      }
-    }
-    return resultCell.get() as
-      | { pending?: boolean; result?: unknown; error?: unknown }
-      | undefined;
-  }
-
-  async function readLabels(
-    link: NormalizedFullLink,
-  ): Promise<Record<string, Labels>> {
-    const readTx = runtime.edit();
-    const raw = readTx.readOrThrow(cfcLabelsAddress(link));
-    await readTx.abort();
-    return normalizePersistedLabels(raw);
-  }
-
   async function runEmailSend(intent = createEmailSendIntent()) {
-    const requestCell = runtime.getCell(
-      space,
-      "agentic-email-request",
-      emailRequestSchema,
-      tx,
-    );
-    requestCell.withTx(tx).set({
-      url: `${sinkAudience}/send`,
-      mode: "json",
-      options: {
-        method: "POST",
-        body: {
-          to: "alice@example.com",
-          body: "Research summary with prompt-influenced content",
+    const requestCell = await harness.writeCellValue({
+      id: "agentic-email-request",
+      schema: emailRequestSchema,
+      value: {
+        url: `${sinkAudience}/send`,
+        mode: "json",
+        options: {
+          method: "POST",
+          body: {
+            to: "alice@example.com",
+            body: "Research summary with prompt-influenced content",
+          },
+          headers: {
+            "X-Idempotency-Key": intent.idempotencyKey,
+          },
         },
-        headers: {
-          "X-Idempotency-Key": intent.idempotencyKey,
+        cfc: {
+          intent,
+          endpoint: "email-send",
         },
       },
-      cfc: {
-        intent,
-        endpoint: "email-send",
-      },
+      prepare: "boundary",
     });
-    await prepareBoundaryCommit(tx);
-    const prepared = await tx.commit();
-    expect(prepared.error).toBeUndefined();
 
-    tx = runtime.edit();
-    const fetchData = byRef("fetchData") as (params: unknown) => unknown;
-    const testPattern = pattern<{ request: unknown }>(({ request }) =>
-      fetchData(request)
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
+    const testPattern = harness.pattern<{ request: unknown }>(
+      ({ request }: { request: unknown }) => fetchData(request),
     );
-    const resultCell = runtime.getCell(
-      space,
-      "agentic-email-result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(
-      tx,
-      testPattern,
-      { request: requestCell },
-      resultCell,
-    );
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-    tx = runtime.edit();
+    const run = await harness.runPattern({
+      id: "agentic-email-result",
+      pattern: testPattern,
+      inputs: { request: requestCell },
+    });
+
     return {
-      result,
-      raw: await pullFinalResult(result),
+      result: run.result,
+      raw: await harness.pullSettledResult(run.result) as SettledFetchResult,
     };
   }
 
@@ -275,9 +212,8 @@ describe("CFC worked example: agentic email send", () => {
     });
     expect(fetchCalls.length).toBe(1);
 
-    const resultLabels = await readLabels(
-      result.key("result").resolveAsCell()
-        .getAsNormalizedFullLink(),
+    const resultLabels = await harness.readLabels(
+      result.key("result").resolveAsCell().getAsNormalizedFullLink(),
     );
     expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
     expect(resultLabels["/"]?.integrity).toEqual(
