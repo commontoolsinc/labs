@@ -30,7 +30,7 @@ import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { getLogger } from "@commontools/utils/logger";
 import { isBrowser } from "@commontools/utils/env";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
@@ -450,7 +450,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
           // If we don't use any $refs, we can compare these without $defs
           if (
-            isObject(newSchema) && isObject(sortedSubSchema) &&
+            isRecord(newSchema) && isRecord(sortedSubSchema) &&
             newSchemaRefs.size == 0
           ) {
             const { $defs: _defs1, ...newSchemaNoDefs } = newSchema;
@@ -2265,7 +2265,7 @@ export const getChanges = (
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
-  if (isObject(change?.is) && "labels" in change.is) {
+  if (isRecord(change.is) && "labels" in change.is) {
     return { ifc: change.is.labels } as JSONSchema;
   }
   return undefined;

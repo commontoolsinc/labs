@@ -7,7 +7,7 @@ import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import { JSONSchemaObj } from "@commontools/api";
-import { isObject } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 // This is for the 'imagine-single-phase' workflow
 
@@ -218,7 +218,7 @@ export async function generateCodeAndSchema(
 
   // If the existing schema is boolean, pretend it doesn't exist, since a
   // boolean schema isn't useful to the llm.
-  if (isObject(existingSchema) && Object.keys(existingSchema).length > 0) {
+  if (isRecord(existingSchema) && Object.keys(existingSchema).length > 0) {
     // When we have an existing schema, focus on generating specification
     systemPrompt = CODE_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(

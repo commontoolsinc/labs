@@ -19,7 +19,7 @@ import {
   type SchemaMemo,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
-import { type Immutable, isObject } from "@commontools/utils/types";
+import { type Immutable, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
@@ -466,7 +466,7 @@ function loadFactsForDoc(
   // Track this doc+schema pair and record it as newly discovered
   schemaTracker.add(factKey, selector);
 
-  if (isObject(fact.value)) {
+  if (isRecord(fact.value)) {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     if (selector.schema !== false) {

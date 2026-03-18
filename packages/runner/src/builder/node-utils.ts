@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -78,7 +78,7 @@ function attachCfcToOutputs(
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<string>([lubClassification]);
     ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isObject(outputSchema) && outputSchema.ifc !== undefined)
+    const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};
     ifc.classification = [cfc.lub(joined)];

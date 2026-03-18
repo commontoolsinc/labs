@@ -1,5 +1,4 @@
 import type { StorableValue } from "@commontools/memory/interface";
-import { isRecord } from "@commontools/utils/types";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -23,7 +22,7 @@ import {
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { getLogger } from "@commontools/utils/logger";
-import { isBoolean, isObject } from "@commontools/utils/types";
+import { isBoolean, isObject, isRecord } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
@@ -1695,7 +1694,10 @@ function handleUpdateArgument(
 
   // Apply updates to argument fields
   runtime.editWithRetry((tx) => {
-    if (isObject(cellifiedValue) && !isCell(cellifiedValue)) {
+    if (
+      isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
+      !isCell(cellifiedValue)
+    ) {
       argumentCell.withTx(tx).update(cellifiedValue);
     } else {
       argumentCell.withTx(tx).set(cellifiedValue);
@@ -2562,7 +2564,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
 function getSchemaTypeString(schema: JSONSchema): string {
   let defs;
-  if (isObject(schema)) {
+  if (isRecord(schema)) {
     // Convert schema to TypeScript-like string for readability
     defs = (schema as Record<string, unknown>).$defs as
       | Record<string, JSONSchema>

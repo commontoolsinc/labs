@@ -67,7 +67,7 @@ export type {
   SelectSchemaStats,
 } from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
-import { isObject } from "../utils/src/types.ts";
+import { isRecord } from "../utils/src/types.ts";
 import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
 export type * from "./interface.ts";
@@ -1295,7 +1295,7 @@ export function getClassifications(
   classifications = new Set<string>(),
 ) {
   if (
-    fact === undefined || !isObject(fact.is) ||
+    fact === undefined || !isRecord(fact.is) ||
     !("classification" in fact.is) || !Array.isArray(fact.is["classification"])
   ) {
     return classifications;

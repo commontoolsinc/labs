@@ -1,4 +1,4 @@
-import { isObject, type Mutable } from "@commontools/utils/types";
+import { isRecord, type Mutable } from "@commontools/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
 
 import type {
@@ -154,7 +154,7 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isObject(value) && "$stream" in value && value.$stream === true;
+  return isRecord(value) && "$stream" in value && value.$stream === true;
 }
 
 declare module "@commontools/api" {

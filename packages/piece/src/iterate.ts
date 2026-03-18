@@ -1,4 +1,4 @@
-import { isObject, Mutable } from "@commontools/utils/types";
+import { isObject, isRecord, Mutable } from "@commontools/utils/types";
 import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   type Cell,
@@ -230,13 +230,13 @@ export const generateNewPatternVersion = async (
 export function scrub(data: unknown): unknown {
   if (isCell(data)) {
     if (
-      isObject(data.schema) && data.schema?.type === "object" &&
+      isRecord(data.schema) && data.schema.type === "object" &&
       data.schema.properties
     ) {
       // If there are properties, remove $UI and $NAME and any streams
       const scrubbed = Object.fromEntries(
         Object.entries(data.schema.properties).filter(([key, value]) =>
-          !key.startsWith("$") && (!isObject(value) || !value.asStream)
+          !key.startsWith("$") && (!isRecord(value) || !value.asStream)
         ),
       );
       console.log("scrubbed modified schema", scrubbed, data.schema);
@@ -276,7 +276,7 @@ export function scrub(data: unknown): unknown {
     }
   } else if (Array.isArray(data)) {
     return data.map((value) => scrub(value));
-  } else if (isObject(data)) {
+  } else if (isRecord(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, scrub(value)]),
     );
@@ -297,7 +297,7 @@ function turnCellsIntoWriteRedirects(
     return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
     return data.map((value) => turnCellsIntoWriteRedirects(value, baseSpace));
-  } else if (isObject(data)) {
+  } else if (isRecord(data)) {
     return Object.fromEntries(
       Object.entries(data).map((
         [key, value],

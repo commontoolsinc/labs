@@ -2,7 +2,7 @@ import { DEFAULT_MODEL, pieceId, PieceManager } from "@commontools/piece";
 import { nameSchema } from "@commontools/runner/schemas";
 import { Cell, NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
-import { isObject } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 export type PieceSearchResult = {
   piece: Cell<unknown>;
@@ -30,7 +30,7 @@ export async function searchPieces(
 
           return {
             title: title + ` (#${pieceId(piece)!.slice(-4)})`,
-            description: isObject(pattern.argumentSchema)
+            description: isRecord(pattern.argumentSchema)
               ? pattern.argumentSchema.description
               : undefined,
             id: pieceId(piece)!,
@@ -125,7 +125,7 @@ export async function searchPieces(
   } catch (error: unknown) {
     console.error(
       "Search pieces error:",
-      (isObject(error) && "message" in error)
+      (isRecord(error) && "message" in error)
         ? error.message
         : JSON.stringify(error),
     );

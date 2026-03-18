@@ -37,20 +37,40 @@ export function isInstance(value: unknown): value is object {
 }
 
 /**
- * Predicate for narrowing a non-array/non-null `object` type.
+ * Check whether a value is a non-array/non-null `object` type.
  * @param value - The value to check
  * @returns True if the value is an object (not array or null)
  */
-export function isObject(value: unknown): value is object {
+export function isObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrowing for a non-array/non-null `object` type.
+ * @param value - The value to check
+ * @returns if the value is an object (not array or null) or throws if it is not
+ */
+export function assertIsObject(value: unknown): asserts value is object {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error();
+  }
 }
 
 /**
  * Predicate for narrowing a `number` type.
  * @param value - The value to check
- * @returns True if the value is a finite number
+ * @returns True if the value is a number
  */
 export function isNumber(value: unknown): value is number {
+  return typeof value === "number";
+}
+
+/**
+ * Check whether a value is a finite number type
+ * @param value - The value to check
+ * @returns True if the value is a finite number
+ */
+export function isFiniteNumber(value: unknown): boolean {
   return typeof value === "number" && Number.isFinite(value);
 }
 

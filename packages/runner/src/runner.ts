@@ -1,6 +1,6 @@
 import { refer } from "@commontools/memory/reference";
 import { getLogger } from "@commontools/utils/logger";
-import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
+import { isRecord, type Mutable } from "@commontools/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import type {
   StorableDatum,
@@ -865,7 +865,7 @@ export class Runner {
 
     if (
       isRecord(processCellSchema) && "properties" in processCellSchema &&
-      isObject(pattern.argumentSchema)
+      isRecord(pattern.argumentSchema)
     ) {
       // extract $defs and definitions and remove them from argumentSchema
       const { $defs, definitions, ...rest } = pattern.argumentSchema;
@@ -2074,7 +2074,7 @@ export function extractDefaultValues(
   if (typeof schema !== "object" || schema === null) return undefined;
 
   if (
-    schema.type === "object" && schema.properties && isObject(schema.properties)
+    schema.type === "object" && schema.properties && isRecord(schema.properties)
   ) {
     // Ignore the schema.default if it's not an object, since it's not a valid
     // default value for an object.
@@ -2115,7 +2115,7 @@ export function mergeObjects<T>(
     // If we have a literal value, return it. Same for arrays, since we wouldn't
     // know how to merge them. Note that earlier objects take precedence, so if
     // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (!isObject(obj) || isCellLink(obj)) {
+    if (!isRecord(obj) || Array.isArray(obj) || isCellLink(obj)) {
       return obj as T;
     }
 

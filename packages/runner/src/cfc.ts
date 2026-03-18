@@ -1,5 +1,5 @@
 import { JSONSchemaObj } from "@commontools/api";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
@@ -276,7 +276,7 @@ export class ContextualFlowControl {
     classification: string,
   ): JSONSchema {
     const joined = new Set<string>([classification]);
-    if (isObject(schema) && schema.ifc !== undefined) {
+    if (isRecord(schema) && schema.ifc !== undefined) {
       if (schema.ifc.classification !== undefined) {
         for (const item of schema.ifc.classification) {
           joined.add(item);
@@ -400,7 +400,7 @@ export class ContextualFlowControl {
           schemaObj = {
             ...resolved,
             ...rest,
-            ...(fullSchema && isObject(fullSchema) && fullSchema.$defs &&
+            ...(isRecord(fullSchema) && fullSchema.$defs &&
               { $defs: fullSchema.$defs }),
           } as JSONSchemaObj;
         } else {
@@ -480,7 +480,7 @@ export class ContextualFlowControl {
       if (schemaRefs.size > 0) {
         schemaCursor = {
           ...schemaCursor,
-          ...(isObject(fullSchema) && fullSchema.$defs &&
+          ...(isRecord(fullSchema) && fullSchema.$defs &&
             { $defs: fullSchema.$defs }),
         };
       }
@@ -541,7 +541,7 @@ export class ContextualFlowControl {
     schemaObj: JSONSchemaObj,
     fullSchema: JSONSchema = schemaObj,
   ) {
-    if (!isObject(fullSchema)) {
+    if (!isRecord(fullSchema)) {
       // We'd need a fullSchema to make this work
       // We don't need to do real cycle detection, since the path is limited
       throw new Error("Found $ref without fullSchema object");
@@ -616,7 +616,7 @@ export class ContextualFlowControl {
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
     // Take defs from schema if available
-    const defs = isObject(schema) && schema.$defs ? schema.$defs : undefined;
+    const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
     return this.schemaAtPathInternal(
       schema,
       path,
@@ -645,7 +645,7 @@ export class ContextualFlowControl {
       )
     ) {
       // If the cursor is a $ref, get the target location
-      if (isObject(cursor) && "$ref" in cursor) {
+      if (isRecord(cursor) && "$ref" in cursor) {
         // Follow the reference
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
@@ -653,11 +653,11 @@ export class ContextualFlowControl {
         );
         // Resolve schema refs can resolve to a fullSchema, in which case we
         // need to replace our defs.
-        if (isObject(cursor) && cursor.$defs) {
+        if (isRecord(cursor) && cursor.$defs) {
           defs = cursor.$defs;
         }
       }
-      if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
+      if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
         const subSchemaStrings: string[] = [];
         const options = (cursor.anyOf && cursor.oneOf)
@@ -765,7 +765,7 @@ export class ContextualFlowControl {
       }
     }
     if (
-      isObject(cursor) && cursor.ifc !== undefined &&
+      isRecord(cursor) && cursor.ifc !== undefined &&
       cursor.ifc?.classification !== undefined
     ) {
       for (const classification of cursor.ifc.classification!) {
@@ -822,7 +822,7 @@ export class ContextualFlowControl {
     if (schema === true) {
       return true;
     }
-    return isObject(schema) &&
+    return isRecord(schema) &&
       Object.keys(schema).every((k) =>
         this.isInternalSchemaKey(k) || k === "default" || k === "$defs"
       );
@@ -836,6 +836,8 @@ export class ContextualFlowControl {
   }
 
   static isFalseSchema(schema: JSONSchema): boolean {
-    return schema === false || (isObject(schema) && schema["not"] === true);
+    return schema === false ||
+      (isRecord(schema) && "not" in schema &&
+        !this.isTrueSchema(schema["not"]!));
   }
 }

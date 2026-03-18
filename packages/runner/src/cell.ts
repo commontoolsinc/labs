@@ -810,7 +810,7 @@ export class CellImpl<T extends StorableValue>
       // just wants to know whether the value could be an object.
       const allowsObject = resolvedSchema === undefined ||
         ContextualFlowControl.isTrueSchema(resolvedSchema) ||
-        (isObject(resolvedSchema) &&
+        (isRecord(resolvedSchema) &&
           (resolvedSchema.type === "object" ||
             (Array.isArray(resolvedSchema.type) &&
               resolvedSchema.type.includes("object")) ||
@@ -876,7 +876,7 @@ export class CellImpl<T extends StorableValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
+      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
         ? processDefaultValue(
           this.runtime,
           this.tx,
@@ -1005,7 +1005,7 @@ export class CellImpl<T extends StorableValue>
 
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
-    if (isObject(childSchema)) {
+    if (isRecord(childSchema)) {
       if (childSchema.asStream) {
         kind = "stream";
       } else if (childSchema.asCell) {

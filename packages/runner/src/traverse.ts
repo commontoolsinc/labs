@@ -16,7 +16,7 @@ import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import {
   type Immutable,
   isBoolean,
-  isNumber,
+  isFiniteNumber,
   isObject,
   isRecord,
   isString,
@@ -685,7 +685,7 @@ export abstract class BaseObjectTraverser {
       }
       doc.value.forEach((item, index) => {
         const itemDefault =
-          isObject(defaultValue) && Array.isArray(defaultValue) &&
+          isRecord(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
             ? defaultValue[index]
             : undefined;
@@ -806,7 +806,7 @@ export abstract class BaseObjectTraverser {
           };
           const val = this.traverseDAG(
             itemDoc,
-            isObject(defaultValue) && !Array.isArray(defaultValue)
+            isRecord(defaultValue) && !Array.isArray(defaultValue)
               ? (defaultValue as JSONObject)[k]
               : undefined,
           )!;
@@ -1006,9 +1006,7 @@ export function getAtPath(
         },
         value: curDoc.value.length,
       };
-    } else if (
-      isObject(curDoc.value) && part in (curDoc.value as Immutable<JSONObject>)
-    ) {
+    } else if (isRecord(curDoc.value) && part in curDoc.value) {
       const cursorObj = curDoc.value as Immutable<JSONObject>;
       curDoc = {
         ...curDoc,
@@ -1292,16 +1290,16 @@ export function loadSource(
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   loadLinkedPattern(tx, valueEntry, schemaTracker);
-  if (!isObject(valueEntry.value)) {
+  if (!isRecord(valueEntry.value)) {
     return;
   }
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!(isObject(targetObj) || !("source" in targetObj))) {
+  if (!(isRecord(targetObj) || !("source" in targetObj))) {
     return;
   }
   // We also want to include the source cells
   const source = targetObj["source"];
-  if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+  if (!isRecord(source) || !("/" in source) || !isString(source["/"])) {
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
@@ -1377,26 +1375,24 @@ function _mergeSchemaFlagsUncached(
   flagSchema: JSONSchema,
   schema: JSONSchema,
 ) {
-  if (isObject(flagSchema)) {
+  if (isRecord(flagSchema)) {
     // we want to preserve asCell and asStream -- if true, these will override
     // the value in the schema
     const { asCell, asStream } = flagSchema;
     if (asCell || asStream) {
-      const mergedFlags: { asCell?: boolean; asStream?: boolean } = {};
-      if (asCell || isObject(schema) && schema.asCell) {
-        mergedFlags.asCell = true;
-      }
-      if (asStream || isObject(schema) && schema.asStream) {
-        mergedFlags.asStream = true;
-      }
-      if (isObject(schema)) {
+      if (schema === true) {
         return {
-          ...schema,
-          ...mergedFlags,
+          ...(asCell && { asCell: true }),
+          ...(asStream && { asStream: true }),
         };
-      } else if (schema === true) {
-        return mergedFlags;
+      } else if (schema === false) {
+        return false;
       }
+      return {
+        ...schema,
+        ...((asCell || schema.asCell) && { asCell: true }),
+        ...((asStream || schema.asStream) && { asStream: true }),
+      };
     }
   }
   return schema;
@@ -1443,149 +1439,149 @@ function _combineSchemaUncached(
     return mergeSchemaFlags(parentSchema, linkSchema);
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
     return mergeSchemaFlags(linkSchema, parentSchema);
-  } else if (
-    (isObject(linkSchema) && linkSchema.type === "object") &&
-    (isObject(parentSchema) && parentSchema.type === "object")
-  ) {
-    // If both schemas have required properties, only include those that are
-    // in both lists
-    const { required: parentRequired, $defs: parentDefs, ...parentSchemaRest } =
-      parentSchema;
-    const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
-      linkSchema;
-    const required = parentRequired && linkRequired
-      ? parentRequired.filter((item) => linkRequired.includes(item))
-      : parentRequired
-      ? parentRequired
-      : linkRequired;
-    const mergedDefs = { ...linkDefs, ...parentDefs };
-    // When combining these object types, if they both have properties,
-    // we only want to include any properties that they both have.
-    // If only one has properties, we will use that set
-    // If neither have properties, since that enables all, we will leave
-    // that alone.
-    // Our additionalProperties default is based on whether we we have defined
-    // properties
-    // If one schema has a property defined, and another schema has an
-    // additionalProperties that covers that, we use the defined property
-    // and don't pick up flags like asCell from additionalProperties.
-    const parentAdditionalProperties = parentSchema.additionalProperties ??
-      (parentSchema.properties === undefined);
-    const linkAdditionalProperties = linkSchema.additionalProperties ??
-      (linkSchema.properties === undefined);
-    if (
-      parentSchema.properties === undefined &&
-      ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
-    ) {
-      const additionalProperties = linkSchema.additionalProperties !== undefined
-        ? mergeSchemaFlags(
-          parentAdditionalProperties,
-          linkSchema.additionalProperties,
-        )
-        : parentAdditionalProperties;
-      // Need to keep the flags from parent schema here
-      // We'll also be explicit about additionalProperties and required
-      return mergeSchemaFlags(parentSchema, {
-        ...linkSchemaRest,
-        additionalProperties,
-        ...(required && { required }),
-        ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-      });
-    } else if (
-      linkSchema.properties === undefined &&
-      ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
-    ) {
-      if (parentSchema.additionalProperties !== undefined) {
+  } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
+    if (linkSchema.type === "object" && parentSchema.type === "object") {
+      // If both schemas have required properties, only include those that are
+      // in both lists
+      const {
+        required: parentRequired,
+        $defs: parentDefs,
+        ...parentSchemaRest
+      } = parentSchema;
+      const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
+        linkSchema;
+      const required = parentRequired && linkRequired
+        ? parentRequired.filter((item) => linkRequired.includes(item))
+        : parentRequired
+        ? parentRequired
+        : linkRequired;
+      const mergedDefs = { ...linkDefs, ...parentDefs };
+      // When combining these object types, if they both have properties,
+      // we only want to include any properties that they both have.
+      // If only one has properties, we will use that set
+      // If neither have properties, since that enables all, we will leave
+      // that alone.
+      // Our additionalProperties default is based on whether we we have defined
+      // properties
+      // If one schema has a property defined, and another schema has an
+      // additionalProperties that covers that, we use the defined property
+      // and don't pick up flags like asCell from additionalProperties.
+      const parentAdditionalProperties = parentSchema.additionalProperties ??
+        (parentSchema.properties === undefined);
+      const linkAdditionalProperties = linkSchema.additionalProperties ??
+        (linkSchema.properties === undefined);
+      if (
+        parentSchema.properties === undefined &&
+        ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
+      ) {
+        const additionalProperties =
+          linkSchema.additionalProperties !== undefined
+            ? mergeSchemaFlags(
+              parentAdditionalProperties,
+              linkSchema.additionalProperties,
+            )
+            : parentAdditionalProperties;
+        // Need to keep the flags from parent schema here
+        // We'll also be explicit about additionalProperties and required
+        return mergeSchemaFlags(parentSchema, {
+          ...linkSchemaRest,
+          additionalProperties,
+          ...(required && { required }),
+          ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
+        });
+      } else if (
+        linkSchema.properties === undefined &&
+        ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
+      ) {
+        if (parentSchema.additionalProperties !== undefined) {
+          return {
+            ...parentSchemaRest,
+            additionalProperties: mergeSchemaFlags(
+              linkAdditionalProperties,
+              parentSchema.additionalProperties,
+            ),
+            ...(required && { required }),
+            ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
+          };
+        }
         return {
           ...parentSchemaRest,
-          additionalProperties: mergeSchemaFlags(
-            linkAdditionalProperties,
-            parentSchema.additionalProperties,
-          ),
           ...(required && { required }),
           ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
         };
       }
+      // Both objects may have properties
+      const mergedSchemaProperties: Record<string, JSONSchema> = {};
+      if (linkSchema.properties !== undefined) {
+        for (const [key, value] of Object.entries(linkSchema.properties)) {
+          if (
+            parentSchema.properties !== undefined &&
+            parentSchema.properties[key] !== undefined
+          ) {
+            mergedSchemaProperties[key] = combineSchema(
+              parentSchema.properties[key],
+              value,
+            );
+          } else {
+            mergedSchemaProperties[key] = combineSchema(
+              parentAdditionalProperties,
+              value,
+            );
+          }
+        }
+      }
+      if (parentSchema.properties !== undefined) {
+        for (const [key, value] of Object.entries(parentSchema.properties)) {
+          if (
+            linkSchema.properties !== undefined &&
+            linkSchema.properties[key] !== undefined
+          ) {
+            continue; // already handled
+          } else {
+            mergedSchemaProperties[key] = combineSchema(
+              value,
+              linkAdditionalProperties,
+            );
+          }
+        }
+      }
       return {
-        ...parentSchemaRest,
+        type: "object",
+        ...linkSchema,
+        ...parentSchema,
+        properties: mergedSchemaProperties,
         ...(required && { required }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
-    }
-    // Both objects may have properties
-    const mergedSchemaProperties: Record<string, JSONSchema> = {};
-    if (linkSchema.properties !== undefined) {
-      for (const [key, value] of Object.entries(linkSchema.properties)) {
-        if (
-          parentSchema.properties !== undefined &&
-          parentSchema.properties[key] !== undefined
-        ) {
-          mergedSchemaProperties[key] = combineSchema(
-            parentSchema.properties[key],
-            value,
-          );
-        } else {
-          mergedSchemaProperties[key] = combineSchema(
-            parentAdditionalProperties,
-            value,
-          );
-        }
+    } else if (linkSchema.type === "array" && parentSchema.type === "array") {
+      if (parentSchema.items === undefined) {
+        return linkSchema;
+      } else if (linkSchema.items === undefined) {
+        return parentSchema;
       }
+      const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
+      const mergedSchemaItems = combineSchema(
+        parentSchema.items,
+        linkSchema.items,
+      );
+      // this isn't great, but at least grab the flags from parent schema
+      return mergeSchemaFlags(parentSchema, {
+        ...linkSchema,
+        type: "array",
+        items: mergedSchemaItems,
+        ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
+      });
+    } else {
+      // this isn't great, but at least grab the flags from parent schema
+      // Merge $defs from the two schema, with parent taking priority
+      const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
+      // In this case, we use the link for flags, but generally use the parent
+      // since the object types may be different
+      return mergeSchemaFlags(linkSchema, {
+        ...parentSchema,
+        ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
+      });
     }
-    if (parentSchema.properties !== undefined) {
-      for (const [key, value] of Object.entries(parentSchema.properties)) {
-        if (
-          linkSchema.properties !== undefined &&
-          linkSchema.properties[key] !== undefined
-        ) {
-          continue; // already handled
-        } else {
-          mergedSchemaProperties[key] = combineSchema(
-            value,
-            linkAdditionalProperties,
-          );
-        }
-      }
-    }
-    return {
-      type: "object",
-      ...linkSchema,
-      ...parentSchema,
-      properties: mergedSchemaProperties,
-      ...(required && { required }),
-      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-    };
-  } else if (
-    (isObject(linkSchema) && linkSchema.type === "array") &&
-    (isObject(parentSchema) && parentSchema.type === "array")
-  ) {
-    if (parentSchema.items === undefined) {
-      return linkSchema;
-    } else if (linkSchema.items === undefined) {
-      return parentSchema;
-    }
-    const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-    const mergedSchemaItems = combineSchema(
-      parentSchema.items,
-      linkSchema.items,
-    );
-    // this isn't great, but at least grab the flags from parent schema
-    return mergeSchemaFlags(parentSchema, {
-      ...linkSchema,
-      type: "array",
-      items: mergedSchemaItems,
-      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-    });
-  } else if (isObject(linkSchema) && isObject(parentSchema)) {
-    // this isn't great, but at least grab the flags from parent schema
-    // Merge $defs from the two schema, with parent taking priority
-    const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-    // In this case, we use the link for flags, but generally use the parent
-    // since the object types may be different
-    return mergeSchemaFlags(linkSchema, {
-      ...parentSchema,
-      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-    });
   }
   return linkSchema;
 }
@@ -1598,16 +1594,16 @@ function loadLinkedPattern(
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
-  if (!isObject(valueEntry.value)) {
+  if (!isRecord(valueEntry.value)) {
     return;
   }
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!(isObject(targetObj) || !("value" in targetObj))) {
+  if (!(isRecord(targetObj) || !("value" in targetObj))) {
     return;
   }
   // We also want to include the source cells
   const value = targetObj["value"];
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     return;
   }
   let address: IMemorySpaceAddress | undefined;
@@ -2007,7 +2003,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     // Track both the unresolved version of our schema (possibly with top
     // level $ref) and the resolved version.
     let resolved: JSONSchema | undefined = schema;
-    if (isObject(schema) && "$ref" in schema) {
+    if (isRecord(schema) && "$ref" in schema) {
       // Handle any top-level $ref in the schema
       resolved = ContextualFlowControl.resolveSchemaRefs(schema);
       if (resolved === undefined) {
@@ -2018,7 +2014,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         return { error: new Error("Failed to resolve schema ref") };
       }
     }
-    if (isObject(resolved)) {
+    if (isRecord(resolved)) {
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
@@ -2177,7 +2173,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       ContextualFlowControl.isTrueSchema(resolved) &&
       !SchemaObjectTraverser.asCellOrStream(resolved)
     ) {
-      const defaultValue = isObject(resolved) ? resolved["default"] : undefined;
+      const defaultValue = isRecord(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
       this.tx.read(doc.address, READ_FOR_SCHEDULING); // recursively read this doc
@@ -2188,7 +2184,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     ) {
       // This value rejects all objects - just return
       return { error: new Error("Schema is false") };
-    } else if (!isObject(resolved)) {
+    } else if (!isRecord(resolved)) {
       logger.warn(
         "traverse",
         () => ["Invalid schema is not an object", resolved],
@@ -2213,7 +2209,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       return this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : { error: new Error("Invalid type") };
-    } else if (isNumber(doc.value)) {
+    } else if (isFiniteNumber(doc.value)) {
       return this.isValidType(schemaObj, "number")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : { error: new Error("Invalid type") };
@@ -2251,7 +2247,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       });
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
-    } else if (isObject(doc.value)) {
+    } else if (isRecord(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);
         // When traversing a pointer, use the unresolved schema, so we have
@@ -2646,7 +2642,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // cell.get will ignore these properties, while the query system will
       // include their raw value (and will not follow links).
       if (
-        isObject(propSchema) && (
+        isRecord(propSchema) && (
           propSchema.$comment === "emptyProperties" ||
           propSchema.$comment === "missingProperty"
         )
@@ -2684,17 +2680,17 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     }
 
     // Apply defaults from our schema
-    if (isObject(schema) && schema.properties) {
+    if (isRecord(schema) && schema.properties) {
       for (const propKey of Object.keys(schema.properties)) {
         if (propKey in filteredObj) {
           continue;
         }
         const subSchema = this.cfc.getSchemaAtPath(schema, [propKey]);
-        if (!isObject(subSchema)) {
+        if (!isRecord(subSchema)) {
           continue;
         }
         const propSchema = ContextualFlowControl.resolveSchemaRefs(subSchema);
-        if (!isObject(propSchema) || propSchema.default == undefined) {
+        if (!isRecord(propSchema) || propSchema.default == undefined) {
           continue;
         }
         const propAddress = {
@@ -2731,7 +2727,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     }
 
     // Check that all required fields are present
-    if (isObject(schema) && "required" in schema) {
+    if (isRecord(schema) && "required" in schema) {
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
@@ -2890,7 +2886,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): StorableDatum | undefined {
-    if (isObject(schema) && schema.default !== undefined) {
+    if (isRecord(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(doc.address, schema);
       return this.objectCreator.applyDefault(link, schema.default);
     }
@@ -2932,7 +2928,7 @@ function mergeSchemaOption(
   const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
-  const result = isObject(innerSchema)
+  const result = isRecord(innerSchema)
     ? { ...outerSchema, ...innerSchema }
     : innerSchema
     ? outerSchema // innerSchema === true
@@ -2958,7 +2954,7 @@ export function canBranchMatch(
   value: unknown,
 ): boolean {
   // Boolean schemas: true matches everything, false matches nothing
-  if (!isObject(branch)) return branch !== false;
+  if (typeof branch === "boolean") return branch;
 
   // Never reject asCell/asStream branches
   if (branch.asCell || branch.asStream) return true;
@@ -2966,14 +2962,13 @@ export function canBranchMatch(
   // If the value is an object that could be a link/pointer, bail out entirely.
   // Links are dereferenced during traversal, so the current shape of the value
   // tells us nothing about the resolved type or properties.
-  if (isObject(value) && (isPrimitiveCellLink(value) || !isRecord(value))) {
-    return true;
-  }
+  if (isPrimitiveCellLink(value)) return true;
 
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
     resolved = ContextualFlowControl.resolveSchemaRefs(branch);
-    if (resolved === undefined || !isObject(resolved)) return true;
+    if (typeof resolved === "boolean") return resolved;
+    else if (resolved === undefined) return true; // we'll properly complain later
   }
 
   // Type mismatch check — only safe for non-link primitive values and
@@ -3012,7 +3007,7 @@ function getJsonType(
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (isNumber(value)) return "number";
+  if (isFiniteNumber(value)) return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
@@ -3060,7 +3055,7 @@ function _mergeAnyOfBranchSchemasUncached(
   const resolvedBranches: JSONSchemaObj[] = [];
   for (const branch of branches) {
     const merged = mergeSchemaOption(outerSchema, branch);
-    if (!isObject(merged)) return null;
+    if (!isRecord(merged)) return null;
     // Must be object type or unspecified (compatible with object)
     // type can be a string or an array of strings
     if (merged.type !== undefined) {
@@ -3078,7 +3073,7 @@ function _mergeAnyOfBranchSchemasUncached(
 
   for (const branch of resolvedBranches) {
     // Collect properties
-    if (isObject(branch.properties)) {
+    if (isRecord(branch.properties)) {
       for (const [k, v] of Object.entries(branch.properties)) {
         let arr = allProps.get(k);
         if (!arr) {
@@ -3097,8 +3092,8 @@ function _mergeAnyOfBranchSchemasUncached(
     }
 
     // Merge $defs
-    if (isObject(branch.$defs)) {
-      if (!mergedDefs) mergedDefs = {};
+    if (isRecord(branch.$defs)) {
+      mergedDefs ??= {};
       Object.assign(mergedDefs, branch.$defs);
     }
 
@@ -3106,7 +3101,7 @@ function _mergeAnyOfBranchSchemasUncached(
     if (
       branch.additionalProperties === undefined ||
       branch.additionalProperties === true ||
-      (isObject(branch.additionalProperties))
+      (isRecord(branch.additionalProperties))
     ) {
       anyAllowsAdditional = true;
     }

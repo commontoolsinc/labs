@@ -1,6 +1,6 @@
 import { AnyCellWrapping } from "@commontools/api";
 import { getLogger } from "@commontools/utils/logger";
-import { Immutable, isObject, isRecord } from "@commontools/utils/types";
+import { Immutable, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
@@ -74,7 +74,7 @@ export function resolveSchema(
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (!isObject(resolved)) {
+    if (!isRecord(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
@@ -123,7 +123,7 @@ export function processDefaultValue(
   let resolvedSchema = resolveSchema(schema);
   let asCell = false;
   let asStream = false;
-  if (isObject(resolvedSchema)) {
+  if (isRecord(resolvedSchema)) {
     asCell = resolvedSchema.asCell === true;
     asStream = resolvedSchema.asStream === true;
     if (
@@ -143,7 +143,7 @@ export function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (
-      defaultValue === undefined && isObject(resolvedSchema) &&
+      defaultValue === undefined && isRecord(resolvedSchema) &&
       resolvedSchema.default !== undefined
     ) {
       return runtime.getImmutableCell(
@@ -181,8 +181,8 @@ export function processDefaultValue(
 
   // Handle object type defaults
   if (
-    isObject(resolvedSchema) && resolvedSchema?.type === "object" &&
-    isObject(defaultValue)
+    isRecord(resolvedSchema) && resolvedSchema?.type === "object" &&
+    isRecord(defaultValue) && !Array.isArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -192,7 +192,7 @@ export function processDefaultValue(
       for (const key of Object.keys(resolvedSchema.properties)) {
         const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
         const propSchema =
-          (isObject(rawPropSchema) && typeof rawPropSchema.$ref === "string")
+          (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
             ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)
             : rawPropSchema;
         if (key in defaultValue) {
@@ -204,7 +204,7 @@ export function processDefaultValue(
             synced,
           );
           processedKeys.add(key);
-        } else if (isObject(propSchema)) {
+        } else if (isRecord(propSchema)) {
           if (propSchema.asCell) {
             // asCell are always created, it's their value that can be `undefined`
             result[key] = processDefaultValue(
@@ -268,9 +268,8 @@ export function processDefaultValue(
 
   // Handle array type defaults
   if (
-    isObject(resolvedSchema) && resolvedSchema?.type === "array" &&
-    Array.isArray(defaultValue) &&
-    resolvedSchema.items
+    isRecord(resolvedSchema) && resolvedSchema.type === "array" &&
+    Array.isArray(defaultValue) && resolvedSchema.items
   ) {
     // Handle boolean items values
     let itemSchema: JSONSchema;
@@ -314,7 +313,7 @@ function mergeDefaults(
   defaultValue: Readonly<StorableDatum>,
 ): JSONSchema {
   const result: JSONSchemaMutable = {
-    ...(isObject(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
+    ...(isRecord(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
   };
 
   // TODO(seefeld): What's the right thing to do for arrays?
@@ -550,7 +549,7 @@ class TransformObjectCreator
     // object so we can get back to the cell if needed.
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
-    } else if (isObject(link.schema)) {
+    } else if (isRecord(link.schema)) {
       const { asCell, asStream, ...restSchema } = link.schema;
       if (asCell || asStream) {
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
@@ -581,7 +580,10 @@ class TransformObjectCreator
       }
       // If we're an object, we may be missing some properties that have a
       // default.
-      if (isObject(value) && link.schema.properties !== undefined) {
+      if (
+        isRecord(value) && !Array.isArray(value) &&
+        link.schema.properties !== undefined
+      ) {
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
         // is a no-op for unfrozen objects and shallow-clones frozen ones.
@@ -595,7 +597,7 @@ class TransformObjectCreator
           JSONSchema,
         ][];
         for (const [propName, propSchema] of propertyEntries) {
-          if (isObject(propSchema) && propSchema.default !== undefined) {
+          if (isRecord(propSchema) && propSchema.default !== undefined) {
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
@@ -640,14 +642,14 @@ export function generateHandlerSchema(
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
-  if (isObject(eventSchema)) {
+  if (isRecord(eventSchema)) {
     // extract $defs and definitions and remove them from eventSchema
     const { $defs, definitions, ...rest } = eventSchema;
     eventSchema = rest;
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  if (isObject(stateSchema)) {
+  if (isRecord(stateSchema)) {
     // extract $defs and definitions and remove them from stateSchema
     const { $defs, definitions, ...rest } = stateSchema;
     stateSchema = rest;

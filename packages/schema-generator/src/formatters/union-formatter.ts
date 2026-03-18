@@ -10,7 +10,7 @@ import {
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
@@ -181,7 +181,7 @@ export class UnionFormatter implements TypeFormatter {
     }
     // See if we can merge into one of the anyOf options
     const matchingTypeIdx = anyOf.findIndex((option) =>
-      isObject(option) &&
+      isRecord(option) &&
       PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
       "type" in option && option.type === cur.type
     );
@@ -231,7 +231,7 @@ export class UnionFormatter implements TypeFormatter {
       const matchingNonEnum = matchingNonEnumIdx !== -1
         ? anyOf[matchingNonEnumIdx]
         : undefined;
-      if (isObject(matchingNonEnum) && matchingNonEnumIdx !== -1) {
+      if (isRecord(matchingNonEnum) && matchingNonEnumIdx !== -1) {
         const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
         const matchingNonEnumTypes = matchingNonEnum.type === undefined
           ? []
