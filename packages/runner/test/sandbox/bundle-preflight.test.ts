@@ -10,6 +10,7 @@ import {
   verifyBundlePreflight,
 } from "../../src/sandbox/bundle-preflight.ts";
 import { verifyAMDFactory } from "../../src/sandbox/module-verifier.ts";
+import { SESRuntime } from "../../src/sandbox/ses-runtime.ts";
 import { Identity } from "@commontools/identity";
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
 import {
@@ -53,6 +54,32 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
     );
     verifyBundlePreflight(withConsole);
   });
+});
+
+Deno.test("SES runtime rejects bundles that redefine trusted runtime modules", () => {
+  const runtime = new SESRuntime();
+  const bundle = createTrustedBundle(
+    [
+      `define("commontools",["exports"],function(exports){exports.replaced=7;});`,
+      `define("main",["exports","commontools"],function(exports,commontools){exports.default=commontools.replaced;});`,
+      `const main = require("main");`,
+      `const exportMap = Object.create(null);`,
+      `exportMap["main"] = require("main");`,
+      `return { main, exportMap };`,
+    ].join(""),
+  );
+
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile",
+      "eval",
+      { js: bundle, filename: "bundle.js" } as never,
+      {
+        console,
+        runtimeExports: { commontools: { replaced: 1 } },
+      },
+    )
+  );
 });
 
 Deno.test("AMD factory verifier enforces canonical wrappers and dependency policy", async (t) => {
@@ -213,6 +240,36 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
   );
 
   await t.step(
+    "rejects __ct_pure_fn when template literal interpolations reference undeclared captures",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            'function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){return `${SECRET}`;});exports.default=fn;}',
+        })
+      );
+    },
+  );
+
+  await t.step(
+    "rejects local h helper declarations instead of trusting them as scaffolding",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            'function(exports){function h(...args){return __ctHelpers.h.apply(null,args);}/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],1);exports.default=value;}',
+        })
+      );
+    },
+  );
+
+  await t.step(
     "rejects aliased async require inside trusted helper callbacks",
     () => {
       assertThrows(() =>
@@ -344,6 +401,55 @@ Deno.test("AMD factory verifier accepts real compiler output for direct default-
 
     const { jsScript } = await runtime.harness.compile(program);
     verifyBundlePreflight(jsScript.js);
+
+    const region = extractBundleRegion(jsScript.js);
+    const defineSource = splitTopLevelStatements(region).find((statement) =>
+      statement.includes("__CT_TOPLEVEL__")
+    );
+    if (!defineSource) {
+      throw new Error("Expected a define(...) region in the compiled bundle");
+    }
+
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["require", "exports", "commontools"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource: `function(require, exports, __ctHelpers){${
+        extractFirstFactoryBody(defineSource)
+      }}`,
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("AMD factory verifier accepts JSX bundles without a local h shim", async () => {
+  const signer = await Identity.fromPassphrase("bundle-preflight jsx bundle");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern } from 'commontools';",
+            "export default pattern<{ count: number }>(({ count }) => <div>{count}</div>);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript } = await runtime.harness.compile(program);
+    verifyBundlePreflight(jsScript.js);
+    assertEquals(jsScript.js.includes("function h("), false);
 
     const region = extractBundleRegion(jsScript.js);
     const defineSource = splitTopLevelStatements(region).find((statement) =>

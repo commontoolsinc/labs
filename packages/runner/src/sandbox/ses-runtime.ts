@@ -178,8 +178,13 @@ export class SESRuntime {
         dependencies: string[],
         factorySource: string,
       ) => {
-        if (moduleId in runtimeExports) {
+        if (!registeredModuleIds.has(moduleId)) {
           return;
+        }
+        if (moduleId in runtimeExports) {
+          throw new Error(
+            `Bundle may not redefine trusted runtime module: ${moduleId}`,
+          );
         }
         verifyAMDFactory({
           moduleId,

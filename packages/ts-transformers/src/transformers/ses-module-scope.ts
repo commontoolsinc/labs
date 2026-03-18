@@ -230,11 +230,6 @@ export class SESCanonicalWrapperTransformer extends Transformer {
       if (
         ts.isFunctionDeclaration(statement) && statement.name && statement.body
       ) {
-        if (isInjectedJSXHelperDeclaration(statement)) {
-          statements.push(statement);
-          approvedBindings.add(statement.name.text);
-          continue;
-        }
         const localName = statement.name.text;
         const itemId = createSESItemId(sourceFile, ordinal++, localName);
         const exportAssignments = createExportAssignments(
@@ -815,17 +810,6 @@ function isAtModuleScope(node: ts.Node): boolean {
     current = current.parent;
   }
   return false;
-}
-
-function isInjectedJSXHelperDeclaration(
-  statement: ts.FunctionDeclaration,
-): boolean {
-  if (statement.name?.text !== "h" || !statement.body) {
-    return false;
-  }
-
-  const compact = statement.body.getText().replace(/\s+/g, " ").trim();
-  return compact.includes("return __ctHelpers.h.apply(null, args);");
 }
 
 function resolveBuilderCallback(

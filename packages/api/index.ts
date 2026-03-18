@@ -2053,6 +2053,7 @@ export declare const getEntityId: GetEntityIdFunction;
 
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
+export declare const h: HFunction;
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

@@ -8,10 +8,7 @@ const CT_HELPERS_SPECIFIER = "commontools";
 const HELPERS_STMT =
   `import * as ${CT_HELPERS_IDENTIFIER} from "${CT_HELPERS_SPECIFIER}";`;
 
-const HELPERS_USED_STMT = `// @ts-ignore: Internals
-function h(...args: any[]) { return ${CT_HELPERS_IDENTIFIER}.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = ${CT_HELPERS_IDENTIFIER}.h.fragment`;
+const HELPERS_KEEPALIVE_STMT = `void ${CT_HELPERS_IDENTIFIER};`;
 
 export class CTHelpers {
   #sourceFile: ts.SourceFile;
@@ -71,11 +68,10 @@ export class CTHelpers {
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
 //
-// We must also inject usage of the module before the AST transformer
-// pipeline, otherwise the binding fails, and the helper module
-// is not available in the compiled JS. We repropagate the jsx `h`
-// function, which allows authors to not manually specify the import,
-// as well as "use" the helper to avoid treeshaking/binding failure.
+// The injected namespace import is referenced directly by JSX emit
+// (`__ctHelpers.h` / `__ctHelpers.h.fragment`) and by subsequent AST
+// transforms. We also emit an inert keepalive expression so TypeScript
+// does not elide the namespace import before those later transforms run.
 //
 // Source maps are derived from this transformation.
 // Take care in maintaining source lines from its input.
@@ -93,7 +89,7 @@ export function transformCtDirective(
   return [
     HELPERS_STMT,
     ...lines.slice(1),
-    HELPERS_USED_STMT,
+    HELPERS_KEEPALIVE_STMT,
   ].join("\n");
 }
 

@@ -381,6 +381,38 @@ Deno.test("SES module-scope validation", async (t) => {
       assertEquals(errors.length, 0);
     },
   );
+
+  await t.step(
+    "allows explicit-schema pattern overloads with module-scope callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const InputSchema = {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      } as const;
+      const OutputSchema = {
+        type: "object",
+        properties: { total: { type: "number" } },
+        required: ["total"],
+      } as const;
+
+      function build({ value }: { value: number }) {
+        return { total: value + 1 };
+      }
+
+      export default pattern(build, InputSchema, OutputSchema);
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {

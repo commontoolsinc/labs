@@ -23,12 +23,7 @@ const EXPORTS_OBJECT_PATTERN =
 const EXPORT_STAR_PATTERN = /^__exportStar\([^)]+\)$/;
 const IMPORT_STAR_NORMALIZATION_PATTERN =
   /^([A-Za-z_$][\w$]*)\s*=\s*__importStar\(\1\)$/;
-const HELPER_FRAGMENT_ASSIGNMENT_PATTERN =
-  /^[A-Za-z_$][\w$]*\.fragment = __ctHelpers\.h\.fragment$/;
-const HELPER_FUNCTION_PATTERN =
-  /^function h\([^)]*\)\s*\{[\s\S]*return __ctHelpers\.h\.apply\(null,\s*[A-Za-z_$][\w$]*\);?\s*\}$/;
-const LEADING_HELPER_FUNCTION_PATTERN =
-  /^function h\([^)]*\)\s*\{[\s\S]*?return __ctHelpers\.h\.apply\(null,\s*[A-Za-z_$][\w$]*\);?\s*\}/;
+const HELPERS_KEEPALIVE_PATTERN = /^void __ctHelpers$/;
 const SIMPLE_OBJECT_LITERAL_PATTERN =
   /^\{\s*(?:[A-Za-z_$][\w$]*(?:\s*:\s*[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*|\s*:\s*(?:null|undefined|true|false|void 0)|\s*:\s*-?\d+(?:\.\d+)?n?|\s*:\s*["'`][\s\S]*["'`])?)(?:\s*,\s*[A-Za-z_$][\w$]*(?:\s*:\s*[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*|\s*:\s*(?:null|undefined|true|false|void 0)|\s*:\s*-?\d+(?:\.\d+)?n?|\s*:\s*["'`][\s\S]*["'`])?)*\s*\}$/;
 const HELPER_CALL_PATTERN =
@@ -122,8 +117,7 @@ function isAllowedStatement(statement: string): boolean {
     CHAINED_EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
     EXPORT_STAR_PATTERN.test(compactWithoutComments) ||
     IMPORT_STAR_NORMALIZATION_PATTERN.test(compactWithoutComments) ||
-    HELPER_FRAGMENT_ASSIGNMENT_PATTERN.test(compactWithoutComments) ||
-    HELPER_FUNCTION_PATTERN.test(compactWithoutComments) ||
+    HELPERS_KEEPALIVE_PATTERN.test(compactWithoutComments) ||
     isSafeExportAssignment(compactWithoutComments)
   ) {
     return true;
@@ -137,70 +131,15 @@ function stripTrailingSemicolon(statement: string): string {
 }
 
 function stripTrustedLeadingScaffolding(statement: string): string {
-  let remaining = statement.trimStart();
+  const remaining = statement.trimStart();
   const sentinelIndex = remaining.indexOf("/*__CT_TOPLEVEL__:");
   if (sentinelIndex > 0) {
     const prefix = remaining.slice(0, sentinelIndex);
-    if (isTrustedScaffoldingPrefix(prefix)) {
+    if (stripAllowedLeadingComments(prefix).length === 0) {
       return remaining.slice(sentinelIndex).trimStart();
     }
   }
-  while (remaining) {
-    const strippedComments = stripAllowedLeadingComments(remaining);
-    if (strippedComments !== remaining) {
-      remaining = strippedComments;
-      continue;
-    }
-
-    if (remaining.startsWith("/*__CT_TOPLEVEL__:")) {
-      return remaining;
-    }
-
-    if (remaining.startsWith("function h(")) {
-      const bodyStart = remaining.indexOf("{");
-      if (bodyStart < 0) {
-        return remaining;
-      }
-      const { end } = findBalancedRegion(remaining, bodyStart);
-      const helperSource = remaining.slice(0, end + 1).trim();
-      if (!LEADING_HELPER_FUNCTION_PATTERN.test(helperSource)) {
-        return remaining;
-      }
-      remaining = remaining.slice(end + 1).trimStart();
-      continue;
-    }
-
-    return remaining;
-  }
-  return remaining;
-}
-
-function isTrustedScaffoldingPrefix(statement: string): boolean {
-  let remaining = statement.trimStart();
-  while (remaining) {
-    const strippedComments = stripAllowedLeadingComments(remaining);
-    if (strippedComments !== remaining) {
-      remaining = strippedComments;
-      continue;
-    }
-
-    if (remaining.startsWith("function h(")) {
-      const bodyStart = remaining.indexOf("{");
-      if (bodyStart < 0) {
-        return false;
-      }
-      const { end } = findBalancedRegion(remaining, bodyStart);
-      const helperSource = remaining.slice(0, end + 1).trim();
-      if (!LEADING_HELPER_FUNCTION_PATTERN.test(helperSource)) {
-        return false;
-      }
-      remaining = remaining.slice(end + 1).trimStart();
-      continue;
-    }
-
-    return false;
-  }
-  return true;
+  return stripAllowedLeadingComments(remaining);
 }
 
 function stripAllowedLeadingComments(statement: string): string {
@@ -769,13 +708,227 @@ function extractDeclaredIdentifiers(source: string): Set<string> | null {
 }
 
 function stripNonCodeSegments(source: string): string {
-  return source
+  return preserveTemplateInterpolations(source)
     .replace(/\/\/[^\n]*/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""')
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
     .replace(/\/(?:[^/\\\n]|\\.)+\/[dgimsuy]*/g, "/re/");
+}
+
+function preserveTemplateInterpolations(source: string): string {
+  let result = "";
+  let index = 0;
+
+  while (index < source.length) {
+    if (source[index] !== "`") {
+      result += source[index]!;
+      index++;
+      continue;
+    }
+
+    const [cleaned, end] = flattenTemplateLiteral(source, index);
+    result += cleaned;
+    index = end;
+  }
+
+  return result;
+}
+
+function flattenTemplateLiteral(
+  source: string,
+  start: number,
+): [string, number] {
+  let result = ' "" ';
+  let index = start + 1;
+
+  while (index < source.length) {
+    const current = source[index]!;
+    if (current === "\\") {
+      index += 2;
+      continue;
+    }
+    if (current === "`") {
+      return [`${result} "" `, index + 1];
+    }
+    if (current === "$" && source[index + 1] === "{") {
+      const [expression, end] = extractTemplateExpression(source, index + 2);
+      result += ` (${expression}) `;
+      index = end;
+      continue;
+    }
+    index++;
+  }
+
+  return [result, index];
+}
+
+function extractTemplateExpression(
+  source: string,
+  start: number,
+): [string, number] {
+  let result = "";
+  let depth = 1;
+  let index = start;
+
+  while (index < source.length) {
+    const current = source[index]!;
+    const next = source[index + 1];
+
+    if (current === "'" || current === '"') {
+      const end = consumeQuotedSegment(source, index, current);
+      result += source.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (current === "/" && next === "/") {
+      const end = consumeLineComment(source, index);
+      result += source.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (current === "/" && next === "*") {
+      const end = consumeBlockComment(source, index);
+      result += source.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (current === "`") {
+      const [cleaned, end] = flattenTemplateLiteral(source, index);
+      result += cleaned;
+      index = end;
+      continue;
+    }
+
+    if (current === "/" && isRegexLiteralStart(source, index)) {
+      const end = consumeRegexLiteral(source, index);
+      result += source.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (current === "{") {
+      depth++;
+      result += current;
+      index++;
+      continue;
+    }
+
+    if (current === "}") {
+      depth--;
+      if (depth === 0) {
+        return [result, index + 1];
+      }
+      result += current;
+      index++;
+      continue;
+    }
+
+    result += current;
+    index++;
+  }
+
+  return [result, index];
+}
+
+function consumeQuotedSegment(
+  source: string,
+  start: number,
+  quote: '"' | "'",
+): number {
+  let index = start + 1;
+  while (index < source.length) {
+    const current = source[index]!;
+    if (current === "\\") {
+      index += 2;
+      continue;
+    }
+    index++;
+    if (current === quote) {
+      break;
+    }
+  }
+  return index;
+}
+
+function consumeLineComment(source: string, start: number): number {
+  const newlineIndex = source.indexOf("\n", start + 2);
+  return newlineIndex >= 0 ? newlineIndex : source.length;
+}
+
+function consumeBlockComment(source: string, start: number): number {
+  const endIndex = source.indexOf("*/", start + 2);
+  return endIndex >= 0 ? endIndex + 2 : source.length;
+}
+
+function consumeRegexLiteral(source: string, start: number): number {
+  let index = start + 1;
+  let inCharacterClass = false;
+
+  while (index < source.length) {
+    const current = source[index]!;
+    if (current === "\\") {
+      index += 2;
+      continue;
+    }
+    if (current === "[") {
+      inCharacterClass = true;
+      index++;
+      continue;
+    }
+    if (current === "]" && inCharacterClass) {
+      inCharacterClass = false;
+      index++;
+      continue;
+    }
+    if (current === "/" && !inCharacterClass) {
+      index++;
+      while (/[A-Za-z]/.test(source[index] ?? "")) {
+        index++;
+      }
+      return index;
+    }
+    if (current === "\n") {
+      return index;
+    }
+    index++;
+  }
+
+  return index;
+}
+
+function isRegexLiteralStart(source: string, index: number): boolean {
+  let previousIndex = index - 1;
+  while (previousIndex >= 0 && /\s/.test(source[previousIndex]!)) {
+    previousIndex--;
+  }
+  if (previousIndex < 0) {
+    return true;
+  }
+
+  const previous = source[previousIndex]!;
+  if ("([{,:;!?=+-*%^&|~<>".includes(previous)) {
+    return true;
+  }
+
+  if (previous === "/") {
+    return true;
+  }
+
+  if (!/[$\w]/.test(previous)) {
+    return false;
+  }
+
+  let wordStart = previousIndex;
+  while (wordStart >= 0 && /[$\w]/.test(source[wordStart]!)) {
+    wordStart--;
+  }
+  return REGEX_PREFIX_KEYWORDS.has(
+    source.slice(wordStart + 1, previousIndex + 1),
+  );
 }
 
 function nextNonWhitespaceChar(
@@ -822,4 +975,19 @@ const JS_KEYWORDS = new Set([
   "void",
   "while",
   "with",
+]);
+
+const REGEX_PREFIX_KEYWORDS = new Set([
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
 ]);

@@ -23,7 +23,6 @@ export const getCompilerOptions = (): CompilerOptions => {
     // a compatible module type (AMD and SystemJS). Using
     // AMD for ease of writing an inline bundler.
     module: MODULE_KIND,
-
     /**
      * Emit
      */
@@ -61,8 +60,8 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     jsx: JsxEmit.React,
-    jsxFactory: "h",
-    jsxFragmentFactory: "h.fragment",
+    jsxFactory: "__ctHelpers.h",
+    jsxFragmentFactory: "__ctHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
     // we are running outside of node. Ensure this lib matches `target`.

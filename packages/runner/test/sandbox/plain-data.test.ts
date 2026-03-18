@@ -3,6 +3,7 @@ import {
   assertPlainData,
   freezeVerifiedPlainData,
 } from "../../src/sandbox/plain-data.ts";
+import { createDataWrapper } from "../../src/sandbox/runtime-helpers.ts";
 
 Deno.test("plain-data validation accepts the v1 subset", () => {
   const value = freezeVerifiedPlainData({
@@ -97,4 +98,17 @@ Deno.test("plain-data validation rejects proxies without invoking traps", () => 
   assertThrows(() => assertPlainData(value));
   assertEquals(getPrototypeOfCalls, 0);
   assertEquals(ownKeysCalls, 0);
+});
+
+Deno.test("createDataWrapper rejects proxies before attaching metadata", () => {
+  let definePropertyCalls = 0;
+  const value = new Proxy({}, {
+    defineProperty(target, key, descriptor) {
+      definePropertyCalls++;
+      return Reflect.defineProperty(target, key, descriptor);
+    },
+  });
+
+  assertThrows(() => createDataWrapper("main.tsx#000:data", [], value));
+  assertEquals(definePropertyCalls, 0);
 });

@@ -54,6 +54,10 @@ export function getAMDLoader(
         moduleFactory = idOrDepsOrFactory;
       }
 
+      if (this.modules.has(id)) {
+        throw new Error(`Module '${id}' is already defined`);
+      }
+
       this.modules.set(id, {
         dependencies,
         factory: moduleFactory,

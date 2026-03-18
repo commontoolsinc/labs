@@ -325,7 +325,7 @@ not assumed to be safe inside data wrappers.
 
 Any top-level value that is not a trusted builder definition or direct function
 must be module-safe data and pass a custom checker/freezer before it survives
-module load. This is the only category where an IIFE is acceptable.
+module load.
 
 ```typescript
 const CONFIG = freezeVerifiedPlainData({
@@ -333,23 +333,19 @@ const CONFIG = freezeVerifiedPlainData({
   labels: ["a", "b"],
 });
 
-const LOOKUP = freezeVerifiedPlainData((() => {
-  return {
-    open: "Open",
-    closed: "Closed",
-  };
-})());
+const LOOKUP = freezeVerifiedPlainData({
+  open: "Open",
+  closed: "Closed",
+});
 ```
 
 Canonical emitted form:
 
 ```javascript
-const LOOKUP = __ct_data((() => {
-  return {
-    open: "Open",
-    closed: "Closed",
-  };
-})());
+const LOOKUP = __ct_data({
+  open: "Open",
+  closed: "Closed",
+});
 ```
 
 Within `__ct_data(...)`, the allowed operation set is narrower than normal

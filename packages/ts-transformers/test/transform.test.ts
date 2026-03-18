@@ -68,6 +68,36 @@ describe("CTHelpers handling", () => {
       });
     }
   });
+
+  it("keeps the __ctHelpers import without injecting a local h shim", async () => {
+    const output = await transformSource(
+      `/// <cts-enable />
+      const view = <div>Hello</div>;
+      export default view;
+    `,
+      {
+        types: COMMONTOOLS_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    assert(
+      output.includes('import * as __ctHelpers from "commontools";'),
+      "__ctHelpers import should be retained for later JSX/helper emit",
+    );
+    assert(
+      output.includes("void __ctHelpers;"),
+      "namespace import should stay alive without a local helper shim",
+    );
+    assert(
+      !output.includes("function h("),
+      "local h shim should no longer be injected",
+    );
+    assert(
+      !output.includes("h.fragment = __ctHelpers.h.fragment"),
+      "fragment shim should no longer be injected",
+    );
+  });
 });
 
 describe("Builder symbol resolution", () => {
