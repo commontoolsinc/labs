@@ -27,6 +27,16 @@ function isBindingPattern(
     (value as { readonly var: string }).var.startsWith("$");
 }
 
+function isContainsPattern(
+  value: unknown,
+): value is { readonly contains: unknown } {
+  return !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    "contains" in value;
+}
+
 function isBindingValue(value: unknown): value is CfcPatternBindingValue {
   if (
     value === null || typeof value === "string" || typeof value === "number" ||
@@ -60,6 +70,23 @@ export function matchPatternWithBindings(
       ...bindings,
       [pattern.var]: actual,
     };
+  }
+
+  if (isContainsPattern(pattern)) {
+    if (!Array.isArray(actual)) {
+      return undefined;
+    }
+    for (const entry of actual) {
+      const matched = matchPatternWithBindings(
+        entry,
+        pattern.contains,
+        bindings,
+      );
+      if (matched) {
+        return matched;
+      }
+    }
+    return undefined;
   }
 
   if (

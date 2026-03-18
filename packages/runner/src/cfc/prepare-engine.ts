@@ -2113,31 +2113,12 @@ function applyPolicyRuleOnce(
       continue;
     }
 
-    if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
+    let clauseChanged = false;
+    if (rule.removeMatchedClauses) {
       clause.splice(match.targetIndex, 1);
-      const nextConfidentiality = label.confidentiality.map((
-        entry,
-      ) => [...entry]);
-      if (clause.length === 0) {
-        nextConfidentiality.splice(clauseIndex, 1);
-      } else {
-        nextConfidentiality[clauseIndex] = clause;
-      }
-      const normalizedConfidentiality =
-        normalizeConfidentialityLabel(nextConfidentiality) ?? [];
-      return {
-        changed: true,
-        label: {
-          confidentiality: normalizedConfidentiality,
-          integrity: addPolicyIntegrity(
-            label.integrity,
-            resolvedIntegrity ?? [],
-          ),
-        },
-      };
+      clauseChanged = true;
     }
 
-    let clauseChanged = false;
     for (const alternative of resolvedAlternatives ?? []) {
       if (!clause.some((atom) => deepEqual(atom, alternative))) {
         clause.push(alternative);
@@ -2156,12 +2137,16 @@ function applyPolicyRuleOnce(
     const nextConfidentiality = label.confidentiality.map((
       entry,
     ) => [...entry]);
-    nextConfidentiality[clauseIndex] = clause;
+    if (clause.length === 0) {
+      nextConfidentiality.splice(clauseIndex, 1);
+    } else {
+      nextConfidentiality[clauseIndex] = clause;
+    }
     const normalizedConfidentiality =
       normalizeConfidentialityLabel(nextConfidentiality) ?? [];
     return {
       changed: true,
-      synthesizedClassification: clauseChanged
+      synthesizedClassification: (resolvedAlternatives?.length ?? 0) > 0
         ? (normalizeConfidentialityLabel([clause]) ?? [])
         : undefined,
       label: {

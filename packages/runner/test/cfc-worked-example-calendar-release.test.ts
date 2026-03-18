@@ -133,22 +133,27 @@ describe("CFC worked example: calendar participant release", () => {
       tx,
     );
     result.set("2026-03-20T17:00:00Z");
-    tx.writeOrThrow(cfcLabelsAddress({
-      space,
-      id: result.getAsNormalizedFullLink().id,
-      type: "application/json",
-    }), {
-      "/": deriveCfcMultiPartyResultLabels({
-        consents: [bobConsent, carolConsent, aliceConsent],
-        codeHash: "sha256:findMeetingTimes-v1",
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: result.getAsNormalizedFullLink().id,
+        type: "application/json",
       }),
-    } satisfies Record<string, Labels>);
+      {
+        "/": deriveCfcMultiPartyResultLabels({
+          consents: [bobConsent, carolConsent, aliceConsent],
+          codeHash: "sha256:findMeetingTimes-v1",
+        }),
+      } satisfies Record<string, Labels>,
+    );
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
     tx = runtime.edit();
     const value = result.withTx(tx).get() ?? "";
-    aliceView.withTx(tx).asSchema(calendarReleaseSchema(consentAtom)).set(value);
+    aliceView.withTx(tx).asSchema(calendarReleaseSchema(consentAtom)).set(
+      value,
+    );
 
     await expect(
       prepareBoundaryCommit(tx, { actingPrincipal: space }),
@@ -156,7 +161,9 @@ describe("CFC worked example: calendar participant release", () => {
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const labels = await readPersistedLabels(aliceView.getAsNormalizedFullLink().id);
+    const labels = await readPersistedLabels(
+      aliceView.getAsNormalizedFullLink().id,
+    );
     expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
   });
 
@@ -184,16 +191,19 @@ describe("CFC worked example: calendar participant release", () => {
       tx,
     );
     result.set("2026-03-20T17:00:00Z");
-    tx.writeOrThrow(cfcLabelsAddress({
-      space,
-      id: result.getAsNormalizedFullLink().id,
-      type: "application/json",
-    }), {
-      "/": deriveCfcMultiPartyResultLabels({
-        consents: [aliceConsent, bobConsent, carolConsent],
-        codeHash: "sha256:findMeetingTimes-v1",
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: result.getAsNormalizedFullLink().id,
+        type: "application/json",
       }),
-    } satisfies Record<string, Labels>);
+      {
+        "/": deriveCfcMultiPartyResultLabels({
+          consents: [aliceConsent, bobConsent, carolConsent],
+          codeHash: "sha256:findMeetingTimes-v1",
+        }),
+      } satisfies Record<string, Labels>,
+    );
     const committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 

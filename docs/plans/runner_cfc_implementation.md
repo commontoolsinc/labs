@@ -895,6 +895,9 @@ Primary docs:
 - [x] Step J.19: derive canonical calendar-result labels
       (`MultiPartyResult`, `ConsentedBy`, `ComputedBy`) from validated consent
       intents and code identity.
+- [x] Step J.20: support participant-membership matching on array-valued atom
+      fields plus remove-and-replace policy rewrites, then prove a calendar
+      release slice to `User($actingUser)`.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

@@ -219,8 +219,14 @@ The calendar-consent foundation is now present too:
 3. Canonical result labels can now be derived directly from those consents:
    `MultiPartyResult(participants=...)` plus `ComputedBy(...)` and
    `ConsentedBy(...)`.
-4. Runtime-placement and acting-user release rules are still a later layer on
-   top of this helper foundation.
+4. Policy atom matching now supports array membership via a `contains` matcher,
+   which lets rules express checks like
+   `participants contains $actingUser` on `MultiPartyResult` atoms.
+5. Policy rewrites now honor `removeMatchedClauses` together with a non-empty
+   postcondition, so a matched confidentiality atom can be replaced rather than
+   only augmented.
+6. Runtime-placement and stronger participant/runtime guards are still a later
+   layer on top of this foundation.
 
 ## Internal Verifier Read Marker
 
