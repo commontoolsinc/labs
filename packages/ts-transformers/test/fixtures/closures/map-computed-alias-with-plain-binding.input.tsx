@@ -15,8 +15,8 @@ interface State {
 }
 
 // FIXTURE: map-computed-alias-with-plain-binding
-// Verifies: computed property key mixed with a plain destructured binding in the same pattern
-//   { foo, [dynamicKey()]: val } → plain destructure for foo, derive() for val
+// Verifies: computed property key mixed with a static destructured binding in the same pattern
+//   { foo, [dynamicKey()]: val } → key binding for foo, derive() for val
 //   foo + val expression → derive() combining both bindings
 // Context: Mixes static destructuring ({foo}) with dynamic computed key ([dynamicKey()]: val)
 export default pattern<State>((state) => {
