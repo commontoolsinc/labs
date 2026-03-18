@@ -45,7 +45,7 @@ Deno.test("memory v2 chronicle retracts an empty JSON envelope", async () => {
   }
 });
 
-Deno.test("memory v2 chronicle keeps empty objects for user values with value siblings", async () => {
+Deno.test("memory v2 chronicle treats an explicit empty root envelope as deletion", async () => {
   const storage = StorageManager.emulate({
     as: signer,
     memoryVersion: "v2",
@@ -77,7 +77,7 @@ Deno.test("memory v2 chronicle keeps empty objects for user values with value si
     assertEquals(commitResult.error, undefined);
     assertEquals(transaction.facts.length, 1);
     assertEquals(transaction.facts[0].of, "test:keep-empty-object");
-    assertEquals(transaction.facts[0].is, { value: {} });
+    assertEquals(transaction.facts[0].is, undefined);
   } finally {
     await storage.close();
   }

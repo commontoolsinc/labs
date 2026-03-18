@@ -5,7 +5,6 @@ import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import {
   ENTITY_DOCUMENT_MARKER_KEY,
   ENTITY_DOCUMENT_MARKER_VALUE,
-  type EntityDocument,
   isEntityDocument,
 } from "@commonfabric/memory/v2";
 import type {
@@ -85,32 +84,14 @@ const alignRootWriteWithLoadedShape = (
   loaded: StorableValue | undefined,
   merged: StorableValue | undefined,
   options: {
-    hasRootWrite: boolean;
-    loadedDocument?: EntityDocument;
+    isV2JsonRoot: boolean;
   },
 ): StorableValue | undefined => {
   if (type !== "application/json") {
     return merged;
   }
-  if (options.loadedDocument !== undefined) {
-    if (!options.hasRootWrite) {
-      return isEmptyRecord(merged) ? undefined : merged;
-    }
-
-    const { value: _value, ...metadata } = (loaded ?? {}) as Record<
-      string,
-      StorableDatum
-    >;
-    if (merged === undefined) {
-      return Object.keys(metadata).length === 0
-        ? undefined
-        : metadata as StorableValue;
-    }
-
-    return {
-      ...metadata,
-      value: merged,
-    } as StorableValue;
+  if (options.isV2JsonRoot) {
+    return isEmptyRecord(merged) ? undefined : merged;
   }
   if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
     return merged;
@@ -350,12 +331,6 @@ export class Chronicle {
         // Fast path: reference equality means no change needed.
         edit.claim(loaded);
       } else {
-        const loadedDocument = changes.address.type === "application/json" &&
-            "getDocument" in replica &&
-            typeof replica.getDocument === "function"
-          ? replica.getDocument(changes.address.id as any)
-          : undefined;
-
         // Normalize both values for comparison and potential storage.
         const normalizedMerged = storableFromNativeValue(merged.value);
         const normalizedLoaded = storableFromNativeValue(loaded.is);
@@ -365,8 +340,9 @@ export class Chronicle {
           normalizedLoaded,
           normalizedMerged,
           {
-            hasRootWrite: changes.hasRootWrite(),
-            loadedDocument,
+            isV2JsonRoot: changes.address.type === "application/json" &&
+              "getDocument" in replica &&
+              typeof replica.getDocument === "function",
           },
         );
 
@@ -688,10 +664,6 @@ class Changes {
    */
   getWorkingCopy(): IAttestation | undefined {
     return this.#workingCopy;
-  }
-
-  hasRootWrite(): boolean {
-    return this.#pathAttestations.has(JSON.stringify([]));
   }
 
   /**
