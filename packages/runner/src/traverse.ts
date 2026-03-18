@@ -57,6 +57,7 @@ import type {
   WriteError,
   WriterError,
 } from "./storage/interface.ts";
+import { createReadOnlyTransactionError } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
@@ -438,10 +439,31 @@ class ManagedStorageJournal implements ITransactionJournal {
  * This is a read-only transaction, and is only used by the query traversal.
  */
 export class ManagedStorageTransaction implements IStorageTransaction {
+  #readOnlySource?: string;
+
   constructor(
     private manager: ObjectStorageManager,
     public journal = new ManagedStorageJournal(),
   ) {
+  }
+
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.#readOnlySource = reason;
+  }
+
+  clearReadOnly(): void {
+    this.#readOnlySource = undefined;
+  }
+
+  isReadOnly(): boolean {
+    return this.#readOnlySource !== undefined;
+  }
+
+  private assertWritable(method: string): void {
+    if (this.#readOnlySource === undefined) {
+      return;
+    }
+    throw createReadOnlyTransactionError(method, this.#readOnlySource);
   }
 
   status(): StorageTransactionStatus {
@@ -460,21 +482,25 @@ export class ManagedStorageTransaction implements IStorageTransaction {
     return resolve(source, address);
   }
   writer(_space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    this.assertWritable("writer()");
     throw new Error("Method not implemented.");
   }
   write(
     _address: IMemorySpaceAddress,
     _value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError> {
+    this.assertWritable("write()");
     throw new Error("Method not implemented.");
   }
   reader(_space: MemorySpace): Result<ITransactionReader, ReaderError> {
     throw new Error("Method not implemented.");
   }
   abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {
+    this.assertWritable("abort()");
     throw new Error("Method not implemented.");
   }
   commit(): Promise<Result<Unit, CommitError>> {
+    this.assertWritable("commit()");
     throw new Error("Method not implemented.");
   }
 }

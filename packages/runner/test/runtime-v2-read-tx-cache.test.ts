@@ -228,7 +228,7 @@ describe("Runtime v2 ambient read transaction", () => {
     }
   });
 
-  it("returns a read-only wrapper for fallback ambient reads", async () => {
+  it("returns a read-only fallback ambient read transaction", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -250,7 +250,7 @@ describe("Runtime v2 ambient read transaction", () => {
       cell.set(3);
       await seed.commit();
 
-      const readTx = runtime.readOnlyTx();
+      const readTx = runtime.readTx();
 
       expect(cell.withTx(readTx).get()).toBe(3);
       expect(() => readTx.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4))

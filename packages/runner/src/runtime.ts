@@ -61,10 +61,7 @@ import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import {
-  createReadOnlyTransaction,
-  ExtendedStorageTransaction,
-} from "./storage/extended-storage-transaction.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
@@ -265,7 +262,6 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   #ambientReadTx?: IExtendedStorageTransaction;
-  #ambientReadOnlyTx?: IExtendedStorageTransaction;
   #ambientReadSubscription?: IStorageNotification;
 
   constructor(options: RuntimeOptions) {
@@ -602,48 +598,34 @@ export class Runtime {
 
   /**
    * Returns the given transaction if it is ready, otherwise creates a new
-   * ambient read transaction.
+   * read-only fallback transaction.
    */
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
     if (tx?.status().status === "ready") {
       return tx;
     }
     if (this.memoryVersion !== "v2") {
-      return this.edit();
+      return this.createReadTx();
     }
     if (this.#ambientReadTx?.status().status === "ready") {
       return this.#ambientReadTx;
     }
-    const ambient = this.edit();
+    const ambient = this.createReadTx();
     this.#ambientReadTx = ambient;
     return ambient;
   }
 
-  /**
-   * Returns a read-only wrapper around a readable transaction. Use this when a
-   * caller should be able to read through the runtime fallback path but should
-   * never be able to mutate or commit the returned transaction.
-   */
-  readOnlyTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
-    if (tx?.status().status === "ready") {
-      return createReadOnlyTransaction(tx);
-    }
-    const ambient = this.readTx(tx);
-    if (ambient === this.#ambientReadTx) {
-      if (this.#ambientReadOnlyTx?.status().status === "ready") {
-        return this.#ambientReadOnlyTx;
-      }
-      this.#ambientReadOnlyTx = createReadOnlyTransaction(ambient);
-      return this.#ambientReadOnlyTx;
-    }
-    return createReadOnlyTransaction(ambient);
+  private createReadTx(): IExtendedStorageTransaction {
+    const tx = this.edit();
+    tx.setReadOnly?.("runtime.readTx()");
+    return tx;
   }
 
   private clearAmbientReadTx(): void {
     const ambient = this.#ambientReadTx;
     this.#ambientReadTx = undefined;
-    this.#ambientReadOnlyTx = undefined;
     if (ambient?.status().status === "ready") {
+      ambient.clearReadOnly?.();
       ambient.abort();
     }
   }

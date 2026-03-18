@@ -43,6 +43,7 @@ import type {
   WriteError,
   WriterError,
 } from "./interface.ts";
+import { createReadOnlyTransactionError } from "./interface.ts";
 import {
   claim,
   load as loadInline,
@@ -664,6 +665,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     writes: [],
   };
   #writeSpace?: MemorySpace;
+  #readOnlySource?: string;
   #lastDocument?: {
     branch: SpaceBranch;
     id: URI;
@@ -672,6 +674,18 @@ export class V2StorageTransaction implements IStorageTransaction {
   };
 
   constructor(private readonly storage: IStorageManager) {}
+
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.#readOnlySource = reason;
+  }
+
+  clearReadOnly(): void {
+    this.#readOnlySource = undefined;
+  }
+
+  isReadOnly(): boolean {
+    return this.#readOnlySource !== undefined;
+  }
 
   static create(manager: IStorageManager): IStorageTransaction {
     return new this(manager);
@@ -770,6 +784,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    this.assertWritable("writer()");
     const ready = this.editable();
     if (ready.error) {
       return { error: ready.error };
@@ -965,6 +980,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemoryAddress,
     value?: StorableDatum,
   ): Result<IAttestation, WriteError> {
+    this.assertWritable("write()");
     return this.writeWithinBranch(this.branch(space), space, address, value);
   }
 
@@ -1256,6 +1272,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
+    this.assertWritable("abort()");
     const ready = this.editable();
     if (ready.error) {
       return { error: ready.error };
@@ -1268,6 +1285,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   async commit(): Promise<Result<Unit, CommitError>> {
+    this.assertWritable("commit()");
     const ready = this.editable();
     if (ready.error) {
       return { error: ready.error };
@@ -1321,6 +1339,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private prepareWriteSpace(
     space: MemorySpace,
   ): Result<SpaceBranch, InactiveTransactionError | WriterError> {
+    this.assertWritable("write()");
     const ready = this.editable();
     if (ready.error) {
       return { error: ready.error };
@@ -1335,6 +1354,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     this.#writeSpace = space;
     return { ok: this.branch(space) };
+  }
+
+  private assertWritable(method: string): void {
+    if (this.#readOnlySource === undefined) {
+      return;
+    }
+    throw createReadOnlyTransactionError(method, this.#readOnlySource);
   }
 
   private branch(space: MemorySpace): SpaceBranch {

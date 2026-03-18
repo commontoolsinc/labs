@@ -31,7 +31,7 @@ import type {
   WriteError,
   WriterError,
 } from "./interface.ts";
-import { toThrowable } from "./interface.ts";
+import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -46,78 +46,6 @@ const logger = getLogger("extended-storage-transaction", {
   level: "error",
 });
 
-function createReadOnlyTransactionError(method: string): Error {
-  return new Error(
-    `Cannot call ${method} on a read-only transaction returned by runtime.readOnlyTx(); ` +
-      "use runtime.edit() to create an owned writable transaction.",
-  );
-}
-
-class ReadOnlyStorageTransaction implements IStorageTransaction {
-  constructor(private wrapped: IStorageTransaction) {}
-
-  get journal(): ITransactionJournal {
-    return this.wrapped.journal;
-  }
-
-  getReactivityLog(): TransactionReactivityLog {
-    return this.wrapped.getReactivityLog?.() ??
-      reactivityLogFromActivities(this.wrapped.journal.activity());
-  }
-
-  getReadActivities(): Iterable<IReadActivity> {
-    return this.wrapped.getReadActivities?.() ??
-      getTransactionReadActivities(this.wrapped);
-  }
-
-  getWriteDetails(
-    space: MemorySpace,
-  ): Iterable<TransactionWriteDetail> {
-    return this.wrapped.getWriteDetails?.(space) ??
-      getTransactionWriteDetails(this.wrapped, space);
-  }
-
-  status(): StorageTransactionStatus {
-    return this.wrapped.status();
-  }
-
-  read(
-    address: IMemorySpaceAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError> {
-    return this.wrapped.read(address, options);
-  }
-
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.wrapped.reader(space);
-  }
-
-  writer(_space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    throw createReadOnlyTransactionError("writer()");
-  }
-
-  write(
-    _address: IMemorySpaceAddress,
-    _value?: StorableDatum,
-  ): Result<IAttestation, WriterError | WriteError> {
-    throw createReadOnlyTransactionError("write()");
-  }
-
-  writeBatch(
-    _writes: Iterable<ITransactionWriteRequest>,
-  ): Result<Unit, WriterError | WriteError> {
-    throw createReadOnlyTransactionError("writeBatch()");
-  }
-
-  abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {
-    throw createReadOnlyTransactionError("abort()");
-  }
-
-  commit(): Promise<Result<Unit, CommitError>> {
-    return Promise.reject(createReadOnlyTransactionError("commit()"));
-  }
-}
-
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
     (
@@ -125,8 +53,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void
   >();
+  private readOnlySource?: string;
 
   constructor(public tx: IStorageTransaction) {}
+
+  setReadOnly(reason = "runtime.readTx()"): void {
+    this.readOnlySource = reason;
+    this.tx.setReadOnly?.(reason);
+  }
+
+  clearReadOnly(): void {
+    this.readOnlySource = undefined;
+    this.tx.clearReadOnly?.();
+  }
+
+  isReadOnly(): boolean {
+    return this.readOnlySource !== undefined || this.tx.isReadOnly?.() === true;
+  }
+
+  private assertWritable(method: string): void {
+    if (!this.isReadOnly()) {
+      return;
+    }
+    throw createReadOnlyTransactionError(method, this.readOnlySource);
+  }
 
   get journal(): ITransactionJournal {
     return this.tx.journal;
@@ -192,6 +142,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    this.assertWritable("writer()");
     return this.tx.writer(space);
   }
 
@@ -199,6 +150,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: any,
   ): Result<IAttestation, WriteError | WriterError> {
+    this.assertWritable("write()");
     return this.tx.write(address, value);
   }
 
@@ -206,6 +158,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
+    this.assertWritable("writeOrThrow()");
     const writeResult = this.tx.write(address, value);
     if (
       writeResult.error &&
@@ -278,12 +231,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
+    this.assertWritable("writeValueOrThrow()");
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 
   writeValuesOrThrow(
     writes: Iterable<ITransactionWriteRequest>,
   ): void {
+    this.assertWritable("writeValuesOrThrow()");
     if (this.tx.writeBatch) {
       const result = this.tx.writeBatch(
         (function* () {
@@ -310,10 +265,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
+    this.assertWritable("abort()");
     return this.tx.abort(reason);
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
+    if (this.isReadOnly()) {
+      return Promise.reject(
+        createReadOnlyTransactionError("commit()", this.readOnlySource),
+      );
+    }
     const promise = this.tx.commit();
 
     // Call commit callbacks after commit completes (success or failure) Note
@@ -357,6 +318,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void {
+    this.assertWritable("addCommitCallback()");
     this.commitCallbacks.add(callback);
   }
 }
@@ -373,15 +335,9 @@ export interface TransactionWrapperOptions {
 
   /**
    * Transaction to use for creating child cells. If not provided, uses the
-   * wrapped transaction unless readOnly is enabled, in which case child cells
-   * stay read-only too.
+   * wrapped transaction.
    */
   childCellTx?: IExtendedStorageTransaction;
-
-  /**
-   * If true, block mutation APIs so the wrapper can only be used for reads.
-   */
-  readOnly?: boolean;
 }
 
 /**
@@ -390,15 +346,12 @@ export interface TransactionWrapperOptions {
  * Supports two modes that can be combined:
  * - nonReactive: Adds ignoreReadForScheduling meta to all reads
  * - childCellTx: Uses a different transaction for child cells
- * - readOnly: Blocks mutation APIs while preserving read behavior
  *
  * Used by:
  * - Cell.sample(): nonReactive=true, childCellTx=wrapped (child cells reactive)
  * - Cell.sink(): nonReactive=false, childCellTx=extraTx (child cells on separate tx)
  */
 export class TransactionWrapper implements IExtendedStorageTransaction {
-  private readOnlyTx?: IStorageTransaction;
-
   constructor(
     private wrapped: IExtendedStorageTransaction,
     private options: TransactionWrapperOptions = {},
@@ -408,16 +361,23 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
    * Get the transaction to use for creating child cells.
    */
   getTransactionForChildCells(): IExtendedStorageTransaction {
-    return this.options.childCellTx ??
-      (this.options.readOnly ? this : this.wrapped);
+    return this.options.childCellTx ?? this.wrapped;
   }
 
   get tx(): IStorageTransaction {
-    if (this.options.readOnly) {
-      this.readOnlyTx ??= new ReadOnlyStorageTransaction(this.wrapped.tx);
-      return this.readOnlyTx;
-    }
     return this.wrapped.tx;
+  }
+
+  setReadOnly(reason?: string): void {
+    this.wrapped.setReadOnly?.(reason);
+  }
+
+  clearReadOnly(): void {
+    this.wrapped.clearReadOnly?.();
+  }
+
+  isReadOnly(): boolean {
+    return this.wrapped.isReadOnly?.() === true;
   }
 
   get journal(): ITransactionJournal {
@@ -487,9 +447,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("writer()");
-    }
     return this.wrapped.writer(space);
   }
 
@@ -497,9 +454,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("write()");
-    }
     return this.wrapped.write(address, value);
   }
 
@@ -507,9 +461,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("writeOrThrow()");
-    }
     return this.wrapped.writeOrThrow(address, value);
   }
 
@@ -517,18 +468,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue,
   ): void {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("writeValueOrThrow()");
-    }
     return this.wrapped.writeValueOrThrow(address, value);
   }
 
   writeValuesOrThrow(
     writes: Iterable<ITransactionWriteRequest>,
   ): void {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("writeValuesOrThrow()");
-    }
     if (this.wrapped.writeValuesOrThrow) {
       return this.wrapped.writeValuesOrThrow(writes);
     }
@@ -538,16 +483,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("abort()");
-    }
     return this.wrapped.abort(reason);
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
-    if (this.options.readOnly) {
-      return Promise.reject(createReadOnlyTransactionError("commit()"));
-    }
     return this.wrapped.commit();
   }
 
@@ -557,9 +496,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void {
-    if (this.options.readOnly) {
-      throw createReadOnlyTransactionError("addCommitCallback()");
-    }
     return this.wrapped.addCommitCallback(callback);
   }
 }
@@ -572,12 +508,6 @@ export function createNonReactiveTransaction(
   tx: IExtendedStorageTransaction,
 ): TransactionWrapper {
   return new TransactionWrapper(tx, { nonReactive: true, childCellTx: tx });
-}
-
-export function createReadOnlyTransaction(
-  tx: IExtendedStorageTransaction,
-): TransactionWrapper {
-  return new TransactionWrapper(tx, { readOnly: true });
 }
 
 /**

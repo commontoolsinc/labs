@@ -464,6 +464,13 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * Optional read-only mode hook used by runtime-generated fallback read
+   * transactions.
+   */
+  setReadOnly?(reason?: string): void;
+  clearReadOnly?(): void;
+  isReadOnly?(): boolean;
+  /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
    */
@@ -1090,6 +1097,18 @@ export {
   createNonReactiveTransaction,
   TransactionWrapper,
 } from "./extended-storage-transaction.ts";
+
+export const createReadOnlyTransactionError = (
+  method: string,
+  source = "runtime.readTx()",
+): Error => {
+  const error = new Error(
+    `Cannot call ${method} on a read-only transaction returned by ${source}; ` +
+      "use runtime.edit() to create an owned writable transaction.",
+  );
+  error.name = "ReadOnlyTransactionError";
+  return error;
+};
 
 /**
  * Converts an IStorageError to a throwable Error instance.
