@@ -4,8 +4,8 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
-  cfcCasBlobAddress,
   cfcCasLabelBindingsAddress,
+  readCfcCasBlob,
   writeCfcCasBlob,
 } from "../src/cfc/cas-storage.ts";
 
@@ -57,7 +57,7 @@ describe("CFC direct CAS write substrate", () => {
     expect(committed.error).toBeUndefined();
 
     const verifyTx = runtime.edit();
-    const storedPayload = verifyTx.readOrThrow(cfcCasBlobAddress(space, blobHash));
+    const storedPayload = readCfcCasBlob(verifyTx, space, blobHash);
     const storedBindings = verifyTx.readOrThrow(
       cfcCasLabelBindingsAddress(space, blobHash),
     );
@@ -85,9 +85,7 @@ describe("CFC direct CAS write substrate", () => {
     expect(second.blobHash).toBe(first.blobHash);
 
     const verifyTx = runtime.edit();
-    const storedPayload = verifyTx.readOrThrow(
-      cfcCasBlobAddress(space, first.blobHash),
-    );
+    const storedPayload = readCfcCasBlob(verifyTx, space, first.blobHash);
     const storedBindings = verifyTx.readOrThrow(
       cfcCasLabelBindingsAddress(space, first.blobHash),
     ) as {
