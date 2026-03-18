@@ -1,20 +1,20 @@
 import type { StorableValue } from "./interface.ts";
 
-// Canonical definitions now live in `@commontools/api`. Re-exported here for
-// backward compatibility -- existing memory-internal and external consumers
+// Canonical definitions now live in `@commontools/data-model`. Re-exported here
+// for backward compatibility -- existing memory-internal and external consumers
 // can continue importing from this module.
 export {
   DECONSTRUCT,
   RECONSTRUCT,
   StorableInstance,
-} from "@commontools/api/storable-instance";
+} from "@commontools/data-model/storable-instance";
 
 // Re-import for use in local interface definitions.
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   StorableInstance,
-} from "@commontools/api/storable-instance";
+} from "@commontools/data-model/storable-instance";
 
 /**
  * A class that can reconstruct storable instances from essential state. The

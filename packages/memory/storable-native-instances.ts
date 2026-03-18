@@ -8,12 +8,12 @@ import {
 } from "./storable-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 
-// Canonical definitions now live in `@commontools/api`. Re-exported here for
-// backward compatibility.
+// Canonical definitions now live in `@commontools/data-model`. Re-exported here
+// for backward compatibility.
 export {
   StorableEpochDays,
   StorableEpochNsec,
-} from "@commontools/api/storable-epoch";
+} from "@commontools/data-model/storable-epoch";
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 

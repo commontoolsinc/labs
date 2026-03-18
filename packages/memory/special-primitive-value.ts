@@ -1,3 +1,3 @@
-// Canonical definition now lives in `@commontools/api`. Re-exported here for
-// backward compatibility.
-export { SpecialPrimitiveValue } from "@commontools/api/special-primitive-value";
+// Canonical definition now lives in `@commontools/data-model`. Re-exported here
+// for backward compatibility.
+export { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";

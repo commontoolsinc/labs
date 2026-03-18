@@ -301,6 +301,16 @@ export interface BuilderFunctionsAndConstants {
 
   // Render utils
   h: HFunction;
+
+  // Storable value classes
+  StorableInstance:
+    typeof import("@commontools/data-model/storable-instance").StorableInstance;
+  SpecialPrimitiveValue:
+    typeof import("@commontools/data-model/special-primitive-value").SpecialPrimitiveValue;
+  StorableEpochNsec:
+    typeof import("@commontools/data-model/storable-epoch").StorableEpochNsec;
+  StorableEpochDays:
+    typeof import("@commontools/data-model/storable-epoch").StorableEpochDays;
 }
 
 // Runtime interface needed by createCell

@@ -21,6 +21,10 @@
   },
   "exports": {
     "./deep-freeze": "./deep-freeze.ts",
-    "./schema-utils": "./schema-utils.ts"
+    "./schema-utils": "./schema-utils.ts",
+    "./fabric-value": "./fabric-value.ts",
+    "./storable-instance": "./storable-instance.ts",
+    "./special-primitive-value": "./special-primitive-value.ts",
+    "./storable-epoch": "./storable-epoch.ts"
   }
 }

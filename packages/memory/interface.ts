@@ -2,21 +2,21 @@ import type { ContentId, DefinedReferent } from "./reference.ts";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 
 // Canonical definitions of StorableValue and related types now live in
-// `@commontools/api/fabric-value`. Re-exported here for backward compatibility
-// -- many files in memory and runner import these from this module.
-// TODO: Migrate consumers to import directly from `@commontools/api`.
+// `@commontools/data-model/fabric-value`. Re-exported here for backward
+// compatibility -- many files in memory and runner import these from this module.
+// TODO: Migrate consumers to import directly from `@commontools/data-model`.
 export type {
   StorableArray,
   StorableDatum,
   StorableObject,
   StorableValue,
-} from "@commontools/api/fabric-value";
+} from "@commontools/data-model/fabric-value";
 
 // Re-import for use in local type definitions within this file.
 import type {
   StorableDatum,
   StorableValue,
-} from "@commontools/api/fabric-value";
+} from "@commontools/data-model/fabric-value";
 
 export type SchemaPathSelector = {
   path: readonly string[];

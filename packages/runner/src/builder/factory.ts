@@ -47,6 +47,12 @@ import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
+import { StorableInstance } from "@commontools/data-model/storable-instance";
+import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
+import {
+  StorableEpochDays,
+  StorableEpochNsec,
+} from "@commontools/data-model/storable-epoch";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -145,6 +151,14 @@ export const createBuilder = (): {
 
       // Render utils
       h,
+
+      // Storable value classes -- runtime values backing the type declarations
+      // in api/index.ts. Enables `new StorableEpochNsec(...)` and `instanceof`
+      // checks in patterns.
+      StorableInstance,
+      SpecialPrimitiveValue,
+      StorableEpochNsec,
+      StorableEpochDays,
     },
     exportsCallback,
   };
