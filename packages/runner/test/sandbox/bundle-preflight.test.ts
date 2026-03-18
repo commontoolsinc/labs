@@ -12,7 +12,10 @@ import {
 import { verifyAMDFactory } from "../../src/sandbox/module-verifier.ts";
 import { Identity } from "@commontools/identity";
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
-import { splitTopLevelStatements } from "../../src/sandbox/token-scanner.ts";
+import {
+  splitTopLevelCommaList,
+  splitTopLevelStatements,
+} from "../../src/sandbox/token-scanner.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
 
@@ -247,6 +250,23 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
       })
     );
   });
+});
+
+Deno.test("token scanner handles quote terminators preceded by escaped backslashes", () => {
+  assertEquals(
+    splitTopLevelStatements(`const value = 'path\\\\\\\\'; const next = 1;`),
+    [
+      `const value = 'path\\\\\\\\';`,
+      "const next = 1;",
+    ],
+  );
+  assertEquals(
+    splitTopLevelCommaList(`'path\\\\\\\\', CONFIG`),
+    [
+      `'path\\\\\\\\'`,
+      "CONFIG",
+    ],
+  );
 });
 
 Deno.test("AMD factory verifier accepts real compiler output from the SES engine path", async () => {

@@ -4,7 +4,6 @@ import {
   CT_IMPLEMENTATION_REF,
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
-  type VerifiedMetadataCarrier,
 } from "./types.ts";
 
 const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -14,7 +13,6 @@ const INTERNAL_SYMBOL_KEYS = new Set([
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
 ]);
-type MetadataTaggedRecord = Record<string, unknown> & VerifiedMetadataCarrier;
 
 export function assertPlainData(value: unknown): void {
   walkPlainData(value, new Set());
@@ -51,7 +49,20 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
   }
   seen.add(value);
 
+  assertAllowedSymbolKeys(value);
+
   if (Array.isArray(value)) {
+    const ownKeys = Object.getOwnPropertyNames(value);
+    for (const key of ownKeys) {
+      if (key === "length") {
+        continue;
+      }
+      if (!isCanonicalArrayIndexKey(key)) {
+        throw new Error(
+          "Arrays may not have extra own properties in verified plain data",
+        );
+      }
+    }
     for (let index = 0; index < value.length; index++) {
       if (!Object.prototype.hasOwnProperty.call(value, index)) {
         throw new Error("Sparse arrays are not allowed in verified plain data");
@@ -73,12 +84,7 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
     throw new Error("Only plain object records are allowed");
   }
 
-  const symbolKeys = Object.getOwnPropertySymbols(value);
-  if (symbolKeys.some((symbol) => !INTERNAL_SYMBOL_KEYS.has(symbol))) {
-    throw new Error("Symbol keys are not allowed in verified plain data");
-  }
-
-  for (const key of Object.keys(value)) {
+  for (const key of Object.getOwnPropertyNames(value)) {
     if (RESERVED_KEYS.has(key)) {
       throw new Error(
         `Reserved key '${key}' is not allowed in verified plain data`,
@@ -92,6 +98,21 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
   }
 
   seen.delete(value);
+}
+
+function assertAllowedSymbolKeys(value: object): void {
+  const symbolKeys = Object.getOwnPropertySymbols(value);
+  if (symbolKeys.some((symbol) => !INTERNAL_SYMBOL_KEYS.has(symbol))) {
+    throw new Error("Symbol keys are not allowed in verified plain data");
+  }
+}
+
+function isCanonicalArrayIndexKey(key: string): boolean {
+  if (!/^(0|[1-9]\d*)$/.test(key)) {
+    return false;
+  }
+  const index = Number(key);
+  return Number.isSafeInteger(index) && String(index) === key;
 }
 
 function getOwnDescriptorOrThrow(
@@ -117,12 +138,14 @@ function deepFreeze<T>(value: T): T {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) {
     return value;
   }
-  Object.freeze(value);
-  const entries = Array.isArray(value)
-    ? value
-    : Object.values(value as MetadataTaggedRecord);
-  for (const entry of entries) {
-    deepFreeze(entry);
+
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor)) {
+      continue;
+    }
+    deepFreeze(descriptor.value);
   }
-  return value;
+
+  return Object.freeze(value);
 }

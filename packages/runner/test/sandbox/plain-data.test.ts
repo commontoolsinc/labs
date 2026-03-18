@@ -48,6 +48,37 @@ Deno.test("plain-data validation rejects unsupported shapes", () => {
   assertThrows(() => assertPlainData(cycle));
 });
 
+Deno.test("plain-data validation rejects array extra own properties and non-enumerable data", () => {
+  const withExtra = [1, 2];
+  Object.defineProperty(withExtra, "extra", {
+    value: { nested: true },
+    enumerable: false,
+  });
+  assertThrows(() => assertPlainData(withExtra));
+
+  const withHidden = {};
+  Object.defineProperty(withHidden, "hidden", {
+    value: new Map([["nope", 1]]),
+    enumerable: false,
+  });
+  assertThrows(() => assertPlainData(withHidden));
+});
+
+Deno.test("freezeVerifiedPlainData deep-freezes non-enumerable nested data", () => {
+  const nested = { ok: true };
+  const value: Record<string, unknown> = {};
+  Object.defineProperty(value, "hidden", {
+    value: nested,
+    enumerable: false,
+  });
+
+  const frozen = freezeVerifiedPlainData(value);
+  const hidden = Object.getOwnPropertyDescriptor(frozen, "hidden")?.value;
+
+  assertEquals(Object.isFrozen(frozen), true);
+  assertEquals(Object.isFrozen(hidden), true);
+});
+
 Deno.test("plain-data validation rejects proxies without invoking traps", () => {
   let getPrototypeOfCalls = 0;
   let ownKeysCalls = 0;

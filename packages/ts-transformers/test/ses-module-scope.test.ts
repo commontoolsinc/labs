@@ -149,7 +149,7 @@ export const lifted = lift(sanitize);
 
   assertMatch(
     output,
-    /__ct_builder\("lift",\s*"[^"]+",\s*function\s*\(value(?::\s*number)?\)/,
+    /__ct_builder\("lift",\s*"[^"]+",\s*function(?:\s+\w+)?\s*\(value(?::\s*number)?\)/,
   );
 });
 
@@ -245,4 +245,35 @@ export default pattern<{ count: number }>(({ count }) => {
     false,
     "nested callback locals must not force hoisting when there is no module-scope capture",
   );
+});
+
+Deno.test("SES module-scope preserves async wrappers and ignores shadowed local captures", async () => {
+  const source = `/// <cts-enable />
+const CONFIG = 2;
+
+export const load = async (value: number) => value + CONFIG;
+export const localOnly = (value: number) => {
+  const CONFIG = value + 1;
+  return CONFIG;
+};
+const VALUE = (() => {
+  const CONFIG = 4;
+  return CONFIG;
+})();
+`;
+
+  const output = await transformSource(source, {
+    types: COMMONTOOLS_TYPES,
+    sesMode: true,
+  });
+
+  assertMatch(
+    output,
+    /__ct_pure_fn\(\s*"[^"]+",\s*\["CONFIG"\],\s*async function/,
+  );
+  assertMatch(
+    output,
+    /const localOnly = __ctHelpers\.__ct_fn\(\s*"[^"]+",\s*function/,
+  );
+  assertMatch(output, /__ct_data\(\s*"[^"]+",\s*\[\s*\],/);
 });

@@ -283,10 +283,34 @@ export class SESRuntime {
     const existing = this.verifiedFunctions.get(evaluationId);
     if (existing) {
       for (const implementationRef of existing.keys()) {
-        this.verifiedFunctionIndex.delete(implementationRef);
+        const replacement = this.findVerifiedFunctionInOtherEvaluations(
+          evaluationId,
+          implementationRef,
+        );
+        if (replacement) {
+          this.verifiedFunctionIndex.set(implementationRef, replacement);
+        } else {
+          this.verifiedFunctionIndex.delete(implementationRef);
+        }
       }
     }
     this.verifiedFunctions.set(evaluationId, new Map());
+  }
+
+  private findVerifiedFunctionInOtherEvaluations(
+    evaluationId: string,
+    implementationRef: string,
+  ): VerifiedCallable | undefined {
+    for (const [otherEvaluationId, registry] of this.verifiedFunctions) {
+      if (otherEvaluationId === evaluationId) {
+        continue;
+      }
+      const replacement = registry.get(implementationRef);
+      if (replacement) {
+        return replacement;
+      }
+    }
+    return undefined;
   }
 
   private collectAssociatedFunctions(

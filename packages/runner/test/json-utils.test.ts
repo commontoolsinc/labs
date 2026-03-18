@@ -448,4 +448,27 @@ describe("moduleToJSON", () => {
     });
     expect("implementation" in serialized).toBe(false);
   });
+
+  it("serializes non-javascript function-backed modules without leaking implementations", () => {
+    const implementation = Object.assign(
+      () => "ok",
+      {
+        preview: "() => 'ok'",
+        src: "main.tsx:2:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "raw",
+      implementation,
+      implementationRef: "main.tsx#001:raw",
+    });
+
+    expect(serialized).toMatchObject({
+      type: "raw",
+      implementationRef: "main.tsx#001:raw",
+      preview: "() => 'ok'",
+      location: "main.tsx:2:1",
+    });
+    expect("implementation" in serialized).toBe(false);
+  });
 });

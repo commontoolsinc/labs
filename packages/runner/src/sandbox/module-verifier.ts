@@ -1,4 +1,4 @@
-import { TRUSTED_RUNTIME_MODULES } from "./abi.ts";
+import { isTrustedRuntimeModuleIdentifier } from "./abi.ts";
 import {
   findBalancedRegion,
   splitTopLevelCommaList,
@@ -56,7 +56,7 @@ function verifyDependencies(
       continue;
     }
     if (
-      TRUSTED_RUNTIME_MODULES.has(dependency) ||
+      isTrustedRuntimeModuleIdentifier(dependency) ||
       registeredModuleIds.has(dependency)
     ) {
       continue;

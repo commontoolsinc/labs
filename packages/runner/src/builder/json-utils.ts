@@ -260,7 +260,7 @@ export function moduleToJSON(module: Module) {
     };
   }
 
-  if (module.type === "javascript" && typeof implementation === "function") {
+  if (typeof implementation === "function") {
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;

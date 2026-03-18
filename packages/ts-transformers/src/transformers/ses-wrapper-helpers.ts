@@ -67,18 +67,24 @@ export function toDirectFunctionExpression(
     );
 
   return factory.createFunctionExpression(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    getFunctionModifiers(expression),
+    ts.isFunctionDeclaration(expression) || ts.isFunctionExpression(expression)
+      ? expression.asteriskToken
+      : undefined,
+    ts.isFunctionDeclaration(expression) || ts.isFunctionExpression(expression)
+      ? expression.name
+      : undefined,
+    expression.typeParameters,
     expression.parameters,
-    undefined,
+    expression.type,
     body,
   );
 }
 
 export function collectReferencedIdentifiers(
   node: ts.Node,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
   allowedBindings: ReadonlySet<string>,
 ): string[] {
   const names = new Set<string>();
@@ -90,6 +96,9 @@ export function collectReferencedIdentifiers(
     if (
       ts.isIdentifier(current) &&
       !isPropertyName(current) &&
+      !isDeclarationName(current) &&
+      !isTypePosition(current) &&
+      resolvesToTopLevelBinding(current, checker, sourceFile) &&
       allowedBindings.has(current.text)
     ) {
       names.add(current.text);
@@ -110,6 +119,112 @@ function isPropertyName(node: ts.Identifier): boolean {
   if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
   if (ts.isMethodDeclaration(parent) && parent.name === node) return true;
   if (ts.isPropertyDeclaration(parent) && parent.name === node) return true;
+  return false;
+}
+
+function getFunctionModifiers(
+  expression: ts.FunctionLikeDeclarationBase,
+): readonly ts.Modifier[] | undefined {
+  if (
+    !ts.isArrowFunction(expression) &&
+    !ts.isFunctionDeclaration(expression) &&
+    !ts.isFunctionExpression(expression)
+  ) {
+    return undefined;
+  }
+
+  const modifiers = expression.modifiers?.filter(
+    (modifier): modifier is ts.Modifier =>
+      modifier.kind === ts.SyntaxKind.AsyncKeyword,
+  );
+  return modifiers as readonly ts.Modifier[] | undefined;
+}
+
+function isDeclarationName(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+  if (
+    (ts.isVariableDeclaration(parent) ||
+      ts.isParameter(parent) ||
+      ts.isBindingElement(parent) ||
+      ts.isFunctionDeclaration(parent) ||
+      ts.isFunctionExpression(parent) ||
+      ts.isClassDeclaration(parent) ||
+      ts.isClassExpression(parent) ||
+      ts.isInterfaceDeclaration(parent) ||
+      ts.isTypeAliasDeclaration(parent) ||
+      ts.isEnumDeclaration(parent) ||
+      ts.isTypeParameterDeclaration(parent) ||
+      ts.isImportClause(parent) ||
+      ts.isImportSpecifier(parent) ||
+      ts.isNamespaceImport(parent) ||
+      ts.isImportEqualsDeclaration(parent)) &&
+    parent.name === node
+  ) {
+    return true;
+  }
+  return ts.isPropertySignature(parent) && parent.name === node;
+}
+
+function isTypePosition(node: ts.Identifier): boolean {
+  for (let current: ts.Node | undefined = node.parent; current; current = current.parent) {
+    if (ts.isTypeNode(current)) {
+      return true;
+    }
+    if (
+      ts.isExpression(current) || ts.isStatement(current) ||
+      ts.isSourceFile(current)
+    ) {
+      return false;
+    }
+  }
+  return false;
+}
+
+function resolvesToTopLevelBinding(
+  node: ts.Identifier,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): boolean {
+  const symbol = checker.getSymbolAtLocation(node);
+  if (!symbol) {
+    return false;
+  }
+
+  const candidates = new Set<ts.Symbol>([symbol]);
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    candidates.add(checker.getAliasedSymbol(symbol));
+  }
+
+  for (const candidate of candidates) {
+    if ((candidate.declarations ?? []).some((declaration) =>
+      isTopLevelDeclaration(declaration, sourceFile)
+    )) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isTopLevelDeclaration(
+  declaration: ts.Declaration,
+  sourceFile: ts.SourceFile,
+): boolean {
+  for (let current: ts.Node | undefined = declaration; current; current = current.parent) {
+    if (current === sourceFile) {
+      return true;
+    }
+    if (
+      current !== declaration &&
+      (
+        ts.isBlock(current) || ts.isFunctionLike(current) ||
+        ts.isClassDeclaration(current) || ts.isClassExpression(current)
+      )
+    ) {
+      return false;
+    }
+  }
   return false;
 }
 

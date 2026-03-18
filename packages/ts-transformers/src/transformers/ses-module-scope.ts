@@ -441,6 +441,8 @@ function createCanonicalBindingStatements(options: {
   if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
     const captureIds = collectReferencedIdentifiers(
       initializer.body,
+      checker,
+      sourceFile,
       approvedBindings,
     );
     const helperName = captureIds.length > 0 ? "__ct_pure_fn" : "__ct_fn";
@@ -486,6 +488,8 @@ function createCanonicalBindingStatements(options: {
 
   const captureIds = collectReferencedIdentifiers(
     initializer,
+    checker,
+    sourceFile,
     approvedBindings,
   );
   const wrappedStatement = factory.createVariableStatement(

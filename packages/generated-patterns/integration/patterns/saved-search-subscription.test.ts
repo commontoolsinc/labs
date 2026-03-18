@@ -31,7 +31,7 @@ const savedSearchSubscriptionScenario: PatternIntegrationScenario<
         name: "market signals ",
         query: " product analytics ",
         frequency: "Monthly",
-        channels: ["push", "digest", "push", "sms"],
+        channels: ["push", "digest", "push", "sms", "toString"],
       },
     ],
   },

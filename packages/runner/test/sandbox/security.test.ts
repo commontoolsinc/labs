@@ -11,6 +11,7 @@ import {
   createFunctionWrapper,
   createPureFunctionWrapper,
 } from "../../src/sandbox/runtime-helpers.ts";
+import { SESRuntime } from "../../src/sandbox/ses-runtime.ts";
 import type { VerifiedCallable } from "../../src/sandbox/types.ts";
 
 Deno.test("runtime wrappers tag and harden approved values", () => {
@@ -91,4 +92,22 @@ Deno.test("runtime wrappers reject obviously invalid input", () => {
       {} as unknown as VerifiedCallable,
     )
   );
+});
+
+Deno.test("SES runtime keeps shared implementation refs indexed while other evaluations still own them", () => {
+  const runtime = new SESRuntime() as unknown as {
+    verifiedFunctions: Map<string, Map<string, VerifiedCallable>>;
+    verifiedFunctionIndex: Map<string, VerifiedCallable>;
+    resetVerifiedFunctions(evaluationId: string): void;
+  };
+  const first = (() => 1) as VerifiedCallable;
+  const second = (() => 2) as VerifiedCallable;
+
+  runtime.verifiedFunctions.set("eval-a", new Map([["shared-ref", first]]));
+  runtime.verifiedFunctions.set("eval-b", new Map([["shared-ref", second]]));
+  runtime.verifiedFunctionIndex.set("shared-ref", second);
+
+  runtime.resetVerifiedFunctions("eval-a");
+
+  assertEquals(runtime.verifiedFunctionIndex.get("shared-ref"), second);
 });
