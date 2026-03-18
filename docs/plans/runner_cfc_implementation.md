@@ -954,6 +954,11 @@ Primary docs:
       refines into a principal-bound return intent when matching
       `TrustedProvider(provider)` evidence is present before the final
       commit-time audience verification.
+- [x] Step J.31: add a trusted share-policy helper that only mints durable
+      `ShareGrant` state when the share preview matches the semantic event and
+      required provenance disclosures were rendered; let `policyState` guards
+      match durable records structurally so the stored value can retain
+      metadata such as `grantedAt` and `sourceIntentId`.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

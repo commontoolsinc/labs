@@ -66,6 +66,7 @@ import {
   normalizeIntegrityLabel,
 } from "./label-algebra.ts";
 import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
+import { matchesCfcAtomPattern } from "./atom-patterns.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -2121,7 +2122,13 @@ function policyRuleStateMatches(
       cfcPolicyStateAddress(entity.space, resolved),
       { cfc: internalVerifierReadAnnotations },
     );
-    if (record === undefined || !deepEqual(record, resolved)) {
+    if (
+      record === undefined ||
+      !matchesCfcAtomPattern(
+        record as CfcAtom | undefined,
+        resolved as CfcAtom,
+      )
+    ) {
       return false;
     }
   }

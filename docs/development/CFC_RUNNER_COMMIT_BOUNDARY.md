@@ -338,6 +338,21 @@ Return-to-sender refinement can also demand explicit provider trust:
 3. This matches the spec’s conditional-trust reading of sender-authored
    provenance without weakening the existing return-to-sender commit gate.
 
+Sharing flows now also have a provenance-disclosure helper layer:
+
+1. A trusted share-policy helper can derive a durable `ShareGrant` from a
+   semantic `ShareWithUser` intent event only when the previewed
+   `owner/resourceRef/recipient/scope` match and disclosure evidence was
+   rendered.
+2. The helper currently requires `GestureProvenance`,
+   `IntentSurfaceTrusted(action = "ShareWithUser")`, and both
+   `DisclosureRendered(kind = "SelectionInfluence")` and
+   `DisclosureRendered(kind = "SelectionNotShared")`.
+3. `policyState` guards now match stored state records structurally rather than
+   by exact deep equality, so the durable stored record can carry metadata like
+   `grantedAt` and `sourceIntentId` while the guard still names only the key
+   fields.
+
 Runtime/device placement guards are now available as ambient prepare-time
 integrity too:
 

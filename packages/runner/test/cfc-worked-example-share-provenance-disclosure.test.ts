@@ -13,6 +13,7 @@ import { deriveCfcPolicyStateId } from "../src/cfc/policy-state.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import {
   deriveCfcShareGrantFromIntent,
+  deriveCfcShareGrantPolicyKey,
 } from "../src/cfc/share-grant-intent.ts";
 import type {
   IExtendedStorageTransaction,
@@ -86,14 +87,17 @@ function shareGrantSchema(resourceRef: string) {
   } as const satisfies JSONSchema;
 }
 
-function createShareIntent(additionalIntegrity: readonly unknown[] = []) {
+function createShareIntent(
+  resourceRef: string,
+  additionalIntegrity: readonly unknown[] = [],
+) {
   return createCfcIntentEventEnvelope({
     action: "ShareWithUser",
     sourceGestureId: "gesture-share-photo-42",
     conditionHash: "Cond.ShareClicked",
     parameters: {
       owner: space,
-      resourceRef: "worked-example-share-provenance-photo",
+      resourceRef,
       recipient: bobDid,
       scope: "read",
     },
@@ -153,7 +157,9 @@ describe("CFC worked example: provenance disclosure before sharing", () => {
   }
 
   it("refuses to mint a durable ShareGrant when disclosure evidence is missing", () => {
-    const shareIntent = createShareIntent();
+    const shareIntent = createShareIntent(
+      "worked-example-share-provenance-photo",
+    );
     const shareGrant = deriveCfcShareGrantFromIntent(shareIntent, {
       owner: space,
       resourceRef: "worked-example-share-provenance-photo",
@@ -198,36 +204,42 @@ describe("CFC worked example: provenance disclosure before sharing", () => {
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const shareIntent = createShareIntent([
+    const resourceRef = photo.getAsNormalizedFullLink().id;
+    const shareIntent = createShareIntent(resourceRef, [
       {
         type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
         kind: "SelectionInfluence",
-        resourceRef: photo.getAsNormalizedFullLink().id,
+        resourceRef,
         recipient: bobDid,
       },
       {
         type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
         kind: "SelectionNotShared",
-        resourceRef: photo.getAsNormalizedFullLink().id,
+        resourceRef,
         recipient: bobDid,
       },
     ]);
     const shareGrant = deriveCfcShareGrantFromIntent(shareIntent, {
       owner: space,
-      resourceRef: photo.getAsNormalizedFullLink().id,
+      resourceRef,
       recipient: bobDid,
       scope: "read",
       grantedAt: 456,
     });
     expect(shareGrant).not.toBeNull();
+    if (shareGrant === null) {
+      throw new Error("Expected share grant to be derived");
+    }
 
     tx = runtime.edit();
+    const persistedShareGrant = { ...shareGrant };
+    const policyKey = deriveCfcShareGrantPolicyKey(shareGrant);
     tx.writeOrThrow({
       space,
-      id: deriveCfcPolicyStateId(shareGrant),
+      id: deriveCfcPolicyStateId(policyKey),
       type: "application/json",
       path: ["value"],
-    }, shareGrant);
+    }, persistedShareGrant);
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
@@ -261,7 +273,7 @@ describe("CFC worked example: provenance disclosure before sharing", () => {
     );
     const value = persistedPhoto.withTx(tx).asSchema(sourceSchema).get();
     persistedSharedPhoto.withTx(tx).asSchema(
-      shareGrantSchema(photo.getAsNormalizedFullLink().id),
+      shareGrantSchema(resourceRef),
     ).set(value);
 
     await prepareCfcCommitIfNeeded(tx);
