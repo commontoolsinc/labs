@@ -165,6 +165,15 @@ Policy rewrite guards now use the same atom-pattern model:
    `AuthorizedRequest`) by subset object pattern, with concept guards still
    routed through trust closure.
 
+That composition is now covered end to end for a Gmail-style read flow:
+
+1. Phase 1 writes a fetch request whose auth-header clause is sink-rewritten.
+2. The resolved fetch result persists `User(...)` confidentiality plus minted
+   `AuthorizedRequest` / `NetworkProvenance` integrity on disk.
+3. Phase 2, in a fresh runtime instance, reads that persisted result and
+   successfully passes both `requiredIntegrity` and downstream declassify
+   checks without relying on phase-1 caches.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

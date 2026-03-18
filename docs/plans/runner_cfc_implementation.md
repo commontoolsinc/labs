@@ -869,6 +869,10 @@ Primary docs:
 - [x] Step J.12: mint `AuthorizedRequest` and `NetworkProvenance` integrity on
       fetch results and expose those labels on the resolved result cell the
       runtime returns.
+- [x] Step J.13: prove the Gmail read worked-example slice end to end across a
+      fresh runtime instance: persisted fetch sink rewrites + minted request
+      evidence must satisfy downstream `requiredIntegrity` and policy
+      declassify checks without relying on in-memory caches.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
