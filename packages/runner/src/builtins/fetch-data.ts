@@ -290,9 +290,68 @@ async function startFetch(
     return;
   }
 
+  const responseHeadersToObject = (
+    response: Response,
+  ): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    for (const [key, value] of response.headers.entries()) {
+      headers[key] = value;
+    }
+    return headers;
+  };
+
+  const buildFetchHttpError = async (response: Response): Promise<Error> => {
+    const contentMode = mode || "json";
+    let parsedBody: unknown = undefined;
+
+    try {
+      parsedBody = contentMode === "json"
+        ? await response.json()
+        : await response.text();
+    } catch {
+      parsedBody = undefined;
+    }
+
+    const parsedError = parsedBody &&
+        typeof parsedBody === "object" &&
+        !Array.isArray(parsedBody) &&
+        "error" in parsedBody
+      ? (parsedBody as { error?: unknown }).error
+      : undefined;
+    const errorRecord = parsedError &&
+        typeof parsedError === "object" &&
+        !Array.isArray(parsedError)
+      ? parsedError as Record<string, unknown>
+      : undefined;
+    const messageSource = typeof errorRecord?.message === "string"
+      ? errorRecord.message
+      : typeof parsedBody === "string"
+      ? parsedBody
+      : response.statusText;
+    const error = new Error(`HTTP ${response.status}: ${messageSource}`);
+
+    Object.assign(error, {
+      code: typeof errorRecord?.code === "number"
+        ? errorRecord.code
+        : response.status,
+      status: typeof errorRecord?.status === "string"
+        ? errorRecord.status
+        : response.statusText,
+      headers: responseHeadersToObject(response),
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+      ...(parsedError !== undefined ? { error: parsedError } : {}),
+      ...(parsedError === undefined && parsedBody !== undefined
+        ? { body: parsedBody }
+        : {}),
+    });
+
+    return error;
+  };
+
   const processResponse = async (r: Response) => {
     if (!r.ok) {
-      throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      throw await buildFetchHttpError(r);
     }
     return (mode || "json") === "json" ? await r.json() : await r.text();
   };
@@ -313,6 +372,7 @@ async function startFetch(
 
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
+  let observedHttpResponse = false;
   try {
     const intent = cfc?.intent;
     if (intent) {
@@ -393,6 +453,7 @@ async function startFetch(
                 ...options,
               },
             );
+            observedHttpResponse = true;
             const data = await processResponse(response);
             return {
               success: true,
@@ -470,6 +531,7 @@ async function startFetch(
         ...options,
       },
     );
+    observedHttpResponse = true;
 
     const data = await processResponse(response);
     const sinkLabels = await deriveFetchSinkResultLabels(
@@ -505,6 +567,15 @@ async function startFetch(
 
     await runtime.idle();
 
+    const sinkLabels = observedHttpResponse
+      ? await deriveFetchSinkResultLabels(
+        runtime,
+        inputsCell,
+        inputs,
+        { endpoint: cfc?.endpoint },
+      )
+      : undefined;
+
     // Write error - but only update inputHash if inputs haven't changed
     await runtime.editWithRetry((tx) => {
       const currentHash = computeInputHashFromValue(
@@ -519,6 +590,12 @@ async function startFetch(
       if (currentHash === inputHash) {
         error.withTx(tx).set(err);
         internal.withTx(tx).update({ inputHash });
+        writeFetchResultLabels(tx, error, sinkLabels);
+        writeFetchResultLabels(tx, parentCell, sinkLabels, "/error");
+        const publicResultCell = parentCell.getSourceCell();
+        if (publicResultCell) {
+          writeFetchResultLabels(tx, publicResultCell, sinkLabels, "/error");
+        }
       }
     });
   }

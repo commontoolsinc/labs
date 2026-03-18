@@ -941,6 +941,10 @@ Primary docs:
       so safe-probing sanitizers can require trusted assurance atoms such as
       `InjectionSafe` while only removing the matched material-risk caveat and
       preserving unrelated clauses like `PROMPT_INFLUENCE`.
+- [x] Step J.28: preserve structured HTTP error bodies/headers on `fetchData`
+      failures, write sink-derived labels onto the error cell, and prove the
+      Gmail error declassification slice by releasing operator-visible fields
+      while retaining full request confidentiality on details and headers.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

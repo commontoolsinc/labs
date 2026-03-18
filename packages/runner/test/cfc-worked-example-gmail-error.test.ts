@@ -52,6 +52,10 @@ const sanitizedErrorMessageAtom = {
   sanitizer: "error-message-sanitizer-v1",
 } as const;
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
+}
+
 const gmailErrorRequestSchema = {
   type: "object",
   properties: {
@@ -88,62 +92,74 @@ const gmailErrorRequestSchema = {
   },
 } as const satisfies JSONSchema;
 
-const declassifiedErrorFieldIfc = {
-  declassify: {
-    confidentialityPre: [secretQueryAtom],
-    integrityPre: [
-      authorizedRequestPattern,
-      networkProvenancePattern,
-    ],
-    removeMatchedClauses: true,
-    addAlternatives: [userAliceAtom],
-    releaseCondition: true,
-  },
-} as const;
+function createDeclassifiedErrorFieldIfc() {
+  return {
+    classification: [cloneJson(userAliceAtom)],
+    declassify: {
+      confidentialityPre: [cloneJson(secretQueryAtom)],
+      integrityPre: [
+        cloneJson(authorizedRequestPattern),
+        cloneJson(networkProvenancePattern),
+      ],
+      removeMatchedClauses: true,
+      addAlternatives: [cloneJson(userAliceAtom)],
+      releaseCondition: true,
+    },
+  } as const;
+}
 
-const gmailErrorViewSchema = {
-  type: "object",
-  properties: {
-    code: {
-      type: "number",
-      ifc: declassifiedErrorFieldIfc,
-    },
-    status: {
-      type: "string",
-      ifc: declassifiedErrorFieldIfc,
-    },
-    message: {
-      type: "string",
-      ifc: {
-        integrity: [sanitizedErrorMessageAtom],
-        declassify: {
-          confidentialityPre: [secretQueryAtom],
-          integrityPre: [
-            authorizedRequestPattern,
-            networkProvenancePattern,
-            sanitizedErrorMessageAtom,
-          ],
-          removeMatchedClauses: true,
-          addAlternatives: [userAliceAtom],
-          releaseCondition: true,
-        },
-      },
-    },
-    details: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: true,
-      },
-    },
-    headers: {
-      type: "object",
-      additionalProperties: {
-        type: "string",
-      },
+const gmailErrorCodeSchema = {
+  type: "number",
+  ifc: {
+    ...createDeclassifiedErrorFieldIfc(),
+  },
+} as const satisfies JSONSchema;
+
+const gmailErrorStatusSchema = {
+  type: "string",
+  ifc: {
+    ...createDeclassifiedErrorFieldIfc(),
+  },
+} as const satisfies JSONSchema;
+
+const gmailErrorMessageSchema = {
+  type: "string",
+  ifc: {
+    classification: [cloneJson(userAliceAtom)],
+    integrity: [cloneJson(sanitizedErrorMessageAtom)],
+    declassify: {
+      confidentialityPre: [cloneJson(secretQueryAtom)],
+      integrityPre: [
+        cloneJson(authorizedRequestPattern),
+        cloneJson(networkProvenancePattern),
+        cloneJson(sanitizedErrorMessageAtom),
+      ],
+      removeMatchedClauses: true,
+      addAlternatives: [cloneJson(userAliceAtom)],
+      releaseCondition: true,
     },
   },
-  required: ["code", "status", "message", "details", "headers"],
+} as const satisfies JSONSchema;
+
+const gmailErrorDetailsSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: true,
+  },
+  ifc: {
+    classification: [[cloneJson(userAliceAtom)], [cloneJson(secretQueryAtom)]],
+  },
+} as const satisfies JSONSchema;
+
+const gmailErrorHeadersSchema = {
+  type: "object",
+  additionalProperties: {
+    type: "string",
+  },
+  ifc: {
+    classification: [[cloneJson(userAliceAtom)], [cloneJson(secretQueryAtom)]],
+  },
 } as const satisfies JSONSchema;
 
 function delay(ms: number): Promise<void> {
@@ -316,29 +332,62 @@ describe("CFC worked example: Gmail error declassification", () => {
     const gmailError = structuredError["@Error"]?.error;
     const errorHeaders = structuredError["@Error"]?.headers;
 
-    const errorView = runtime.getCell(
+    const codeView = runtime.getCell(
       space,
-      "gmail-error-sanitized-view",
-      gmailErrorViewSchema,
+      "gmail-error-operator-code",
+      gmailErrorCodeSchema,
       tx,
     );
-    errorView.withTx(tx).set({
-      code: gmailError?.code ?? 0,
-      status: gmailError?.status ?? "",
-      message: gmailError?.message ?? "",
-      details: gmailError?.details ?? [],
-      headers: errorHeaders ?? {},
-    });
+    const statusView = runtime.getCell(
+      space,
+      "gmail-error-operator-status",
+      gmailErrorStatusSchema,
+      tx,
+    );
+    const messageView = runtime.getCell(
+      space,
+      "gmail-error-operator-message",
+      gmailErrorMessageSchema,
+      tx,
+    );
+    const detailsView = runtime.getCell(
+      space,
+      "gmail-error-details",
+      gmailErrorDetailsSchema,
+      tx,
+    );
+    const headersView = runtime.getCell(
+      space,
+      "gmail-error-headers",
+      gmailErrorHeadersSchema,
+      tx,
+    );
+    codeView.withTx(tx).set(gmailError?.code ?? 0);
+    statusView.withTx(tx).set(gmailError?.status ?? "");
+    messageView.withTx(tx).set(gmailError?.message ?? "");
+    detailsView.withTx(tx).set(gmailError?.details ?? []);
+    headersView.withTx(tx).set(errorHeaders ?? {});
 
     await prepareCfcCommitIfNeeded(tx);
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const viewLabels = await readLabels(errorView.getAsNormalizedFullLink());
-    expect(viewLabels["/code"]?.classification).toEqual([[userAliceAtom]]);
-    expect(viewLabels["/status"]?.classification).toEqual([[userAliceAtom]]);
-    expect(viewLabels["/message"]?.classification).toEqual([[userAliceAtom]]);
-    expect(viewLabels["/message"]?.integrity).toEqual(
+    const codeLabels = await readLabels(codeView.getAsNormalizedFullLink());
+    const statusLabels = await readLabels(statusView.getAsNormalizedFullLink());
+    const messageLabels = await readLabels(
+      messageView.getAsNormalizedFullLink(),
+    );
+    const detailsLabels = await readLabels(
+      detailsView.getAsNormalizedFullLink(),
+    );
+    const headersLabels = await readLabels(
+      headersView.getAsNormalizedFullLink(),
+    );
+
+    expect(codeLabels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(statusLabels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(messageLabels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(messageLabels["/"]?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining(sanitizedErrorMessageAtom),
         expect.objectContaining({
@@ -349,13 +398,13 @@ describe("CFC worked example: Gmail error declassification", () => {
         }),
       ]),
     );
-    expect(viewLabels["/details"]?.classification).toEqual(
+    expect(detailsLabels["/"]?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],
       ]),
     );
-    expect(viewLabels["/headers"]?.classification).toEqual(
+    expect(headersLabels["/"]?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],

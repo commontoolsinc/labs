@@ -300,6 +300,20 @@ integrity:
    `PROMPT_INFLUENCE`.
 4. This is the runner hook needed for the safe-probing worked example.
 
+Fetch sink failures now preserve boundary evidence too:
+
+1. Non-OK `fetchData` responses keep structured HTTP error metadata on the
+   stored `@Error` wrapper, including parsed error body fields and response
+   headers when available.
+2. The error cell receives the same sink-derived confidentiality/integrity
+   labels as a successful result cell when the request reached an HTTP
+   response.
+3. That makes Gmail-style operator diagnostics implementable without dropping
+   `AuthorizedRequest` / `NetworkProvenance` evidence on the failure path.
+4. Operator-facing sanitized fields can then be materialized into separate
+   cells/views while retaining full request confidentiality on raw details and
+   headers.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
