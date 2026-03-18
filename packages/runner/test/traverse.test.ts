@@ -3106,3 +3106,39 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     expect(result).toBe("hello");
   });
 });
+
+describe("canBranchMatch NaN and Infinity type handling", () => {
+  // getJsonType uses isFiniteNumber, so NaN/Infinity are not typed as "number".
+  // A schema requiring type "number" should therefore not exclude NaN/Infinity
+  // (canBranchMatch returns true — let traversal deal with it) rather than
+  // incorrectly filtering them out.
+  it("does not reject NaN against a {type: 'number'} branch", () => {
+    expect(canBranchMatch({ type: "number" }, NaN)).toBe(true);
+  });
+
+  it("does not reject Infinity against a {type: 'number'} branch", () => {
+    expect(canBranchMatch({ type: "number" }, Infinity)).toBe(true);
+  });
+
+  it("does not reject -Infinity against a {type: 'number'} branch", () => {
+    expect(canBranchMatch({ type: "number" }, -Infinity)).toBe(true);
+  });
+
+  it("rejects a string against a {type: 'number'} branch", () => {
+    expect(canBranchMatch({ type: "number" }, "hello")).toBe(false);
+  });
+
+  it("accepts a finite number against a {type: 'number'} branch", () => {
+    expect(canBranchMatch({ type: "number" }, 42)).toBe(true);
+  });
+
+  it("does not reject NaN against a {type: 'string'} branch (getJsonType returns null for NaN)", () => {
+    // NaN falls through all isFiniteNumber/isString/etc. checks so getJsonType
+    // returns null, and canBranchMatch conservatively allows the branch.
+    expect(canBranchMatch({ type: "string" }, NaN)).toBe(true);
+  });
+
+  it("rejects a finite number against a {type: 'string'} branch", () => {
+    expect(canBranchMatch({ type: "string" }, 42)).toBe(false);
+  });
+});

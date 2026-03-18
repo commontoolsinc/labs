@@ -30,6 +30,37 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
   });
 });
 
+describe("ContextualFlowControl.isFalseSchema", () => {
+  it("treats false as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema(false)).toBe(true);
+  });
+
+  it("does not treat true as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema(true)).toBe(false);
+  });
+
+  it("does not treat a normal object schema as false", () => {
+    expect(ContextualFlowControl.isFalseSchema({ type: "string" })).toBe(false);
+  });
+
+  it("treats {not: true} as a false schema (negation of true matches nothing)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: true })).toBe(true);
+  });
+
+  it("treats {not: {}} as a false schema ({} is a true schema, so its negation is false)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: {} })).toBe(true);
+  });
+
+  it("does not treat {not: false} as a false schema (negation of false matches everything)", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: false })).toBe(false);
+  });
+
+  it("does not treat {not: {type: 'string'}} as a false schema", () => {
+    expect(ContextualFlowControl.isFalseSchema({ not: { type: "string" } }))
+      .toBe(false);
+  });
+});
+
 describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
   it("resolves a local $ref successfully", () => {
     const schema: JSONSchemaObj = {

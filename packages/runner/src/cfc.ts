@@ -838,6 +838,6 @@ export class ContextualFlowControl {
   static isFalseSchema(schema: JSONSchema): boolean {
     return schema === false ||
       (isRecord(schema) && "not" in schema &&
-        !this.isTrueSchema(schema["not"]!));
+        this.isTrueSchema(schema["not"]!));
   }
 }
