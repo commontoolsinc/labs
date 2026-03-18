@@ -201,6 +201,14 @@ A durable sharing slice is now covered too:
 3. A fresh runtime instance can consult that persisted `ShareGrant` and still
    complete the share-style declassification without relying on warm caches.
 
+Prepare-time policy matching now also seeds reserved bindings from the ambient
+prepare context:
+
+1. `$actingUser` resolves from `PrepareBoundaryCommitOptions.actingPrincipal`.
+2. Policy preconditions can require a user-scoped input to match the acting
+   principal.
+3. The same binding can be substituted into synthesized output atoms.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

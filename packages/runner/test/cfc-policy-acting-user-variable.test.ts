@@ -83,12 +83,25 @@ describe("CFC policy acting-user variables", () => {
     return normalizePersistedLabels(raw);
   }
 
+  function atomKey(atom: unknown): string {
+    if (!atom || typeof atom !== "object" || Array.isArray(atom)) {
+      return JSON.stringify(atom);
+    }
+    return JSON.stringify(
+      Object.fromEntries(
+        Object.entries(atom).sort(([left], [right]) =>
+          left.localeCompare(right)
+        ),
+      ),
+    );
+  }
+
   function clauseKeys(labels: Record<string, Labels>): string[] {
     const clause = labels["/"]?.classification?.[0];
     if (!Array.isArray(clause)) {
       return [];
     }
-    return clause.map((atom: unknown) => JSON.stringify(atom)).sort();
+    return clause.map((atom: unknown) => atomKey(atom)).sort();
   }
 
   it("binds $actingUser into policy preconditions and synthesized output atoms", async () => {
@@ -106,16 +119,19 @@ describe("CFC policy acting-user variables", () => {
       tx,
     );
     source.set("visible to acting user");
-    tx.writeOrThrow(cfcLabelsAddress({
-      space,
-      id: source.getAsNormalizedFullLink().id,
-      type: "application/json",
-    }), {
-      "/": {
-        classification: [userAliceAtom],
-        integrity: [],
-      } satisfies Labels,
-    });
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: source.getAsNormalizedFullLink().id,
+        type: "application/json",
+      }),
+      {
+        "/": {
+          classification: [userAliceAtom],
+          integrity: [],
+        } satisfies Labels,
+      },
+    );
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
@@ -129,9 +145,11 @@ describe("CFC policy acting-user variables", () => {
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const labels = await readPersistedLabels(target.getAsNormalizedFullLink().id);
+    const labels = await readPersistedLabels(
+      target.getAsNormalizedFullLink().id,
+    );
     expect(clauseKeys(labels)).toEqual(
-      [JSON.stringify(userAliceAtom), JSON.stringify(viewerAliceAtom)].sort(),
+      [atomKey(userAliceAtom), atomKey(viewerAliceAtom)].sort(),
     );
   });
 
@@ -150,17 +168,20 @@ describe("CFC policy acting-user variables", () => {
       tx,
     );
     source.set("not visible to bob");
-    tx.writeOrThrow(cfcLabelsAddress({
-      space,
-      id: source.getAsNormalizedFullLink().id,
-      type: "application/json",
-    }), {
-      "/": {
-        classification: [userAliceAtom],
-        integrity: [],
-      } satisfies Labels,
-    });
-    let committed = await tx.commit();
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: source.getAsNormalizedFullLink().id,
+        type: "application/json",
+      }),
+      {
+        "/": {
+          classification: [userAliceAtom],
+          integrity: [],
+        } satisfies Labels,
+      },
+    );
+    const committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
     tx = runtime.edit();

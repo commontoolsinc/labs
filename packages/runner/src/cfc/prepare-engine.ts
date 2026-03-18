@@ -48,6 +48,7 @@ import {
 } from "./integrity-trust.ts";
 import {
   type CfcPatternBindings,
+  type CfcPatternBindingValue,
   matchPatternWithBindings,
   resolvePatternWithBindings,
 } from "./policy-bindings.ts";
@@ -1624,6 +1625,16 @@ type PolicyConfidentialityMatch = {
 
 const DEFAULT_POLICY_FUEL = 8;
 
+function buildPolicyContextBindings(
+  options: PrepareBoundaryCommitOptions = {},
+): CfcPatternBindings {
+  const bindings: Record<string, CfcPatternBindingValue> = {};
+  if (options.actingPrincipal) {
+    bindings.$actingUser = options.actingPrincipal;
+  }
+  return bindings;
+}
+
 function normalizePolicyAtomListOrdered(value: unknown): readonly CfcAtom[] {
   if (!Array.isArray(value)) {
     return [];
@@ -1881,6 +1892,7 @@ function policyRuleConfidentialityMatch(
   label: PolicyLabelState,
   clauseIndex: number,
   rule: PolicyRewriteRule,
+  initialBindings: CfcPatternBindings = {},
 ): PolicyConfidentialityMatch | undefined {
   const clause = label.confidentiality[clauseIndex];
   const targetAtom = rule.confidentialityPre[0];
@@ -1892,6 +1904,7 @@ function policyRuleConfidentialityMatch(
     const targetMatch = matchPatternWithBindings(
       clause[targetIndex],
       targetAtom,
+      initialBindings,
     );
     if (!targetMatch) {
       continue;
@@ -2042,6 +2055,7 @@ function applyPolicyRuleOnce(
   writePath: string,
   options: PrepareBoundaryCommitOptions = {},
 ): { readonly changed: boolean; readonly label: PolicyLabelState } {
+  const contextBindings = buildPolicyContextBindings(options);
   if (
     !evaluatePolicyReleaseCondition(
       rule.releaseCondition,
@@ -2058,7 +2072,12 @@ function applyPolicyRuleOnce(
     clauseIndex < label.confidentiality.length;
     clauseIndex++
   ) {
-    const match = policyRuleConfidentialityMatch(label, clauseIndex, rule);
+    const match = policyRuleConfidentialityMatch(
+      label,
+      clauseIndex,
+      rule,
+      contextBindings,
+    );
     if (!match) {
       continue;
     }

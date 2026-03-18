@@ -886,6 +886,9 @@ Primary docs:
 - [x] Step J.16: add deterministic `policyState` guard lookups plus policy-rule
       variable substitution, then prove a durable `ShareGrant` worked-example
       slice across a fresh runtime instance.
+- [x] Step J.17: seed reserved policy variables from prepare context, starting
+      with `$actingUser`, so policy rewrites can bind the acting principal into
+      preconditions and synthesized output atoms.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
