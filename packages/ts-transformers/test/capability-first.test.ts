@@ -651,6 +651,42 @@ const p = pattern<State>((state) => {
 );
 
 Deno.test(
+  "Capability-first: opaque destructure temporaries preserve generated root names",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, generateObject, pattern } from "commontools";
+const p = pattern<{ messages: string[] }>(({ messages }) => {
+  const preview = computed(() => messages[0] ?? "");
+  const { result } = generateObject({
+    prompt: preview,
+    schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+      required: ["title"],
+    },
+  });
+  return <div>{result?.title ?? "Untitled"}</div>;
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertMatch(
+      output,
+      /const (__ct_destructure(?:_\d+)?) = generateObject\([\s\S]*?result = \1\.key\("result"\)/,
+    );
+    assert(
+      !output.includes('__ct_destructure.key("result")'),
+      "should not drop generated suffixes when lowering destructured opaque temporaries",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first diagnostics: optional-call stays blocked in pattern context",
   async () => {
     const source = `/// <cts-enable />

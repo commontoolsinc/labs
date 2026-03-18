@@ -325,7 +325,7 @@ export function createKeyCall(
 ): ts.Expression {
   const keyCall = factory.createCallExpression(
     factory.createPropertyAccessExpression(
-      factory.createIdentifier(rootIdentifier.text),
+      rootIdentifier,
       factory.createIdentifier("key"),
     ),
     undefined,
