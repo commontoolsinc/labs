@@ -117,6 +117,56 @@ export function canBeStoredLegacy(
 }
 
 /**
+ * Legacy implementation of `cloneIfNecessary()`. As a legacy version, this is
+ * an intentionally simplified implementation meant to capture only the truly
+ * necessary behavior to keep the system running without the rich-data flag
+ * turned on. Details:
+ *
+ * * This function just returns the given `value` in many cases that ideally
+ *   would do something else. Specifically, this function _only_ ever does
+ *   something nontrivial when asked for a mutable (`frozen === false`) result. *
+ * * This function does not try to do anything smart about circular values; they
+ *   _will_ cause the stack to blow out.
+ * * Given a plain object which is to be cloned, this function always returns
+ *   a result which has a non-`null` prototype.
+ * * When producing a clone with `deep === true`, this just uses the built-in
+ *   `structuredClone()` function (which would be incorrect given arbitrary
+ *   rich-data values).
+ *
+ * Callers must resolve `CloneOptions` defaults and validate before calling;
+ * the dispatcher in `storable-value.ts` handles that.
+ *
+ * @param value - An already-valid `StorableValue`.
+ * @param frozen - Whether the result should be frozen.
+ * @param deep - Whether to clone deeply or shallowly.
+ * @param force - Whether to force a copy.
+ */
+export function cloneIfNecessaryLegacy(
+  value: StorableValue,
+  frozen: boolean,
+  deep: boolean,
+  force: boolean,
+): StorableValue {
+  const needClone = force || Object.isFrozen(value);
+  if (frozen || !needClone) {
+    return value;
+  }
+
+  if (deep) {
+    return structuredClone(value);
+  } else if (Array.isArray(value)) {
+    const arr = value as StorableValue[];
+    const copy: StorableValue[] = new Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      if (i in arr) copy[i] = arr[i];
+    }
+    return copy;
+  } else {
+    return { ...(value as Record<string, unknown>) } as StorableValue;
+  }
+}
+
+/**
  * Legacy implementation of `shallowStorableFromNativeValue()` for the
  * JSON-only type system. Converts a value to storable form without recursing
  * into nested values.

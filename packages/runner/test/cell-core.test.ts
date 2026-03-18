@@ -735,19 +735,19 @@ describe("Cell utility functions", () => {
       );
     });
 
-    it("getRawUntyped({ frozen: false }) is identity passthrough (flag OFF)", () => {
-      // With richStorableValues OFF, cloneIfNecessary is a no-op, so
-      // getRawUntyped({ frozen: false }) returns the same reference.
+    it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
+      // Even with `richStorableValues === false`, `cloneIfNecessary()` _will_
+      // make a clone of a frozen value to get a mutable result.
       const cell = runtime.getCell<{ items: number[] }>(
         space,
-        "getRawUntyped frozen false passthrough off",
+        "getRawUntyped frozen false clone off",
         undefined,
         tx,
       );
       cell.set({ items: [1, 2] });
       const result = cell.getRawUntyped({ frozen: false });
       expect(result).toEqual({ items: [1, 2] });
-      expect(result).toBe(cell.getRawUntyped());
+      expect(Object.isFrozen(result)).toBe(false);
     });
   });
 });

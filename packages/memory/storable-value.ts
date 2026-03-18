@@ -17,6 +17,7 @@ export type { CloneOptions } from "./storable-value-modern.ts";
 import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
+  cloneIfNecessaryLegacy,
   isStorableValueLegacy,
   shallowStorableFromNativeValueLegacy,
   storableFromNativeValueLegacy,
@@ -166,9 +167,9 @@ export function cloneIfNecessary(
     );
   }
 
-  if (!currentConfig.richStorableValues) return value;
-
-  return cloneIfNecessaryRich(value, frozen, deep, force);
+  return currentConfig.richStorableValues
+    ? cloneIfNecessaryRich(value, frozen, deep, force)
+    : cloneIfNecessaryLegacy(value, frozen, deep, force);
 }
 
 // ---------------------------------------------------------------------------
