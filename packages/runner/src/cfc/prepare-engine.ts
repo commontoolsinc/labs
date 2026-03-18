@@ -1606,6 +1606,7 @@ type PolicyFixpointResult =
   | {
     readonly nonConverged: false;
     readonly changed: boolean;
+    readonly synthesizedClassification: CfcConfidentialityLabel | undefined;
     readonly label: PolicyLabelState;
     readonly fuel: number;
   };
@@ -1613,6 +1614,7 @@ type PolicyFixpointResult =
 type PolicyDowngradeDecision = {
   readonly allowed: boolean;
   readonly changed: boolean;
+  readonly synthesizedClassification: CfcConfidentialityLabel | undefined;
   readonly nonConverged: boolean;
   readonly fuel: number;
   readonly label?: PolicyLabelState;
@@ -2054,7 +2056,11 @@ function applyPolicyRuleOnce(
   entity: EntityAddress,
   writePath: string,
   options: PrepareBoundaryCommitOptions = {},
-): { readonly changed: boolean; readonly label: PolicyLabelState } {
+): {
+  readonly changed: boolean;
+  readonly label: PolicyLabelState;
+  readonly synthesizedClassification?: CfcConfidentialityLabel;
+} {
   const contextBindings = buildPolicyContextBindings(options);
   if (
     !evaluatePolicyReleaseCondition(
@@ -2155,6 +2161,9 @@ function applyPolicyRuleOnce(
       normalizeConfidentialityLabel(nextConfidentiality) ?? [];
     return {
       changed: true,
+      synthesizedClassification: clauseChanged
+        ? (normalizeConfidentialityLabel([clause]) ?? [])
+        : undefined,
       label: {
         confidentiality: normalizedConfidentiality,
         integrity: nextIntegrity,
@@ -2176,15 +2185,22 @@ function evaluatePolicyOnce(
 ): {
   readonly changed: boolean;
   readonly label: PolicyLabelState;
+  readonly synthesizedClassification: CfcConfidentialityLabel | undefined;
   readonly remainingFuel: number;
 } {
   let current = label;
   let changed = false;
+  let synthesizedClassification: CfcConfidentialityLabel | undefined;
   let fuel = remainingFuel;
   for (const rule of config.rules) {
     while (true) {
       if (fuel <= 0 && changed) {
-        return { changed: true, label: current, remainingFuel: 0 };
+        return {
+          changed: true,
+          label: current,
+          synthesizedClassification,
+          remainingFuel: 0,
+        };
       }
       const applied = applyPolicyRuleOnce(
         current,
@@ -2199,10 +2215,19 @@ function evaluatePolicyOnce(
       }
       changed = true;
       current = applied.label;
+      synthesizedClassification = joinConfidentialityLabels(
+        synthesizedClassification,
+        applied.synthesizedClassification,
+      );
       fuel--;
     }
   }
-  return { changed, label: current, remainingFuel: fuel };
+  return {
+    changed,
+    label: current,
+    synthesizedClassification,
+    remainingFuel: fuel,
+  };
 }
 
 function evaluatePolicyFixpoint(
@@ -2216,6 +2241,7 @@ function evaluatePolicyFixpoint(
   let current = label;
   let remainingFuel = config.fuel;
   let changed = false;
+  let synthesizedClassification: CfcConfidentialityLabel | undefined;
 
   while (true) {
     const next = evaluatePolicyOnce(
@@ -2231,11 +2257,16 @@ function evaluatePolicyFixpoint(
       return {
         nonConverged: false,
         changed,
+        synthesizedClassification,
         label: current,
         fuel: config.fuel,
       };
     }
     changed = true;
+    synthesizedClassification = joinConfidentialityLabels(
+      synthesizedClassification,
+      next.synthesizedClassification,
+    );
     remainingFuel = next.remainingFuel;
     if (remainingFuel <= 0) {
       return { nonConverged: true, fuel: config.fuel };
@@ -2262,7 +2293,13 @@ function evaluatePolicyDowngradeDecision(
 ): PolicyDowngradeDecision {
   const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
   if (!policyConfig) {
-    return { allowed: false, changed: false, nonConverged: false, fuel: 0 };
+    return {
+      allowed: false,
+      changed: false,
+      synthesizedClassification: undefined,
+      nonConverged: false,
+      fuel: 0,
+    };
   }
   const initialLabel = buildPolicyLabelFromConsumedReads(consumedReadLabels);
   const policyResult = evaluatePolicyFixpoint(
@@ -2277,14 +2314,15 @@ function evaluatePolicyDowngradeDecision(
     return {
       allowed: false,
       changed: false,
+      synthesizedClassification: undefined,
       nonConverged: true,
       fuel: policyResult.fuel,
     };
   }
-  const effectiveOutputClassification = policyResult.changed
+  const effectiveOutputClassification = policyResult.synthesizedClassification
     ? joinConfidentialityLabels(
       outputClassification,
-      policyResult.label.confidentiality,
+      policyResult.synthesizedClassification,
     )
     : outputClassification;
   return {
@@ -2293,6 +2331,7 @@ function evaluatePolicyDowngradeDecision(
       effectiveOutputClassification,
     ),
     changed: policyResult.changed,
+    synthesizedClassification: policyResult.synthesizedClassification,
     nonConverged: false,
     fuel: policyResult.fuel,
     label: policyResult.label,
@@ -2402,7 +2441,7 @@ function verifyOutputTransitionsForAttempt(
           dynamicLabelsByEntity,
           entity,
           write.path,
-          decision.label?.confidentiality,
+          decision.synthesizedClassification,
         );
       }
       policyIntegrity = joinIntegrityLabels(
