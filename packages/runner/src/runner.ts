@@ -1170,6 +1170,7 @@ export class Runner {
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
     let fn: (inputs: any) => any;
+    const patternId = this.runtime.patternManager.getPatternId(pattern);
 
     if (typeof module.implementation === "function") {
       fn = module.implementation as (inputs: any) => any;
@@ -1181,6 +1182,7 @@ export class Runner {
       if (!cached) {
         cached = this.runtime.harness.getVerifiedFunction(
           module.implementationRef,
+          patternId,
         ) as ((...args: any[]) => any) | undefined;
         if (cached) {
           this.functionCache.set(module, cached);
@@ -1197,7 +1199,9 @@ export class Runner {
         "Cannot execute a string-backed authored javascript module",
       );
     } else {
-      throw new Error("JavaScript module is missing an executable implementation");
+      throw new Error(
+        "JavaScript module is missing an executable implementation",
+      );
     }
 
     // Prefer .src (backup) over .name since name can be finicky

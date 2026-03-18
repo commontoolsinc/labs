@@ -4,7 +4,6 @@ import {
   type MappedPosition,
   SourceMapParser,
 } from "@commontools/js-compiler";
-import { moduleToJSON } from "../builder/json-utils.ts";
 import type { Exports } from "../harness/types.ts";
 import {
   extractDefinedModuleIds,
@@ -15,7 +14,7 @@ import {
   ensureSESLockdown,
 } from "./compartment-globals.ts";
 import { verifyAMDFactory } from "./module-verifier.ts";
-import { CT_IMPLEMENTATION_REF, CT_STABLE_REF } from "./types.ts";
+import { CT_IMPLEMENTATION_REF } from "./types.ts";
 
 interface BundleEvaluationResult {
   main?: Exports;
@@ -31,6 +30,7 @@ export class SESRuntime {
   private readonly compartments = new Map<string, SESCompartment>();
   private readonly verifiedFunctions = new Map<string, Map<string, Function>>();
   private readonly verifiedFunctionIndex = new Map<string, Function>();
+  private readonly patternFunctions = new Map<string, Map<string, Function>>();
 
   evaluateBundle(
     compileId: string,
@@ -72,14 +72,6 @@ export class SESRuntime {
         main: Exports;
         exportMap: Record<string, Exports>;
       };
-      typedResult.main = this.qualifyImplementationRefs(
-        evaluationId,
-        typedResult.main,
-      );
-      typedResult.exportMap = this.qualifyImplementationRefs(
-        evaluationId,
-        typedResult.exportMap,
-      );
       this.resetVerifiedFunctions(evaluationId);
       this.recordVerifiedFunctions(evaluationId, typedResult.main);
       this.recordVerifiedFunctions(evaluationId, typedResult.exportMap);
@@ -107,7 +99,14 @@ export class SESRuntime {
 
   getVerifiedFunction(
     implementationRef: string,
+    patternId?: string,
   ): Function | undefined {
+    if (patternId) {
+      const registry = this.patternFunctions.get(patternId);
+      if (registry?.has(implementationRef)) {
+        return registry.get(implementationRef);
+      }
+    }
     return this.verifiedFunctionIndex.get(implementationRef);
   }
 
@@ -119,7 +118,14 @@ export class SESRuntime {
     this.compartments.clear();
     this.verifiedFunctions.clear();
     this.verifiedFunctionIndex.clear();
+    this.patternFunctions.clear();
     this.sourceMaps.clear();
+  }
+
+  associatePattern(patternId: string, value: unknown): void {
+    const registry = new Map<string, Function>();
+    this.collectAssociatedFunctions(value, registry, new Set());
+    this.patternFunctions.set(patternId, registry);
   }
 
   private getCompartment(
@@ -241,7 +247,6 @@ export class SESRuntime {
       const metadata = value as Function & {
         implementationRef?: string;
         [CT_IMPLEMENTATION_REF]?: string;
-        [CT_STABLE_REF]?: string;
       };
       const implementationRef = metadata[CT_IMPLEMENTATION_REF] ??
         metadata.implementationRef;
@@ -253,18 +258,15 @@ export class SESRuntime {
         }
         registry.set(implementationRef, value);
         this.verifiedFunctionIndex.set(implementationRef, value);
-        // Also register the stable (unscoped) ref so that serialized
-        // modules can be rebound by their stable implementationRef.
-        const stableRef = metadata[CT_STABLE_REF];
-        if (stableRef && stableRef !== implementationRef) {
-          registry.set(stableRef, value);
-          this.verifiedFunctionIndex.set(stableRef, value);
-        }
       }
     }
 
-    for (const entry of Object.values(value as Record<string, unknown>)) {
-      this.recordVerifiedFunctions(evaluationId, entry, seen);
+    for (const key of Reflect.ownKeys(value as object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      this.recordVerifiedFunctions(evaluationId, descriptor.value, seen);
     }
   }
 
@@ -278,187 +280,65 @@ export class SESRuntime {
     this.verifiedFunctions.set(evaluationId, new Map());
   }
 
-  private qualifyImplementationRefs<T>(
-    evaluationId: string,
-    value: T,
-    seen = new Map<unknown, unknown>(),
-  ): T {
+  private collectAssociatedFunctions(
+    value: unknown,
+    registry: Map<string, Function>,
+    seen: Set<unknown>,
+  ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return value;
+      return;
     }
-    const existing = seen.get(value);
-    if (existing) {
-      return existing as T;
+    if (seen.has(value)) {
+      return;
     }
+    seen.add(value);
 
-    if (typeof value === "function" && this.hasImplementationRef(value)) {
-      return this.wrapQualifiedFunction(evaluationId, value, seen) as T;
+    const associated = this.extractAssociatedFunction(value);
+    if (associated) {
+      registry.set(associated.implementationRef, associated.implementation);
     }
-
-    seen.set(value, value);
-    this.qualifyOwnImplementationRef(evaluationId, value);
 
     for (const key of Reflect.ownKeys(value as object)) {
       const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
       if (!descriptor || !("value" in descriptor)) {
         continue;
       }
-      const qualified = this.qualifyImplementationRefs(
-        evaluationId,
-        descriptor.value,
-        seen,
-      );
-      if (qualified !== descriptor.value) {
-        Reflect.set(value as object, key, qualified);
-      }
+      this.collectAssociatedFunctions(descriptor.value, registry, seen);
     }
-    return value;
   }
 
-  private hasImplementationRef(value: unknown): value is Function & {
-    implementationRef?: string;
-    [CT_IMPLEMENTATION_REF]?: string;
-  } {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return false;
-    }
-    const carrier = value as {
-      implementationRef?: string;
-      [CT_IMPLEMENTATION_REF]?: string;
-    };
-    return typeof (carrier[CT_IMPLEMENTATION_REF] ??
-      carrier.implementationRef) ===
-      "string";
-  }
-
-  private qualifyOwnImplementationRef(
-    _evaluationId: string,
+  private extractAssociatedFunction(
     value: unknown,
-  ): void {
-    // For plain objects (module descriptors), keep implementationRef as the
-    // stable (unscoped) ref. This ensures serialized modules are session-
-    // independent and can be rebound in any runtime that has the source.
-    if (!value || typeof value !== "object") {
-      return;
+  ): { implementationRef: string; implementation: Function } | null {
+    if (typeof value === "function") {
+      const metadata = value as Function & {
+        implementationRef?: string;
+        [CT_IMPLEMENTATION_REF]?: string;
+      };
+      const implementationRef = metadata[CT_IMPLEMENTATION_REF] ??
+        metadata.implementationRef;
+      return implementationRef
+        ? { implementationRef, implementation: value }
+        : null;
     }
 
-    const carrier = value as { implementationRef?: string };
-    if (typeof carrier.implementationRef !== "string") {
-      return;
-    }
-    // No scoping: the ref stays stable for serialization.
-  }
-
-  private scopeImplementationRef(
-    evaluationId: string,
-    implementationRef: string,
-  ): string {
-    const prefix = `${evaluationId}::`;
-    return implementationRef.startsWith(prefix)
-      ? implementationRef
-      : `${prefix}${implementationRef}`;
-  }
-
-  private wrapQualifiedFunction(
-    evaluationId: string,
-    original: Function & {
+    const record = value as {
       implementationRef?: string;
-      [CT_IMPLEMENTATION_REF]?: string;
-    },
-    seen: Map<unknown, unknown>,
-  ): Function {
-    const stableRef = original[CT_IMPLEMENTATION_REF] ??
-      original.implementationRef!;
-    const scopedRef = this.scopeImplementationRef(evaluationId, stableRef);
-    const wrapped = function (this: unknown, ...args: unknown[]) {
-      return Reflect.apply(original, this, args);
+      implementation?: unknown;
     };
-    seen.set(original, wrapped);
-    Object.setPrototypeOf(wrapped, Object.getPrototypeOf(original));
-
-    for (const key of Reflect.ownKeys(original)) {
-      if (
-        key === "length" ||
-        key === "name" ||
-        key === "prototype" ||
-        key === "arguments" ||
-        key === "caller"
-      ) {
-        continue;
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(original, key);
-      if (!descriptor) {
-        continue;
-      }
-      if (key === CT_IMPLEMENTATION_REF) {
-        Object.defineProperty(wrapped, key, {
-          value: scopedRef,
-          enumerable: descriptor.enumerable ?? false,
-          configurable: true,
-          writable: false,
-        });
-        continue;
-      }
-      if (key === "implementationRef") {
-        // Use the stable (unscoped) ref for serialization
-        Object.defineProperty(wrapped, key, {
-          value: stableRef,
-          enumerable: descriptor.enumerable ?? true,
-          configurable: true,
-          writable: false,
-        });
-        continue;
-      }
-      if (key === "toJSON") {
-        Object.defineProperty(wrapped, key, {
-          value: () => moduleToJSON(wrapped as never),
-          enumerable: descriptor.enumerable ?? true,
-          configurable: true,
-          writable: false,
-        });
-        continue;
-      }
-      if ("value" in descriptor) {
-        Object.defineProperty(wrapped, key, {
-          ...descriptor,
-          value: this.qualifyImplementationRefs(
-            evaluationId,
-            descriptor.value,
-            seen,
-          ),
-        });
-        continue;
-      }
-      Object.defineProperty(wrapped, key, descriptor);
+    if (typeof record.implementationRef !== "string") {
+      return null;
+    }
+    if (typeof record.implementation === "function") {
+      return {
+        implementationRef: record.implementationRef,
+        implementation: record.implementation,
+      };
     }
 
-    if (!Reflect.has(wrapped, CT_IMPLEMENTATION_REF)) {
-      Object.defineProperty(wrapped, CT_IMPLEMENTATION_REF, {
-        value: scopedRef,
-        enumerable: false,
-        configurable: true,
-        writable: false,
-      });
-    }
-    if (!Reflect.has(wrapped, "implementationRef")) {
-      Object.defineProperty(wrapped, "implementationRef", {
-        value: stableRef,
-        enumerable: true,
-        configurable: true,
-        writable: false,
-      });
-    }
-    // Always store the stable ref for serialization lookup
-    Object.defineProperty(wrapped, CT_STABLE_REF, {
-      value: stableRef,
-      enumerable: false,
-      configurable: true,
-      writable: false,
-    });
-
-    if (Object.isFrozen(original)) {
-      Object.freeze(wrapped);
-    }
-    return wrapped;
+    const rebound = this.verifiedFunctionIndex.get(record.implementationRef);
+    return rebound
+      ? { implementationRef: record.implementationRef, implementation: rebound }
+      : null;
   }
 }

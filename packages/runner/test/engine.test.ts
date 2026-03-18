@@ -6,7 +6,6 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { moduleToJSON } from "../src/builder/json-utils.ts";
-import { CT_IMPLEMENTATION_REF } from "../src/sandbox/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -271,6 +270,10 @@ describe("Engine.evaluate()", () => {
       compiled.jsScript,
       program.files,
     );
+    const patternId = runtime.patternManager.registerPattern(
+      main!.default as never,
+      program,
+    );
     const pattern = main!.default as { nodes: Array<{ module: unknown }> };
     const serialized = JSON.parse(
       JSON.stringify(
@@ -283,55 +286,91 @@ describe("Engine.evaluate()", () => {
       typeof moduleToJSON
     >[0];
     expect(typeof module.implementationRef).toBe("string");
-    expect(engine.getVerifiedFunction(module.implementationRef!)).toBeDefined();
+    expect(engine.getVerifiedFunction(module.implementationRef!, patternId))
+      .toBeDefined();
   });
 
-  it("keeps verified implementation refs scoped per loaded pattern even for identical source", async () => {
-    const program: RuntimeProgram = {
+  it("resolves stable implementation refs through the pattern association", async () => {
+    const programA: RuntimeProgram = {
       main: "/main.tsx",
       files: [
         {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
-            "export function helper(value: number) {",
-            "  return value * 2;",
-            "}",
-            "export default helper;",
+            "import { pattern, lift } from 'commontools';",
+            "const BASE = 1;",
+            "const derived = lift((value: number) => value + BASE);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: derived(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+    const programB: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const BASE = 10;",
+            "const derived = lift((value: number) => value + BASE);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: derived(value) }));",
           ].join("\n"),
         },
       ],
     };
 
-    const firstCompiled = await engine.compile(program);
+    const firstCompiled = await engine.compile(programA);
     const firstEvaluation = await engine.evaluate(
       firstCompiled.id,
       firstCompiled.jsScript,
-      program.files,
+      programA.files,
     );
-    const firstExport = firstEvaluation.main!.helper as {
-      [CT_IMPLEMENTATION_REF]?: string;
-    };
-    const firstRef = firstExport[CT_IMPLEMENTATION_REF]!;
-    const firstFn = engine.getVerifiedFunction(firstRef);
+    const firstPatternId = runtime.patternManager.registerPattern(
+      firstEvaluation.main!.default as never,
+      programA,
+    );
+    const firstRef = JSON.parse(
+      JSON.stringify(
+        firstEvaluation.main!.default,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    ).nodes[0].module.implementationRef as string;
 
-    const secondCompiled = await engine.compile(program);
+    const secondCompiled = await engine.compile(programB);
     const secondEvaluation = await engine.evaluate(
       secondCompiled.id,
       secondCompiled.jsScript,
-      program.files,
+      programB.files,
     );
-    const secondExport = secondEvaluation.main!.helper as {
-      [CT_IMPLEMENTATION_REF]?: string;
-    };
-    const secondRef = secondExport[CT_IMPLEMENTATION_REF]!;
-    const secondFn = engine.getVerifiedFunction(secondRef);
+    const secondPatternId = runtime.patternManager.registerPattern(
+      secondEvaluation.main!.default as never,
+      programB,
+    );
+    const secondRef = JSON.parse(
+      JSON.stringify(
+        secondEvaluation.main!.default,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    ).nodes[0].module.implementationRef as string;
 
-    // Internal refs are scoped per-load for isolation
+    const firstFn = engine.getVerifiedFunction(
+      firstRef,
+      firstPatternId,
+    ) as ((value: number) => number) | undefined;
+    const secondFn = engine.getVerifiedFunction(
+      secondRef,
+      secondPatternId,
+    ) as ((value: number) => number) | undefined;
+
     expect(firstRef).not.toBe(secondRef);
     expect(firstFn).toBeDefined();
     expect(secondFn).toBeDefined();
     expect(firstFn).not.toBe(secondFn);
+    expect(firstFn!(1)).toBe(2);
+    expect(secondFn!(1)).toBe(11);
   });
 
   it("serialized implementationRef is stable across separate load sessions of the same source", async () => {
@@ -391,14 +430,25 @@ describe("Engine.evaluate()", () => {
       (secondSerialized.nodes[0].module as { implementationRef?: string })
         .implementationRef;
 
+    const firstPatternId = runtime.patternManager.registerPattern(
+      first.main!.default as never,
+      program,
+    );
+    const secondPatternId = runtime.patternManager.registerPattern(
+      second.main!.default as never,
+      program,
+    );
+
     // Serialized refs must be stable (same source -> same ref, no session scoping)
     expect(firstModuleRef).toBeDefined();
     expect(secondModuleRef).toBeDefined();
     expect(firstModuleRef).toBe(secondModuleRef);
 
     // Both refs must be resolvable in the verified function index
-    expect(engine.getVerifiedFunction(firstModuleRef!)).toBeDefined();
-    expect(engine.getVerifiedFunction(secondModuleRef!)).toBeDefined();
+    expect(engine.getVerifiedFunction(firstModuleRef!, firstPatternId))
+      .toBeDefined();
+    expect(engine.getVerifiedFunction(secondModuleRef!, secondPatternId))
+      .toBeDefined();
   });
 });
 

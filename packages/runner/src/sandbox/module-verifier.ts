@@ -416,10 +416,15 @@ function isTrustedFunctionExpression(
     return false;
   }
   if (allowedCaptures) {
-    const params = extractFunctionParamNames(
-      trimmed.slice(paramsStart + 1, paramsEnd),
-    );
+    const paramsSource = trimmed.slice(paramsStart + 1, paramsEnd);
+    const params = extractSimpleParamNames(paramsSource);
+    if (!params) {
+      return false;
+    }
     const freeIds = extractFreeIdentifiers(body, params);
+    if (!freeIds) {
+      return false;
+    }
     for (const id of freeIds) {
       if (!allowedCaptures.has(id) && !WELL_KNOWN_IDENTIFIERS.has(id)) {
         return false;
@@ -668,71 +673,149 @@ const WELL_KNOWN_IDENTIFIERS = new Set([
 
 const IDENTIFIER_PATTERN = /[$A-Z_a-z][\w$]*/g;
 
-function extractFunctionParamNames(paramsSource: string): Set<string> {
-  const names = new Set<string>();
-  // Simple extraction: find all identifiers in the param list
-  // This handles `a, b, c` as well as `{a, b}` destructuring
-  for (const match of paramsSource.matchAll(IDENTIFIER_PATTERN)) {
-    names.add(match[0]);
+function extractSimpleParamNames(source: string): Set<string> | null {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return new Set();
   }
-  return names;
+  if (/[{\[=]|\.\.\./.test(trimmed)) {
+    return null;
+  }
+
+  const params = new Set<string>();
+  for (const entry of splitTopLevelCommaList(trimmed)) {
+    const name = entry.trim();
+    if (!/^[$A-Z_a-z][\w$]*$/.test(name)) {
+      return null;
+    }
+    params.add(name);
+  }
+  return params;
 }
 
 function extractFreeIdentifiers(
   body: string,
   params: ReadonlySet<string>,
-): Set<string> {
-  const freeIds = new Set<string>();
-  // Strip string literals, comments, and regex to avoid false positives
-  const cleaned = body
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+): Set<string> | null {
+  const cleaned = stripNonCodeSegments(body);
+  if (/\bfunction\b|=>/.test(cleaned)) {
+    return null;
+  }
+  if (/\b(?:const|let|var)\s*[\[{]/.test(cleaned)) {
+    return null;
+  }
 
+  const locals = new Set(params);
+  const declared = extractDeclaredIdentifiers(cleaned);
+  if (!declared) {
+    return null;
+  }
+  for (const name of declared) {
+    locals.add(name);
+  }
+
+  const freeIds = new Set<string>();
   for (const match of cleaned.matchAll(IDENTIFIER_PATTERN)) {
     const id = match[0];
     const index = match.index!;
-    // Skip if preceded by a dot (property access, not free identifier)
+    if (JS_KEYWORDS.has(id)) {
+      continue;
+    }
     if (index > 0 && cleaned[index - 1] === ".") {
       continue;
     }
-    // Skip JS keywords
-    if (isJSKeyword(id)) {
+    const next = nextNonWhitespaceChar(cleaned, index + id.length);
+    if (next === ":") {
       continue;
     }
-    if (!params.has(id)) {
+    if (!locals.has(id)) {
       freeIds.add(id);
     }
   }
   return freeIds;
 }
 
-function isJSKeyword(id: string): boolean {
-  return JS_KEYWORDS.has(id);
+function extractDeclaredIdentifiers(source: string): Set<string> | null {
+  const locals = new Set<string>();
+
+  const variableDeclarations = source.matchAll(
+    /\b(?:const|let|var)\s+([^;]+)/g,
+  );
+  for (const declaration of variableDeclarations) {
+    const declarators = splitTopLevelCommaList(declaration[1]!.trim());
+    for (const declarator of declarators) {
+      const match = declarator.trim().match(/^([$A-Z_a-z][\w$]*)\b/);
+      if (!match) {
+        return null;
+      }
+      locals.add(match[1]!);
+    }
+  }
+
+  for (
+    const match of source.matchAll(
+      /\b(?:class|function)\s+([$A-Z_a-z][\w$]*)\b/g,
+    )
+  ) {
+    locals.add(match[1]!);
+  }
+
+  for (
+    const match of source.matchAll(/\bcatch\s*\(\s*([$A-Z_a-z][\w$]*)\s*\)/g)
+  ) {
+    locals.add(match[1]!);
+  }
+
+  return locals;
+}
+
+function stripNonCodeSegments(source: string): string {
+  return source
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+    .replace(/\/(?:[^/\\\n]|\\.)+\/[dgimsuy]*/g, "/re/");
+}
+
+function nextNonWhitespaceChar(
+  source: string,
+  start: number,
+): string | undefined {
+  for (let index = start; index < source.length; index++) {
+    const current = source[index]!;
+    if (!/\s/.test(current)) {
+      return current;
+    }
+  }
+  return undefined;
 }
 
 const JS_KEYWORDS = new Set([
   "break",
   "case",
   "catch",
+  "const",
   "continue",
   "debugger",
   "default",
   "delete",
   "do",
   "else",
+  "export",
   "finally",
   "for",
   "function",
   "if",
+  "import",
   "in",
   "instanceof",
+  "let",
   "new",
+  "of",
   "return",
   "switch",
-  "this",
   "throw",
   "try",
   "typeof",
@@ -740,15 +823,4 @@ const JS_KEYWORDS = new Set([
   "void",
   "while",
   "with",
-  "const",
-  "let",
-  "class",
-  "extends",
-  "super",
-  "yield",
-  "import",
-  "export",
-  "of",
-  "async",
-  "await",
 ]);

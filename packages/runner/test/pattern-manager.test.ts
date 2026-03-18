@@ -170,7 +170,7 @@ describe("PatternManager program persistence", () => {
       const reloadedEngine = reloadedRuntime
         .harness as import("../src/harness/engine.ts").Engine;
       for (const ref of nodeModules) {
-        const fn = reloadedEngine.getVerifiedFunction(ref);
+        const fn = reloadedEngine.getVerifiedFunction(ref, patternId);
         expect(fn).toBeDefined();
       }
 

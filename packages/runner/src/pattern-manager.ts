@@ -198,6 +198,13 @@ export class PatternManager {
     return meta;
   }
 
+  getPatternId(input: Pattern | Module): string | undefined {
+    if (!input || typeof input !== "object") {
+      return undefined;
+    }
+    return this.patternToIdMap.get(this.findOriginalPattern(input as Pattern));
+  }
+
   registerPattern(
     pattern: Pattern | Module,
     src?: string | RuntimeProgram,
@@ -233,6 +240,8 @@ export class PatternManager {
       // Pattern exists - touch to mark as recently used
       this.touchPattern(generatedId);
     }
+
+    this.associateVerifiedFunctions(generatedId, pattern);
 
     return generatedId;
   }
@@ -411,6 +420,7 @@ export class PatternManager {
           this.patternIdMap.set(patternId, pattern);
           this.evictIfNeeded();
         }
+        this.associateVerifiedFunctions(patternId, pattern);
         return pattern;
       })
       .finally(() => {
@@ -450,6 +460,7 @@ export class PatternManager {
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
+    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     return pattern;
   }
@@ -498,5 +509,12 @@ export class PatternManager {
       const pending = this.pendingMetaById.get(patternId) ?? {};
       this.pendingMetaById.set(patternId, { ...pending, ...fields });
     }
+  }
+
+  private associateVerifiedFunctions(
+    patternId: string,
+    value: Pattern | Module,
+  ): void {
+    this.runtime.harness.associatePattern(patternId, value);
   }
 }

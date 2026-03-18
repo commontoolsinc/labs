@@ -9,7 +9,6 @@ import {
   createSESItemId,
   toDirectFunctionExpression,
 } from "./ses-wrapper-helpers.ts";
-import {} from "../../../runner/src/sandbox/abi.ts";
 
 const HOISTABLE_BUILDERS = new Set(["derive", "lift", "handler", "action"]);
 const TRUSTED_RUNTIME_IMPORTS = new Set([
@@ -589,6 +588,7 @@ const DISALLOWED_NEW_CONSTRUCTORS = new Set([
   "WeakMap",
   "RegExp",
   "Date",
+  "Promise",
   "Error",
   "TypeError",
   "RangeError",
@@ -606,28 +606,87 @@ const DISALLOWED_STATIC_METHOD_TARGETS = new Set([
 export function isDisallowedModuleScopeDataInitializer(
   initializer: ts.Expression,
 ): boolean {
-  if (ts.isRegularExpressionLiteral(initializer)) {
-    return true;
-  }
+  let disallowed = false;
 
-  if (
-    ts.isNewExpression(initializer) && ts.isIdentifier(initializer.expression)
-  ) {
-    return DISALLOWED_NEW_CONSTRUCTORS.has(initializer.expression.text);
-  }
+  const visit = (node: ts.Node): void => {
+    if (disallowed) {
+      return;
+    }
 
-  // Reject static method calls like Promise.resolve(), Symbol.for()
-  if (
-    ts.isCallExpression(initializer) &&
-    ts.isPropertyAccessExpression(initializer.expression) &&
-    ts.isIdentifier(initializer.expression.expression)
-  ) {
-    return DISALLOWED_STATIC_METHOD_TARGETS.has(
-      initializer.expression.expression.text,
-    );
-  }
+    if (ts.isRegularExpressionLiteral(node)) {
+      disallowed = true;
+      return;
+    }
 
-  return false;
+    if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      DISALLOWED_NEW_CONSTRUCTORS.has(node.expression.text)
+    ) {
+      disallowed = true;
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      DISALLOWED_STATIC_METHOD_TARGETS.has(node.expression.expression.text)
+    ) {
+      disallowed = true;
+      return;
+    }
+
+    if (ts.isArrayLiteralExpression(node)) {
+      if (node.elements.some((element) => ts.isOmittedExpression(element))) {
+        disallowed = true;
+        return;
+      }
+    }
+
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (
+          ts.isGetAccessorDeclaration(property) ||
+          ts.isSetAccessorDeclaration(property) ||
+          ts.isMethodDeclaration(property) ||
+          ts.isSpreadAssignment(property)
+        ) {
+          disallowed = true;
+          return;
+        }
+        if (
+          ts.isPropertyAssignment(property) &&
+          ts.isComputedPropertyName(property.name)
+        ) {
+          disallowed = true;
+          return;
+        }
+        if (
+          ts.isShorthandPropertyAssignment(property) &&
+          property.objectAssignmentInitializer
+        ) {
+          disallowed = true;
+          return;
+        }
+      }
+    }
+
+    if (
+      node !== initializer &&
+      (ts.isFunctionExpression(node) ||
+        ts.isArrowFunction(node) ||
+        ts.isClassExpression(node))
+    ) {
+      disallowed = true;
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(initializer);
+  return disallowed;
 }
 
 function createAssignment(

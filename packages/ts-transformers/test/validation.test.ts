@@ -320,6 +320,7 @@ Deno.test("SES module-scope validation", async (t) => {
         `/// <cts-enable />\nconst when = new Date();\nexport default when;`,
         `/// <cts-enable />\nconst err = new Error("boom");\nexport default err;`,
         `/// <cts-enable />\nconst p = Promise.resolve(1);\nexport default p;`,
+        `/// <cts-enable />\nconst value = { get now() { return 1; } };\nexport default value;`,
       ];
       for (const source of sources) {
         const { diagnostics } = await validateSource(source, {

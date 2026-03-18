@@ -204,7 +204,7 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
         dependencies: ["exports"],
         registeredModuleIds: new Set(["main"]),
         factorySource:
-          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",["CONFIG"],function(){return CONFIG + 1;});exports.default=fn;}`,
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",["CONFIG"],function(value){const local=value+1;return local + CONFIG;});exports.default=fn;}`,
       });
     },
   );
@@ -397,7 +397,7 @@ Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing help
   }
 });
 
-Deno.test("engine evaluation rejects non-inert top-level data initializers before module-load execution", async () => {
+Deno.test("engine rejects non-inert top-level data initializers before module-load execution", async () => {
   const signer = await Identity.fromPassphrase(
     "bundle-preflight malicious data",
   );
@@ -422,11 +422,10 @@ Deno.test("engine evaluation rejects non-inert top-level data initializers befor
       ],
     };
 
-    const { id, jsScript } = await runtime.harness.compile(program);
     await assertRejects(
-      () => runtime.harness.evaluate(id, jsScript, program.files),
+      () => runtime.harness.compile(program),
       Error,
-      "non-canonical top-level statement",
+      "Top-level non-builder values must stay within the SES v1 inert plain-data subset",
     );
   } finally {
     await runtime.dispose();

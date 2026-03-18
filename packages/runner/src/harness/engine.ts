@@ -239,11 +239,24 @@ export class Engine extends EventTarget implements Harness {
     return this.internals.runtime.getCompartmentCount();
   }
 
-  getVerifiedFunction(implementationRef: string): Function | undefined {
+  getVerifiedFunction(
+    implementationRef: string,
+    patternId?: string,
+  ): Function | undefined {
     if (!this.internals) {
       return undefined;
     }
-    return this.internals.runtime.getVerifiedFunction(implementationRef);
+    return this.internals.runtime.getVerifiedFunction(
+      implementationRef,
+      patternId,
+    );
+  }
+
+  associatePattern(patternId: string, value: unknown): void {
+    if (!this.internals) {
+      return;
+    }
+    this.internals.runtime.associatePattern(patternId, value);
   }
 
   // Returns a map of runtime module types.
