@@ -20,10 +20,11 @@ export function createCompartmentGlobals(
   helpers: Record<string, unknown>,
 ): Record<string, unknown> {
   ensureSESLockdown();
+  const hardenedHelpers = harden(helpers);
   return {
     console,
     harden,
-    __ctHelpers: helpers,
+    __ctHelpers: hardenedHelpers,
     Proxy: undefined,
     fetch: undefined,
     Temporal: undefined,

@@ -507,10 +507,16 @@ not a general JavaScript parser. It only needs to:
 - for `__ct_data(...)` items, confirm their declared captures resolve only to
   previously approved module-safe-data bindings or approved `__ct_pure_fn(...)`
   helpers
+- enforce the small runtime-boundary checks that remain meaningful after
+  lowering, such as trusted AMD dependency policy and rejection of AMD async
+  `require(...)`
 - reject anything outside that mini-language
 
 The trusted verifier does **not** need to understand arbitrary JavaScript AST
-structure if the emitted grammar is kept small and canonical.
+structure if the emitted grammar is kept small and canonical. In particular,
+authored-source language restrictions such as dynamic-import support, external
+module policy, and builder-placement rules are primarily the responsibility of
+the authored-source transformer/validator that runs before code generation.
 
 ### 4.3 Hoisting Inline Transformations
 
@@ -809,6 +815,13 @@ Ambient Compartment globals for authored modules must stay intentionally narrow:
 - `harden`
 - verifier/runtime helper bindings needed to realize canonical wrappers
 
+This narrow surface still includes SES's compartment-local evaluator machinery
+such as `globalThis`, `eval`, and `Function`. Those names are not verifier
+rejections in v1; the security property is that they remain confined to the
+authored Compartment rather than reaching host globals. The injected
+`__ctHelpers` namespace reachable through that global surface MUST itself be
+hardened before exposure.
+
 Ambient globals available to authored module code in v1 MUST NOT include:
 
 - direct `fetch`
@@ -872,10 +885,14 @@ Dynamic import support is not part of this implementation baseline.
 
 Normative v1 behavior:
 
-- any authored `import()` expression is rejected by the verifier
+- any authored `import()` expression is rejected during authored-source
+  validation / transformation before compilation succeeds
 - no import-hook implementation is assumed or required for this baseline
 - the escape-hatch and threat-model analysis must treat dynamic imports as
   unavailable, not controlled
+- if a compiled bundle nevertheless contains `import()`, v1 does not require a
+  dedicated verifier-side import parser; the current SES script-evaluation path
+  rejects such expressions at runtime and the feature remains unavailable
 
 Future v2 requirements, if dynamic imports are reintroduced:
 
@@ -1721,6 +1738,8 @@ The verifier must check:
 - top-level functions are direct functions only
 - all other surviving top-level values are module-safe data and hardened
 - no unclassified top-level side effects survive
+- trusted AMD dependencies and wrapper/capture metadata remain within the
+  canonical runtime policy
 
 The verifier should be implemented as a minimal recognizer for the canonical
 emitted wrapper grammar, not as a full JavaScript parser. The TCB scanner only
@@ -2069,12 +2088,12 @@ Potential escape routes and their status:
 
 | Vector | Status | Notes |
 |--------|--------|-------|
-| `eval()` | Blocked | SES removes `eval` from Compartment globals |
-| `Function()` | Blocked | SES removes `Function` constructor |
-| `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
+| `eval()` | Contained | SES keeps evaluation inside the authored Compartment global; direct eval may still reject, but surviving evaluation does not escape the Compartment |
+| `Function()` | Contained | New functions are created against the same authored Compartment globals, not host globals |
+| `import()` | Rejected in v1 | Authored-source validation rejects it; the current SES script-eval path also throws if one survives |
 | Prototype access | Blocked | Frozen prototypes |
 | ambient `fetch` | Blocked in v1 | Not injected into authored module Compartment globals |
-| `globalThis` | Controlled | Custom minimal Compartment globals |
+| `globalThis` | Controlled | Exposes only the authored Compartment global, including hardened `__ctHelpers`, not host globals |
 | `__proto__` | Blocked | Frozen Object.prototype |
 | `constructor` | Blocked | Frozen constructors |
 

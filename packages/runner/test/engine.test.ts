@@ -596,7 +596,14 @@ describe("Engine compile + evaluate", () => {
             "  const proxyType = typeof Proxy;",
             "  const fetchType = typeof fetch;",
             "  const scType = typeof structuredClone;",
-            "  return `${proxyType}:${fetchType}:${scType}`;",
+            "  const evalType = typeof eval;",
+            "  const functionType = typeof Function;",
+            "  const helperKey = '__ct' + 'Helpers';",
+            "  const helpers = Reflect.get(globalThis, helperKey) as { h: unknown };",
+            "  const helperType = typeof helpers.h;",
+            "  const helpersFrozen = Object.isFrozen(helpers);",
+            "  const hFrozen = Object.isFrozen(helpers.h);",
+            "  return `${proxyType}:${fetchType}:${scType}:${evalType}:${functionType}:${helperType}:${helpersFrozen}:${hFrozen}`;",
             "}",
             "export default readGlobalSurface;",
           ].join("\n"),
@@ -610,7 +617,7 @@ describe("Engine compile + evaluate", () => {
     expect(main).toBeDefined();
     expect(typeof main!["default"]).toBe("function");
     expect((main!["default"] as () => string)()).toBe(
-      "undefined:undefined:undefined",
+      "undefined:undefined:undefined:function:function:function:true:true",
     );
   });
 

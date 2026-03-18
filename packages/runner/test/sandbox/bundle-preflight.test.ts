@@ -121,17 +121,15 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
   );
 
   await t.step(
-    "rejects non-canonical helper callbacks even when wrapped",
+    "allows trusted helper callbacks to reference contained compartment globals",
     () => {
-      assertThrows(() =>
-        verifyAMDFactory({
-          moduleId: "main",
-          dependencies: ["exports"],
-          registeredModuleIds: new Set(["main"]),
-          factorySource:
-            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){globalThis.__pwned = true;return 1;});exports.default=fn;}`,
-        })
-      );
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){eval("1");Function("return 2")();return [typeof globalThis,typeof eval,typeof Function,typeof window,typeof document].join(":");});exports.default=fn;}`,
+      });
     },
   );
 

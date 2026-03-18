@@ -30,8 +30,6 @@ const HELPER_CALL_PATTERN =
   /^const\s+([A-Za-z_$][\w$]*)\s*=\s*((?:__ctHelpers\.)?__(?:ct_builder|ct_fn|ct_pure_fn|ct_data))\(/;
 const SENTINEL_PATTERN = /^\/\*__CT_TOPLEVEL__:(.+?)\*\/\s*([\s\S]+)$/;
 const STRING_LITERAL_PATTERN = /^"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'$/;
-const FORBIDDEN_AUTHORITY_PATTERN =
-  /(?:^|[^\w$.])globalThis\b|(?:^|[^\w$.])(?:window|document)\s*\.|(?:^|[^\w$.])eval\s*\(|(?:^|[^\w$.])Function\s*\(/;
 const FORBIDDEN_CALLBACK_PATTERN = /(?:^|[^\w$.])require(?:$|[^\w$])/;
 
 export function verifyAMDFactory(options: VerifyAMDFactoryOptions): void {
@@ -347,10 +345,7 @@ function isTrustedFunctionExpression(
   const bodyStart = trimmed.indexOf("{", paramsEnd + 1);
   const bodyEnd = trimmed.lastIndexOf("}");
   const body = trimmed.slice(bodyStart + 1, bodyEnd);
-  if (
-    FORBIDDEN_AUTHORITY_PATTERN.test(body) ||
-    FORBIDDEN_CALLBACK_PATTERN.test(body)
-  ) {
+  if (FORBIDDEN_CALLBACK_PATTERN.test(body)) {
     return false;
   }
   if (allowedCaptures) {
@@ -591,6 +586,11 @@ const WELL_KNOWN_IDENTIFIERS = new Set([
   "TypeError",
   "RangeError",
   "console",
+  "globalThis",
+  "eval",
+  "Function",
+  "window",
+  "document",
   "undefined",
   "null",
   "true",

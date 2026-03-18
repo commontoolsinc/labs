@@ -11,6 +11,7 @@ import {
   createFunctionWrapper,
   createPureFunctionWrapper,
 } from "../../src/sandbox/runtime-helpers.ts";
+import { createCompartmentGlobals } from "../../src/sandbox/compartment-globals.ts";
 import { SESRuntime } from "../../src/sandbox/ses-runtime.ts";
 import type { VerifiedCallable } from "../../src/sandbox/types.ts";
 
@@ -92,6 +93,57 @@ Deno.test("runtime wrappers reject obviously invalid input", () => {
       {} as unknown as VerifiedCallable,
     )
   );
+});
+
+Deno.test("compartment globals harden __ctHelpers before exposing them", () => {
+  const CompartmentCtor = (globalThis as typeof globalThis & {
+    Compartment: new (
+      globals: Record<string, unknown>,
+    ) => { evaluate<T>(source: string): T };
+  }).Compartment;
+  const compartment = new CompartmentCtor(
+    createCompartmentGlobals(console, {
+      nested: { count: 1 },
+      h() {
+        return 1;
+      },
+    }),
+  );
+
+  const result = compartment.evaluate<{
+    rootFrozen: boolean;
+    nestedFrozen: boolean;
+    hFrozen: boolean;
+    extra: unknown;
+    count: number;
+  }>(`(() => {
+    const helpers = globalThis.__ctHelpers;
+    try {
+      helpers.extra = 1;
+    } catch {
+      // Mutation should fail once helpers are hardened.
+    }
+    try {
+      helpers.nested.count = 2;
+    } catch {
+      // Nested mutations should fail once helpers are hardened.
+    }
+    return {
+      rootFrozen: Object.isFrozen(helpers),
+      nestedFrozen: Object.isFrozen(helpers.nested),
+      hFrozen: Object.isFrozen(helpers.h),
+      extra: helpers.extra,
+      count: helpers.nested.count,
+    };
+  })()`);
+
+  assertEquals(result, {
+    rootFrozen: true,
+    nestedFrozen: true,
+    hFrozen: true,
+    extra: undefined,
+    count: 1,
+  });
 });
 
 Deno.test("SES runtime keeps shared implementation refs indexed while other evaluations still own them", () => {

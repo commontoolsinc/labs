@@ -159,7 +159,7 @@ export class SESRuntime {
     const compartment = new Compartment(
       createCompartmentGlobals(
         console as Record<string, unknown>,
-        harden(helpers),
+        helpers,
       ),
     ) as SESCompartment;
     this.compartments.set(evaluationId, compartment);
