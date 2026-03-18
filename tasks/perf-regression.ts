@@ -518,6 +518,12 @@ async function main() {
     console.log("  Benchmarks workflow not found or not yet created.");
   }
 
+  // Sort all timelines chronologically before applying overrides, since
+  // concurrent artifact fetches may have appended samples out of order.
+  for (const timeline of timelines.values()) {
+    timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   // Apply baseline overrides (truncate timelines at override points)
   if (overridesBySha.size > 0) {
     console.log(

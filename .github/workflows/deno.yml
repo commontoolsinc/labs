@@ -273,6 +273,7 @@ jobs:
     needs:
       - build
       - package-integration-test
+      - cli-integration-test
       - pattern-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
