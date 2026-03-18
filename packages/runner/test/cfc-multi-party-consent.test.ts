@@ -148,11 +148,16 @@ describe("CFC multi-party consent", () => {
   });
 
   it("rejects disjoint time ranges", () => {
-    const alice = createConsent({ start: 100, end: 120 });
+    const alice = createConsent({
+      start: 100,
+      end: 120,
+      sharedWith: ["did:key:alice", "did:key:bob"],
+    });
     const bob = createConsent({
       participant: "did:key:bob",
       start: 130,
       end: 150,
+      sharedWith: ["did:key:alice", "did:key:bob"],
     });
 
     expect(

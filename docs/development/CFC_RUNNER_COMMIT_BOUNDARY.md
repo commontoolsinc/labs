@@ -209,6 +209,16 @@ prepare context:
    principal.
 3. The same binding can be substituted into synthesized output atoms.
 
+The calendar-consent foundation is now present too:
+
+1. Runner-internal `MultiPartyConsentIntent` helpers derive deterministic ids
+   from participant, scope, constraints, evidence, and expiry.
+2. Consent validation intersects time ranges and hours conservatively, takes
+   the minimum `maxResults`, preserves `onlyFuture` when any participant
+   requires it, and derives a deterministic `ConsentedBy` atom.
+3. Runtime-placement and acting-user release rules are still a later layer on
+   top of this helper foundation.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

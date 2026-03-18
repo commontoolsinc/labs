@@ -889,6 +889,9 @@ Primary docs:
 - [x] Step J.17: seed reserved policy variables from prepare context, starting
       with `$actingUser`, so policy rewrites can bind the acting principal into
       preconditions and synthesized output atoms.
+- [x] Step J.18: add deterministic `MultiPartyConsentIntent` helpers and
+      conservative consent validation so the calendar worked example has a
+      runner-local foundation before runtime-attestation work.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
