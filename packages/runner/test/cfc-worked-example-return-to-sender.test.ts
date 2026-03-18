@@ -8,8 +8,14 @@ import { setPatternEnvironment } from "../src/env.ts";
 import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
 import { createCfcIntentOnce } from "../src/cfc/intent-refinement.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { Labels } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example return-to-sender test",
@@ -237,13 +243,25 @@ describe("CFC worked example: return-to-sender", () => {
     expect(committed.error).toBeUndefined();
     tx = runtime.edit();
 
-    return await pullFinalResult(result);
+    return {
+      result,
+      raw: await pullFinalResult(result),
+    };
+  }
+
+  async function readLabels(
+    link: NormalizedFullLink,
+  ): Promise<Record<string, Labels>> {
+    const readTx = runtime.edit();
+    const raw = readTx.readOrThrow(cfcLabelsAddress(link));
+    await readTx.abort();
+    return normalizePersistedLabels(raw);
   }
 
   it("blocks return-to-sender sends when no sink rule releases the sender-bound clause", async () => {
     verifiedBindings.add(`${hotelPrincipal}@@${hotelAudience}`);
 
-    const raw = await runMembershipSend(
+    const { raw } = await runMembershipSend(
       createMembershipSendSchema({ includeReturnRule: false }),
       "return-to-sender-no-rule",
     );
@@ -252,5 +270,31 @@ describe("CFC worked example: return-to-sender", () => {
     expect(raw?.result).toBeUndefined();
     expect(raw?.error).toBe("fetch_request_not_authorized");
     expect(fetchCalls.length).toBe(0);
+  });
+
+  it("allows return-to-sender sends when fresh audience verification satisfies the release rule", async () => {
+    verifiedBindings.add(`${hotelPrincipal}@@${hotelAudience}`);
+
+    const { raw, result } = await runMembershipSend(
+      createMembershipSendSchema({ includeReturnRule: true }),
+      "return-to-sender-allowed",
+    );
+
+    expect(raw?.pending).toBe(false);
+    expect(raw?.error).toBeUndefined();
+    expect(raw?.result).toEqual({
+      ok: true,
+      accepted: true,
+    });
+    expect(fetchCalls.length).toBe(1);
+
+    const resultLabels = await readLabels(result.key("result").resolveAsCell()
+      .getAsNormalizedFullLink());
+    expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(resultLabels["/"]?.integrity).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining(audienceRepresentsHotelAtom),
+      ]),
+    );
   });
 });

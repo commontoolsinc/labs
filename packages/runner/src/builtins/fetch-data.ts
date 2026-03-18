@@ -18,9 +18,11 @@ import {
 } from "../cfc/fetch-auth-structure.ts";
 import { commitCfcFetchIntentWithRetries } from "../cfc/fetch-intent-commit.ts";
 import {
+  authorizeFetchSinkRequest,
   deriveFetchSinkResultLabels,
   writeFetchResultLabels,
 } from "../cfc/fetch-sink-labels.ts";
+import type { CfcAtom } from "../cfc/label-algebra.ts";
 import {
   type FetchDataInputs,
   type NormalizedFetchDataInputs,
@@ -310,6 +312,7 @@ async function startFetch(
   try {
     const intent = cfc?.intent;
     if (intent) {
+      let committedRequestIntegrity: readonly CfcAtom[] | undefined;
       const authorization = options?.headers?.Authorization ??
         options?.headers?.authorization;
       if (
@@ -327,6 +330,7 @@ async function startFetch(
         inputs,
         async (attemptNumber) => {
           try {
+            let additionalRequestIntegrity: readonly CfcAtom[] = [];
             if (intent.targetPrincipal) {
               const requestAudience = new URL(
                 url,
@@ -346,7 +350,31 @@ async function startFetch(
                   terminal: true,
                 };
               }
+              additionalRequestIntegrity = [
+                {
+                  type: "https://commonfabric.org/cfc/atom/AudienceRepresents",
+                  principal: intent.targetPrincipal,
+                  audience: requestAudience,
+                },
+              ];
             }
+
+            const requestAuthorized = await authorizeFetchSinkRequest(
+              runtime,
+              inputsCell,
+              {
+                endpoint: cfc.endpoint,
+                additionalRequestIntegrity,
+              },
+            );
+            if (!requestAuthorized) {
+              return {
+                success: false,
+                error: "fetch_request_not_authorized",
+                terminal: true,
+              };
+            }
+            committedRequestIntegrity = additionalRequestIntegrity;
 
             const response = await fetch(
               new URL(url, getPatternEnvironment().apiUrl),
@@ -390,7 +418,10 @@ async function startFetch(
           runtime,
           inputsCell,
           inputs,
-          { endpoint: cfc.endpoint },
+          {
+            endpoint: cfc.endpoint,
+            additionalRequestIntegrity: committedRequestIntegrity,
+          },
         );
         await tryWriteResult(
           runtime,

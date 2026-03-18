@@ -42,6 +42,15 @@ type CfcEntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 export interface DeriveFetchSinkResultLabelsOptions {
   readonly endpoint?: string;
   readonly actingPrincipal?: string;
+  readonly additionalRequestIntegrity?: readonly CfcAtom[];
+}
+
+interface FetchSinkRequestContext {
+  readonly requestLink: CfcEntityAddress;
+  readonly requestSchema: JSONSchema | undefined;
+  readonly labelsByPath: Record<string, Labels>;
+  readonly aggregate: Labels | undefined;
+  readonly rules: readonly FetchSinkRule[];
 }
 
 function atomKey(atom: JSONValue): string {
@@ -289,6 +298,13 @@ function containsAllAtoms(
   return required.every((atom) => keys.has(atomKey(atom)));
 }
 
+function joinExtraIntegrity(
+  integrity: readonly CfcAtom[] | undefined,
+  extraIntegrity: readonly CfcAtom[] | undefined,
+): readonly CfcAtom[] | undefined {
+  return joinIntegrityLabels(integrity, extraIntegrity);
+}
+
 function clauseMatchesRule(
   clause: CfcConfidentialityClause,
   rule: FetchSinkRule,
@@ -299,6 +315,7 @@ function clauseMatchesRule(
 function ruleMatchesAtAllowedPath(
   labelsByPath: Record<string, Labels>,
   rule: FetchSinkRule,
+  extraIntegrity: readonly CfcAtom[] | undefined = undefined,
 ): boolean {
   return rule.allowedPaths.some((path) => {
     const label = effectiveLabelForPath(labelsByPath, path);
@@ -311,7 +328,10 @@ function ruleMatchesAtAllowedPath(
     if (!pathMatches) {
       return false;
     }
-    return containsAllAtoms(label?.integrity, rule.integrityPre);
+    return containsAllAtoms(
+      joinExtraIntegrity(label?.integrity, extraIntegrity),
+      rule.integrityPre,
+    );
   });
 }
 
@@ -344,12 +364,38 @@ function applyRuleToClassification(
   return normalizeConfidentialityLabel(nextClauses);
 }
 
-export async function deriveFetchSinkResultLabels(
+function isActingUserClause(
+  clause: CfcConfidentialityClause,
+  actingPrincipal: string | undefined,
+): boolean {
+  if (!actingPrincipal) {
+    return false;
+  }
+  return clause.some((atom) => {
+    if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+      return false;
+    }
+    const candidate = atom as { type?: unknown; subject?: unknown };
+    return candidate.type === "https://commonfabric.org/cfc/atom/User" &&
+      candidate.subject === actingPrincipal;
+  });
+}
+
+function authorizationSatisfiedAfterSinkRewrite(
+  classification: Labels["classification"],
+  actingPrincipal: string | undefined,
+): boolean {
+  const normalized = normalizeConfidentialityLabel(classification);
+  if (!normalized || normalized.length === 0) {
+    return true;
+  }
+  return normalized.every((clause) => isActingUserClause(clause, actingPrincipal));
+}
+
+async function loadFetchSinkRequestContext(
   runtime: Runtime,
   inputsCell: Cell<unknown>,
-  inputs: NormalizedFetchDataInputs,
-  options: DeriveFetchSinkResultLabelsOptions = {},
-): Promise<Labels | undefined> {
+): Promise<FetchSinkRequestContext> {
   const requestCell = inputsCell.getArgumentCell<{ request: unknown }>()
     ?.key("request")
     .resolveAsCell() ?? inputsCell.resolveAsCell();
@@ -364,20 +410,97 @@ export async function deriveFetchSinkResultLabels(
   );
   await readTx.abort();
 
-  const aggregate = aggregateRequestLabels(labelsByPath);
-  if (!aggregate && !labelsPresent(labelsByPath)) {
-    return undefined;
-  }
-
-  let classification = aggregate?.classification;
-  const integrity = aggregate?.integrity;
-
   const rules: FetchSinkRule[] = [];
   collectFetchSinkRules(requestSchema, rules);
 
-  let sinkRuleFired = false;
+  return {
+    requestLink,
+    requestSchema,
+    labelsByPath,
+    aggregate: aggregateRequestLabels(labelsByPath),
+    rules,
+  };
+}
+
+function rewriteClassificationForPath(
+  path: string,
+  classification: Labels["classification"],
+  labelsByPath: Record<string, Labels>,
+  rules: readonly FetchSinkRule[],
+  extraIntegrity: readonly CfcAtom[] | undefined,
+): Labels["classification"] {
+  let nextClassification = classification;
   for (const rule of rules) {
-    if (!ruleMatchesAtAllowedPath(labelsByPath, rule)) {
+    if (!rule.allowedPaths.includes(path)) {
+      continue;
+    }
+    if (!ruleMatchesAtAllowedPath(labelsByPath, rule, extraIntegrity)) {
+      continue;
+    }
+    nextClassification = applyRuleToClassification(nextClassification, rule);
+  }
+  return nextClassification;
+}
+
+export async function authorizeFetchSinkRequest(
+  runtime: Runtime,
+  inputsCell: Cell<unknown>,
+  options: DeriveFetchSinkResultLabelsOptions = {},
+): Promise<boolean> {
+  const context = await loadFetchSinkRequestContext(runtime, inputsCell);
+  if (!context.aggregate && !labelsPresent(context.labelsByPath)) {
+    return true;
+  }
+
+  const actingPrincipal = options.actingPrincipal ?? runtime.userIdentityDID;
+  for (const path of Object.keys(context.labelsByPath)) {
+    const effective = effectiveLabelForPath(context.labelsByPath, path);
+    const rewrittenClassification = rewriteClassificationForPath(
+      path,
+      effective?.classification,
+      context.labelsByPath,
+      context.rules,
+      options.additionalRequestIntegrity,
+    );
+    if (
+      !authorizationSatisfiedAfterSinkRewrite(
+        rewrittenClassification,
+        actingPrincipal,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export async function deriveFetchSinkResultLabels(
+  runtime: Runtime,
+  inputsCell: Cell<unknown>,
+  inputs: NormalizedFetchDataInputs,
+  options: DeriveFetchSinkResultLabelsOptions = {},
+): Promise<Labels | undefined> {
+  const context = await loadFetchSinkRequestContext(runtime, inputsCell);
+  if (!context.aggregate && !labelsPresent(context.labelsByPath)) {
+    return undefined;
+  }
+
+  let classification = context.aggregate?.classification;
+  const integrity = joinExtraIntegrity(
+    context.aggregate?.integrity,
+    options.additionalRequestIntegrity,
+  );
+
+  let sinkRuleFired = false;
+  for (const rule of context.rules) {
+    if (
+      !ruleMatchesAtAllowedPath(
+        context.labelsByPath,
+        rule,
+        options.additionalRequestIntegrity,
+      )
+    ) {
       continue;
     }
     sinkRuleFired = true;
@@ -405,7 +528,7 @@ export async function deriveFetchSinkResultLabels(
     ]);
   }
 
-  if ((aggregate || sinkRuleFired) && inputs.url) {
+  if ((context.aggregate || sinkRuleFired) && inputs.url) {
     const url = new URL(inputs.url);
     nextIntegrity = joinIntegrityLabels(nextIntegrity, [
       {
