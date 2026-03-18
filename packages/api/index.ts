@@ -5,6 +5,9 @@
  * Workspace code should import these types via `@commontools/builder`.
  */
 
+// Storable value types - canonical definitions for the storage layer
+export type { StorableDatum, StorableValue } from "./fabric-value.ts";
+
 // Runtime constants - defined by @commontools/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;

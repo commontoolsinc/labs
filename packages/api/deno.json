@@ -5,6 +5,10 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./schema": "./schema.ts"
+    "./schema": "./schema.ts",
+    "./fabric-value": "./fabric-value.ts",
+    "./storable-instance": "./storable-instance.ts",
+    "./special-primitive-value": "./special-primitive-value.ts",
+    "./storable-epoch": "./storable-epoch.ts"
   }
 }
