@@ -20,6 +20,15 @@ export interface CfcCasWriteResult {
   readonly blobHash: string;
 }
 
+export interface WriteCfcCasBlobWithBoundaryOptions {
+  readonly space: MemorySpace;
+  readonly payload: Uint8Array;
+  readonly proposedLabel: Labels;
+  readonly evaluateEffectiveLabel: (
+    proposedLabel: Labels,
+  ) => Labels | Promise<Labels>;
+}
+
 export interface CfcCasBlobRecord {
   readonly blobHash: string;
   readonly bytes: readonly number[];
@@ -107,6 +116,21 @@ export function writeCfcCasBlob(
   }
 
   return { blobHash };
+}
+
+export async function writeCfcCasBlobWithBoundary(
+  tx: IExtendedStorageTransaction,
+  options: WriteCfcCasBlobWithBoundaryOptions,
+): Promise<CfcCasWriteResult> {
+  const effectiveLabel = await options.evaluateEffectiveLabel(
+    options.proposedLabel,
+  );
+  return writeCfcCasBlob(
+    tx,
+    options.space,
+    options.payload,
+    effectiveLabel,
+  );
 }
 
 export function readCfcCasBlob(

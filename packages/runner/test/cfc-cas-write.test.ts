@@ -6,8 +6,8 @@ import { Runtime } from "../src/runtime.ts";
 import {
   cfcCasLabelBindingsAddress,
   readCfcCasBlob,
-  writeCfcCasBlobWithBoundary,
   writeCfcCasBlob,
+  writeCfcCasBlobWithBoundary,
 } from "../src/cfc/cas-storage.ts";
 
 const signer = await Identity.fromPassphrase("cfc cas write test");
@@ -165,7 +165,6 @@ describe("CFC direct CAS write substrate", () => {
 
   it("does not write blob or label bindings when trusted boundary evaluation rejects", async () => {
     const payload = new Uint8Array([3, 1, 4, 1]);
-    const blobHash = "will-be-replaced-by-helper";
     const boundaryError = new Error("cfc policy rejected");
 
     const tx = runtime.edit();
