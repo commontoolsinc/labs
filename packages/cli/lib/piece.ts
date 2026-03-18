@@ -473,13 +473,11 @@ export async function executePieceCallable(
   const input = parsed.readJsonFromStdin
     ? await (deps.readJsonInput ?? defaultReadJsonInput)()
     : parsed.input;
-  const normalizedInput = normalizeCallableInputForExecution(
-    resolved.commandSpec,
-    input,
-  );
   const executed = await executeResolvedCallable(
     resolved,
-    normalizedInput,
+    parsed.usedJsonInput
+      ? input
+      : normalizeCallableInputForExecution(resolved.commandSpec, input),
     deps,
   );
 

@@ -193,10 +193,6 @@ export async function executeMountedCallableFile(
   const input = parsed.readJsonFromStdin
     ? await (deps.readJsonInput ?? defaultReadJsonInput)()
     : parsed.input;
-  const normalizedInput = normalizeCallableInputForExecution(
-    resolved.commandSpec,
-    input,
-  );
   const executed = await executeResolvedCallable(
     {
       callableCell: resolved.callableCell,
@@ -207,7 +203,9 @@ export async function executeMountedCallableFile(
       piece: resolved.piece,
       space: resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
     },
-    normalizedInput,
+    parsed.usedJsonInput
+      ? input
+      : normalizeCallableInputForExecution(resolved.commandSpec, input),
     deps,
   );
 

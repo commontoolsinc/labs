@@ -1068,6 +1068,131 @@ describe("mounted callable resolution and execution", () => {
     ]);
   });
 
+  it("passes stdin --json through unchanged for mounted tools", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+          },
+          required: ["query", "source"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      },
+      extraParams: {
+        source: "bound-source",
+      },
+      toolResult: {
+        summary: "bound-source:tea",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      ["--json"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readJsonInput: () => Promise.resolve({ query: "tea" }),
+      },
+    );
+
+    expect(harness.tracker.toolRunInput).toEqual({
+      query: "tea",
+      source: "bound-source",
+    });
+  });
+
+  it("passes inline --json through unchanged for mounted tools", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            help: { type: "string" },
+            source: { type: "string" },
+          },
+          required: ["query", "source"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      },
+      extraParams: {
+        source: "bound-source",
+      },
+      toolResult: {
+        summary: "bound-source:tea",
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      ["--json", '{"query":"tea"}'],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    expect(harness.tracker.toolRunInput).toEqual({
+      query: "tea",
+      source: "bound-source",
+    });
+  });
+
   it("parses stdin JSON for --json without enforcing the linked schema in the CLI", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {

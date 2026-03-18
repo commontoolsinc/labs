@@ -13,6 +13,7 @@ export interface ParsedExecArgs {
   showHelp: boolean;
   showHelpJson: boolean;
   readJsonFromStdin: boolean;
+  usedJsonInput: boolean;
 }
 
 export interface RenderExecHelpOptions {
@@ -29,6 +30,7 @@ interface FlagDescriptor {
 interface ParsedInputMode {
   input: unknown;
   readJsonFromStdin: boolean;
+  usedJsonInput: boolean;
 }
 
 function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
@@ -273,6 +275,7 @@ function parseObjectInput(
     return {
       input: undefined,
       readJsonFromStdin: true,
+      usedJsonInput: true,
     };
   }
 
@@ -285,6 +288,7 @@ function parseObjectInput(
   return {
     input,
     readJsonFromStdin: false,
+    usedJsonInput: usedJson,
   };
 }
 
@@ -296,6 +300,7 @@ function parseNonObjectInput(
     return {
       input: undefined,
       readJsonFromStdin: false,
+      usedJsonInput: false,
     };
   }
   if (args.length > 2) {
@@ -310,6 +315,7 @@ function parseNonObjectInput(
     return {
       input: undefined,
       readJsonFromStdin: true,
+      usedJsonInput: true,
     };
   }
   if (rawValue === undefined) {
@@ -322,11 +328,13 @@ function parseNonObjectInput(
     return {
       input: parseJson(rawValue, flag),
       readJsonFromStdin: false,
+      usedJsonInput: true,
     };
   }
   return {
     input: parseValueForSchema(rawValue, schema, flag),
     readJsonFromStdin: false,
+    usedJsonInput: false,
   };
 }
 
@@ -606,6 +614,7 @@ export function parseExecArgs(
         showHelp: true,
         showHelpJson: false,
         readJsonFromStdin: false,
+        usedJsonInput: false,
       };
     }
     if (rawArgs.length === 2 && rawArgs[1] === "--json") {
@@ -615,6 +624,7 @@ export function parseExecArgs(
         showHelp: true,
         showHelpJson: true,
         readJsonFromStdin: false,
+        usedJsonInput: false,
       };
     }
     if (!helpField) {
@@ -642,6 +652,7 @@ export function parseExecArgs(
         showHelp: true,
         showHelpJson: false,
         readJsonFromStdin: false,
+        usedJsonInput: false,
       };
     }
     if (args.length === 2 && args[1] === "--json") {
@@ -651,6 +662,7 @@ export function parseExecArgs(
         showHelp: true,
         showHelpJson: true,
         readJsonFromStdin: false,
+        usedJsonInput: false,
       };
     }
     if (!helpField) {
@@ -677,6 +689,7 @@ export function parseExecArgs(
     showHelp: false,
     showHelpJson: false,
     readJsonFromStdin: parsedInput.readJsonFromStdin,
+    usedJsonInput: parsedInput.usedJsonInput,
   };
 }
 
