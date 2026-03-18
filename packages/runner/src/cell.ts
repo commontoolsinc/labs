@@ -890,7 +890,7 @@ export class CellImpl<T extends FabricValue>
     // Append the new values to the array, preserving sparse holes in the original.
     const combined = new Array(array.length + value.length);
     array.forEach((v, i) => {
-      combined[i] = cloneIfNecessary(v as StorableValue, { frozen: false });
+      combined[i] = v;
     });
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
