@@ -2928,6 +2928,9 @@ interface CTAudioVisualizerElement extends CTHTMLElement {}
 interface CTLocationElement extends CTHTMLElement {}
 interface CTWebhookElement extends CTHTMLElement {}
 interface CTSecretViewerElement extends CTHTMLElement {}
+interface CTRouterElement extends CTHTMLElement {}
+interface CTRouteElement extends CTHTMLElement {}
+interface CTLinkElement extends CTHTMLElement {}
 
 // Chart components
 interface CTChartElement extends CTHTMLElement {}
@@ -3320,6 +3323,15 @@ interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
   "clickable"?: boolean;
+}
+
+interface CTRouterAttributes<T> extends CTHTMLAttributes<T> {
+  "path"?: CellLike<string> | string;
+  "$path"?: CellLike<string>;
+}
+
+interface CTLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "to": string;
 }
 
 interface CTCalendarAttributes<T> extends CTHTMLAttributes<T> {
@@ -4705,6 +4717,14 @@ declare global {
       "ct-card": CTDOM.DetailedHTMLProps<
         CTCardAttributes<CTCardElement>,
         CTCardElement
+      >;
+      "ct-router": CTDOM.DetailedHTMLProps<
+        CTRouterAttributes<CTRouterElement>,
+        CTRouterElement
+      >;
+      "ct-link": CTDOM.DetailedHTMLProps<
+        CTLinkAttributes<CTLinkElement>,
+        CTLinkElement
       >;
       "ct-calendar": CTDOM.DetailedHTMLProps<
         CTCalendarAttributes<CTCalendarElement>,

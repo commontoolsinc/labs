@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 
 /**
  * Integration test runner for the entire monorepo.
@@ -171,10 +171,12 @@ async function findPatternTests(
 
 /**
  * Find and run all .test.tsx pattern tests via `ct test`.
+ * Captures per-test timing and optionally writes JUnit XML.
  */
 async function runPatternTests(
   rootDir: string,
   filter?: string,
+  junitDir?: string,
 ): Promise<boolean> {
   const patternsDir = path.join(rootDir, "packages/patterns");
   const ctCmd = getCtCommand(rootDir);
@@ -191,6 +193,8 @@ async function runPatternTests(
   );
 
   const failed: string[] = [];
+  const testTimings: { file: string; durationMs: number; passed: boolean }[] =
+    [];
 
   // Run as a pool: always keep `concurrency` tests in flight
   let nextIndex = 0;
@@ -200,6 +204,7 @@ async function runPatternTests(
     while (running.size < concurrency && nextIndex < testFiles.length) {
       const testFile = testFiles[nextIndex++];
       const p = (async () => {
+        const startMs = performance.now();
         const result = await runCommand(
           [
             ...ctCmd,
@@ -212,11 +217,22 @@ async function runPatternTests(
           ],
           { cwd: rootDir },
         );
+        const durationMs = performance.now() - startMs;
+
+        testTimings.push({
+          file: testFile,
+          durationMs,
+          passed: result.success,
+        });
 
         if (result.success) {
-          console.log(`✅ ${testFile}`);
+          console.log(
+            `✅ ${testFile} (${(durationMs / 1000).toFixed(1)}s)`,
+          );
         } else {
-          console.log(`❌ ${testFile}`);
+          console.log(
+            `❌ ${testFile} (${(durationMs / 1000).toFixed(1)}s)`,
+          );
           failed.push(testFile);
         }
         if (result.stdout) {
@@ -253,7 +269,57 @@ async function runPatternTests(
     }
   }
 
+  // Write JUnit XML with per-test timing
+  if (junitDir) {
+    await Deno.mkdir(junitDir, { recursive: true });
+    const xml = buildPatternTestJUnit(testTimings);
+    const junitPath = path.join(junitDir, "pattern-unit-tests.xml");
+    await Deno.writeTextFile(junitPath, xml);
+    console.log(`Wrote JUnit timing to ${junitPath}`);
+  }
+
   return failed.length === 0;
+}
+
+/** Build a JUnit XML document from per-test pattern test timings. */
+function buildPatternTestJUnit(
+  timings: { file: string; durationMs: number; passed: boolean }[],
+): string {
+  const escapeXml = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const totalTime = timings.reduce((s, t) => s + t.durationMs, 0) / 1000;
+  const failures = timings.filter((t) => !t.passed).length;
+
+  const lines = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<testsuites>`,
+    `<testsuite name="pattern-unit-tests" tests="${timings.length}" failures="${failures}" time="${
+      totalTime.toFixed(3)
+    }">`,
+  ];
+
+  for (const t of timings) {
+    const timeSec = (t.durationMs / 1000).toFixed(3);
+    lines.push(
+      `  <testcase name="${escapeXml(t.file)}" time="${timeSec}"${
+        t.passed ? " />" : ">"
+      }`,
+    );
+    if (!t.passed) {
+      lines.push(`    <failure message="Test failed" />`);
+      lines.push(`  </testcase>`);
+    }
+  }
+
+  lines.push(`</testsuite>`);
+  lines.push(`</testsuites>`);
+
+  return lines.join("\n");
 }
 
 /** Recursively walk a directory yielding file paths. */
@@ -317,7 +383,7 @@ async function runPackageIntegration(
   let result: { success: boolean; code: number };
 
   if (pkg === "pattern-tests") {
-    return await runPatternTests(rootDir, filter);
+    return await runPatternTests(rootDir, filter, junitDir);
   } else if (pkg === "cli") {
     // CLI uses a special shell script
     env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
