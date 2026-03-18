@@ -32,6 +32,8 @@
     "./type-tags": "./type-tags.ts",
     "./explicit-tag-storable": "./explicit-tag-storable.ts",
     "./unknown-storable": "./unknown-storable.ts",
-    "./problematic-storable": "./problematic-storable.ts"
+    "./problematic-storable": "./problematic-storable.ts",
+    "./hash-impl": "./hash-impl.ts",
+    "./canonical-hash": "./canonical-hash.ts"
   }
 }

@@ -12,7 +12,7 @@
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
 import { StorableContentId } from "@commontools/data-model/storable-content-id";
-import { StorableUint8Array } from "./storable-native-instances.ts";
+import { StorableUint8Array } from "@commontools/memory/storable-native-instances";
 import {
   DECONSTRUCT,
   type StorableInstance,

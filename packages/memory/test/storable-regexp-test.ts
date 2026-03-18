@@ -24,7 +24,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@commontools/data-model/type-tags";
-import { canonicalHash } from "../canonical-hash.ts";
+import { canonicalHash } from "@commontools/data-model/canonical-hash";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
