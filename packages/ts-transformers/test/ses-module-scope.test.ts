@@ -224,3 +224,25 @@ export default pattern<{ enabled: Cell<boolean> }>(({ enabled }) => {
     "callbacks that call cell methods must remain inline",
   );
 });
+
+Deno.test("SES module-scope does not hoist inline derive callbacks with only nested-scope locals", async () => {
+  const source = `/// <cts-enable />
+import { derive, pattern } from "commontools";
+
+export default pattern<{ count: number }>(({ count }) => {
+  const labels = derive(count, (value) => [1, 2].map((n) => n + value));
+  return { labels };
+});
+`;
+
+  const output = await transformSource(source, {
+    types: COMMONTOOLS_TYPES,
+    sesMode: true,
+  });
+
+  assertEquals(
+    output.includes("__ct_hoisted_lift_"),
+    false,
+    "nested callback locals must not force hoisting when there is no module-scope capture",
+  );
+});

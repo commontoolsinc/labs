@@ -2816,7 +2816,7 @@ export class Scheduler {
 
     // Transform stack trace to show original source locations
     if (error.stack) {
-      error.stack = this.runtime.harness.parseStack(error.stack);
+      error.stack = sanitizeUserVisibleStack(this.runtime.harness.parseStack(error.stack));
     }
 
     const errorWithContext = error as ErrorWithContext;
@@ -3504,6 +3504,33 @@ export class Scheduler {
     }
     this.diagnosisEnabled = false;
   }
+}
+
+function sanitizeUserVisibleStack(stack: string): string {
+  const lines = stack.split("\n");
+  if (lines.length === 0) {
+    return stack;
+  }
+
+  const filtered = [lines[0]!];
+  for (const line of lines.slice(1)) {
+    if (isInternalRuntimeStackLine(line)) {
+      continue;
+    }
+    filtered.push(line);
+  }
+  return filtered.join("\n");
+}
+
+function isInternalRuntimeStackLine(line: string): boolean {
+  return line.includes("<CT_INTERNAL>") ||
+    line.includes("/packages/runner/src/sandbox/ses-runtime.ts:") ||
+    line.includes("/packages/runner/src/runner.ts:") ||
+    line.includes("/packages/runner/src/harness/engine.ts:") ||
+    line.includes("/packages/runner/src/scheduler.ts:") ||
+    line.includes(" at wrapped ") ||
+    line.includes(" at handler:wrapped ") ||
+    line.includes(" at action:wrapped ");
 }
 
 function mapsEqual(

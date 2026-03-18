@@ -67,6 +67,14 @@ export class PatternContextValidationTransformer extends Transformer {
         this.validateImportDeclaration(node, context);
       }
 
+      if (ts.isExportDeclaration(node)) {
+        this.validateExportDeclaration(node, context);
+      }
+
+      if (ts.isImportEqualsDeclaration(node)) {
+        this.validateImportEqualsDeclaration(node, context);
+      }
+
       if (ts.isVariableDeclaration(node)) {
         this.validateModuleScopeDataInitializer(node, context, checker);
       }
@@ -429,10 +437,41 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!ts.isStringLiteral(node.moduleSpecifier)) {
       return;
     }
+    this.validateExternalModuleSpecifier(node.moduleSpecifier, context);
+  }
+
+  private validateExportDeclaration(
+    node: ts.ExportDeclaration,
+    context: TransformationContext,
+  ): void {
+    if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) {
+      return;
+    }
+    this.validateExternalModuleSpecifier(node.moduleSpecifier, context);
+  }
+
+  private validateImportEqualsDeclaration(
+    node: ts.ImportEqualsDeclaration,
+    context: TransformationContext,
+  ): void {
+    if (!context.options.sesMode || !ts.isExternalModuleReference(node.moduleReference)) {
+      return;
+    }
+    const expression = node.moduleReference.expression;
+    if (!expression || !ts.isStringLiteral(expression)) {
+      return;
+    }
+    this.validateExternalModuleSpecifier(expression, context);
+  }
+
+  private validateExternalModuleSpecifier(
+    moduleSpecifier: ts.StringLiteral,
+    context: TransformationContext,
+  ): void {
     if (!context.options.sesMode) {
       return;
     }
-    const specifier = node.moduleSpecifier.text;
+    const specifier = moduleSpecifier.text;
     if (
       specifier.startsWith("./") || specifier.startsWith("../") ||
       specifier.startsWith("/")
@@ -447,7 +486,7 @@ export class PatternContextValidationTransformer extends Transformer {
       type: "pattern-context:external-import",
       message:
         `Static import '${specifier}' is not allowed in SES-authored code. Only trusted runtimeDeps modules or same-bundle relative imports are supported.`,
-      node,
+      node: moduleSpecifier,
     });
   }
 

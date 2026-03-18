@@ -169,6 +169,30 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
       })
     );
   });
+
+  await t.step("rejects require() inside __ct_fn callbacks", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports", "require"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports, require){/*__CT_TOPLEVEL__:main.tsx:000:fn:fn*/const fn=__ctHelpers.__ct_fn("main.tsx#000:fn",function(){return require("other");});exports.default=fn;}`,
+      })
+    );
+  });
+
+  await t.step("rejects require() inside __ct_builder callbacks", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports", "require"],
+        registeredModuleIds: new Set(["main", "other"]),
+        factorySource:
+          `function(exports, require){/*__CT_TOPLEVEL__:main.tsx:000:lifted:builder*/const lifted=__ctHelpers.__ct_builder("lift","main.tsx#000:lifted",function(){return require("other");});exports.default=lifted;}`,
+      })
+    );
+  });
 });
 
 Deno.test("AMD factory verifier accepts real compiler output from the SES engine path", async () => {

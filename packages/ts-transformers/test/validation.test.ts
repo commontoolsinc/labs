@@ -267,6 +267,33 @@ Deno.test("SES module-scope validation", async (t) => {
     assertEquals(errors[0]!.type, "pattern-context:external-import");
   });
 
+  await t.step("errors on non-trusted external re-exports", async () => {
+    const source = `/// <cts-enable />
+      export { uniq } from "lodash";
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:external-import");
+  });
+
+  await t.step("errors on import equals require() in SES mode", async () => {
+    const source = `/// <cts-enable />
+      import uniq = require("lodash");
+      export default uniq;
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+      sesMode: true,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:external-import");
+  });
+
   await t.step("errors on top-level data outside the v1 inert subset", async () => {
     const source = `/// <cts-enable />
       const lookup = new Set(["alpha", "beta"]);

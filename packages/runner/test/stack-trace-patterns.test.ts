@@ -87,6 +87,16 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
     new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
     `first frame should reference main.tsx:${THROW_LINE}, got:\n${frames[0]}`,
   );
+  assertEquals(
+    frames.some((frame) =>
+      frame.includes("/packages/runner/src/") ||
+      frame.includes("ses-runtime.ts:") ||
+      frame.includes("scheduler.ts:") ||
+      frame.includes("<CT_INTERNAL>")
+    ),
+    false,
+    `user-visible handler stack must not expose internal runtime frames:\n${stack}`,
+  );
 
   await runtime.dispose();
   await storageManager.close();

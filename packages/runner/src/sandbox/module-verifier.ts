@@ -341,14 +341,14 @@ function isValidBuilderWrapper(args: string[]): boolean {
   }
   return /^"(?:lift|handler|pattern|recipe)"$/.test(args[0]!.trim()) &&
     isTrustedItemId(args[1]!) &&
-    hasFunctionExpressionShape(args[2]!);
+    isTrustedFunctionExpression(args[2]!);
 }
 
 function isValidFunctionWrapper(args: string[]): boolean {
   if (args.length !== 2) {
     return false;
   }
-  return isTrustedItemId(args[0]!) && hasFunctionExpressionShape(args[1]!);
+  return isTrustedItemId(args[0]!) && isTrustedFunctionExpression(args[1]!);
 }
 
 function isValidPureFunctionWrapper(args: string[]): boolean {

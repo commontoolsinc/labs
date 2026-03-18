@@ -740,22 +740,10 @@ function referencesExternalSymbols(
   callback: ts.FunctionLikeDeclarationBase,
   checker: ts.TypeChecker,
 ): boolean {
-  const localNames = new Set<string>();
-  for (const parameter of callback.parameters) {
-    collectBindingNames(parameter.name, localNames);
-  }
-
   let hasExternalReference = false;
   const visit = (node: ts.Node): void => {
     if (hasExternalReference) return;
-    if (ts.isVariableDeclaration(node)) {
-      collectBindingNames(node.name, localNames);
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      localNames.add(node.name.text);
-    }
     if (ts.isIdentifier(node) && !isPropertyName(node)) {
-      if (localNames.has(node.text)) return;
       if (WELL_KNOWN_GLOBALS.has(node.text)) {
         return;
       }
@@ -763,6 +751,14 @@ function referencesExternalSymbols(
       if (symbol) {
         const declarations = symbol.getDeclarations() ?? [];
         if (declarations.some((declaration) => isBuiltinDeclaration(declaration))) {
+          return;
+        }
+        if (
+          declarations.length > 0 &&
+          declarations.every((declaration) =>
+            isNestedWithin(declaration, callback)
+          )
+        ) {
           return;
         }
       }
@@ -778,6 +774,17 @@ function referencesExternalSymbols(
 
   visit(callback.body);
   return hasExternalReference;
+}
+
+function isNestedWithin(node: ts.Node, ancestor: ts.Node): boolean {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (current === ancestor) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function resolveModuleScopeCallbackReference(
