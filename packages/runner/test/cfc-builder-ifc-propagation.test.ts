@@ -38,4 +38,45 @@ describe("builder IFC propagation", () => {
       },
     });
   });
+
+  it("does not auto-propagate argument confidentiality onto result schemas that declare declassify rules", () => {
+    const argumentSchema = {
+      type: "object",
+      ifc: {
+        classification: [[
+          {
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: "did:key:alice",
+          },
+        ]],
+      },
+    } as const satisfies JSONSchema;
+    const resultSchema = {
+      type: "number",
+      ifc: {
+        integrity: [[
+          {
+            type: "https://commonfabric.org/cfc/atom/InjectionSafe",
+            stage: "value",
+            detectorProfile: "pi-screen-v3",
+          },
+        ]],
+        declassify: {
+          confidentialityPre: [[
+            {
+              type: "https://commonfabric.org/cfc/atom/Caveat",
+              kind: "PROMPT_INJECTION_RISK_UNSCREENED",
+              source: "ref:report-1",
+            },
+          ]],
+          removeMatchedClauses: true,
+          releaseCondition: true,
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    expect(applyArgumentIfcToResult(argumentSchema, resultSchema)).toEqual(
+      resultSchema,
+    );
+  });
 });

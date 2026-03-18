@@ -56,6 +56,22 @@ const wordCountSchema = {
   },
 } as const satisfies JSONSchema;
 
+const probeInputSchema = {
+  type: "object",
+  properties: {
+    report: reportSchema,
+  },
+  required: ["report"],
+} as const satisfies JSONSchema;
+
+const probeOutputSchema = {
+  type: "object",
+  properties: {
+    count: wordCountSchema,
+  },
+  required: ["count"],
+} as const satisfies JSONSchema;
+
 describe("CFC worked example: safe probing", () => {
   let harness: ReturnType<typeof createCfcPatternTestHarness>;
 
@@ -71,42 +87,51 @@ describe("CFC worked example: safe probing", () => {
   });
 
   it("clears material-risk caveats for a numeric probe while preserving prompt influence", async () => {
-    await harness.writeCellValue({
+    const report = await harness.writeCellValue({
       id: "safe-probing-report",
       schema: reportSchema,
       value: "Malicious instructions hidden in a report",
       prepare: "cfc",
     });
 
-    const wordCount = await harness.withCommittedEdit((tx) => {
-      const reportInTx = harness.getCell<string>(
-        "safe-probing-report",
-        reportSchema,
-        tx,
-      );
-      const wordCount = harness.getCell<number>(
-        "safe-probing-word-count",
-        wordCountSchema,
-        tx,
-      );
-      reportInTx.withTx(tx).get();
-      wordCount.withTx(tx).set(42);
-      return wordCount;
-    }, {
+    const safeProbePattern = harness.pattern(
+      ({ report }) => ({
+        count: harness.lift(reportSchema, wordCountSchema, (_value) => 42)(
+          report,
+        ),
+      }),
+      probeInputSchema,
+      probeOutputSchema,
+    );
+    const run = await harness.runPattern({
+      id: "safe-probing-word-count",
+      pattern: safeProbePattern,
+      inputs: { report },
+      outputSchema: probeOutputSchema,
+      initialOutput: { count: 0 },
       prepare: "cfc",
     });
+    expect(await run.result.pull()).toEqual({ count: 42 });
 
-    const labels = await harness.readLabels(
-      wordCount.getAsNormalizedFullLink().id,
+    await harness.restart();
+
+    const persistedOutput = harness.getCell<{ count: number }>(
+      "safe-probing-word-count",
+      probeOutputSchema,
     );
-    expect(labels["/"]?.classification).toEqual(
+    const labels = await harness.readEffectiveLabel(
+      persistedOutput.key("count"),
+      wordCountSchema,
+    );
+
+    expect(labels?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [promptInfluenceAtom],
       ]),
     );
-    expect(labels["/"]?.classification).toHaveLength(2);
-    expect(labels["/"]?.integrity).toEqual(
+    expect(labels?.classification).toHaveLength(2);
+    expect(labels?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining(injectionSafeAtom),
       ]),
