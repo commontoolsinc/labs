@@ -181,6 +181,11 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.synced();
   }
 
+  async idle(): Promise<void> {
+    this.#check();
+    await this.#client.idle();
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -224,22 +229,33 @@ export class RuntimeInternals extends EventTarget {
     }
   };
 
-  #onNavigateRequest = (e: RuntimeClientEvents["navigaterequest"][0]) => {
-    const { cell } = e;
-    const pieceId = cell.id();
-    logger.log("navigate", `Navigating to piece: ${pieceId}`);
+  #onNavigateRequest = async (
+    e: RuntimeClientEvents["navigaterequest"][0],
+  ) => {
+    try {
+      const { cell } = e;
+      const pieceId = cell.id();
+      logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
-    if (cell.space() === this.#space) {
-      void this.registerNavigatedPiece(cell);
-    }
+      const sameSpace = cell.space() === this.#space;
 
-    if (cell.space() === this.#space && this.#spaceName) {
-      navigate({
-        spaceName: this.#spaceName,
-        pieceId,
-      });
-    } else {
-      navigate({ spaceDid: cell.space(), pieceId: cell.id() });
+      if (sameSpace) {
+        void this.registerNavigatedPiece(cell);
+      } else {
+        await this.#client.idle();
+        await this.#client.synced();
+      }
+
+      if (sameSpace && this.#spaceName) {
+        navigate({
+          spaceName: this.#spaceName,
+          pieceId,
+        });
+      } else {
+        navigate({ spaceDid: cell.space(), pieceId: cell.id() });
+      }
+    } catch (error) {
+      console.error("[RuntimeInternals] Failed to navigate:", error);
     }
   };
 

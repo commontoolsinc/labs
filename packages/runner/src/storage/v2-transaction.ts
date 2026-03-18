@@ -62,6 +62,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsPotentialWrite,
 } from "./reactivity-log.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
 
 type RootAttestation = IAttestation;
 
@@ -366,31 +367,6 @@ const getValueTypeName = (value: StorableDatum | undefined): string => {
   return typeof value;
 };
 
-const isDocumentEnvelopeValue = (
-  value: StorableDatum | undefined,
-): value is Record<string, StorableDatum> =>
-  isRecord(value) &&
-  (
-    Object.hasOwn(value, "value") ||
-    Object.hasOwn(value, "source")
-  );
-
-const collapseEmptyDocumentEnvelope = (
-  currentRoot: StorableDatum | undefined,
-  nextRoot: StorableDatum | undefined,
-  type: MediaType,
-): StorableDatum | undefined => {
-  if (
-    type === "application/json" &&
-    isDocumentEnvelopeValue(currentRoot) &&
-    isRecord(nextRoot) &&
-    Object.keys(nextRoot).length === 0
-  ) {
-    return undefined;
-  }
-  return nextRoot;
-};
-
 type MutableWriteResult = {
   root: StorableDatum | undefined;
   previousValue: StorableDatum | undefined;
@@ -402,7 +378,6 @@ const applyMutablePathWrite = (
   address: IMemoryAddress,
   value: StorableDatum | undefined,
 ): Result<MutableWriteResult, ITypeMismatchError> => {
-  const sourceRoot = currentRoot;
   if (address.path.length === 0) {
     return {
       ok: {
@@ -469,11 +444,7 @@ const applyMutablePathWrite = (
           if (parent === undefined) {
             return {
               ok: {
-                root: collapseEmptyDocumentEnvelope(
-                  sourceRoot,
-                  replacement,
-                  address.type,
-                ),
+                root: replacement,
                 previousValue,
                 changed: true,
               },
@@ -517,7 +488,7 @@ const applyMutablePathWrite = (
         }
         return {
           ok: {
-            root: collapseEmptyDocumentEnvelope(sourceRoot, root, address.type),
+            root,
             previousValue,
             changed: true,
           },
@@ -555,7 +526,7 @@ const applyMutablePathWrite = (
       }
       return {
         ok: {
-          root: collapseEmptyDocumentEnvelope(sourceRoot, root, address.type),
+          root,
           previousValue,
           changed: true,
         },
@@ -1443,10 +1414,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       of: address.id,
       the: address.type,
     });
+    const document = address.type === "application/json" &&
+        "getDocument" in branch.replica &&
+        typeof branch.replica.getDocument === "function"
+      ? branch.replica.getDocument(address.id as URI)
+      : undefined;
 
     return {
       address: { id: address.id, type: address.type, path: [] },
-      value: state.is,
+      value: document === undefined
+        ? state.is
+        : toTransactionDocumentValue(document),
     };
   }
 

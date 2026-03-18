@@ -1,29 +1,29 @@
 import { assertEquals } from "@std/assert";
-import { resolveMemoryV2StoreRootUrl } from "./memory-path.ts";
+import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
 
-Deno.test("resolveMemoryV2StoreRootUrl derives a sibling v2-engine directory for DB_PATH mode", () => {
+Deno.test("resolveMemoryEngineStoreRootUrl derives a sibling engine directory for DB_PATH mode", () => {
   const file = new URL("file:///tmp/ct-memory/space.sqlite");
 
   assertEquals(
-    resolveMemoryV2StoreRootUrl(file, { singleFileMode: true }).href,
-    new URL("file:///tmp/ct-memory/space.v2-engine/").href,
+    resolveMemoryEngineStoreRootUrl(file, { singleFileMode: true }).href,
+    new URL("file:///tmp/ct-memory/space.engine/").href,
   );
 });
 
-Deno.test("resolveMemoryV2StoreRootUrl derives a nested v2-engine directory for directory mode", () => {
+Deno.test("resolveMemoryEngineStoreRootUrl derives a nested engine directory for directory mode", () => {
   const root = new URL("file:///tmp/ct-memory/");
 
   assertEquals(
-    resolveMemoryV2StoreRootUrl(root, { singleFileMode: false }).href,
-    new URL("file:///tmp/ct-memory/v2-engine/").href,
+    resolveMemoryEngineStoreRootUrl(root, { singleFileMode: false }).href,
+    new URL("file:///tmp/ct-memory/engine/").href,
   );
 });
 
-Deno.test("resolveMemoryV2StoreRootUrl treats extensionless DB_PATH values as single-file mode when requested", () => {
+Deno.test("resolveMemoryEngineStoreRootUrl treats extensionless DB_PATH values as single-file mode when requested", () => {
   const file = new URL("file:///tmp/ct-memory/space");
 
   assertEquals(
-    resolveMemoryV2StoreRootUrl(file, { singleFileMode: true }).href,
-    new URL("file:///tmp/ct-memory/space.v2-engine/").href,
+    resolveMemoryEngineStoreRootUrl(file, { singleFileMode: true }).href,
+    new URL("file:///tmp/ct-memory/space.engine/").href,
   );
 });

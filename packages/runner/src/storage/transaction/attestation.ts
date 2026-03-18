@@ -22,6 +22,7 @@ import type {
 import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { toTransactionDocumentValue } from "../v2-document.ts";
 
 /** Copies an array preserving sparse holes (unlike [...arr] which fills them with undefined). */
 const sparseArrayCopy = <T>(arr: T[]): T[] => {
@@ -257,15 +258,6 @@ export const write = (
     return { ok: source };
   }
 
-  if (
-    address.type === "application/json" &&
-    isDocumentEnvelope(source.value) &&
-    isRecord(result.ok) &&
-    Object.keys(result.ok).length === 0
-  ) {
-    return { ok: { ...source, value: undefined } };
-  }
-
   return { ok: { ...source, value: result.ok } };
 };
 
@@ -341,7 +333,12 @@ export const claim = (
   const state = replica.get(address) ??
     unclaimed({ of: address.id, the: address.type });
   const source = attest(state);
-  const actual = read(source, address)?.ok?.value;
+  const actual = address.type === "application/json" &&
+      address.path.length === 0 &&
+      "getDocument" in replica &&
+      typeof replica.getDocument === "function"
+    ? toTransactionDocumentValue(replica.getDocument(address.id as any))
+    : read(source, address)?.ok?.value;
 
   // Fast path: reference equality check avoids expensive comparison
   // when the replica state hasn't changed since the original read
@@ -600,14 +597,4 @@ export const StateInconsistency = (source: {
       });
     },
   };
-};
-
-const isDocumentEnvelope = (value: StorableValue): value is StorableObject => {
-  return isRecord(value) &&
-    Object.keys(value).length > 0 &&
-    Object.keys(value).every((key) => key === "value" || key === "source") &&
-    (
-      Object.hasOwn(value, "value") ||
-      Object.hasOwn(value, "source")
-    );
 };

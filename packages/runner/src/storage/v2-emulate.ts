@@ -7,6 +7,7 @@ import { iterate as iterateFacts } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
+import { toMemoryV2Document } from "./v2-document.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
 
@@ -22,27 +23,7 @@ class EmulatedSessionFactory implements SessionFactory {
   }
 }
 
-const toStoredDocument = (value: StorableDatum) => {
-  if (
-    value !== null && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).length > 0 &&
-    Object.keys(value).every((key) =>
-      key === "value" || key === "source" || key === "labels"
-    ) &&
-    ("value" in value || "source" in value)
-  ) {
-    return {
-      ...("value" in value
-        ? { value: (value as { value: unknown }).value }
-        : {}),
-      ...("source" in value &&
-          (value as { source?: unknown }).source !== undefined
-        ? { source: (value as { source?: unknown }).source }
-        : {}),
-    } as StorableDatum;
-  }
-  return { value } as StorableDatum;
-};
+const toStoredDocument = (value: StorableDatum) => toMemoryV2Document(value);
 
 export class EmulatedStorageManager extends StorageManager {
   #serverFactory: () => MemoryV2Server.Server;

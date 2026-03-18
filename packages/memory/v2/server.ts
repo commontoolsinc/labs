@@ -1,3 +1,5 @@
+import * as FS from "@std/fs";
+import * as Path from "@std/path";
 import type { JSONValue } from "../interface.ts";
 import { refer } from "../reference.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
@@ -1154,11 +1156,15 @@ export class Server {
       return existing;
     }
 
-    const opened = Engine.open({
-      url: this.#store
-        ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
-        : new URL(`memory:///${encodeURIComponent(space)}`),
-    });
+    const url = this.#store
+      ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
+      : new URL(`memory:///${encodeURIComponent(space)}`);
+    const opened = (async () => {
+      if (url.protocol === "file:") {
+        await FS.ensureDir(Path.toFileUrl(Path.dirname(Path.fromFileUrl(url))));
+      }
+      return await Engine.open({ url });
+    })();
     opened.catch(() => {
       if (this.#engines.get(space) === opened) {
         this.#engines.delete(space);

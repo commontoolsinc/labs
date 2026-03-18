@@ -4,6 +4,8 @@ export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
 export const EMPTY_VALUE_REF = "__empty__" as const;
+export const ENTITY_DOCUMENT_MARKER_KEY = "$ctDocument" as const;
+export const ENTITY_DOCUMENT_MARKER_VALUE = "common-tools/document@1" as const;
 
 export type EntityId = string;
 export type BranchName = string;
@@ -18,9 +20,13 @@ export interface SourceLink {
   "/": string;
 }
 
+export type EntityDocumentField = JSONValue | SourceLink | undefined;
+
 export interface EntityDocument {
+  [ENTITY_DOCUMENT_MARKER_KEY]: typeof ENTITY_DOCUMENT_MARKER_VALUE;
   value?: JSONValue;
   source?: SourceLink;
+  [key: string]: EntityDocumentField;
 }
 
 export interface Blob {
@@ -249,11 +255,42 @@ export const isSourceLink = (value: unknown): value is SourceLink => {
 export const toEntityDocument = (
   value: JSONValue | undefined,
   source?: SourceLink,
+  metadata: Record<string, EntityDocumentField> = {},
 ): EntityDocument => {
-  if (source && value === undefined) {
-    return { source };
+  const document: Record<string, EntityDocumentField> = {
+    [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
+    ...metadata,
+    ...(source !== undefined ? { source } : {}),
+  };
+  if (value !== undefined) {
+    document.value = value;
   }
-  return source ? { value, source } : { value };
+  return document as EntityDocument;
 };
+
+export const isEntityDocument = (
+  value: unknown,
+): value is EntityDocument => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return (value as Record<string, unknown>)[ENTITY_DOCUMENT_MARKER_KEY] ===
+    ENTITY_DOCUMENT_MARKER_VALUE;
+};
+
+export const getEntityDocumentMetadata = (
+  document: EntityDocument,
+): Record<string, EntityDocumentField> => {
+  const {
+    [ENTITY_DOCUMENT_MARKER_KEY]: _marker,
+    value: _value,
+    ...metadata
+  } = document;
+  return metadata;
+};
+
+export const normalizeEntityDocument = (
+  value: JSONValue | EntityDocument,
+): EntityDocument => isEntityDocument(value) ? value : toEntityDocument(value);
 
 export const toDocumentPath = (path: ReadPath): string[] => ["value", ...path];

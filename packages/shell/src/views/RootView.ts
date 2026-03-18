@@ -3,6 +3,7 @@ import {
   applyCommand,
   AppState,
   AppUpdateEvent,
+  AppView,
   clone,
   Command,
   isAppViewEqual,
@@ -168,13 +169,7 @@ export class XRootView extends BaseView {
 
     let spaceChanged = false;
     if (previous && !isAppViewEqual(previous.view, current.view)) {
-      // Check that if the view has changed, we may still
-      // be in the same space
-      if ("spaceName" in previous.view && "spaceName" in current.view) {
-        spaceChanged = previous.view.spaceName !== current.view.spaceName;
-      } else {
-        spaceChanged = true;
-      }
+      spaceChanged = didViewSpaceChange(previous.view, current.view);
     }
 
     // If host, view's space, or identity changes, we'll
@@ -235,5 +230,18 @@ export class XRootView extends BaseView {
     `;
   }
 }
+
+const didViewSpaceChange = (previous: AppView, current: AppView): boolean => {
+  if ("builtin" in previous || "builtin" in current) {
+    return JSON.stringify(previous) !== JSON.stringify(current);
+  }
+  if ("spaceName" in previous && "spaceName" in current) {
+    return previous.spaceName !== current.spaceName;
+  }
+  if ("spaceDid" in previous && "spaceDid" in current) {
+    return previous.spaceDid !== current.spaceDid;
+  }
+  return true;
+};
 
 globalThis.customElements.define("x-root-view", XRootView);

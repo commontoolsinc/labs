@@ -2,6 +2,11 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
 import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
+import {
+  ENTITY_DOCUMENT_MARKER_KEY,
+  ENTITY_DOCUMENT_MARKER_VALUE,
+  isEntityDocument,
+} from "@commonfabric/memory/v2";
 import type {
   Assertion,
   IAttestation,
@@ -39,11 +44,31 @@ import * as Edit from "./edit.ts";
 
 const isStoredDocumentEnvelope = (
   value: StorableValue | undefined,
-): value is { value?: StorableValue; source?: StorableValue } =>
-  isRecord(value) &&
-  Object.keys(value).length > 0 &&
-  Object.keys(value).every((key) => key === "value" || key === "source") &&
-  ("value" in value || "source" in value);
+): boolean => isEntityDocument(value);
+
+const toStoredDocumentEnvelope = (
+  loaded: StorableValue,
+  merged: StorableValue | undefined,
+): StorableValue | undefined => {
+  const {
+    [ENTITY_DOCUMENT_MARKER_KEY]: _marker,
+    value: _value,
+    ...metadata
+  } = loaded as Record<string, StorableDatum>;
+
+  if (merged === undefined) {
+    return Object.keys(metadata).length === 0 ? undefined : {
+      [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
+      ...metadata,
+    } as StorableValue;
+  }
+
+  return {
+    [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
+    ...metadata,
+    value: merged,
+  } as StorableValue;
+};
 
 const alignRootWriteWithLoadedShape = (
   type: string,
@@ -57,16 +82,7 @@ const alignRootWriteWithLoadedShape = (
     return merged;
   }
 
-  if (merged === undefined) {
-    return loaded.source === undefined ? undefined : { source: loaded.source };
-  }
-
-  return {
-    ...("source" in loaded && loaded.source !== undefined
-      ? { source: loaded.source }
-      : {}),
-    value: merged,
-  };
+  return toStoredDocumentEnvelope(loaded, merged);
 };
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);

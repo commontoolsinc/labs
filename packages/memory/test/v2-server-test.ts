@@ -259,7 +259,7 @@ Deno.test("memory v2 server retries a failed engine open once the store path exi
       }))
     );
 
-    await Deno.mkdir(new URL("./v2/", store), { recursive: true });
+    await Deno.mkdir(new URL("./engine/", store), { recursive: true });
 
     await connection.receive(JSON.stringify({
       type: "session.open",

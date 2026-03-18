@@ -334,22 +334,23 @@ export const resolveSpaceStoreUrl = (
   subject: Subject,
   memoryVersion: MemoryVersion = getDefaultMemoryVersion(),
 ): URL => {
-  const isFile = Path.extname(store.pathname) !== "";
+  const storePath = store.protocol === "file:"
+    ? Path.fromFileUrl(store)
+    : store.pathname;
+  const isFile = Path.extname(storePath) !== "";
 
   if (!isFile) {
     if (memoryVersion === "v2") {
-      return new URL(`./v2/${subject}.sqlite`, store);
+      return new URL(`./engine/${subject}.sqlite`, store);
     }
 
     return new URL(`./${subject}.sqlite`, store);
   }
 
   if (memoryVersion === "v2") {
-    const ext = Path.extname(store.pathname);
-    const stem = ext === ""
-      ? store.pathname
-      : store.pathname.slice(0, -ext.length);
-    return new URL(`${stem}.v2${ext}`, store);
+    const ext = Path.extname(storePath);
+    const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
+    return Path.toFileUrl(Path.join(`${stem}.engine`, `${subject}.sqlite`));
   }
 
   return store;

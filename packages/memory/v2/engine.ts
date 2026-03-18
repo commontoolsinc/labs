@@ -12,11 +12,13 @@ import {
   EMPTY_VALUE_REF,
   type EntityDocument,
   type EntityId,
-  isSourceLink,
+  getEntityDocumentMetadata,
+  normalizeEntityDocument,
   type Operation,
   type PatchOp,
   type Reference,
   type SessionId,
+  toEntityDocument,
 } from "../v2.ts";
 
 const PRAGMAS = `
@@ -1280,40 +1282,14 @@ const latestMaterializationSeq = (
 const applyPatchDocument = (
   document: EntityDocument,
   patches: PatchOp[],
-): EntityDocument => {
-  return {
-    ...document,
-    value: applyPatch(document.value ?? {}, patches),
-  };
-};
+): EntityDocument =>
+  toEntityDocument(
+    applyPatch(document.value ?? {}, patches),
+    document.source,
+    getEntityDocumentMetadata(document),
+  );
 
-const normalizeEntityDocument = (
-  value: JSONValue | EntityDocument,
-): EntityDocument => {
-  return isEntityDocument(value) ? value : { value };
-};
-
-const emptyEntityDocument = (): EntityDocument => ({ value: {} });
-
-const isEntityDocument = (
-  value: JSONValue | EntityDocument,
-): value is EntityDocument => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const keys = Object.keys(value);
-  if (
-    keys.length === 0 ||
-    !keys.every((key) => key === "value" || key === "source")
-  ) {
-    return false;
-  }
-  return Object.hasOwn(value, "value") ||
-    (
-      Object.hasOwn(value, "source") &&
-      isSourceLink((value as { source?: unknown }).source)
-    );
-};
+const emptyEntityDocument = (): EntityDocument => toEntityDocument({});
 
 export const hashBlobBytes = (value: Uint8Array): Reference => {
   return fromDigest(sha256(value)).toString() as Reference;

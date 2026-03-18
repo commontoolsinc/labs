@@ -290,16 +290,15 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
         operations: [{
           op: "set",
           id: "of:piece:1",
-          value: {
-            source: toSourceLink("process:1"),
-          } as any,
+          value: toEntityDocument(undefined, toSourceLink("process:1")),
         }],
       },
     });
 
-    assertEquals(read(engine, { id: "of:piece:1" }), {
-      source: toSourceLink("process:1"),
-    });
+    assertEquals(
+      read(engine, { id: "of:piece:1" }),
+      toEntityDocument(undefined, toSourceLink("process:1")),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -426,13 +425,16 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
       },
     });
 
-    assertEquals(read(engine, { id: "entity:patch" }), {
-      value: {
-        profile: { name: "Bob", title: "Dr" },
-        tags: ["one", "two", "three"],
-      },
-      source: { "/": "origin" },
-    });
+    assertEquals(
+      read(engine, { id: "entity:patch" }),
+      toEntityDocument(
+        {
+          profile: { name: "Bob", title: "Dr" },
+          tags: ["one", "two", "three"],
+        },
+        { "/": "origin" },
+      ),
+    );
     assertEquals(read(engine, { id: "entity:patch", seq: 1 }), original);
 
     const patchFact = engine.database.prepare(
@@ -565,9 +567,10 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
     const snapshotValue = engine.database.prepare(
       "SELECT data FROM value WHERE hash = ?",
     ).get([snapshotRow.value_ref]) as { data: string } | undefined;
-    assertEquals(JSON.parse(snapshotValue?.data ?? "null"), {
-      value: { tags: ["one", "two", "three"] },
-    });
+    assertEquals(
+      JSON.parse(snapshotValue?.data ?? "null"),
+      toEntityDocument({ tags: ["one", "two", "three"] }),
+    );
 
     applyCommit(engine, {
       sessionId: "session:snapshot",
@@ -597,12 +600,14 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
       "DELETE FROM fact WHERE id = 'entity:snapshot' AND seq = 2",
     ).run();
 
-    assertEquals(read(engine, { id: "entity:snapshot", seq: 3 }), {
-      value: { tags: ["one", "two", "three"] },
-    });
-    assertEquals(read(engine, { id: "entity:snapshot" }), {
-      value: { tags: ["one", "two", "three", "four"] },
-    });
+    assertEquals(
+      read(engine, { id: "entity:snapshot", seq: 3 }),
+      toEntityDocument({ tags: ["one", "two", "three"] }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:snapshot" }),
+      toEntityDocument({ tags: ["one", "two", "three", "four"] }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -682,12 +687,14 @@ Deno.test("memory v2 engine compacts old snapshots beyond retention", async () =
     ).all() as Array<{ seq: number }>;
     assertEquals(snapshotRows, [{ seq: 3 }, { seq: 4 }]);
 
-    assertEquals(read(engine, { id: "entity:snapshot-retention", seq: 2 }), {
-      value: { tags: ["one", "two"] },
-    });
-    assertEquals(read(engine, { id: "entity:snapshot-retention" }), {
-      value: { tags: ["one", "two", "three", "four"] },
-    });
+    assertEquals(
+      read(engine, { id: "entity:snapshot-retention", seq: 2 }),
+      toEntityDocument({ tags: ["one", "two"] }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:snapshot-retention" }),
+      toEntityDocument({ tags: ["one", "two", "three", "four"] }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -809,12 +816,13 @@ Deno.test("memory v2 blob metadata remains ordinary entity state separate from b
       },
     });
 
-    assertEquals(read(engine, { id: metadataId }), {
-      value: {
+    assertEquals(
+      read(engine, { id: metadataId }),
+      toEntityDocument({
         blob: blob.hash,
         label: "profile-photo",
-      },
-    });
+      }),
+    );
     assertEquals(getBlob(engine, blob.hash), {
       hash: blob.hash,
       value: payload,
@@ -980,12 +988,13 @@ Deno.test("memory v2 engine preserves root objects with value siblings", async (
       },
     });
 
-    assertEquals(read(engine, { id: "entity:value-siblings" }), {
-      value: {
+    assertEquals(
+      read(engine, { id: "entity:value-siblings" }),
+      toEntityDocument({
         value: "hello",
         other: "data",
-      },
-    });
+      }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1080,9 +1089,10 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
     });
 
     assertEquals(derived.seq, 3);
-    assertEquals(read(engine, { id: "entity:target" }), {
-      value: { derivedFromName: true },
-    });
+    assertEquals(
+      read(engine, { id: "entity:target" }),
+      toEntityDocument({ derivedFromName: true }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1434,9 +1444,10 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
       } else {
         const applied = commit();
         assertEquals(applied.seq, 3);
-        assertEquals(read(engine, { id: "entity:derived" }), {
-          value: { case: testCase.name },
-        });
+        assertEquals(
+          read(engine, { id: "entity:derived" }),
+          toEntityDocument({ case: testCase.name }),
+        );
       }
     } finally {
       close(engine);
@@ -1538,22 +1549,27 @@ Deno.test("memory v2 engine reconstructs point-in-time state across delete bound
       },
     });
 
-    assertEquals(read(engine, { id: "entity:timeline", seq: 1 }), {
-      value: { phase: "one", data: { start: true } },
-    });
-    assertEquals(read(engine, { id: "entity:timeline", seq: 2 }), {
-      value: { phase: "one", data: { start: true, step: 2 } },
-    });
+    assertEquals(
+      read(engine, { id: "entity:timeline", seq: 1 }),
+      toEntityDocument({ phase: "one", data: { start: true } }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:timeline", seq: 2 }),
+      toEntityDocument({ phase: "one", data: { start: true, step: 2 } }),
+    );
     assertEquals(read(engine, { id: "entity:timeline", seq: 3 }), null);
-    assertEquals(read(engine, { id: "entity:timeline", seq: 4 }), {
-      value: { phase: "two", data: { restart: true } },
-    });
-    assertEquals(read(engine, { id: "entity:timeline", seq: 5 }), {
-      value: { phase: "two", data: { restart: true, final: 5 } },
-    });
-    assertEquals(read(engine, { id: "entity:timeline" }), {
-      value: { phase: "two", data: { restart: true, final: 5 } },
-    });
+    assertEquals(
+      read(engine, { id: "entity:timeline", seq: 4 }),
+      toEntityDocument({ phase: "two", data: { restart: true } }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:timeline", seq: 5 }),
+      toEntityDocument({ phase: "two", data: { restart: true, final: 5 } }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:timeline" }),
+      toEntityDocument({ phase: "two", data: { restart: true, final: 5 } }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1649,16 +1665,19 @@ Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt 
       },
     });
 
-    assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 2 }), {
-      value: { before: { kept: true, count: 2 } },
-    });
+    assertEquals(
+      read(engine, { id: "entity:snapshot-delete", seq: 2 }),
+      toEntityDocument({ before: { kept: true, count: 2 } }),
+    );
     assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 3 }), null);
-    assertEquals(read(engine, { id: "entity:snapshot-delete", seq: 5 }), {
-      value: { after: { rebuilt: true, final: 5 } },
-    });
-    assertEquals(read(engine, { id: "entity:snapshot-delete" }), {
-      value: { after: { rebuilt: true, final: 5 } },
-    });
+    assertEquals(
+      read(engine, { id: "entity:snapshot-delete", seq: 5 }),
+      toEntityDocument({ after: { rebuilt: true, final: 5 } }),
+    );
+    assertEquals(
+      read(engine, { id: "entity:snapshot-delete" }),
+      toEntityDocument({ after: { rebuilt: true, final: 5 } }),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

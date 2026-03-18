@@ -12,8 +12,12 @@ import {
 } from "@commontools/memory/interface";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
-import type { PatchOp } from "@commontools/memory/v2";
-import type { EntitySnapshot, GraphQueryResult } from "@commontools/memory/v2";
+import {
+  type EntityDocument,
+  type EntitySnapshot,
+  type GraphQueryResult,
+  type PatchOp,
+} from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -54,6 +58,12 @@ import type {
 } from "./interface.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getTransactionReadActivities } from "./transaction-inspection.ts";
+import {
+  fromMemoryV2Document,
+  toMemoryV2DocumentFromStorageValue,
+  toMemoryV2DocumentFromTransactionValue,
+  toTransactionDocumentValue,
+} from "./v2-document.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 
 const logger = getLogger("storage.v2", {
@@ -67,13 +77,13 @@ const DOCUMENT_MIME = "application/json" as const;
 
 type PendingVersion = {
   localSeq: number;
-  value: StorableDatum | undefined;
+  value: EntityDocument | undefined;
 };
 
 type ConfirmedVersion = {
   seq: number;
   hash?: string;
-  value: StorableDatum | undefined;
+  value: EntityDocument | undefined;
 };
 
 type DocumentRecord = {
@@ -722,8 +732,14 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   getStorageValue(uri: URI): OptStorageValue {
-    const visible = this.visibleValue(uri);
-    return visible === undefined ? undefined : visible as OptStorageValue;
+    const document = this.visibleDocument(uri);
+    return document === undefined
+      ? undefined
+      : toStorageValueFromStoredDocument(document);
+  }
+
+  getDocument(uri: URI): EntityDocument | undefined {
+    return this.visibleDocument(uri);
   }
 
   async close(): Promise<void> {
@@ -794,7 +810,9 @@ class SpaceReplica implements ISpaceReplica {
           : {
             op: "set" as const,
             id: fact.of as URI,
-            value: toStoredDocument(fact.is as StorableDatum),
+            value: toMemoryV2DocumentFromTransactionValue(
+              fact.is as StorableDatum,
+            ),
           }
       );
 
@@ -819,12 +837,12 @@ class SpaceReplica implements ISpaceReplica {
             op: "patch" as const,
             id: operation.id,
             patches: operation.patches,
-            value: operation.value,
+            value: toMemoryV2DocumentFromTransactionValue(operation.value),
           }
           : {
             op: "set" as const,
             id: operation.id,
-            value: toStoredDocument(operation.value),
+            value: toMemoryV2DocumentFromTransactionValue(operation.value),
           }
       );
 
@@ -884,8 +902,8 @@ class SpaceReplica implements ISpaceReplica {
 
   private async commitOperations(
     operations: Array<
-      | { op: "set"; id: URI; value: StorableDatum }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
+      | { op: "set"; id: URI; value: EntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
       | { op: "delete"; id: URI }
     >,
     source?: IStorageTransaction,
@@ -908,7 +926,7 @@ class SpaceReplica implements ISpaceReplica {
             return {
               op: "set" as const,
               id: operation.id,
-              value: operation.value as any,
+              value: operation.value,
             };
         }
       }),
@@ -951,8 +969,8 @@ class SpaceReplica implements ISpaceReplica {
   private async pushCommit(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: StorableDatum }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
+      | { op: "set"; id: URI; value: EntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
       | { op: "delete"; id: URI }
     >,
     commit: any,
@@ -1048,8 +1066,7 @@ class SpaceReplica implements ISpaceReplica {
       record.confirmed = {
         seq: entity.seq,
         hash: entity.hash,
-        value: entity.document as unknown as StorableDatum | undefined ??
-          undefined,
+        value: entity.document ?? undefined,
       };
     }
 
@@ -1079,7 +1096,7 @@ class SpaceReplica implements ISpaceReplica {
   private applyPending(
     id: URI,
     localSeq: number,
-    value: StorableDatum | undefined,
+    value: EntityDocument | undefined,
   ): void {
     const record = this.record(id);
     record.pending.push({ localSeq, value });
@@ -1088,8 +1105,8 @@ class SpaceReplica implements ISpaceReplica {
   private confirmPending(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: StorableDatum }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: StorableDatum }
+      | { op: "set"; id: URI; value: EntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
       | { op: "delete"; id: URI }
     >,
     applied: AppliedCommit,
@@ -1123,15 +1140,8 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private visibleValue(id: URI): StorableDatum | undefined {
-    const record = this.#docs.get(id);
-    if (!record) {
-      return undefined;
-    }
-    const pending = record.pending.at(-1);
-    if (pending !== undefined) {
-      return pending.value;
-    }
-    return record.confirmed.value;
+    const document = this.visibleDocument(id);
+    return toTransactionDocumentValue(document);
   }
 
   private getState(id: URI): State | undefined {
@@ -1148,6 +1158,18 @@ class SpaceReplica implements ISpaceReplica {
       }),
       since: this.#docs.get(id)?.confirmed.seq ?? 0,
     } as State;
+  }
+
+  private visibleDocument(id: URI): EntityDocument | undefined {
+    const record = this.#docs.get(id);
+    if (!record) {
+      return undefined;
+    }
+    const pending = record.pending.at(-1);
+    if (pending !== undefined) {
+      return pending.value;
+    }
+    return record.confirmed.value;
   }
 
   private notifySinks(changes: IMergedChanges): void {
@@ -1194,32 +1216,11 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
 
 const toStoredDocumentFromStorageValue = (
   value: StorageValue,
-): StorableDatum =>
-  ({
-    ...(value.source !== undefined ? { source: value.source } : {}),
-    value: value.value as StorableValue,
-  }) as StorableDatum;
+): EntityDocument => toMemoryV2DocumentFromStorageValue(value);
 
-const toStoredDocument = (
-  value: StorableDatum,
-): StorableDatum => {
-  if (
-    isRecord(value) &&
-    Object.keys(value).length > 0 &&
-    Object.keys(value).every((key) =>
-      key === "value" || key === "source" || key === "labels"
-    ) &&
-    ("value" in value || "source" in value)
-  ) {
-    return {
-      ...("value" in value ? { value: value.value as StorableValue } : {}),
-      ...("source" in value && value.source !== undefined
-        ? { source: value.source }
-        : {}),
-    } as StorableDatum;
-  }
-  return { value } as StorableDatum;
-};
+const toStorageValueFromStoredDocument = (
+  document: EntityDocument,
+): StorageValue | undefined => fromMemoryV2Document(document);
 
 const toConnectionError = (error: unknown): IConnectionError =>
   ({

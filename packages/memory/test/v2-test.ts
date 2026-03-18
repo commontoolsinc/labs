@@ -18,6 +18,7 @@ Deno.test("memory v2 wraps entity values in the expected document envelope", () 
   assertEquals(
     toEntityDocument({ hello: "world" }, source),
     {
+      $ctDocument: "common-tools/document@1",
       value: { hello: "world" },
       source,
     },

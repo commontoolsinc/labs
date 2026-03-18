@@ -3,7 +3,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import { resolveMemoryV2StoreRootUrl } from "./memory-path.ts";
+import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
 
 // Determine store URL: DB_PATH (single-file mode) or MEMORY_DIR (directory mode)
 let storeUrl: URL;
@@ -30,14 +30,14 @@ if (result.error) {
   throw result.error;
 }
 
-const memoryV2StoreUrl = resolveMemoryV2StoreRootUrl(storeUrl, {
+const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
   singleFileMode: Boolean(env.DB_PATH),
 });
-await FS.ensureDir(new URL("./v2/", memoryV2StoreUrl));
+await FS.ensureDir(memoryEngineStoreUrl);
 
 export const memory = result.ok;
 export const memoryV2Server = new Memory.V2Server.Server({
-  store: memoryV2StoreUrl,
+  store: memoryEngineStoreUrl,
 });
 console.log("Memory: Provider initialized successfully");
 
