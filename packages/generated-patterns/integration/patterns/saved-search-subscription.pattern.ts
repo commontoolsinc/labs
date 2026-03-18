@@ -136,7 +136,9 @@ const sanitizeChannels = (
     if (typeof raw !== "string") continue;
     const normalized = raw.trim().toLowerCase();
     if (normalized.length === 0) continue;
-    if (!Object.prototype.hasOwnProperty.call(channelOrder, normalized)) continue;
+    if (!Object.prototype.hasOwnProperty.call(channelOrder, normalized)) {
+      continue;
+    }
     if (seen.has(normalized)) continue;
     seen.add(normalized);
     sanitized.push(normalized);

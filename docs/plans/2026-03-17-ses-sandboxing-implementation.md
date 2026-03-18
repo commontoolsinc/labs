@@ -81,7 +81,7 @@ Use these exact helper names so the transformer, verifier, and runtime share one
 
 Use these exact wrapper classes:
 
-- `kind` is one of `"pattern"`, `"recipe"`, `"lift"`, `"handler"`.
+- `kind` is one of `"pattern"`, `"lift"`, `"handler"`.
 - `itemId` is a stable per-module identifier derived from module path + top-level ordinal + local name.
 - `captureIds` is an emitted manifest of previously approved top-level bindings used by `__ct_pure_fn(...)` or `__ct_data(...)`.
 
@@ -199,8 +199,9 @@ Create or modify the following files. Keep responsibilities tight; do not hide t
   Trusted `runtimeDeps` provider migrated from the current harness surface.
 - Create: `packages/runner/src/sandbox/ses-runtime.ts`
   Lockdown singleton, per-pattern Compartment lifecycle, verified bundle evaluation, verified-function registry, and source-map registration.
-- Create: `packages/runner/src/sandbox/error-mapping.ts`
-  Source-map loading, stack parsing, and mapped-error objects around `SourceMapParser`.
+- Modify: `packages/runner/src/sandbox/ses-runtime.ts`
+  Own the shared `SourceMapParser` lifecycle for SES evaluation/invocation and
+  expose stack/position mapping through the runtime surface.
 - Create: `packages/runner/src/sandbox/execution-wrapper.ts`
   Sync/async wrappers that preserve security errors and wrap authored failures consistently.
 - Create: `packages/runner/src/sandbox/frame-classifier.ts`
@@ -883,7 +884,7 @@ git commit -m "feat: replace authored eval with verified function refs"
 ### Task 7: Restore Error Mapping, Stack Filtering, And User-Facing Error Surfaces On The SES Path
 
 **Files:**
-- Create: `packages/runner/src/sandbox/error-mapping.ts`
+- Modify: `packages/runner/src/sandbox/ses-runtime.ts`
 - Create: `packages/runner/src/sandbox/execution-wrapper.ts`
 - Create: `packages/runner/src/sandbox/frame-classifier.ts`
 - Create: `packages/runner/src/sandbox/error-display.ts`
@@ -915,9 +916,10 @@ deno test packages/shell/test/error-ipc.test.ts
 
 Expected: FAIL because the current stack/error path is tied to `UnsafeEvalRuntime`.
 
-- [ ] **Step 3: Implement sandbox error mapping and execution wrappers**
+- [ ] **Step 3: Implement sandbox error mapping on shared runtime state**
 
-Build synchronous source-map loading/parsing around `SourceMapParser`, then wrap sync/async authored callbacks so:
+Build synchronous source-map loading/parsing around the SES runtime's shared
+`SourceMapParser`, then wrap sync/async authored callbacks so:
 - security errors pass through unchanged
 - authored failures carry `patternId`, function name, mapped location, and filtered stack
 
@@ -942,7 +944,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/runner/src/sandbox/error-mapping.ts \
+git add packages/runner/src/sandbox/ses-runtime.ts \
   packages/runner/src/sandbox/execution-wrapper.ts \
   packages/runner/src/sandbox/frame-classifier.ts \
   packages/runner/src/sandbox/error-display.ts \
@@ -1036,7 +1038,7 @@ Before declaring the implementation done, verify all of the following:
 - [ ] `import()` is rejected in v1.
 - [ ] Ambient authored globals do not include `fetch`, `Temporal`, randomness helpers, or other host-effectful objects.
 - [ ] `__ct_data(...)` rejects getters, symbol keys, custom prototypes, sparse arrays, cycles, reserved keys, and non-v1 `StorableValue` members.
-- [ ] `pattern()` / `recipe()` still run at module load with only the allowed authority surface.
+- [ ] `pattern()` still runs at module load with only the allowed authority surface.
 - [ ] Runner execution never evaluates authored function source strings.
 - [ ] Trusted `runtimeDeps` imports and same-bundle local imports still work; other static imports do not.
 - [ ] One Compartment is reused per loaded pattern, and different patterns do not share one.

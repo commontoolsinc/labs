@@ -29,11 +29,11 @@ hardening of module-scope definitions at load time.
 
 1. **Invocation Isolation**: Each callback invocation must be isolated from
    any other invocation except through trusted runtime abstractions such as
-   `Cell`, `lift`, `handler`, `pattern`, and `recipe`.
+   `Cell`, `lift`, `handler`, and `pattern`.
 2. **Verified Module Load**: Every top-level module item must be classified and
    verified before it may execute or become observable.
-3. **Direct Callback Builders**: `pattern`, `recipe`, `lift`, `handler`, and
-   similar trusted builders must receive direct callbacks, not IIFE-produced or
+3. **Direct Callback Builders**: `pattern`, `lift`, `handler`, and similar
+   trusted builders must receive direct callbacks, not IIFE-produced or
    otherwise computed callables.
 4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
    only when they are direct functions and their captured module environment is
@@ -230,13 +230,13 @@ A callback is "direct" when it is:
 The following are allowed:
 
 ```typescript
-import { pattern, recipe, lift, handler } from "commontools";
+import { pattern, lift, handler } from "commontools";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   return { value: props.value };
 });
 
-export const MyRecipe = recipe<Input, Output>("name", (props) => {
+export const MyNamedPattern = pattern<Input, Output>("name", (props) => {
   return { value: props.value };
 });
 
@@ -353,19 +353,33 @@ const LOOKUP = __ct_data((() => {
 ```
 
 Within `__ct_data(...)`, the allowed operation set is narrower than normal
-pattern construction. A data initializer may use:
+pattern construction. This is a verifier-simplicity rule, not a claim that all
+other Common Tools helpers are intrinsically dangerous at module load. A data
+initializer may use:
 
 - literals and operators
 - previously verified module-safe-data bindings
-- approved `__ct_pure_fn(...)` top-level helpers whose captures are themselves
-  limited to module-safe data
 
 A data initializer MUST NOT call:
 
-- trusted builder entrypoints such as `pattern`, `recipe`, `lift`, or `handler`
+- trusted builder entrypoints such as `pattern`, `lift`, or `handler`
 - graph-construction built-ins such as `fetchData`, `compileAndRun`,
   `navigateTo`, or `wish`
 - arbitrary imported runtime-module functions
+
+This restriction is intentionally stronger than the general module-load
+authority model. Runtime helpers from trusted Common Tools modules primarily
+construct reactive graph nodes and defer host-visible effects to the scheduler;
+they are excluded from `__ct_data(...)` because v1 data wrappers are defined as
+literal/object/array/identifier expressions whose escaping value can be
+validated directly, not because invoking those helpers would immediately perform
+network or other host effects by itself.
+
+The current implementation baseline is stricter than the abstract model above:
+the verifier accepts only literals, array literals, object literals, and
+identifier/property-path references rooted in previously approved data
+bindings. It does not currently admit helper calls or IIFE-computed values
+inside the third argument to `__ct_data(...)`.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commontools/memory`'s `StorableValue`:
@@ -404,15 +418,14 @@ Externally observable module-load side effects are disallowed except for
 sandboxed `console` output, which is separately controlled and treated as a
 debugging/observability channel rather than a surviving state channel. Trusted
 graph construction during active builder execution is allowed as part of pattern
-assembly, but data-category initializers must remain inert apart from console
-output. This is enforced by giving authored code a narrower module-load
-authority surface than the runtime's later execution environment.
+assembly and does not by itself constitute immediate host I/O, but
+data-category initializers must remain inert apart from console output. This is
+enforced by giving authored code a narrower module-load authority surface than
+the runtime's later execution environment.
 
-`__ct_data(...)` validates the result that survives module load, not the full
-semantics of the computation that produced it. This is acceptable under the
-current threat model because data-category code may only observe already-verified
-module-safe bindings and the only tolerated externally observable side effect in
-that context is sandboxed console output.
+`__ct_data(...)` still validates the value that survives module load, but in the
+current implementation it also constrains the authored expression to the narrow
+literal/object/array/identifier grammar described above before evaluation.
 
 #### 4.2.4 Type-Only Syntax
 
@@ -829,8 +842,8 @@ In v1, the trusted runtime module identifiers are:
 
 These runtime modules may export:
 
-- builder entrypoints: `recipe`, `pattern`, `patternTool`, `lift`, `handler`,
-  `action`, `derive`, `computed`
+- builder entrypoints: `pattern`, `patternTool`, `lift`, `handler`, `action`,
+  `derive`, `computed`
 - cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
   `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
 - graph-construction built-ins: `str`, `ifElse`, `when`, `unless`, `llm`,
@@ -920,9 +933,9 @@ config.key = "value";
 const CONFIG = freezeVerifiedPlainData({ key: "value" });
 ```
 
-#### 7.2.2 Pattern/Recipe Inner Functions Run at Load Time
+#### 7.2.2 Pattern Inner Functions Run at Load Time
 
-When `pattern()` or `recipe()` is called, the inner function executes immediately:
+When `pattern()` is called, the inner function executes immediately:
 
 ```typescript
 export const MyPattern = pattern((props) => {
@@ -1211,32 +1224,35 @@ if (inputSourceMap) {
 
 ### 8.4 Error Mapping Implementation
 
-#### 8.4.1 ErrorMapper Lifecycle
+#### 8.4.1 Shared Source-Map State
 
 Error mapping is synchronous and centered on
-`@commontools/js-compiler`'s `SourceMapParser`:
+`@commontools/js-compiler`'s `SourceMapParser`, but SES must reuse the same
+runtime-owned source-map state across bundle evaluation, invocation, and stack
+parsing rather than introducing a second `ErrorMapper` object model.
+
+The shared surface is:
 
 ```typescript
-class ErrorMapper {
-  private readonly sourceMapParser = new SourceMapParser();
-  private readonly debug: boolean;
-
-  constructor(debug = false) {
-    this.debug = debug;
-  }
-
-  loadSourceMap(filename: string, sourceMap: SourceMap): void { ... }
-  mapError(error: Error, options: ErrorMappingOptions = {}): MappedError { ... }
-  mapPosition(filename: string, line: number, column: number): MappedPosition | null { ... }
-  parseStack(stack: string): string { ... }
-  clear(): void { ... }
+interface StackMapper {
+  loadSourceMap(filename: string, sourceMap: SourceMap): void;
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null;
+  parseStack(stack: string): string;
+  clear(): void;
 }
 ```
 
-- mapping is synchronous
-- source maps are loaded by filename into the mapper, not required to live on
-  every `PatternCompartment`
-- the same mapper also supports direct `parseStack()` and `mapPosition()` calls
+Implementation guidance:
+
+- keep `SourceMapParser` ownership on the runtime / isolate / sandbox instance
+- source maps are loaded by filename into that shared mapper, not stored on
+  individual errors or `PatternCompartment` records
+- the same mapper supports direct `parseStack()` and `mapPosition()` calls for
+  both the harness and the SES runtime
 
 #### 8.4.2 ErrorMappingOptions and MappedError
 
@@ -1259,24 +1275,32 @@ interface MappedError {
 
 Required behavior:
 
-- if `filename` and `sourceMap` are present, the mapper loads that map before
-  parsing the stack
+- if `filename` and `sourceMap` are present, the shared mapper loads that map
+  before parsing the stack
 - `mappedStack` is the formatted post-classification stack shown to users or
   logs
 - `patternLocation` comes from the first `pattern` frame after classification
 - `userMessage` is preformatted so callers do not need to rebuild a concise
   display string
 
-The convenience entrypoint remains synchronous:
+The synchronous helper must operate on the shared mapper:
 
 ```typescript
 function mapError(
+  mapper: StackMapper,
   error: Error,
   options: ErrorMappingOptions = {},
 ): MappedError {
-  return new ErrorMapper(options.debug).mapError(error, options);
+  if (options.filename && options.sourceMap) {
+    mapper.loadSourceMap(options.filename, options.sourceMap);
+  }
+
+  return classifyAndFormatMappedError(mapper, error, options);
 }
 ```
+
+`mapError()` must not instantiate a fresh `SourceMapParser`, `ErrorMapper`, or
+other per-call cache container.
 
 #### 8.4.3 Execution Wrappers
 
@@ -1288,6 +1312,7 @@ interface ExecutionWrapperOptions {
   readonly functionName?: string;
   readonly includeStack?: boolean;
   readonly debug?: boolean;
+  readonly mapper: StackMapper;
 }
 
 class PatternExecutionError extends Error {
@@ -1623,8 +1648,8 @@ current tree.
 |------|----------|-------|
 | Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
 | Source map chaining in js-compiler | High | `js-compiler/typescript/compiler.ts` |
-| ErrorMapper source-map lifecycle | High | `runner/src/sandbox/error-mapping.ts` |
-| Error mapping utility | High | `runner/src/sandbox/error-mapping.ts` |
+| Reuse shared `SourceMapParser` lifecycle in SES runtime | High | `runner/src/sandbox/ses-runtime.ts`, `runner/src/harness/engine.ts` |
+| Error mapping utility over shared mapper state | High | `runner/src/sandbox/ses-runtime.ts`, `runner/src/scheduler.ts` |
 | Execution wrapper with mapping | High | `runner/src/sandbox/execution-wrapper.ts` |
 | Frame classification and filtering | High | `runner/src/sandbox/frame-classifier.ts` |
 | Enhanced error display | Medium | `runner/src/sandbox/error-display.ts` |
@@ -1987,12 +2012,12 @@ export const MyPattern = pattern(() => {
 ```typescript
 // Before
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+runner.start(pattern, inputs);
 
 // After (if explicit lockdown control needed)
 SESRuntime.applyLockdown({ enabled: true, debug: false });
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+runner.start(pattern, inputs);
 ```
 
 ---

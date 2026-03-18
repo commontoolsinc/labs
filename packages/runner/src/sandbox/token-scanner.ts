@@ -211,7 +211,11 @@ function createScannerState(): ScannerState {
 
 function isEscapedByBackslashes(source: string, index: number): boolean {
   let backslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && source[cursor] === "\\"; cursor--) {
+  for (
+    let cursor = index - 1;
+    cursor >= 0 && source[cursor] === "\\";
+    cursor--
+  ) {
     backslashes++;
   }
   return backslashes % 2 === 1;

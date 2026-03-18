@@ -167,7 +167,11 @@ function isDeclarationName(node: ts.Identifier): boolean {
 }
 
 function isTypePosition(node: ts.Identifier): boolean {
-  for (let current: ts.Node | undefined = node.parent; current; current = current.parent) {
+  for (
+    let current: ts.Node | undefined = node.parent;
+    current;
+    current = current.parent
+  ) {
     if (ts.isTypeNode(current)) {
       return true;
     }
@@ -197,9 +201,11 @@ function resolvesToTopLevelBinding(
   }
 
   for (const candidate of candidates) {
-    if ((candidate.declarations ?? []).some((declaration) =>
-      isTopLevelDeclaration(declaration, sourceFile)
-    )) {
+    if (
+      (candidate.declarations ?? []).some((declaration) =>
+        isTopLevelDeclaration(declaration, sourceFile)
+      )
+    ) {
       return true;
     }
   }
@@ -211,7 +217,11 @@ function isTopLevelDeclaration(
   declaration: ts.Declaration,
   sourceFile: ts.SourceFile,
 ): boolean {
-  for (let current: ts.Node | undefined = declaration; current; current = current.parent) {
+  for (
+    let current: ts.Node | undefined = declaration;
+    current;
+    current = current.parent
+  ) {
     if (current === sourceFile) {
       return true;
     }
