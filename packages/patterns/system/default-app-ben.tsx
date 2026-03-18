@@ -186,6 +186,14 @@ const trackRecent = handler<
   recentPieces.set(updated);
 });
 
+const recordSuggestion = handler<
+  SuggestionHistoryEntry,
+  { suggestionHistory: Writable<SuggestionHistoryEntry[]> }
+>(({ result, messages, timestamp }, { suggestionHistory }) => {
+  const current = suggestionHistory.get() ?? [];
+  suggestionHistory.set([...current, { result, messages, timestamp }]);
+});
+
 /** Read current do list items */
 const readDoList = pattern<
   { items: Array<{ title: string; done: boolean; indent: number }> },
@@ -544,6 +552,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
+    recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };
 });

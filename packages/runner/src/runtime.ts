@@ -154,6 +154,7 @@ export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
               },
             },
           },
+          recordSuggestion: { asStream: true },
         },
         asCell: true,
       },

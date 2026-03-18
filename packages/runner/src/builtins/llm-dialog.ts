@@ -2506,48 +2506,29 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             },
           );
 
-          // Record suggestion history separately so conflicts don't break the
-          // main result write. Uses its own editWithRetry with tx-aware get().
+          // Record suggestion history by calling the recordSuggestion handler
+          // on the default pattern. Tolerant if the handler doesn't exist.
           if (
             success && cellifiedResult !== undefined &&
             queueName === "suggestions"
           ) {
-            const snapshotMessages = messagesCell.get() ?? [];
-            const timestamp = new Date().toISOString();
-            runtime.editWithRetry((tx) => {
-              try {
-                const spaceCell = runtime.getCell(
-                  space,
-                  space,
-                  spaceCellSchema,
-                  tx,
-                );
-                const historyCell = spaceCell
-                  .key("defaultPattern")
-                  .key("suggestionHistory");
-                const current =
-                  (historyCell.withTx(tx).get() as unknown[] | undefined) ??
-                    [];
-                historyCell.withTx(tx).set([
-                  ...current,
-                  {
-                    result: (cellifiedResult as any)?.cell ?? cellifiedResult,
-                    messages: snapshotMessages,
-                    timestamp,
-                  },
-                ]);
-                return true;
-              } catch (e) {
-                logger.warn(
-                  "llm",
-                  "Failed to record suggestion history entry",
-                  e,
-                );
-                return false;
-              }
-            }).catch((e) =>
-              logger.warn("llm", "History editWithRetry failed", e)
-            );
+            try {
+              const spaceCell = runtime.getCell(space, space, spaceCellSchema);
+              const handler = spaceCell
+                .key("defaultPattern")
+                .key("recordSuggestion");
+              handler.send({
+                result: (cellifiedResult as any)?.cell ?? cellifiedResult,
+                messages: messagesCell.get() ?? [],
+                timestamp: new Date().toISOString(),
+              });
+            } catch (e) {
+              logger.warn(
+                "llm",
+                "Failed to record suggestion history entry",
+                e,
+              );
+            }
           }
 
           if (success) {
