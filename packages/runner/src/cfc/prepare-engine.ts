@@ -1930,6 +1930,7 @@ function readPolicyRewriteConfig(
 
 function buildPolicyLabelFromConsumedReads(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  additionalIntegrity: CfcIntegrityLabel | undefined = undefined,
 ): PolicyLabelState {
   let confidentiality: CfcConfidentialityLabel | undefined;
   let integrity: CfcIntegrityLabel | undefined;
@@ -1944,6 +1945,8 @@ function buildPolicyLabelFromConsumedReads(
       consumed.effectiveLabel?.integrity,
     );
   }
+
+  integrity = joinIntegrityLabels(integrity, additionalIntegrity);
 
   return {
     confidentiality: confidentiality ?? [],
@@ -2349,6 +2352,7 @@ function evaluatePolicyDowngradeDecision(
   schemaAtWritePath: JSONSchema | undefined,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   outputClassification: CfcConfidentialityLabel | undefined,
+  outputIntegrity: CfcIntegrityLabel | undefined,
   options: PrepareBoundaryCommitOptions = {},
 ): PolicyDowngradeDecision {
   const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
@@ -2361,7 +2365,10 @@ function evaluatePolicyDowngradeDecision(
       fuel: 0,
     };
   }
-  const initialLabel = buildPolicyLabelFromConsumedReads(consumedReadLabels);
+  const initialLabel = buildPolicyLabelFromConsumedReads(
+    consumedReadLabels,
+    outputIntegrity,
+  );
   const policyResult = evaluatePolicyFixpoint(
     initialLabel,
     policyConfig,
@@ -2379,10 +2386,17 @@ function evaluatePolicyDowngradeDecision(
       fuel: policyResult.fuel,
     };
   }
-  const effectiveOutputClassification = policyResult.synthesizedClassification
+  const synthesizedClassification = policyResult.changed &&
+      (!outputClassification || outputClassification.length === 0)
+    ? policyResult.synthesizedClassification ??
+      (policyResult.label.confidentiality.length > 0
+        ? normalizeConfidentialityLabel(policyResult.label.confidentiality)
+        : undefined)
+    : policyResult.synthesizedClassification;
+  const effectiveOutputClassification = synthesizedClassification
     ? joinConfidentialityLabels(
       outputClassification,
-      policyResult.synthesizedClassification,
+      synthesizedClassification,
     )
     : outputClassification;
   return {
@@ -2391,7 +2405,7 @@ function evaluatePolicyDowngradeDecision(
       effectiveOutputClassification,
     ),
     changed: policyResult.changed,
-    synthesizedClassification: policyResult.synthesizedClassification,
+    synthesizedClassification,
     nonConverged: false,
     fuel: policyResult.fuel,
     label: policyResult.label,
@@ -2506,6 +2520,12 @@ function verifyOutputTransitionsForAttempt(
         write.path,
       )?.classification,
     );
+    const actualIntegrity = normalizeIntegrityLabel(
+      effectiveLabelForPath(
+        preparedLabels,
+        write.path,
+      )?.integrity,
+    );
     if (
       !classificationDominates(
         actualClassification,
@@ -2519,6 +2539,7 @@ function verifyOutputTransitionsForAttempt(
         schemaAtWritePath,
         effectiveConsumedReadLabels,
         actualClassification,
+        actualIntegrity,
         options,
       );
       if (decision.nonConverged) {

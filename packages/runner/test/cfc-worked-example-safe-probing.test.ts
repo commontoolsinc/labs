@@ -10,7 +10,10 @@ import {
 } from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
-import type { IExtendedStorageTransaction, Labels } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  Labels,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example safe probing test",
@@ -88,13 +91,20 @@ describe("CFC worked example: safe probing", () => {
     cell: { getAsNormalizedFullLink: () => NormalizedFullLink },
   ): Promise<Record<string, Labels>> {
     const readTx = runtime.edit();
-    const raw = readTx.readOrThrow(cfcLabelsAddress(cell.getAsNormalizedFullLink()));
+    const raw = readTx.readOrThrow(
+      cfcLabelsAddress(cell.getAsNormalizedFullLink()),
+    );
     await readTx.abort();
     return normalizePersistedLabels(raw);
   }
 
   it("clears material-risk caveats for a numeric probe while preserving prompt influence", async () => {
-    const report = runtime.getCell(space, "safe-probing-report", reportSchema, tx);
+    const report = runtime.getCell(
+      space,
+      "safe-probing-report",
+      reportSchema,
+      tx,
+    );
     report.withTx(tx).set("Malicious instructions hidden in a report");
     await prepareCfcCommitIfNeeded(tx);
     let committed = await tx.commit();
@@ -115,10 +125,13 @@ describe("CFC worked example: safe probing", () => {
     expect(committed.error).toBeUndefined();
 
     const labels = await readLabelsForCell(wordCount);
-    expect(labels["/"]?.classification).toEqual([
-      [userAliceAtom],
-      [promptInfluenceAtom],
-    ]);
+    expect(labels["/"]?.classification).toEqual(
+      expect.arrayContaining([
+        [userAliceAtom],
+        [promptInfluenceAtom],
+      ]),
+    );
+    expect(labels["/"]?.classification).toHaveLength(2);
     expect(labels["/"]?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining(injectionSafeAtom),

@@ -937,6 +937,10 @@ Primary docs:
 - [x] Step J.26: include refined-intent integrity in the live fetch sink gate
       so agentic email body rules can require disclaimer/acknowledgment atoms
       without routing authority through the untrusted report text.
+- [x] Step J.27: include prepared output integrity in policy rewrite evaluation
+      so safe-probing sanitizers can require trusted assurance atoms such as
+      `InjectionSafe` while only removing the matched material-risk caveat and
+      preserving unrelated clauses like `PROMPT_INFLUENCE`.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

@@ -288,6 +288,18 @@ Schema-declared write authority is now also enforced in prepare:
 4. This covers the counter-pattern worked example directly at the field level,
    before the write reaches storage.
 
+Policy rewrites now also see trusted output integrity, not just consumed-read
+integrity:
+
+1. Prepare seeds policy evaluation with the effective integrity of the output
+   label being written.
+2. Sanitizer patterns can therefore require trusted post-transform assurance
+   atoms such as `InjectionSafe` in `integrityPre`.
+3. Clause-local confidentiality release remains narrow: removing one matched
+   material-risk caveat does not clear unrelated clauses like
+   `PROMPT_INFLUENCE`.
+4. This is the runner hook needed for the safe-probing worked example.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
