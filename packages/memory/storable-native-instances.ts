@@ -15,7 +15,7 @@ import {
   tagFromNativeValue,
   TAGS,
 } from "@commontools/data-model/type-tags";
-import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
+import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard

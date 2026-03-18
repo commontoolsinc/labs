@@ -49,7 +49,6 @@
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
     "./json-type-handlers": "./json-type-handlers.ts",
-    "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts"
   },
   "imports": {

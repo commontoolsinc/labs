@@ -34,6 +34,7 @@
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
     "./hash-impl": "./hash-impl.ts",
-    "./canonical-hash": "./canonical-hash.ts"
+    "./canonical-hash": "./canonical-hash.ts",
+    "./frozen-builtins": "./frozen-builtins.ts"
   }
 }
