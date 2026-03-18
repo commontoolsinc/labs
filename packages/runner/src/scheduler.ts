@@ -3508,7 +3508,7 @@ export class Scheduler {
   }
 }
 
-function sanitizeUserVisibleStack(stack: string): string {
+export function sanitizeUserVisibleStack(stack: string): string {
   const lines = stack.split("\n");
   if (lines.length === 0) {
     return stack;
@@ -3526,10 +3526,10 @@ function sanitizeUserVisibleStack(stack: string): string {
 
 function isInternalRuntimeStackLine(line: string): boolean {
   return line.includes("<CT_INTERNAL>") ||
-    line.includes("/packages/runner/src/sandbox/ses-runtime.ts:") ||
-    line.includes("/packages/runner/src/runner.ts:") ||
-    line.includes("/packages/runner/src/harness/engine.ts:") ||
-    line.includes("/packages/runner/src/scheduler.ts:") ||
+    line.includes("packages/runner/src/sandbox/ses-runtime.ts:") ||
+    line.includes("packages/runner/src/runner.ts:") ||
+    line.includes("packages/runner/src/harness/engine.ts:") ||
+    line.includes("packages/runner/src/scheduler.ts:") ||
     line.includes(" at wrapped ") ||
     line.includes(" at handler:wrapped ") ||
     line.includes(" at action:wrapped ");
