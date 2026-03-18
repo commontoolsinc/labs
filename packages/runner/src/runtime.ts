@@ -61,10 +61,13 @@ import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import type { CachedCompiler } from "./compilation-cache/mod.ts";
 import {
+  type CfcExecutionIntegritySource,
   type CfcTrustContext,
   type CfcTrustContextSource,
+  resolveCfcExecutionIntegritySnapshot,
   resolveCfcTrustContextSnapshot,
 } from "./cfc/integrity-trust.ts";
+import type { CfcIntegrityLabel } from "./cfc/label-algebra.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -141,6 +144,8 @@ export interface RuntimeOptions {
   cachedCompiler?: CachedCompiler;
   /** Optional trust statements/delegations used when evaluating CFC concept guards. */
   cfcTrustContext?: CfcTrustContextSource;
+  /** Optional ambient execution integrity facts for runtime/device placement checks. */
+  cfcExecutionIntegrity?: CfcExecutionIntegritySource;
   /** Optional fresh commit-time verifier for principal-to-audience bindings. */
   cfcAudienceVerifier?: CfcAudienceVerifier;
 }
@@ -215,6 +220,7 @@ export class Runtime {
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
   readonly cfcTrustContextSource?: CfcTrustContextSource;
+  readonly cfcExecutionIntegritySource?: CfcExecutionIntegritySource;
   readonly cfcAudienceVerifier?: CfcAudienceVerifier;
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
@@ -268,6 +274,7 @@ export class Runtime {
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.cfcTrustContextSource = options.cfcTrustContext;
+    this.cfcExecutionIntegritySource = options.cfcExecutionIntegrity;
     this.cfcAudienceVerifier = options.cfcAudienceVerifier;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
@@ -329,6 +336,12 @@ export class Runtime {
 
   getCfcTrustContextSnapshot(): CfcTrustContext | undefined {
     return resolveCfcTrustContextSnapshot(this.cfcTrustContextSource);
+  }
+
+  getCfcExecutionIntegritySnapshot(): CfcIntegrityLabel | undefined {
+    return resolveCfcExecutionIntegritySnapshot(
+      this.cfcExecutionIntegritySource,
+    );
   }
 
   async verifyCfcAudienceAtCommit(
@@ -456,6 +469,7 @@ export class Runtime {
     return new ExtendedStorageTransaction(tx, () => ({
       actingPrincipal: this.userIdentityDID,
       trustContext: this.getCfcTrustContextSnapshot(),
+      executionIntegrity: this.getCfcExecutionIntegritySnapshot(),
     }));
   }
 

@@ -1013,6 +1013,17 @@ Primary files:
 
 - [-] Broader runner TODO: handlers and transaction lifecycle behavior when
       transactions are later aborted (tracked independently from CFC project).
-- [-] Runtime-trust domain enforcement phase:
-      attestation evidence ingestion, principal-scoped trust-set evaluation,
-      and domain-confinement policy checks (device-locked vs CC-locked data).
+
+### 16.1 Runtime-Trust Domain Enforcement
+
+- [x] Add ambient execution-integrity facts to runtime prepare scope and bind
+      them into the prepared digest so runtime/device placement assumptions are
+      same-attempt checked at commit.
+- [x] Allow policy `integrityPre` guards to match against ambient
+      execution-integrity facts in addition to consumed-read/output integrity.
+- [x] Prove shared-CC calendar release and triggered-audio release worked
+      example slices with runtime attestation facts provided by the runtime.
+- [-] Principal-scoped trust-set evaluation of attestation evidence.
+- [-] Full domain-confinement policy checks for actual runtime/device
+      destinations beyond prepare-time release guards (device-locked vs
+      CC-locked data).

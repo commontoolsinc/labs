@@ -3,7 +3,11 @@ import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import { toHex } from "./shared.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 import { matchesCfcAtomPattern } from "./atom-patterns.ts";
-import type { CfcAtom, CfcIntegrityLabel } from "./label-algebra.ts";
+import {
+  type CfcAtom,
+  type CfcIntegrityLabel,
+  normalizeIntegrityLabel,
+} from "./label-algebra.ts";
 
 export interface CfcVerifierDelegation {
   readonly delegator: string;
@@ -52,6 +56,7 @@ export interface CfcPrepareScope {
   readonly implementationIdentity?: CfcImplementationIdentity;
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+  readonly executionIntegrity?: CfcIntegrityLabel;
 }
 
 export type CfcPrepareScopeOverrides = Partial<CfcPrepareScope>;
@@ -59,6 +64,10 @@ export type CfcPrepareScopeOverrides = Partial<CfcPrepareScope>;
 export type CfcTrustContextSource =
   | CfcTrustContext
   | (() => CfcTrustContext | undefined);
+
+export type CfcExecutionIntegritySource =
+  | CfcIntegrityLabel
+  | (() => CfcIntegrityLabel | undefined);
 
 export interface CfcIntegrityTrustOptions {
   readonly actingPrincipal?: string;
@@ -73,6 +82,13 @@ export function resolveCfcTrustContextSnapshot(
     return undefined;
   }
   return structuredClone(trustContext);
+}
+
+export function resolveCfcExecutionIntegritySnapshot(
+  source: CfcExecutionIntegritySource | undefined,
+): CfcIntegrityLabel | undefined {
+  const executionIntegrity = typeof source === "function" ? source() : source;
+  return normalizeIntegrityLabel(executionIntegrity);
 }
 
 export function snapshotCfcTrustContext(

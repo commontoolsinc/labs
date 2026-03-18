@@ -78,6 +78,7 @@ export interface PrepareBoundaryCommitOptions {
   readonly implementationIdentity?: CfcImplementationIdentity;
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+  readonly executionIntegrity?: CfcIntegrityLabel;
   readonly trustEvaluator?: CfcImplementationTrustEvaluator;
 }
 
@@ -2367,7 +2368,7 @@ function evaluatePolicyDowngradeDecision(
   }
   const initialLabel = buildPolicyLabelFromConsumedReads(
     consumedReadLabels,
-    outputIntegrity,
+    joinIntegrityLabels(outputIntegrity, options.executionIntegrity),
   );
   const policyResult = evaluatePolicyFixpoint(
     initialLabel,
@@ -2827,6 +2828,8 @@ export async function prepareBoundaryCommit(
       prepareScope.implementationIdentity,
     actingPrincipal: options.actingPrincipal ?? prepareScope.actingPrincipal,
     trustContext: options.trustContext ?? prepareScope.trustContext,
+    executionIntegrity: options.executionIntegrity ??
+      prepareScope.executionIntegrity,
   };
   const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
   const writtenEntities = collectWrittenEntities(canonical);
@@ -2907,6 +2910,7 @@ export async function prepareBoundaryCommit(
     implementationIdentity: effectiveOptions.implementationIdentity,
     actingPrincipal: effectiveOptions.actingPrincipal,
     trustContext: effectiveOptions.trustContext,
+    executionIntegrity: effectiveOptions.executionIntegrity,
   });
   tx.markCfcPrepared(digest);
 }

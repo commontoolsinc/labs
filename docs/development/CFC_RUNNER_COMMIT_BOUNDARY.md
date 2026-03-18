@@ -275,8 +275,9 @@ The calendar-consent foundation is now present too:
 5. Policy rewrites now honor `removeMatchedClauses` together with a non-empty
    postcondition, so a matched confidentiality atom can be replaced rather than
    only augmented.
-6. Runtime-placement and stronger participant/runtime guards are still a later
-   layer on top of this foundation.
+6. Broader runtime-trust domain enforcement is still a later layer, but
+   prepare-time runtime/device attestation guards now sit on top of this
+   foundation.
 
 Schema-declared write authority is now also enforced in prepare:
 
@@ -336,6 +337,21 @@ Return-to-sender refinement can also demand explicit provider trust:
    remain separate checks.
 3. This matches the spec’s conditional-trust reading of sender-authored
    provenance without weakening the existing return-to-sender commit gate.
+
+Runtime/device placement guards are now available as ambient prepare-time
+integrity too:
+
+1. `Runtime` may expose ambient execution-integrity atoms such as
+   `RuntimeProfile`, `RuntimeTEE`, `RuntimeProvider`, `RuntimeImage`,
+   `AudioTrigger`, or `AudioFilterApplied`.
+2. Those atoms are threaded into the transaction prepare scope, included in the
+   prepared digest, and therefore same-attempt checked at commit just like the
+   acting principal and trust-context snapshot.
+3. Policy `integrityPre` rules can match those ambient runtime facts without
+   persisting them onto the output label unless the schema explicitly adds them.
+4. This is enough for the shared-CC calendar placement slice and the
+   device-constrained audio-trigger slice from the worked examples; full
+   destination-confinement enforcement remains a later layer.
 
 ## Internal Verifier Read Marker
 

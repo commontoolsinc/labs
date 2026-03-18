@@ -56,6 +56,7 @@ interface NormalizedDigestScope {
   readonly implementationIdentity: string;
   readonly actingPrincipal: string | null;
   readonly trustContextHash: string;
+  readonly executionIntegrity: readonly unknown[];
 }
 
 function normalizeReadMetadata(
@@ -127,6 +128,8 @@ function normalizeDigestScope(
       scope?.actingPrincipal,
       scope?.trustContext,
     ),
+    executionIntegrity: normalizeIntegrityLabel(scope?.executionIntegrity) ??
+      [],
   };
 }
 

@@ -14,6 +14,7 @@ import {
   normalizePersistedLabels,
 } from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcIntegrityLabel } from "../src/cfc/label-algebra.ts";
 import type { Labels } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -141,7 +142,7 @@ const filteredAudioSchema = {
 describe("CFC worked example: runtime placement variants", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let executionIntegrity: readonly unknown[] | undefined;
+  let executionIntegrity: CfcIntegrityLabel | undefined;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });

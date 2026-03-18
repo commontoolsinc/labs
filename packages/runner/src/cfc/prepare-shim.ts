@@ -7,6 +7,7 @@ import type {
   CfcPrepareScopeOverrides,
   CfcTrustContext,
 } from "./integrity-trust.ts";
+import type { CfcIntegrityLabel } from "./label-algebra.ts";
 import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 
 export interface PrepareCfcCommitIfNeededOptions {
@@ -14,6 +15,7 @@ export interface PrepareCfcCommitIfNeededOptions {
   readonly implementationIdentity?: CfcImplementationIdentity;
   readonly actingPrincipal?: string;
   readonly trustContext?: CfcTrustContext;
+  readonly executionIntegrity?: CfcIntegrityLabel;
   readonly trustEvaluator?: CfcImplementationTrustEvaluator;
 }
 
@@ -43,6 +45,9 @@ export async function prepareCfcCommitIfNeeded(
     ...(Object.hasOwn(options, "trustContext")
       ? { trustContext: options.trustContext }
       : {}),
+    ...(Object.hasOwn(options, "executionIntegrity")
+      ? { executionIntegrity: options.executionIntegrity }
+      : {}),
   } satisfies CfcPrepareScopeOverrides;
   tx.setCfcPrepareScopeOverrides(prepareScopeOverrides);
 
@@ -59,6 +64,7 @@ export async function prepareCfcCommitIfNeeded(
     implementationIdentity: prepareScope.implementationIdentity,
     actingPrincipal: prepareScope.actingPrincipal,
     trustContext: prepareScope.trustContext,
+    executionIntegrity: prepareScope.executionIntegrity,
     trustEvaluator: options.trustEvaluator,
   });
 }

@@ -316,6 +316,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         ambientScope.actingPrincipal,
       trustContext: this.cfcState.prepareScopeOverrides.trustContext ??
         ambientScope.trustContext,
+      executionIntegrity:
+        this.cfcState.prepareScopeOverrides.executionIntegrity ??
+          ambientScope.executionIntegrity,
     };
   }
 
@@ -329,6 +332,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       ...overrides,
       ...("trustContext" in overrides
         ? { trustContext: structuredClone(overrides.trustContext) }
+        : {}),
+      ...("executionIntegrity" in overrides
+        ? { executionIntegrity: structuredClone(overrides.executionIntegrity) }
         : {}),
     };
     this.invalidateCfcPreparation();
