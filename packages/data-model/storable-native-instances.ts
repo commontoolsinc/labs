@@ -1,21 +1,17 @@
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "./fabric-value.ts";
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   StorableInstance,
-} from "@commontools/data-model/storable-instance";
+} from "./storable-instance.ts";
 import {
   isStorableInstance,
   type ReconstructionContext,
-} from "@commontools/data-model/storable-protocol";
-import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
+} from "./storable-protocol.ts";
+import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 
-import {
-  NATIVE_TAGS,
-  tagFromNativeValue,
-  TAGS,
-} from "@commontools/data-model/type-tags";
-import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
+import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
+import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard

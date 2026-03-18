@@ -35,6 +35,7 @@
     "./problematic-storable": "./problematic-storable.ts",
     "./hash-impl": "./hash-impl.ts",
     "./canonical-hash": "./canonical-hash.ts",
-    "./frozen-builtins": "./frozen-builtins.ts"
+    "./frozen-builtins": "./frozen-builtins.ts",
+    "./storable-native-instances": "./storable-native-instances.ts"
   }
 }

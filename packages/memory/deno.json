@@ -48,8 +48,7 @@
     "./storable-value-utils": "./storable-value-utils.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
-    "./json-type-handlers": "./json-type-handlers.ts",
-    "./storable-native-instances": "./storable-native-instances.ts"
+    "./json-type-handlers": "./json-type-handlers.ts"
   },
   "imports": {
     "@commontools/leb128": "jsr:@commontools/leb128",

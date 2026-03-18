@@ -11,7 +11,7 @@ import {
   shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "@commontools/memory/storable-value";
-import { StorableError } from "@commontools/memory/storable-native-instances";
+import { StorableError } from "@commontools/data-model/storable-native-instances";
 import {
   refer,
   resetCanonicalHashConfig,
