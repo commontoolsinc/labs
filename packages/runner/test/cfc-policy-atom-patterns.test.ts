@@ -49,6 +49,21 @@ const integrityPatternDeclassifySchema = {
   },
 } as const satisfies JSONSchema;
 
+const missingIntegrityPatternDeclassifySchema = {
+  type: "number",
+  ifc: {
+    declassify: {
+      confidentialityPre: ["secret"],
+      integrityPre: [{
+        type: "https://commonfabric.org/cfc/atom/AuthorizedRequest",
+        endpoint: "GET /gmail/v1/users/me/profile",
+      }],
+      removeMatchedClauses: true,
+      releaseCondition: true,
+    },
+  },
+} as const satisfies JSONSchema;
+
 const confidentialityPatternDeclassifySchema = {
   type: "number",
   ifc: {
@@ -136,6 +151,43 @@ describe("CFC policy atom-pattern preconditions", () => {
     target.withTx(tx).asSchema(integrityPatternDeclassifySchema).set(value + 1);
 
     await expect(prepareCfcCommitIfNeeded(tx)).resolves.toBeUndefined();
+  });
+
+  it("rejects policy rewrites when structured integrityPre object patterns do not match", async () => {
+    let tx = runtime.edit();
+    const source = runtime.getCell<number>(
+      space,
+      "cfc-policy-atom-integrity-miss-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "cfc-policy-atom-integrity-miss-target",
+      undefined,
+      tx,
+    );
+    source.set(6);
+    target.set(0);
+    await tx.commit();
+
+    await seedValueWithLabels(source.getAsNormalizedFullLink().id, 6, {
+      classification: ["secret"],
+      integrity: [authorizedRequestAtom],
+    });
+
+    tx = runtime.edit();
+    const value = Number(
+      source.withTx(tx).asSchema(secretSourceSchema).get() ?? 0,
+    );
+    target.withTx(tx).asSchema(missingIntegrityPatternDeclassifySchema).set(
+      value + 1,
+    );
+
+    await expect(prepareCfcCommitIfNeeded(tx)).rejects.toMatchObject({
+      name: "CfcOutputTransitionViolationError",
+      requirement: "confidentialityMonotonicity",
+    });
   });
 
   it("allows structured confidentialityPre object patterns in policy rewrites", async () => {
