@@ -2439,6 +2439,29 @@ function evaluatePolicyDowngradeDecision(
   };
 }
 
+function nearestPolicyRewriteSchemaForPath(
+  cfc: ContextualFlowControl,
+  rootSchema: JSONSchema | undefined,
+  writePath: string,
+): JSONSchema | undefined {
+  if (!rootSchema) {
+    return undefined;
+  }
+
+  const segments = fromCanonicalPath(writePath);
+  let nearest = readPolicyRewriteConfig(rootSchema) ? rootSchema : undefined;
+  for (let index = 0; index < segments.length; index++) {
+    const candidate = cfc.getSchemaAtPath(
+      rootSchema,
+      segments.slice(0, index + 1),
+    );
+    if (candidate && readPolicyRewriteConfig(candidate)) {
+      nearest = candidate;
+    }
+  }
+  return nearest;
+}
+
 function implementationIdentityMatchesWriteAuthorizer(
   implementationIdentity: CfcImplementationIdentity | undefined,
   authorizer: WriteAuthorizerSpec,
@@ -2567,6 +2590,9 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const policySchemaAtWritePath =
+      nearestPolicyRewriteSchemaForPath(cfc, rootSchema, write.path) ??
+        schemaAtWritePath;
     const writeAuthorizedBy = readWriteAuthorizedBy(schemaAtWritePath);
     if (
       !implementationIdentityAuthorizedForWrite(
@@ -2621,7 +2647,7 @@ function verifyOutputTransitionsForAttempt(
         tx,
         entity,
         write.path,
-        schemaAtWritePath,
+        policySchemaAtWritePath,
         effectiveConsumedReadLabels,
         actualClassification,
         actualIntegrity,

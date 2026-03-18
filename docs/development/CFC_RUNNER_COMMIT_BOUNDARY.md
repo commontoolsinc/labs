@@ -262,18 +262,20 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
    outside the pattern body. Safe-probing now also runs as a true pattern after
    skipping automatic input-classification propagation onto declassifying lift
    outputs.
-3. Durable share-grant and provenance-disclosure tests use the harness for
-   labeled seeding, policy-state setup, and restart, but their final guarded
-   read phase is still direct because the share rewrite is not yet reflected in
-   downstream effective labels of pattern outputs.
+3. Durable share-grant and provenance-disclosure now also run as real pattern
+   flows after prepare-time policy lookup was taught to fall back from a leaf
+   write to the nearest ancestor schema carrying a rewrite rule. This lets a
+   root-object share rewrite authorize the descendant writes produced by a
+   materializing lift.
 4. The remaining uncovered worked-example tests are the direct
    prepare-boundary/runtime-scope variants (`calendar-release`,
    `runtime-placement`); they are not yet pattern-flow tests.
 5. There is still a known gap for some policy-rewrite cases through pattern
    outputs: root/property rewrites that succeed for the produced value do not
    always reappear in the downstream effective labels of later pattern reads.
-   Current blocked conversions are Gmail operator-error views and
-   share-grant/provenance-disclosure.
+   Current blocked conversion is the Gmail operator-error view, where a secret
+   root object still taints child-field effective labels under the current
+   ancestor-label join semantics.
 
 Prepare-time policy matching now also seeds reserved bindings from the ambient
 prepare context:
