@@ -76,6 +76,7 @@ Deno.test("freezeVerifiedPlainData deep-freezes non-enumerable nested data", () 
   const hidden = Object.getOwnPropertyDescriptor(frozen, "hidden")?.value;
 
   assertEquals(Object.isFrozen(frozen), true);
+  assertEquals(hidden === undefined, false);
   assertEquals(Object.isFrozen(hidden), true);
 });
 

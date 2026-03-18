@@ -112,7 +112,8 @@ function isCanonicalArrayIndexKey(key: string): boolean {
     return false;
   }
   const index = Number(key);
-  return Number.isSafeInteger(index) && String(index) === key;
+  return Number.isInteger(index) && index >= 0 && index <= 0xFFFFFFFE &&
+    String(index) === key;
 }
 
 function getOwnDescriptorOrThrow(

@@ -111,3 +111,23 @@ Deno.test("SES runtime keeps shared implementation refs indexed while other eval
 
   assertEquals(runtime.verifiedFunctionIndex.get("shared-ref"), second);
 });
+
+Deno.test("SES runtime prefers the newest surviving callable when shared refs outlive an evaluation", () => {
+  const runtime = new SESRuntime() as unknown as {
+    verifiedFunctions: Map<string, Map<string, VerifiedCallable>>;
+    verifiedFunctionIndex: Map<string, VerifiedCallable>;
+    resetVerifiedFunctions(evaluationId: string): void;
+  };
+  const oldest = (() => 1) as VerifiedCallable;
+  const newer = (() => 2) as VerifiedCallable;
+  const newest = (() => 3) as VerifiedCallable;
+
+  runtime.verifiedFunctions.set("eval-a", new Map([["shared-ref", oldest]]));
+  runtime.verifiedFunctions.set("eval-b", new Map([["shared-ref", newer]]));
+  runtime.verifiedFunctions.set("eval-c", new Map([["shared-ref", newest]]));
+  runtime.verifiedFunctionIndex.set("shared-ref", newest);
+
+  runtime.resetVerifiedFunctions("eval-c");
+
+  assertEquals(runtime.verifiedFunctionIndex.get("shared-ref"), newer);
+});

@@ -301,16 +301,19 @@ export class SESRuntime {
     evaluationId: string,
     implementationRef: string,
   ): VerifiedCallable | undefined {
+    let replacement: VerifiedCallable | undefined;
     for (const [otherEvaluationId, registry] of this.verifiedFunctions) {
       if (otherEvaluationId === evaluationId) {
         continue;
       }
-      const replacement = registry.get(implementationRef);
-      if (replacement) {
-        return replacement;
+      const candidate = registry.get(implementationRef);
+      if (candidate) {
+        // Prefer the most recently registered surviving evaluation rather than
+        // the first one inserted into the global registry.
+        replacement = candidate;
       }
     }
-    return undefined;
+    return replacement;
   }
 
   private collectAssociatedFunctions(
