@@ -325,6 +325,18 @@ Quality-constrained direct-command refinement is now available too:
 4. This gives the agentic fact-checked email variant an earlier, explicit
    quality gate in addition to the normal commit-point sink enforcement.
 
+Return-to-sender refinement can also demand explicit provider trust:
+
+1. A sender-bound confidentiality clause such as `AuthoredBy(..., provider =
+   Gmail)` can now be paired with an early refinement helper that requires
+   matching `TrustedProvider(Gmail)` evidence before minting the final
+   principal-bound `IntentOnce`.
+2. The final sink rule can still require fresh `AudienceRepresents(...)` at
+   commit, so refinement-time provider trust and commit-time audience binding
+   remain separate checks.
+3. This matches the spec’s conditional-trust reading of sender-authored
+   provenance without weakening the existing return-to-sender commit gate.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

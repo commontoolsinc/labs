@@ -949,6 +949,11 @@ Primary docs:
       trusted direct-command root intent with `requiresFactChecked: true`
       refuses to mint the final email-send `IntentOnce` unless `FactChecked`
       assurance evidence is present.
+- [x] Step J.30: add a provider-trusted return-to-sender refinement helper so
+      sender-bound `AuthoredBy(..., provider=...)` confidentiality only
+      refines into a principal-bound return intent when matching
+      `TrustedProvider(provider)` evidence is present before the final
+      commit-time audience verification.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
