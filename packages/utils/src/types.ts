@@ -49,7 +49,9 @@ export function isObject(value: unknown): boolean {
  */
 export function assertIsObject(value: unknown): asserts value is object {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error();
+    throw new Error(
+      "Assertion that value is a non-array/non-null object failed",
+    );
   }
 }
 
