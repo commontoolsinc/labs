@@ -314,6 +314,17 @@ Fetch sink failures now preserve boundary evidence too:
    cells/views while retaining full request confidentiality on raw details and
    headers.
 
+Quality-constrained direct-command refinement is now available too:
+
+1. A trusted direct-command root `IntentOnce` may bind
+   `requiresFactChecked: true` as part of the user's requested authority.
+2. Refinement to the final email-send `IntentOnce` can fail closed before any
+   sink call if the refinement does not carry matching `FactChecked` evidence.
+3. The live fetch sink still independently checks the final request/body
+   bindings plus any disclaimer or assurance atoms required by the sink rule.
+4. This gives the agentic fact-checked email variant an earlier, explicit
+   quality gate in addition to the normal commit-point sink enforcement.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

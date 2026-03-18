@@ -945,6 +945,10 @@ Primary docs:
       failures, write sink-derived labels onto the error cell, and prove the
       Gmail error declassification slice by releasing operator-visible fields
       while retaining full request confidentiality on details and headers.
+- [x] Step J.29: add a quality-constrained agent-email refinement helper so a
+      trusted direct-command root intent with `requiresFactChecked: true`
+      refuses to mint the final email-send `IntentOnce` unless `FactChecked`
+      assurance evidence is present.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
