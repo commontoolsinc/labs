@@ -294,40 +294,76 @@ Deno.test("SES module-scope validation", async (t) => {
     assertEquals(errors[0]!.type, "pattern-context:external-import");
   });
 
-  await t.step("errors on top-level data outside the v1 inert subset", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "errors on top-level data outside the v1 inert subset",
+    async () => {
+      const source = `/// <cts-enable />
       const lookup = new Set(["alpha", "beta"]);
       const matcher = /^[a-z]+$/i;
       export default { lookup, matcher };
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-      sesMode: true,
-    });
-    const errors = getErrors(diagnostics).filter((error) =>
-      error.type === "pattern-context:module-scope-data"
-    );
-    assertGreater(errors.length, 0, "Expected inert-subset diagnostics");
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:module-scope-data"
+      );
+      assertGreater(errors.length, 0, "Expected inert-subset diagnostics");
+    },
+  );
 
-  await t.step("errors when lift callback is not a direct function", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "errors on new Date(), new Error(), and Promise.resolve() at module scope",
+    async () => {
+      const sources = [
+        `/// <cts-enable />\nconst when = new Date();\nexport default when;`,
+        `/// <cts-enable />\nconst err = new Error("boom");\nexport default err;`,
+        `/// <cts-enable />\nconst p = Promise.resolve(1);\nexport default p;`,
+      ];
+      for (const source of sources) {
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+          sesMode: true,
+        });
+        const errors = getErrors(diagnostics).filter((error) =>
+          error.type === "pattern-context:module-scope-data"
+        );
+        assertGreater(
+          errors.length,
+          0,
+          `Expected inert-subset diagnostic for: ${source.split("\n")[1]}`,
+        );
+      }
+    },
+  );
+
+  await t.step(
+    "errors when lift callback is not a direct function",
+    async () => {
+      const source = `/// <cts-enable />
       import { lift } from "commontools";
 
       const makeCallback = () => (value: number) => value + 1;
       export const lifted = lift(makeCallback());
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-      sesMode: true,
-    });
-    const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:non-direct-builder-callback");
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(
+        errors[0]!.type,
+        "pattern-context:non-direct-builder-callback",
+      );
+    },
+  );
 
-  await t.step("allows module-scope function references as builder callbacks", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "allows module-scope function references as builder callbacks",
+    async () => {
+      const source = `/// <cts-enable />
       import { lift } from "commontools";
 
       function sanitize(value: number) {
@@ -336,13 +372,14 @@ Deno.test("SES module-scope validation", async (t) => {
 
       export const lifted = lift(sanitize);
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-      sesMode: true,
-    });
-    const errors = getErrors(diagnostics);
-    assertEquals(errors.length, 0);
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {

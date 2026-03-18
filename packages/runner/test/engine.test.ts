@@ -266,13 +266,22 @@ describe("Engine.evaluate()", () => {
     };
 
     const compiled = await engine.compile(program);
-    const { main } = await engine.evaluate(compiled.id, compiled.jsScript, program.files);
+    const { main } = await engine.evaluate(
+      compiled.id,
+      compiled.jsScript,
+      program.files,
+    );
     const pattern = main!.default as { nodes: Array<{ module: unknown }> };
-    const serialized = JSON.parse(JSON.stringify(pattern, (_key, value) =>
-      typeof value === "function" ? undefined : value
-    ));
+    const serialized = JSON.parse(
+      JSON.stringify(
+        pattern,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
 
-    const module = serialized.nodes[0].module as Parameters<typeof moduleToJSON>[0];
+    const module = serialized.nodes[0].module as Parameters<
+      typeof moduleToJSON
+    >[0];
     expect(typeof module.implementationRef).toBe("string");
     expect(engine.getVerifiedFunction(module.implementationRef!)).toBeDefined();
   });
@@ -318,10 +327,78 @@ describe("Engine.evaluate()", () => {
     const secondRef = secondExport[CT_IMPLEMENTATION_REF]!;
     const secondFn = engine.getVerifiedFunction(secondRef);
 
+    // Internal refs are scoped per-load for isolation
     expect(firstRef).not.toBe(secondRef);
     expect(firstFn).toBeDefined();
     expect(secondFn).toBeDefined();
     expect(firstFn).not.toBe(secondFn);
+  });
+
+  it("serialized implementationRef is stable across separate load sessions of the same source", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    // Two separate compile calls produce distinct JsScript objects with
+    // distinct evaluationIds, simulating separate load sessions.
+    const firstCompiled = await engine.compile(program);
+    const secondCompiled = await engine.compile(program);
+
+    const first = await engine.evaluate(
+      firstCompiled.id,
+      firstCompiled.jsScript,
+      program.files,
+    );
+    const firstPattern = first.main!.default as {
+      nodes: Array<{ module: unknown }>;
+    };
+    const firstSerialized = JSON.parse(
+      JSON.stringify(
+        firstPattern,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+    const firstModuleRef =
+      (firstSerialized.nodes[0].module as { implementationRef?: string })
+        .implementationRef;
+
+    const second = await engine.evaluate(
+      secondCompiled.id,
+      secondCompiled.jsScript,
+      program.files,
+    );
+    const secondPattern = second.main!.default as {
+      nodes: Array<{ module: unknown }>;
+    };
+    const secondSerialized = JSON.parse(
+      JSON.stringify(
+        secondPattern,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+    const secondModuleRef =
+      (secondSerialized.nodes[0].module as { implementationRef?: string })
+        .implementationRef;
+
+    // Serialized refs must be stable (same source -> same ref, no session scoping)
+    expect(firstModuleRef).toBeDefined();
+    expect(secondModuleRef).toBeDefined();
+    expect(firstModuleRef).toBe(secondModuleRef);
+
+    // Both refs must be resolvable in the verified function index
+    expect(engine.getVerifiedFunction(firstModuleRef!)).toBeDefined();
+    expect(engine.getVerifiedFunction(secondModuleRef!)).toBeDefined();
   });
 });
 
@@ -468,7 +545,8 @@ describe("Engine compile + evaluate", () => {
             "export function readGlobalSurface() {",
             "  const proxyType = typeof Proxy;",
             "  const fetchType = typeof fetch;",
-            "  return `${proxyType}:${fetchType}`;",
+            "  const scType = typeof structuredClone;",
+            "  return `${proxyType}:${fetchType}:${scType}`;",
             "}",
             "export default readGlobalSurface;",
           ].join("\n"),
@@ -481,7 +559,9 @@ describe("Engine compile + evaluate", () => {
 
     expect(main).toBeDefined();
     expect(typeof main!["default"]).toBe("function");
-    expect((main!["default"] as () => string)()).toBe("undefined:undefined");
+    expect((main!["default"] as () => string)()).toBe(
+      "undefined:undefined:undefined",
+    );
   });
 
   it("normalizes returned internal cells to value schemas on SES-evaluated patterns", async () => {

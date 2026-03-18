@@ -28,12 +28,14 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
   });
 
   await t.step("rejects statements before define()", async () => {
-    const malicious =
-      createTrustedBundle(
-        `globalThis.__sideEffect = true;define("main",["exports"],function(exports){});return require("main");`,
-      );
+    const malicious = createTrustedBundle(
+      `globalThis.__sideEffect = true;define("main",["exports"],function(exports){});return require("main");`,
+    );
     assertThrows(() => verifyBundlePreflight(malicious));
-    assertEquals((globalThis as { __sideEffect?: boolean }).__sideEffect, undefined);
+    assertEquals(
+      (globalThis as { __sideEffect?: boolean }).__sideEffect,
+      undefined,
+    );
   });
 
   await t.step("rejects statements after the trusted AMD wrapper", () => {
@@ -73,102 +75,154 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     );
   });
 
-  await t.step("rejects unexpected module-load statements even with a sentinel", () => {
-    assertThrows(() =>
+  await t.step(
+    "rejects unexpected module-load statements even with a sentinel",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);globalThis.pwned = true;exports.default=value;}`,
+        })
+      );
+    },
+  );
+
+  await t.step(
+    "rejects non-canonical helper callbacks even when wrapped",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){globalThis.__pwned = true;return 1;});exports.default=fn;}`,
+        })
+      );
+    },
+  );
+
+  await t.step(
+    "rejects non-inert __ct_data third arguments before evaluation",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { globalThis.__pwned = true; return 1; })());exports.default=value;}`,
+        })
+      );
+      assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+    },
+  );
+
+  await t.step(
+    "rejects interpolated template literals in __ct_data third arguments",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            'function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],`${(() => { globalThis.__pwned = true; return 1; })()}`);exports.default=value;}',
+        })
+      );
+      assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+    },
+  );
+
+  await t.step(
+    "allows console module-load side effects while rejecting other globals",
+    () => {
       verifyAMDFactory({
         moduleId: "main",
         dependencies: ["exports"],
         registeredModuleIds: new Set(["main"]),
         factorySource:
-          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);globalThis.pwned = true;exports.default=value;}`,
-      })
-    );
-  });
+          `function(exports){console.log("allowed");/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
+      });
+    },
+  );
 
-  await t.step("rejects non-canonical helper callbacks even when wrapped", () => {
-    assertThrows(() =>
+  await t.step(
+    "rejects console module-load side effects hidden in arguments",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){console.log((globalThis.__pwned = true, "ok"));/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
+        })
+      );
+      assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+    },
+  );
+
+  await t.step(
+    "rejects non-trusted imports and AMD async require",
+    async () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports", "lodash"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){require(["evil"], function(evil) {});exports.default=1;}`,
+        })
+      );
+    },
+  );
+
+  await t.step(
+    "rejects __ct_pure_fn when free identifiers exceed declared capture manifest",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){return SECRET + 1;});exports.default=fn;}`,
+        })
+      );
+    },
+  );
+
+  await t.step(
+    "accepts __ct_pure_fn when free identifiers are within declared capture manifest",
+    () => {
       verifyAMDFactory({
         moduleId: "main",
         dependencies: ["exports"],
         registeredModuleIds: new Set(["main"]),
         factorySource:
-          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){globalThis.__pwned = true;return 1;});exports.default=fn;}`,
-      })
-    );
-  });
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",["CONFIG"],function(){return CONFIG + 1;});exports.default=fn;}`,
+      });
+    },
+  );
 
-  await t.step("rejects non-inert __ct_data third arguments before evaluation", () => {
-    assertThrows(() =>
-      verifyAMDFactory({
-        moduleId: "main",
-        dependencies: ["exports"],
-        registeredModuleIds: new Set(["main"]),
-        factorySource:
-          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { globalThis.__pwned = true; return 1; })());exports.default=value;}`,
-      })
-    );
-    assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
-  });
-
-  await t.step("rejects interpolated template literals in __ct_data third arguments", () => {
-    assertThrows(() =>
-      verifyAMDFactory({
-        moduleId: "main",
-        dependencies: ["exports"],
-        registeredModuleIds: new Set(["main"]),
-        factorySource:
-          "function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data(\"main.tsx#000:value\",[],`${(() => { globalThis.__pwned = true; return 1; })()}`);exports.default=value;}",
-      })
-    );
-    assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
-  });
-
-  await t.step("allows console module-load side effects while rejecting other globals", () => {
-    verifyAMDFactory({
-      moduleId: "main",
-      dependencies: ["exports"],
-      registeredModuleIds: new Set(["main"]),
-      factorySource:
-        `function(exports){console.log("allowed");/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
-    });
-  });
-
-  await t.step("rejects console module-load side effects hidden in arguments", () => {
-    assertThrows(() =>
-      verifyAMDFactory({
-        moduleId: "main",
-        dependencies: ["exports"],
-        registeredModuleIds: new Set(["main"]),
-        factorySource:
-          `function(exports){console.log((globalThis.__pwned = true, "ok"));/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
-      })
-    );
-    assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
-  });
-
-  await t.step("rejects non-trusted imports and AMD async require", async () => {
-    assertThrows(() =>
-      verifyAMDFactory({
-        moduleId: "main",
-        dependencies: ["exports", "lodash"],
-        registeredModuleIds: new Set(["main"]),
-        factorySource:
-          `function(exports){require(["evil"], function(evil) {});exports.default=1;}`,
-      })
-    );
-  });
-
-  await t.step("rejects aliased async require inside trusted helper callbacks", () => {
-    assertThrows(() =>
-      verifyAMDFactory({
-        moduleId: "main",
-        dependencies: ["exports", "require"],
-        registeredModuleIds: new Set(["main"]),
-        factorySource:
-          `function(exports, require){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){const r=require;r(["evil"], function(){});return 1;});exports.default=fn;}`,
-      })
-    );
-  });
+  await t.step(
+    "rejects aliased async require inside trusted helper callbacks",
+    () => {
+      assertThrows(() =>
+        verifyAMDFactory({
+          moduleId: "main",
+          dependencies: ["exports", "require"],
+          registeredModuleIds: new Set(["main"]),
+          factorySource:
+            `function(exports, require){/*__CT_TOPLEVEL__:main.tsx:000:fn:pure-fn*/const fn=__ctHelpers.__ct_pure_fn("main.tsx#000:fn",[],function(){const r=require;r(["evil"], function(){});return 1;});exports.default=fn;}`,
+        })
+      );
+    },
+  );
 
   await t.step("rejects require() inside __ct_fn callbacks", () => {
     assertThrows(() =>
@@ -244,7 +298,9 @@ Deno.test("AMD factory verifier accepts real compiler output from the SES engine
 });
 
 Deno.test("AMD factory verifier accepts real compiler output for direct default-export builders", async () => {
-  const signer = await Identity.fromPassphrase("bundle-preflight default export");
+  const signer = await Identity.fromPassphrase(
+    "bundle-preflight default export",
+  );
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -342,7 +398,9 @@ Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing help
 });
 
 Deno.test("engine evaluation rejects non-inert top-level data initializers before module-load execution", async () => {
-  const signer = await Identity.fromPassphrase("bundle-preflight malicious data");
+  const signer = await Identity.fromPassphrase(
+    "bundle-preflight malicious data",
+  );
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),

@@ -1,4 +1,5 @@
 export const CT_IMPLEMENTATION_REF = Symbol.for("ct.implementationRef");
+export const CT_STABLE_REF = Symbol.for("ct.stableRef");
 export const CT_ITEM_ID = Symbol.for("ct.itemId");
 export const CT_WRAPPER_KIND = Symbol.for("ct.wrapperKind");
 export const CT_CAPTURE_IDS = Symbol.for("ct.captureIds");

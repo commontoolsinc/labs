@@ -15,7 +15,7 @@ import {
   ensureSESLockdown,
 } from "./compartment-globals.ts";
 import { verifyAMDFactory } from "./module-verifier.ts";
-import { CT_IMPLEMENTATION_REF } from "./types.ts";
+import { CT_IMPLEMENTATION_REF, CT_STABLE_REF } from "./types.ts";
 
 interface BundleEvaluationResult {
   main?: Exports;
@@ -122,7 +122,10 @@ export class SESRuntime {
     this.sourceMaps.clear();
   }
 
-  private getCompartment(evaluationId: string, console: unknown): SESCompartment {
+  private getCompartment(
+    evaluationId: string,
+    console: unknown,
+  ): SESCompartment {
     return this.getCompartmentWithHelpers(evaluationId, console, {});
   }
 
@@ -175,7 +178,9 @@ export class SESRuntime {
       },
       require: (dependency: string[] | string) => {
         if (Array.isArray(dependency)) {
-          throw new Error("AMD async require() is not allowed in verified bundles");
+          throw new Error(
+            "AMD async require() is not allowed in verified bundles",
+          );
         }
       },
     };
@@ -214,7 +219,8 @@ export class SESRuntime {
       typeof value === "object" &&
       value !== null &&
       "implementationRef" in (value as Record<string, unknown>) &&
-      typeof (value as Record<string, unknown>).implementationRef === "string" &&
+      typeof (value as Record<string, unknown>).implementationRef ===
+        "string" &&
       "implementation" in (value as Record<string, unknown>) &&
       typeof (value as Record<string, unknown>).implementation === "function"
     ) {
@@ -235,6 +241,7 @@ export class SESRuntime {
       const metadata = value as Function & {
         implementationRef?: string;
         [CT_IMPLEMENTATION_REF]?: string;
+        [CT_STABLE_REF]?: string;
       };
       const implementationRef = metadata[CT_IMPLEMENTATION_REF] ??
         metadata.implementationRef;
@@ -246,6 +253,13 @@ export class SESRuntime {
         }
         registry.set(implementationRef, value);
         this.verifiedFunctionIndex.set(implementationRef, value);
+        // Also register the stable (unscoped) ref so that serialized
+        // modules can be rebound by their stable implementationRef.
+        const stableRef = metadata[CT_STABLE_REF];
+        if (stableRef && stableRef !== implementationRef) {
+          registry.set(stableRef, value);
+          this.verifiedFunctionIndex.set(stableRef, value);
+        }
       }
     }
 
@@ -312,14 +326,18 @@ export class SESRuntime {
       implementationRef?: string;
       [CT_IMPLEMENTATION_REF]?: string;
     };
-    return typeof (carrier[CT_IMPLEMENTATION_REF] ?? carrier.implementationRef) ===
+    return typeof (carrier[CT_IMPLEMENTATION_REF] ??
+      carrier.implementationRef) ===
       "string";
   }
 
   private qualifyOwnImplementationRef(
-    evaluationId: string,
+    _evaluationId: string,
     value: unknown,
   ): void {
+    // For plain objects (module descriptors), keep implementationRef as the
+    // stable (unscoped) ref. This ensures serialized modules are session-
+    // independent and can be rebound in any runtime that has the source.
     if (!value || typeof value !== "object") {
       return;
     }
@@ -328,10 +346,7 @@ export class SESRuntime {
     if (typeof carrier.implementationRef !== "string") {
       return;
     }
-    carrier.implementationRef = this.scopeImplementationRef(
-      evaluationId,
-      carrier.implementationRef,
-    );
+    // No scoping: the ref stays stable for serialization.
   }
 
   private scopeImplementationRef(
@@ -352,11 +367,10 @@ export class SESRuntime {
     },
     seen: Map<unknown, unknown>,
   ): Function {
-    const scopedRef = this.scopeImplementationRef(
-      evaluationId,
-      original[CT_IMPLEMENTATION_REF] ?? original.implementationRef!,
-    );
-    const wrapped = function(this: unknown, ...args: unknown[]) {
+    const stableRef = original[CT_IMPLEMENTATION_REF] ??
+      original.implementationRef!;
+    const scopedRef = this.scopeImplementationRef(evaluationId, stableRef);
+    const wrapped = function (this: unknown, ...args: unknown[]) {
       return Reflect.apply(original, this, args);
     };
     seen.set(original, wrapped);
@@ -386,8 +400,9 @@ export class SESRuntime {
         continue;
       }
       if (key === "implementationRef") {
+        // Use the stable (unscoped) ref for serialization
         Object.defineProperty(wrapped, key, {
-          value: scopedRef,
+          value: stableRef,
           enumerable: descriptor.enumerable ?? true,
           configurable: true,
           writable: false,
@@ -427,12 +442,19 @@ export class SESRuntime {
     }
     if (!Reflect.has(wrapped, "implementationRef")) {
       Object.defineProperty(wrapped, "implementationRef", {
-        value: scopedRef,
+        value: stableRef,
         enumerable: true,
         configurable: true,
         writable: false,
       });
     }
+    // Always store the stable ref for serialization lookup
+    Object.defineProperty(wrapped, CT_STABLE_REF, {
+      value: stableRef,
+      enumerable: false,
+      configurable: true,
+      writable: false,
+    });
 
     if (Object.isFrozen(original)) {
       Object.freeze(wrapped);

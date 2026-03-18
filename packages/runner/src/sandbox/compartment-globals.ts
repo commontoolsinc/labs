@@ -23,10 +23,10 @@ export function createCompartmentGlobals(
   return {
     console,
     harden,
-    structuredClone,
     __ctHelpers: helpers,
     Proxy: undefined,
     fetch: undefined,
     Temporal: undefined,
+    structuredClone: undefined,
   };
 }

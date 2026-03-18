@@ -1,8 +1,5 @@
 import ts from "typescript";
-import {
-  detectCallKind,
-  isFunctionLikeExpression,
-} from "../ast/mod.ts";
+import { detectCallKind, isFunctionLikeExpression } from "../ast/mod.ts";
 import { Transformer } from "../core/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import {
@@ -12,8 +9,7 @@ import {
   createSESItemId,
   toDirectFunctionExpression,
 } from "./ses-wrapper-helpers.ts";
-import {
-} from "../../../runner/src/sandbox/abi.ts";
+import {} from "../../../runner/src/sandbox/abi.ts";
 
 const HOISTABLE_BUILDERS = new Set(["derive", "lift", "handler", "action"]);
 const TRUSTED_RUNTIME_IMPORTS = new Set([
@@ -100,7 +96,9 @@ export class SESModuleScopeHoistTransformer extends Transformer {
         const hoistedName = `__ct_hoisted_lift_${hoistedLiftCount++}`;
         const args = [...visited.arguments];
         const callbackArg = args[args.length - 1]!;
-        const capturesArg = args.length >= 2 ? args[args.length - 2] : undefined;
+        const capturesArg = args.length >= 2
+          ? args[args.length - 2]
+          : undefined;
         const schemaArgs = args.length > 2 ? args.slice(0, -2) : [];
         const liftExpr = context.ctHelpers.sourceHasHelpers()
           ? context.ctHelpers.getHelperExpr("lift")
@@ -173,7 +171,10 @@ export class SESModuleScopeHoistTransformer extends Transformer {
     const imports: ts.Statement[] = [];
     const rest: ts.Statement[] = [];
     for (const statement of transformed.statements) {
-      if (ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) {
+      if (
+        ts.isImportDeclaration(statement) ||
+        ts.isImportEqualsDeclaration(statement)
+      ) {
         imports.push(statement);
       } else {
         rest.push(statement);
@@ -192,19 +193,24 @@ export class SESCanonicalWrapperTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, factory, checker } = context;
     const statements: ts.Statement[] = [];
-    const functionDeclarations = sourceFile.statements.filter((statement):
-      statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement) && !!statement.name && !!statement.body
+    const functionDeclarations = sourceFile.statements.filter((
+      statement,
+    ): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && !!statement.name &&
+      !!statement.body
     );
     const orderedStatements = [
       ...sourceFile.statements.filter((statement) =>
-        ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)
+        ts.isImportDeclaration(statement) ||
+        ts.isImportEqualsDeclaration(statement)
       ),
       ...functionDeclarations,
       ...sourceFile.statements.filter((statement) =>
         !(
-          ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement) ||
-          (ts.isFunctionDeclaration(statement) && !!statement.name && !!statement.body)
+          ts.isImportDeclaration(statement) ||
+          ts.isImportEqualsDeclaration(statement) ||
+          (ts.isFunctionDeclaration(statement) && !!statement.name &&
+            !!statement.body)
         )
       ),
     ];
@@ -214,12 +220,17 @@ export class SESCanonicalWrapperTransformer extends Transformer {
     let ordinal = 0;
 
     for (const statement of orderedStatements) {
-      if (ts.isImportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) {
+      if (
+        ts.isImportDeclaration(statement) ||
+        ts.isImportEqualsDeclaration(statement)
+      ) {
         statements.push(statement);
         continue;
       }
 
-      if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+      if (
+        ts.isFunctionDeclaration(statement) && statement.name && statement.body
+      ) {
         if (isInjectedJSXHelperDeclaration(statement)) {
           statements.push(statement);
           approvedBindings.add(statement.name.text);
@@ -433,9 +444,7 @@ function createCanonicalBindingStatements(options: {
       initializer.body,
       approvedBindings,
     );
-    const helperName = captureIds.length > 0
-      ? "__ct_pure_fn"
-      : "__ct_fn";
+    const helperName = captureIds.length > 0 ? "__ct_pure_fn" : "__ct_fn";
     const wrappedStatement = factory.createVariableStatement(
       undefined,
       factory.createVariableDeclarationList(
@@ -476,7 +485,10 @@ function createCanonicalBindingStatements(options: {
     ];
   }
 
-  const captureIds = collectReferencedIdentifiers(initializer, approvedBindings);
+  const captureIds = collectReferencedIdentifiers(
+    initializer,
+    approvedBindings,
+  );
   const wrappedStatement = factory.createVariableStatement(
     undefined,
     factory.createVariableDeclarationList(
@@ -570,6 +582,27 @@ function encodeStructuredDataInitializer(
   return initializer;
 }
 
+const DISALLOWED_NEW_CONSTRUCTORS = new Set([
+  "Set",
+  "Map",
+  "WeakSet",
+  "WeakMap",
+  "RegExp",
+  "Date",
+  "Error",
+  "TypeError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "URIError",
+  "EvalError",
+]);
+
+const DISALLOWED_STATIC_METHOD_TARGETS = new Set([
+  "Promise",
+  "Symbol",
+]);
+
 export function isDisallowedModuleScopeDataInitializer(
   initializer: ts.Expression,
 ): boolean {
@@ -577,13 +610,24 @@ export function isDisallowedModuleScopeDataInitializer(
     return true;
   }
 
-  if (!ts.isNewExpression(initializer) || !ts.isIdentifier(initializer.expression)) {
-    return false;
+  if (
+    ts.isNewExpression(initializer) && ts.isIdentifier(initializer.expression)
+  ) {
+    return DISALLOWED_NEW_CONSTRUCTORS.has(initializer.expression.text);
   }
 
-  return initializer.expression.text === "Set" ||
-    initializer.expression.text === "Map" ||
-    initializer.expression.text === "RegExp";
+  // Reject static method calls like Promise.resolve(), Symbol.for()
+  if (
+    ts.isCallExpression(initializer) &&
+    ts.isPropertyAccessExpression(initializer.expression) &&
+    ts.isIdentifier(initializer.expression.expression)
+  ) {
+    return DISALLOWED_STATIC_METHOD_TARGETS.has(
+      initializer.expression.expression.text,
+    );
+  }
+
+  return false;
 }
 
 function createAssignment(
@@ -606,20 +650,24 @@ function createAssignment(
 
 function createExportAssignments(
   factory: ts.NodeFactory,
-  modifiers: ts.NodeArray<ts.ModifierLike> | readonly ts.ModifierLike[] | undefined,
+  modifiers:
+    | ts.NodeArray<ts.ModifierLike>
+    | readonly ts.ModifierLike[]
+    | undefined,
   localName: string,
 ): ts.Statement[] {
-  if (!modifiers?.some((modifier) =>
-    modifier.kind === ts.SyntaxKind.ExportKeyword
-  )) {
+  if (
+    !modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.ExportKeyword
+    )
+  ) {
     return [];
   }
 
-  const exportName = modifiers.some((modifier) =>
-    modifier.kind === ts.SyntaxKind.DefaultKeyword
-  )
-    ? "default"
-    : localName;
+  const exportName =
+    modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)
+      ? "default"
+      : localName;
 
   return [
     createExportAssignmentStatement(
@@ -750,7 +798,9 @@ function referencesExternalSymbols(
       const symbol = checker.getSymbolAtLocation(node);
       if (symbol) {
         const declarations = symbol.getDeclarations() ?? [];
-        if (declarations.some((declaration) => isBuiltinDeclaration(declaration))) {
+        if (
+          declarations.some((declaration) => isBuiltinDeclaration(declaration))
+        ) {
           return;
         }
         if (
@@ -865,7 +915,9 @@ function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
 function isPropertyName(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    return true;
+  }
   if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
   return false;
 }

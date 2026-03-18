@@ -133,8 +133,23 @@ describe("PatternManager program persistence", () => {
       ],
     };
 
+    // Compile and extract stable implementationRefs from serialized modules
     const compiled = await runtime.patternManager.compilePattern(program);
     const patternId = runtime.patternManager.registerPattern(compiled, program);
+
+    // Extract the stable implementationRef from the compiled pattern's serialized form
+    const serialized = JSON.parse(
+      JSON.stringify(
+        compiled,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+    const nodeModules = (serialized.nodes ?? []).map(
+      (n: { module?: { implementationRef?: string } }) =>
+        n.module?.implementationRef,
+    ).filter(Boolean) as string[];
+    expect(nodeModules.length).toBeGreaterThan(0);
+
     await runtime.patternManager.saveAndSyncPattern({ patternId, space });
 
     const reloadedRuntime = new Runtime({
@@ -149,6 +164,16 @@ describe("PatternManager program persistence", () => {
         space,
         reloadedTx,
       );
+
+      // Verify that the loaded pattern's serialized implementationRefs are
+      // resolvable in the new runtime's verified function registry.
+      const reloadedEngine = reloadedRuntime
+        .harness as import("../src/harness/engine.ts").Engine;
+      for (const ref of nodeModules) {
+        const fn = reloadedEngine.getVerifiedFunction(ref);
+        expect(fn).toBeDefined();
+      }
+
       const resultCell = reloadedRuntime.getCell<{ result: number }>(
         space,
         "pattern-manager: fresh runtime run loaded",

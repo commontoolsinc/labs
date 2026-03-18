@@ -1,6 +1,4 @@
-import {
-  TRUSTED_RUNTIME_MODULES,
-} from "./abi.ts";
+import { TRUSTED_RUNTIME_MODULES } from "./abi.ts";
 import {
   findBalancedRegion,
   splitTopLevelCommaList,
@@ -16,8 +14,7 @@ export interface VerifyAMDFactoryOptions {
 
 const SCHEMA_ASSIGNMENT_PATTERN =
   /^[$A-Z_a-z][\w$]*\.(?:argumentSchema|resultSchema)\s*=/;
-const EXPORT_VOID_PATTERN =
-  /^exports\.[A-Za-z_$][\w$]*\s*=\s*void 0$/;
+const EXPORT_VOID_PATTERN = /^exports\.[A-Za-z_$][\w$]*\s*=\s*void 0$/;
 const CHAINED_EXPORT_VOID_PATTERN =
   /^(?:exports\.[A-Za-z_$][\w$]*\s*=\s*){2,}void 0$/;
 const USE_STRICT_PATTERN = /^["']use strict["']$/;
@@ -40,8 +37,7 @@ const SENTINEL_PATTERN = /^\/\*__CT_TOPLEVEL__:(.+?)\*\/\s*([\s\S]+)$/;
 const STRING_LITERAL_PATTERN = /^"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'$/;
 const FORBIDDEN_AUTHORITY_PATTERN =
   /(?:^|[^\w$.])globalThis\b|(?:^|[^\w$.])(?:window|document)\s*\.|(?:^|[^\w$.])eval\s*\(|(?:^|[^\w$.])Function\s*\(/;
-const FORBIDDEN_CALLBACK_PATTERN =
-  /(?:^|[^\w$.])require(?:$|[^\w$])/;
+const FORBIDDEN_CALLBACK_PATTERN = /(?:^|[^\w$.])require(?:$|[^\w$])/;
 
 export function verifyAMDFactory(options: VerifyAMDFactoryOptions): void {
   verifyDependencies(options.dependencies, options.registeredModuleIds);
@@ -138,9 +134,7 @@ function isAllowedStatement(statement: string): boolean {
 }
 
 function stripTrailingSemicolon(statement: string): string {
-  return statement.endsWith(";")
-    ? statement.slice(0, -1).trim()
-    : statement;
+  return statement.endsWith(";") ? statement.slice(0, -1).trim() : statement;
 }
 
 function stripTrustedLeadingScaffolding(statement: string): string {
@@ -270,7 +264,8 @@ function isTrustedConsoleStatement(statement: string): boolean {
     return false;
   }
 
-  const argsSource = statement.slice(openParenIndex + 1, closeParenIndex).trim();
+  const argsSource = statement.slice(openParenIndex + 1, closeParenIndex)
+    .trim();
   if (!argsSource) {
     return true;
   }
@@ -355,9 +350,17 @@ function isValidPureFunctionWrapper(args: string[]): boolean {
   if (args.length !== 3) {
     return false;
   }
-  return isTrustedItemId(args[0]!) &&
-    isTrustedCaptureManifest(args[1]!) &&
-    isTrustedFunctionExpression(args[2]!);
+  const captureIds = parseTrustedCaptureManifest(args[1]!);
+  if (!captureIds) {
+    return false;
+  }
+  if (!isTrustedItemId(args[0]!)) {
+    return false;
+  }
+  if (!isTrustedFunctionExpression(args[2]!, new Set(captureIds))) {
+    return false;
+  }
+  return true;
 }
 
 function isValidDataWrapper(args: string[]): boolean {
@@ -377,10 +380,6 @@ function isTrustedItemId(source: string): boolean {
   return STRING_LITERAL_PATTERN.test(value) && value.length > 2;
 }
 
-function isTrustedCaptureManifest(source: string): boolean {
-  return parseTrustedCaptureManifest(source) !== null;
-}
-
 function parseTrustedCaptureManifest(source: string): string[] | null {
   const trimmed = source.trim();
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
@@ -397,7 +396,10 @@ function parseTrustedCaptureManifest(source: string): string[] | null {
   return entries.map((entry) => stripStringLiteralQuotes(entry.trim()));
 }
 
-function isTrustedFunctionExpression(source: string): boolean {
+function isTrustedFunctionExpression(
+  source: string,
+  allowedCaptures?: ReadonlySet<string>,
+): boolean {
   if (!hasFunctionExpressionShape(source)) {
     return false;
   }
@@ -407,8 +409,24 @@ function isTrustedFunctionExpression(source: string): boolean {
   const bodyStart = trimmed.indexOf("{", paramsEnd + 1);
   const bodyEnd = trimmed.lastIndexOf("}");
   const body = trimmed.slice(bodyStart + 1, bodyEnd);
-  return !FORBIDDEN_AUTHORITY_PATTERN.test(body) &&
-    !FORBIDDEN_CALLBACK_PATTERN.test(body);
+  if (
+    FORBIDDEN_AUTHORITY_PATTERN.test(body) ||
+    FORBIDDEN_CALLBACK_PATTERN.test(body)
+  ) {
+    return false;
+  }
+  if (allowedCaptures) {
+    const params = extractFunctionParamNames(
+      trimmed.slice(paramsStart + 1, paramsEnd),
+    );
+    const freeIds = extractFreeIdentifiers(body, params);
+    for (const id of freeIds) {
+      if (!allowedCaptures.has(id) && !WELL_KNOWN_IDENTIFIERS.has(id)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function hasFunctionExpressionShape(source: string): boolean {
@@ -554,7 +572,7 @@ function findTopLevelPropertyColon(source: string): number {
     }
     if (inDouble) {
       if (current === "\\") escaped = true;
-      else if (current === "\"") inDouble = false;
+      else if (current === '"') inDouble = false;
       continue;
     }
     if (inTemplate) {
@@ -567,7 +585,7 @@ function findTopLevelPropertyColon(source: string): number {
       inSingle = true;
       continue;
     }
-    if (current === "\"") {
+    if (current === '"') {
       inDouble = true;
       continue;
     }
@@ -607,3 +625,130 @@ function stripTrustedParens(source: string): string {
 function stripStringLiteralQuotes(source: string): string {
   return source.slice(1, -1);
 }
+
+// Identifiers that are always allowed inside pure function bodies
+// (JS builtins, keywords, etc.)
+const WELL_KNOWN_IDENTIFIERS = new Set([
+  "Object",
+  "Array",
+  "Map",
+  "Set",
+  "WeakMap",
+  "WeakSet",
+  "Promise",
+  "Math",
+  "JSON",
+  "Number",
+  "String",
+  "Boolean",
+  "BigInt",
+  "Date",
+  "RegExp",
+  "Error",
+  "TypeError",
+  "RangeError",
+  "console",
+  "undefined",
+  "null",
+  "true",
+  "false",
+  "NaN",
+  "Infinity",
+  "parseInt",
+  "parseFloat",
+  "isNaN",
+  "isFinite",
+  "encodeURIComponent",
+  "decodeURIComponent",
+  "encodeURI",
+  "decodeURI",
+  "arguments",
+  "this",
+]);
+
+const IDENTIFIER_PATTERN = /[$A-Z_a-z][\w$]*/g;
+
+function extractFunctionParamNames(paramsSource: string): Set<string> {
+  const names = new Set<string>();
+  // Simple extraction: find all identifiers in the param list
+  // This handles `a, b, c` as well as `{a, b}` destructuring
+  for (const match of paramsSource.matchAll(IDENTIFIER_PATTERN)) {
+    names.add(match[0]);
+  }
+  return names;
+}
+
+function extractFreeIdentifiers(
+  body: string,
+  params: ReadonlySet<string>,
+): Set<string> {
+  const freeIds = new Set<string>();
+  // Strip string literals, comments, and regex to avoid false positives
+  const cleaned = body
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+
+  for (const match of cleaned.matchAll(IDENTIFIER_PATTERN)) {
+    const id = match[0];
+    const index = match.index!;
+    // Skip if preceded by a dot (property access, not free identifier)
+    if (index > 0 && cleaned[index - 1] === ".") {
+      continue;
+    }
+    // Skip JS keywords
+    if (isJSKeyword(id)) {
+      continue;
+    }
+    if (!params.has(id)) {
+      freeIds.add(id);
+    }
+  }
+  return freeIds;
+}
+
+function isJSKeyword(id: string): boolean {
+  return JS_KEYWORDS.has(id);
+}
+
+const JS_KEYWORDS = new Set([
+  "break",
+  "case",
+  "catch",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "in",
+  "instanceof",
+  "new",
+  "return",
+  "switch",
+  "this",
+  "throw",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "const",
+  "let",
+  "class",
+  "extends",
+  "super",
+  "yield",
+  "import",
+  "export",
+  "of",
+  "async",
+  "await",
+]);
