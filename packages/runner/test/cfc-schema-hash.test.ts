@@ -71,4 +71,32 @@ describe("computeCfcSchemaHash", () => {
     const normalizedHash = await computeCfcSchemaHash(normalizedSchema);
     expect(legacyHash).toBe(normalizedHash);
   });
+
+  it("allows repeated shared object references without treating them as cycles", async () => {
+    const sharedDeviceAtom = {
+      type: "https://commonfabric.org/cfc/atom/DeviceIdentity",
+      device: "did:key:alice-phone-1",
+    } as const;
+    const schema = {
+      type: "string",
+      ifc: {
+        declassify: {
+          confidentialityPre: [sharedDeviceAtom],
+          integrityPre: [sharedDeviceAtom],
+          removeMatchedClauses: true,
+          postCondition: {
+            confidentiality: [{
+              type: "https://commonfabric.org/cfc/atom/User",
+              subject: "did:key:alice",
+            }],
+          },
+          releaseCondition: true,
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    await expect(computeCfcSchemaHash(schema)).resolves.toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+  });
 });

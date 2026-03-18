@@ -35,6 +35,24 @@ const rawAudioCaveatAtom = {
   source: "mic-buffer-epoch-8842",
 } as const;
 
+const alicePhoneDeviceAtom = {
+  type: "https://commonfabric.org/cfc/atom/DeviceIdentity",
+  device: "did:key:alice-phone-1",
+} as const;
+
+const aliceManagedHighTierAtom = {
+  type: "https://commonfabric.org/cfc/atom/DeviceTier",
+  owner: space,
+  tier: "managed-high",
+} as const;
+
+const strongClientAppAttestedAtom = {
+  type: "https://commonfabric.org/cfc/atom/ClientAppAttested",
+  platform: "ios",
+  appId: "org.example.calendar",
+  verdict: "strong",
+} as const;
+
 const sharedCcExecutionIntegrity = [
   {
     type: "https://commonfabric.org/cfc/atom/RuntimeProfile",
@@ -133,6 +151,53 @@ const filteredAudioSchema = {
       removeMatchedClauses: true,
       postCondition: {
         confidentiality: [userAliceAtom],
+      },
+      releaseCondition: true,
+    },
+  },
+} as const satisfies JSONSchema;
+
+const exactDeviceReleaseSchema = {
+  type: "string",
+  ifc: {
+    declassify: {
+      confidentialityPre: [alicePhoneDeviceAtom],
+      integrityPre: [
+        alicePhoneDeviceAtom,
+        strongClientAppAttestedAtom,
+      ],
+      removeMatchedClauses: true,
+      postCondition: {
+        confidentiality: [userAliceAtom],
+      },
+      releaseCondition: true,
+    },
+  },
+} as const satisfies JSONSchema;
+
+const ownerTierReleaseSchema = {
+  type: "string",
+  ifc: {
+    declassify: {
+      confidentialityPre: [{
+        type: "https://commonfabric.org/cfc/atom/DeviceTier",
+        owner: { var: "$actingUser" },
+        tier: "managed-high",
+      }],
+      integrityPre: [
+        {
+          type: "https://commonfabric.org/cfc/atom/DeviceTier",
+          owner: { var: "$actingUser" },
+          tier: "managed-high",
+        },
+        strongClientAppAttestedAtom,
+      ],
+      removeMatchedClauses: true,
+      postCondition: {
+        confidentiality: [{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: { var: "$actingUser" },
+        }],
       },
       releaseCondition: true,
     },
@@ -299,6 +364,141 @@ describe("CFC worked example: runtime placement variants", () => {
 
     const labels = await readPersistedLabels(
       filteredAudio.getAsNormalizedFullLink().id,
+    );
+    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+  });
+
+  it("allows exact-device release only on the enrolled device identity", async () => {
+    let tx = runtime.edit();
+    const localAvailability = runtime.getCell<string>(
+      space,
+      "runtime-placement-local-availability",
+      undefined,
+      tx,
+    );
+    const releasedAvailability = runtime.getCell<string>(
+      space,
+      "runtime-placement-device-release",
+      undefined,
+      tx,
+    );
+    localAvailability.set("09:00-10:00");
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: localAvailability.getAsNormalizedFullLink().id,
+        type: "application/json",
+      }),
+      {
+        "/": {
+          classification: [[userAliceAtom], [alicePhoneDeviceAtom]],
+        },
+      } satisfies Record<string, Labels>,
+    );
+    let committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    executionIntegrity = [
+      {
+        type: "https://commonfabric.org/cfc/atom/DeviceIdentity",
+        device: "did:key:alice-tablet-1",
+      },
+      strongClientAppAttestedAtom,
+    ];
+
+    tx = runtime.edit();
+    releasedAvailability.withTx(tx).asSchema(exactDeviceReleaseSchema).set(
+      localAvailability.withTx(tx).get() ?? "",
+    );
+    await expect(
+      prepareBoundaryCommit(tx, { actingPrincipal: space }),
+    ).rejects.toMatchObject({
+      name: "CfcOutputTransitionViolationError",
+    });
+    await tx.abort();
+
+    executionIntegrity = [alicePhoneDeviceAtom, strongClientAppAttestedAtom];
+
+    tx = runtime.edit();
+    releasedAvailability.withTx(tx).asSchema(exactDeviceReleaseSchema).set(
+      localAvailability.withTx(tx).get() ?? "",
+    );
+    await expect(
+      prepareBoundaryCommit(tx, { actingPrincipal: space }),
+    ).resolves.toBeUndefined();
+    committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const labels = await readPersistedLabels(
+      releasedAvailability.getAsNormalizedFullLink().id,
+    );
+    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+  });
+
+  it("allows owner-tier release on same-owner managed devices but rejects others", async () => {
+    let tx = runtime.edit();
+    const localAvailability = runtime.getCell<string>(
+      space,
+      "runtime-placement-tier-source",
+      undefined,
+      tx,
+    );
+    const releasedAvailability = runtime.getCell<string>(
+      space,
+      "runtime-placement-tier-release",
+      undefined,
+      tx,
+    );
+    localAvailability.set("10:00-11:00");
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: localAvailability.getAsNormalizedFullLink().id,
+        type: "application/json",
+      }),
+      {
+        "/": {
+          classification: [[userAliceAtom], [aliceManagedHighTierAtom]],
+        },
+      } satisfies Record<string, Labels>,
+    );
+    let committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    executionIntegrity = [
+      {
+        type: "https://commonfabric.org/cfc/atom/DeviceTier",
+        owner: bobDid,
+        tier: "managed-high",
+      },
+      strongClientAppAttestedAtom,
+    ];
+
+    tx = runtime.edit();
+    releasedAvailability.withTx(tx).asSchema(ownerTierReleaseSchema).set(
+      localAvailability.withTx(tx).get() ?? "",
+    );
+    await expect(
+      prepareBoundaryCommit(tx, { actingPrincipal: space }),
+    ).rejects.toMatchObject({
+      name: "CfcOutputTransitionViolationError",
+    });
+    await tx.abort();
+
+    executionIntegrity = [aliceManagedHighTierAtom, strongClientAppAttestedAtom];
+
+    tx = runtime.edit();
+    releasedAvailability.withTx(tx).asSchema(ownerTierReleaseSchema).set(
+      localAvailability.withTx(tx).get() ?? "",
+    );
+    await expect(
+      prepareBoundaryCommit(tx, { actingPrincipal: space }),
+    ).resolves.toBeUndefined();
+    committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const labels = await readPersistedLabels(
+      releasedAvailability.getAsNormalizedFullLink().id,
     );
     expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
   });
