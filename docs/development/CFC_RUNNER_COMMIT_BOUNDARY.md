@@ -164,6 +164,8 @@ Policy rewrite guards now use the same atom-pattern model:
 3. `integrityPre` matches minted evidence atoms (for example
    `AuthorizedRequest`) by subset object pattern, with concept guards still
    routed through trust closure.
+4. `addIntegrity` now persists onto prepared output labels; it is no longer
+   just an internal allow/deny intermediate during policy evaluation.
 
 That composition is now covered end to end for a Gmail-style read flow:
 
@@ -181,6 +183,13 @@ The commit-point send path is also now covered in the same way:
    consumed-intent marker.
 3. A second runtime instance replays the same send and gets the stored result
    back without issuing another network request.
+
+A fact-check assurance slice is also now covered:
+
+1. A policy rewrite authorizes a public-audience output classification from a
+   user-scoped input using structured atom-pattern guards.
+2. The same rewrite persists structured assurance atoms like `FactChecked` and
+   `SourcesDisclosed` onto the output label.
 
 ## Internal Verifier Read Marker
 

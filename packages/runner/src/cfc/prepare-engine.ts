@@ -1585,6 +1585,7 @@ type PolicyDowngradeDecision = {
   readonly allowed: boolean;
   readonly nonConverged: boolean;
   readonly fuel: number;
+  readonly label?: PolicyLabelState;
 };
 
 const DEFAULT_POLICY_FUEL = 8;
@@ -2130,6 +2131,7 @@ function evaluatePolicyDowngradeDecision(
     ),
     nonConverged: false,
     fuel: policyResult.fuel,
+    label: policyResult.label,
   };
 }
 
@@ -2188,6 +2190,9 @@ function verifyOutputTransitionsForAttempt(
     const minClassification = strongestConsumedClassification(
       effectiveConsumedReadLabels,
     );
+    let policyIntegrity = collectDynamicWriteIntegrity(
+      effectiveConsumedReadLabels,
+    );
     let preparedLabels = preparedLabelsByEntity.get(cfcEntityKey(entity));
     if (!preparedLabels) {
       preparedLabels = computePreparedLabels(rootSchema);
@@ -2225,13 +2230,17 @@ function verifyOutputTransitionsForAttempt(
           actualClassification,
         );
       }
+      policyIntegrity = joinIntegrityLabels(
+        policyIntegrity,
+        decision.label?.integrity,
+      );
     }
 
     recordDynamicWriteIntegrity(
       dynamicLabelsByEntity,
       entity,
       write.path,
-      collectDynamicWriteIntegrity(effectiveConsumedReadLabels),
+      policyIntegrity,
     );
     if (flowPrecisionSelection.mode === "elementLocalExpansion") {
       const conservativeClassification =

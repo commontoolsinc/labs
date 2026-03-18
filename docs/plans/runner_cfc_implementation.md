@@ -343,6 +343,9 @@ Primary files:
 - [x] Accept structured atom-pattern `confidentialityPre` and `integrityPre`
       guards in policy rules so minted evidence atoms can participate in
       declassify/exchange checks without string-only shims.
+- [x] Persist policy-added integrity evidence onto prepared output labels;
+      `addIntegrity` must affect stored output labels, not only
+      allow/deny evaluation.
 - [x] Bind prepare success to the acting principal + trust-context snapshot used
       for evaluation; if that snapshot changes before commit, invalidate
       preparation.
@@ -876,6 +879,10 @@ Primary docs:
 - [x] Step J.14: prove the Gmail send/forward worked-example slice across a
       fresh runtime instance: committed `IntentOnce` fetch sends must reuse the
       stored committed result and avoid reissuing the external request.
+- [x] Step J.15: prove a fact-check assurance worked-example slice where policy
+      rewrites both authorize a public audience classification and persist
+      structured assurance atoms (`FactChecked`, `SourcesDisclosed`) onto the
+      output label.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
