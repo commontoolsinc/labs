@@ -155,6 +155,16 @@ Input-requirement checks now also accept structured atom patterns:
 3. Concept-valued requirements still route through the acting principal's
    trust closure rather than requiring derived concept atoms to be persisted.
 
+Policy rewrite guards now use the same atom-pattern model:
+
+1. `confidentialityPre` and `integrityPre` accept JSON atoms, not only legacy
+   strings.
+2. `confidentialityPre` preserves declared order because the first atom is the
+   target clause atom and later atoms are side conditions.
+3. `integrityPre` matches minted evidence atoms (for example
+   `AuthorizedRequest`) by subset object pattern, with concept guards still
+   routed through trust closure.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

@@ -340,6 +340,9 @@ Primary files:
       evaluation and reject boundary attempt on that signal.
 - [x] Match concept-valued integrity preconditions against available concrete
       integrity using the acting principal's trust closure.
+- [x] Accept structured atom-pattern `confidentialityPre` and `integrityPre`
+      guards in policy rules so minted evidence atoms can participate in
+      declassify/exchange checks without string-only shims.
 - [x] Bind prepare success to the acting principal + trust-context snapshot used
       for evaluation; if that snapshot changes before commit, invalidate
       preparation.

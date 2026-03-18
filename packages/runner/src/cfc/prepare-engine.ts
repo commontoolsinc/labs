@@ -46,7 +46,9 @@ import {
   type CfcTrustContext,
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
+import { matchesCfcAtomPattern } from "./atom-patterns.ts";
 import {
+  type CfcAtom,
   type CfcConfidentialityLabel,
   type CfcIntegrityLabel,
   confidentialityDominates,
@@ -775,14 +777,6 @@ function effectiveLabelForPath(
     ...(classification ? { classification } : {}),
     ...(integrity ? { integrity } : {}),
   };
-}
-
-function stringIntegrityAtoms(
-  integrity: CfcIntegrityLabel | undefined,
-): readonly string[] {
-  return (integrity ?? []).filter((atom): atom is string =>
-    typeof atom === "string" && atom.length > 0
-  );
 }
 
 function classificationSatisfiesMaxConfidentiality(
@@ -1560,11 +1554,11 @@ function verifyRecomposeCoverage(
 type PolicyPreConfScope = "targetClause" | "anywhere";
 
 type PolicyRewriteRule = {
-  readonly confidentialityPre: readonly string[];
-  readonly integrityPre: readonly string[];
+  readonly confidentialityPre: readonly CfcAtom[];
+  readonly integrityPre: CfcIntegrityLabel;
   readonly preConfScope: PolicyPreConfScope;
-  readonly addAlternatives: readonly string[];
-  readonly addIntegrity: readonly string[];
+  readonly addAlternatives: readonly CfcAtom[];
+  readonly addIntegrity: CfcIntegrityLabel;
   readonly removeMatchedClauses: boolean;
   readonly releaseCondition: unknown;
 };
@@ -1576,7 +1570,7 @@ type PolicyRewriteConfig = {
 
 type PolicyLabelState = {
   readonly confidentiality: CfcConfidentialityLabel;
-  readonly integrity: readonly string[];
+  readonly integrity: CfcIntegrityLabel;
 };
 
 type PolicyFixpointResult =
@@ -1595,12 +1589,30 @@ type PolicyDowngradeDecision = {
 
 const DEFAULT_POLICY_FUEL = 8;
 
-function toStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string =>
-      typeof entry === "string" && entry.length > 0
-    )
-    : [];
+function normalizePolicyAtomListOrdered(value: unknown): readonly CfcAtom[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const atoms: CfcAtom[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const normalized = normalizeIntegrityLabel([entry]);
+    const atom = normalized?.[0];
+    if (atom === undefined) {
+      continue;
+    }
+    const key = JSON.stringify(atom);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    atoms.push(atom);
+  }
+  return atoms;
+}
+
+function normalizePolicyIntegrityAtoms(value: unknown): CfcIntegrityLabel {
+  return normalizeIntegrityLabel(value) ?? [];
 }
 
 function readPolicyPreConfScope(
@@ -1637,19 +1649,19 @@ function parsePolicyRule(
     }
     : undefined;
 
-  const confidentialityPre = toStringArray(
+  const confidentialityPre = normalizePolicyAtomListOrdered(
     (rawRule as { confidentialityPre?: unknown }).confidentialityPre ??
       preConditionObject?.confidentiality,
   );
-  const integrityPre = toStringArray(
+  const integrityPre = normalizePolicyIntegrityAtoms(
     (rawRule as { integrityPre?: unknown }).integrityPre ??
       preConditionObject?.integrity,
   );
-  const addAlternatives = toStringArray(
+  const addAlternatives = normalizePolicyAtomListOrdered(
     (rawRule as { addAlternatives?: unknown }).addAlternatives ??
       postConditionObject?.confidentiality,
   );
-  const addIntegrity = toStringArray(
+  const addIntegrity = normalizePolicyIntegrityAtoms(
     (rawRule as { addIntegrity?: unknown }).addIntegrity ??
       postConditionObject?.integrity,
   );
@@ -1783,23 +1795,22 @@ function buildPolicyLabelFromConsumedReads(
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
 ): PolicyLabelState {
   let confidentiality: CfcConfidentialityLabel | undefined;
-  const integrity = new Set<string>();
+  let integrity: CfcIntegrityLabel | undefined;
 
   for (const consumed of consumedReadLabels) {
     confidentiality = joinConfidentialityLabels(
       confidentiality,
       consumed.effectiveLabel?.classification,
     );
-    for (
-      const atom of stringIntegrityAtoms(consumed.effectiveLabel?.integrity)
-    ) {
-      integrity.add(atom);
-    }
+    integrity = joinIntegrityLabels(
+      integrity,
+      consumed.effectiveLabel?.integrity,
+    );
   }
 
   return {
     confidentiality: confidentiality ?? [],
-    integrity: [...integrity].sort(),
+    integrity: integrity ?? [],
   };
 }
 
@@ -1810,8 +1821,8 @@ function policyRuleConfidentialityMatches(
 ): boolean {
   const clause = label.confidentiality[clauseIndex];
   const targetAtom = rule.confidentialityPre[0];
-  const clauseContains = (atom: string) =>
-    clause?.some((entry) => typeof entry === "string" && entry === atom) ??
+  const clauseContains = (atom: CfcAtom) =>
+    clause?.some((entry) => matchesCfcAtomPattern(entry, atom)) ??
       false;
   if (!clause || !clauseContains(targetAtom)) {
     return false;
@@ -1821,7 +1832,7 @@ function policyRuleConfidentialityMatches(
     if (rule.preConfScope === "anywhere") {
       const found = label.confidentiality.some((candidateClause) =>
         candidateClause.some((entry) =>
-          typeof entry === "string" && entry === sideCondition
+          matchesCfcAtomPattern(entry, sideCondition)
         )
       );
       if (!found) {
@@ -1905,17 +1916,13 @@ function evaluatePolicyReleaseCondition(
 }
 
 function addPolicyIntegrity(
-  integrity: readonly string[],
-  additions: readonly string[],
-): readonly string[] {
+  integrity: CfcIntegrityLabel,
+  additions: CfcIntegrityLabel,
+): CfcIntegrityLabel {
   if (additions.length === 0) {
     return integrity;
   }
-  const result = new Set(integrity);
-  for (const atom of additions) {
-    result.add(atom);
-  }
-  return [...result].sort();
+  return joinIntegrityLabels(integrity, additions) ?? integrity;
 }
 
 function applyPolicyRuleOnce(
@@ -1951,7 +1958,7 @@ function applyPolicyRuleOnce(
     }
     const clause = [...label.confidentiality[clauseIndex]];
     const targetIndex = clause.findIndex((atom) =>
-      typeof atom === "string" && atom === target
+      matchesCfcAtomPattern(atom, target)
     );
     if (targetIndex < 0) {
       continue;
@@ -1980,9 +1987,7 @@ function applyPolicyRuleOnce(
 
     let clauseChanged = false;
     for (const alternative of rule.addAlternatives) {
-      if (
-        !clause.some((atom) => typeof atom === "string" && atom === alternative)
-      ) {
+      if (!clause.some((atom) => deepEqual(atom, alternative))) {
         clause.push(alternative);
         clauseChanged = true;
       }
@@ -1991,8 +1996,7 @@ function applyPolicyRuleOnce(
       label.integrity,
       rule.addIntegrity,
     );
-    const integrityChanged = nextIntegrity.length !== label.integrity.length ||
-      nextIntegrity.some((atom, index) => atom !== label.integrity[index]);
+    const integrityChanged = !deepEqual(nextIntegrity, label.integrity);
     if (!clauseChanged && !integrityChanged) {
       continue;
     }
