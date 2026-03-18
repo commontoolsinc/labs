@@ -13,7 +13,7 @@ import {
 } from "./types.ts";
 
 export function createBuilderWrapper<T extends VerifiedCallable>(
-  kind: "pattern" | "recipe" | "lift" | "handler",
+  kind: "pattern" | "lift" | "handler",
   itemId: string,
   callback: T,
 ): T & VerifiedMetadataCarrier {
@@ -29,7 +29,7 @@ export function createBuilderWrapper<T extends VerifiedCallable>(
       ) => unknown,
     )
     : pattern(callback as unknown as (input: unknown) => unknown);
-  if (kind === "pattern" || kind === "recipe") {
+  if (kind === "pattern") {
     installPatternResultSchemaNormalizer(
       wrapped as unknown as Pattern & { resultSchema?: JSONSchema },
     );

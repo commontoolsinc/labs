@@ -272,7 +272,7 @@ function isValidBuilderWrapper(args: string[]): boolean {
   if (args.length !== 3) {
     return false;
   }
-  return /^"(?:lift|handler|pattern|recipe)"$/.test(args[0]!.trim()) &&
+  return /^"(?:lift|handler|pattern)"$/.test(args[0]!.trim()) &&
     isTrustedItemId(args[1]!) &&
     isTrustedFunctionExpression(args[2]!);
 }

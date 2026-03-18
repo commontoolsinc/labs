@@ -7,7 +7,6 @@ export type VerifiedCallable = (...args: any[]) => unknown;
 
 export type VerifiedWrapperKind =
   | "pattern"
-  | "recipe"
   | "lift"
   | "handler"
   | "fn"

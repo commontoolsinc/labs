@@ -531,7 +531,7 @@ export class PatternContextValidationTransformer extends Transformer {
     if (
       !builderName ||
       (builderName !== "lift" && builderName !== "handler" &&
-        builderName !== "pattern" && builderName !== "recipe")
+        builderName !== "pattern")
     ) {
       return;
     }
@@ -541,7 +541,7 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!this.isAtModuleScope(node)) {
       return;
     }
-    const callback = builderName === "pattern" || builderName === "recipe"
+    const callback = builderName === "pattern"
       ? node.arguments[0]
       : node.arguments[node.arguments.length - 1];
     if (!callback || isInsideSafeCallbackWrapper(callback, checker, context)) {

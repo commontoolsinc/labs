@@ -526,7 +526,7 @@ function createSchemaAssignments(
   factory: ts.NodeFactory,
   localName: string,
   initializer: ts.CallExpression,
-  builderKind: "pattern" | "recipe" | "lift" | "handler",
+  builderKind: "pattern" | "lift" | "handler",
 ): ts.Statement[] {
   if (isCompilerGeneratedHoistedBuilder(localName)) {
     return [];
@@ -560,11 +560,6 @@ function createSchemaAssignments(
     return [
       createAssignment(factory, localName, "argumentSchema", args[1]!),
       createAssignment(factory, localName, "resultSchema", args[2]!),
-    ];
-  }
-  if (builderKind === "recipe" && args.length >= 2) {
-    return [
-      createAssignment(factory, localName, "resultSchema", args[1]!),
     ];
   }
   return [];
@@ -758,7 +753,7 @@ function createExportAssignmentStatement(
 function getCanonicalBuilderKind(
   expression: ts.Expression,
   checker: ts.TypeChecker,
-): "pattern" | "recipe" | "lift" | "handler" | undefined {
+): "pattern" | "lift" | "handler" | undefined {
   if (!ts.isCallExpression(expression)) {
     return undefined;
   }
@@ -766,7 +761,7 @@ function getCanonicalBuilderKind(
   if (callKind?.kind === "builder") {
     const name = callKind.builderName;
     if (
-      name === "pattern" || name === "recipe" || name === "lift" ||
+      name === "pattern" || name === "lift" ||
       name === "handler"
     ) {
       return name;
@@ -774,8 +769,8 @@ function getCanonicalBuilderKind(
   }
   const simpleName = getSimpleBuilderName(expression.expression);
   if (
-    simpleName === "pattern" || simpleName === "recipe" ||
-    simpleName === "lift" || simpleName === "handler"
+    simpleName === "pattern" || simpleName === "lift" ||
+    simpleName === "handler"
   ) {
     return simpleName;
   }
@@ -784,14 +779,14 @@ function getCanonicalBuilderKind(
 
 function getSimpleBuilderName(
   expression: ts.Expression,
-): "pattern" | "recipe" | "lift" | "handler" | "action" | "derive" | undefined {
+): "pattern" | "lift" | "handler" | "action" | "derive" | undefined {
   const name = ts.isIdentifier(expression)
     ? expression.text
     : ts.isPropertyAccessExpression(expression)
     ? expression.name.text
     : undefined;
   if (
-    name === "pattern" || name === "recipe" || name === "lift" ||
+    name === "pattern" || name === "lift" ||
     name === "handler" || name === "action" || name === "derive"
   ) {
     return name;
