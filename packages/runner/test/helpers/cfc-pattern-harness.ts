@@ -14,6 +14,7 @@ import type { NormalizedFullLink } from "../../src/link-types.ts";
 import { Runtime, type RuntimeOptions } from "../../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
   Labels,
   MemorySpace,
   URI,
@@ -174,7 +175,7 @@ export class CfcPatternTestHarness {
     return this.runtime.getCellFromLink<T>(link, schema, tx);
   }
 
-  async seedLabeledValue<T>(
+  seedLabeledValue<T>(
     options: SeedLabeledValueOptions<T>,
   ) {
     return this.writeCellValue({
@@ -201,6 +202,16 @@ export class CfcPatternTestHarness {
       }
     }, { prepare: options.prepare ?? "none" });
     return this.getCell<T>(options.id, options.schema);
+  }
+
+  async writeDocumentValue(
+    address: IMemorySpaceAddress,
+    value: unknown,
+    options: { prepare?: PrepareMode } = {},
+  ): Promise<void> {
+    await this.withCommittedEdit((tx) => {
+      tx.writeOrThrow(address, value as never);
+    }, options);
   }
 
   async readLabels(

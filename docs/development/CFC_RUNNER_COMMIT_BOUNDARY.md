@@ -251,6 +251,21 @@ A durable sharing slice is now covered too:
 3. A fresh runtime instance can consult that persisted `ShareGrant` and still
    complete the share-style declassification without relying on warm caches.
 
+Worked-example tests now also have a dedicated pattern-oriented harness:
+
+1. `packages/runner/test/helpers/cfc-pattern-harness.ts` owns runtime
+   lifecycle, committed edits, labeled input seeding, fetch stubs, label
+   inspection, and fresh-runtime restart.
+2. Gmail send/read worked-example tests now run mostly as patterns, with the
+   harness keeping only trust/runtime setup outside the pattern body.
+3. Durable share-grant tests also use the harness for labeled seeding, policy
+   state setup, and restart.
+4. There is still a known gap for some policy-rewrite cases through pattern
+   output materialization: root/property output rewrites in worked-example
+   scenarios do not yet consistently persist the same integrity additions that
+   direct schema writes do. Where that gap appears, tests still use a
+   harness-managed direct schema write for the final checked phase.
+
 Prepare-time policy matching now also seeds reserved bindings from the ambient
 prepare context:
 

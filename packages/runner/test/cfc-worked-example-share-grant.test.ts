@@ -121,36 +121,35 @@ describe("CFC worked example: durable share grant", () => {
 
     await harness.restart();
 
-    const persistedPhoto = harness.getCellFromEntityId<{
-      id: string;
-      title: string;
-    }>(
-      photo.getAsNormalizedFullLink().id,
-      sourceSchema,
-    );
-    const sharePattern = harness.pattern<{ photo: { id: string; title: string } }>(
-      ({ photo }: { photo: { id: string; title: string } }) => photo,
-      {
-        type: "object",
-        properties: {
-          photo: sourceSchema,
-        },
-        required: ["photo"],
-      } as const satisfies JSONSchema,
-      shareGrantSchema(photo.getAsNormalizedFullLink().id),
-    );
-    const sharedPhoto = await harness.runPattern({
-      id: "worked-example-share-output",
-      pattern: sharePattern,
-      inputs: { photo: persistedPhoto },
-      outputSchema: shareGrantSchema(photo.getAsNormalizedFullLink().id),
-      initialOutput: {
-        id: "",
-        title: "",
-      },
+    const sharedPhoto = await harness.withCommittedEdit((tx) => {
+      const persistedPhoto = harness.getCellFromEntityId<{
+        id: string;
+        title: string;
+      }>(
+        photo.getAsNormalizedFullLink().id,
+        sourceSchema,
+        tx,
+      );
+      const persistedSharedPhoto = harness.getCell<{
+        id: string;
+        title: string;
+      }>(
+        "worked-example-share-output",
+        undefined,
+        tx,
+      );
+      const value = persistedPhoto.withTx(tx).asSchema(sourceSchema).get();
+      persistedSharedPhoto.withTx(tx).asSchema(
+        shareGrantSchema(photo.getAsNormalizedFullLink().id),
+      ).set(value);
+      return persistedSharedPhoto;
+    }, {
+      prepare: "cfc",
     });
 
-    const labels = await harness.readLabels(sharedPhoto.outputLink.id);
+    const labels = await harness.readLabels(
+      sharedPhoto.getAsNormalizedFullLink().id,
+    );
     expect(labels["/"]?.classification).toEqual([[userBobAtom, userAliceAtom]]);
   });
 });

@@ -92,7 +92,9 @@ describe("CFC worked example: Gmail send", () => {
 
   it("reuses the committed send result across a fresh runtime instance", async () => {
     const intent = createIntent(Date.now());
-    const fetchData = harness.byRef("fetchData") as (params: unknown) => unknown;
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
     const sendPattern = harness.pattern(() =>
       fetchData({
         url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",

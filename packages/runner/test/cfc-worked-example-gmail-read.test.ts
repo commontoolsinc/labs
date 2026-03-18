@@ -140,7 +140,8 @@ describe("CFC worked example: Gmail read", () => {
             headers: { "Content-Type": "application/json" },
           },
         ),
-      ));
+      )
+    );
   });
 
   afterEach(async () => {
@@ -164,11 +165,11 @@ describe("CFC worked example: Gmail read", () => {
       },
       prepare: "boundary",
     });
-    const fetchData = harness.byRef("fetchData") as
-      (params: unknown) => unknown;
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
     const fetchPattern = harness.pattern<{ request: unknown }>(
-      ({ request }: { request: unknown }) =>
-      fetchData(request)
+      ({ request }: { request: unknown }) => fetchData(request),
     );
     const wrapperRun = await harness.runPattern({
       id: "gmail-read-fetch-wrapper",

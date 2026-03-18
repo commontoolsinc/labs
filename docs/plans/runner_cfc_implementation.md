@@ -1050,3 +1050,17 @@ Primary files:
 - [x] Full domain-confinement policy checks for actual runtime/device
       destinations beyond prepare-time release guards (device-locked vs
       CC-locked data).
+
+### 16.2 Worked-Example Pattern Harness
+
+- [x] Add a reusable worked-example test harness for pattern-oriented runner
+      tests (`packages/runner/test/helpers/cfc-pattern-harness.ts`).
+- [x] Cover fetch/send worked examples with harness-managed runtime setup,
+      fetch stubs, restarts, and label inspection while keeping the main logic
+      inside patterns where the current runner path supports it.
+- [x] Cover durable share-grant worked-example setup/restart via the same
+      harness.
+- [ ] Close the remaining gap where some policy-rewrite worked-example phases
+      still need harness-managed direct schema writes because pattern output
+      materialization does not yet persist the same integrity additions as the
+      direct schema-write path.
