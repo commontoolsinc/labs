@@ -88,6 +88,16 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
+export interface CfcAudienceVerificationInput {
+  readonly principal: string;
+  readonly audience: string;
+  readonly endpoint?: string;
+  readonly intentId: string;
+  readonly operation: string;
+}
+export type CfcAudienceVerifier = (
+  input: CfcAudienceVerificationInput,
+) => boolean | Promise<boolean>;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
@@ -131,6 +141,8 @@ export interface RuntimeOptions {
   cachedCompiler?: CachedCompiler;
   /** Optional trust statements/delegations used when evaluating CFC concept guards. */
   cfcTrustContext?: CfcTrustContextSource;
+  /** Optional fresh commit-time verifier for principal-to-audience bindings. */
+  cfcAudienceVerifier?: CfcAudienceVerifier;
 }
 
 /**
@@ -203,6 +215,7 @@ export class Runtime {
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
   readonly cfcTrustContextSource?: CfcTrustContextSource;
+  readonly cfcAudienceVerifier?: CfcAudienceVerifier;
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
 
@@ -255,6 +268,7 @@ export class Runtime {
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.cfcTrustContextSource = options.cfcTrustContext;
+    this.cfcAudienceVerifier = options.cfcAudienceVerifier;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
@@ -315,6 +329,15 @@ export class Runtime {
 
   getCfcTrustContextSnapshot(): CfcTrustContext | undefined {
     return resolveCfcTrustContextSnapshot(this.cfcTrustContextSource);
+  }
+
+  async verifyCfcAudienceAtCommit(
+    input: CfcAudienceVerificationInput,
+  ): Promise<boolean> {
+    if (!this.cfcAudienceVerifier) {
+      return false;
+    }
+    return await this.cfcAudienceVerifier(input);
   }
 
   /**

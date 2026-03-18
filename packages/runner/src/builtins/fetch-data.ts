@@ -327,6 +327,27 @@ async function startFetch(
         inputs,
         async (attemptNumber) => {
           try {
+            if (intent.targetPrincipal) {
+              const requestAudience = new URL(
+                url,
+                getPatternEnvironment().apiUrl,
+              ).origin;
+              const audienceVerified = await runtime.verifyCfcAudienceAtCommit({
+                principal: intent.targetPrincipal,
+                audience: requestAudience,
+                endpoint: cfc.endpoint,
+                intentId: intent.id,
+                operation: intent.operation,
+              });
+              if (!audienceVerified) {
+                return {
+                  success: false,
+                  error: "audience_verification_failed",
+                  terminal: true,
+                };
+              }
+            }
+
             const response = await fetch(
               new URL(url, getPatternEnvironment().apiUrl),
               {

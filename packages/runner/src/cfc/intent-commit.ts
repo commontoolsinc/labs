@@ -12,6 +12,7 @@ export interface CfcIntentCommitResult {
   readonly success: boolean;
   readonly deduplicated?: boolean;
   readonly error?: string;
+  readonly terminal?: boolean;
   readonly attemptNumber?: number;
   readonly result?: unknown;
 }
@@ -88,6 +89,9 @@ export async function commitCfcIntentWithRetries<T>(
 
     const result = await commitActionForAttempt(attempt);
     if (!result.success) {
+      if (result.terminal) {
+        return result;
+      }
       continue;
     }
 

@@ -24,6 +24,7 @@ export interface CfcIntentOnce<T = unknown> {
   readonly operation: string;
   readonly audience: string;
   readonly endpoint: string;
+  readonly targetPrincipal?: string;
   readonly parameters: T;
   readonly payloadDigest: string;
   readonly idempotencyKey: string;
@@ -40,6 +41,7 @@ export interface CreateCfcIntentOnceOptions<T> {
   readonly operation: string;
   readonly audience: string;
   readonly endpoint: string;
+  readonly targetPrincipal?: string;
   readonly parameters: T;
   readonly exp: number;
   readonly maxAttempts: number;
@@ -108,6 +110,9 @@ export function createCfcIntentOnce<T>(
     operation: options.operation,
     audience: options.audience,
     endpoint: options.endpoint,
+    ...(options.targetPrincipal
+      ? { targetPrincipal: options.targetPrincipal }
+      : {}),
     parameters: options.parameters,
     payloadDigest: computeCfcIntentPayloadDigest(options.parameters),
     idempotencyKey: deriveCfcIntentIdempotencyKey({

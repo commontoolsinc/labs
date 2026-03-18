@@ -62,6 +62,7 @@ export const fetchDataInputSchema = {
             operation: { type: "string" },
             audience: { type: "string" },
             endpoint: { type: "string" },
+            targetPrincipal: { type: "string" },
             parameters: {},
             payloadDigest: { type: "string" },
             idempotencyKey: { type: "string" },
