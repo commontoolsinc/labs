@@ -122,10 +122,13 @@ effects and deterministic schema binding.
       precision is trust-gated and fail-closed when untrusted.
 - [x] Align flow-precision claim handling to spec
       `PointwisePresencePreserved` / `PointwiseWriteDependency`.
-- [-] Direct CAS reads must be label-gated (`hash + expectedLabel` + caller
-      readability), not hash-knowledge gated.
-- [-] Direct CAS miss outcomes (absent hash, label mismatch, unreadable label)
-      must be externally indistinguishable.
+- [x] Direct CAS reads are now label-gated in the current helper seam
+      (`hash + expectedLabel` + injected caller-readability check), not
+      hash-knowledge gated.
+- [x] Current direct CAS helper returns an indistinguishable `undefined` result
+      across absent hash, label mismatch, and unreadable label.
+- [ ] Replace the injected CAS readability callback with the runner's concrete
+      caller-access semantics once that API is exposed.
 
 ## 2. Transaction Model Extensions
 
@@ -748,11 +751,14 @@ Primary test location:
 
 ### 11.9 Direct CAS + Dual-Path Safety Tests (Deferred)
 
-- [-] `cfc-cas-write-appends-effective-label-binding.test.ts`
-- [-] `cfc-cas-write-failed-boundary-check-does-not-append-binding.test.ts`
-- [-] `cfc-cas-read-requires-expected-label-match.test.ts`
-- [-] `cfc-cas-read-unreadable-binding-returns-not-found.test.ts`
-- [-] `cfc-cas-read-absent-vs-unreadable-indistinguishable.test.ts`
+- [x] `cfc-cas-write` now covers appending the boundary-computed effective
+      label binding.
+- [x] `cfc-cas-write` now covers boundary rejection without blob/binding write.
+- [x] `cfc-cas-read` now covers exact `expectedLabel` matching.
+- [x] `cfc-cas-read` now covers unreadable matching bindings returning
+      normalized not-found.
+- [x] `cfc-cas-read` now covers absent-hash vs label-mismatch indistinguishable
+      helper results.
 - [-] `cfc-cas-low-write-does-not-overwrite-stronger-binding.test.ts`
 - [-] `cfc-causal-and-cas-no-bypass.test.ts`
 
@@ -973,29 +979,34 @@ Primary files:
 
 ### 15.1 Direct CAS Write Path
 
-- [-] Add write contract for direct CAS that accepts payload bytes plus proposed
+- [x] Add write contract for direct CAS that accepts payload bytes plus proposed
       label context.
-- [-] Route direct CAS writes through trusted boundary evaluation to compute
-      effective write label (caller-provided label is request, not authority).
-- [-] Canonicalize + hash payload bytes before storage.
-- [-] Persist immutable payload by hash and append (never overwrite)
+- [x] Route direct CAS writes through an injected trusted-boundary evaluator to
+      compute effective write label (caller-provided label is request, not
+      authority).
+- [x] Canonicalize + hash payload bytes before storage.
+- [x] Persist immutable payload by hash and append (never overwrite)
       `LabelBinding{label: effectiveLabel}`.
-- [-] On IFC/policy rejection, fail write without appending label binding.
+- [x] On IFC/policy rejection, fail write without appending label binding.
+- [ ] Replace the injected boundary-evaluator seam with the runner's concrete
+      IFC/policy boundary evaluation path.
 
 ### 15.2 Direct CAS Read Path
 
-- [-] Add read contract that requires `blobHash` and `expectedLabel`.
-- [-] Return bytes only when a stored binding exactly matches `expectedLabel`
+- [x] Add read contract that requires `blobHash` and `expectedLabel`.
+- [x] Return bytes only when a stored binding exactly matches `expectedLabel`
       and caller principal can access that label.
-- [-] Return normalized not-found for all non-authorized/non-matching cases.
+- [x] Return normalized not-found for all non-authorized/non-matching cases.
 
 ### 15.3 Miss Indistinguishability and Side-Channel Hygiene
 
-- [-] Normalize external status code/class across absent hash, label mismatch,
+- [x] Normalize helper return shape across absent hash, label mismatch, and
+      unreadable label (`undefined`).
+- [ ] Normalize external status code/class across absent hash, label mismatch,
       and unreadable label.
-- [-] Normalize response body shape across miss cases.
-- [-] Normalize timing envelope within configured bounds for miss cases.
-- [-] Keep internal diagnostics reasoned, but do not leak miss cause via
+- [ ] Normalize response body shape across miss cases.
+- [ ] Normalize timing envelope within configured bounds for miss cases.
+- [ ] Keep internal diagnostics reasoned, but do not leak miss cause via
       external API/log surface.
 
 ### 15.4 Parallel-Store Non-Bypass Rules
@@ -1011,8 +1022,8 @@ Primary files:
 
 ### 15.5 Acceptance Criteria
 
-- [-] Unit tests from Section 11.9 pass for direct CAS and dual-path cases.
-- [-] Existing causal-ID behavior is unchanged by enabling direct CAS path.
+- [ ] Unit tests from Section 11.9 pass for direct CAS and dual-path cases.
+- [ ] Existing causal-ID behavior is unchanged by enabling direct CAS path.
 
 ## 16. Open Items Tracked Separately
 

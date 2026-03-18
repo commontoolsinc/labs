@@ -259,6 +259,20 @@ prepare context:
    principal.
 3. The same binding can be substituted into synthesized output atoms.
 
+There is now also a first direct-CAS helper seam:
+
+1. CAS payloads are stored immutably by canonicalized byte hash, with labels in
+   a separate append-only binding record keyed by the same hash.
+2. Direct CAS writes currently flow through an injected trusted-boundary
+   evaluator that turns a caller-proposed label context into the effective
+   stored label.
+3. Direct CAS reads currently require `(blobHash, expectedLabel)` plus an
+   injected readability check; absent hash, label mismatch, and unreadable
+   label all normalize to the same `undefined` miss shape.
+4. This is intentionally narrower than the final runtime contract: the helper
+   seams still need to be replaced by the runner's concrete IFC/policy engine
+   and caller-access semantics before the CAS path is fully integrated.
+
 The calendar-consent foundation is now present too:
 
 1. Runner-internal `MultiPartyConsentIntent` helpers derive deterministic ids
