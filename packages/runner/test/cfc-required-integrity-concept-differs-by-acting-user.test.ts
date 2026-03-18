@@ -50,16 +50,12 @@ async function seedRuntime(
   space: MemorySpace,
   sourceName: string,
   targetName: string,
-): Promise<{ target: Cell<number> }> {
+): Promise<{ source: Cell<number>; target: Cell<number> }> {
   let tx = runtime.edit();
   const source = runtime.getCell<number>(space, sourceName, undefined, tx);
   const target = runtime.getCell<number>(space, targetName, undefined, tx);
   source.set(1);
   target.set(0);
-  let result = await tx.commit();
-  expect(result.error).toBeUndefined();
-
-  tx = runtime.edit();
   tx.writeOrThrow({
     space,
     id: source.getAsNormalizedFullLink().id,
@@ -70,12 +66,14 @@ async function seedRuntime(
       integrity: ["runtime-attested-source"],
     },
   });
-  result = await tx.commit();
+  const result = await tx.commit();
   expect(result.error).toBeUndefined();
 
+  const refreshedSource = runtime.getCell<number>(space, sourceName);
   const refreshedTarget = runtime.getCell<number>(space, targetName);
+  await refreshedSource.pull();
   await refreshedTarget.pull();
-  return { target: refreshedTarget };
+  return { source: refreshedSource, target: refreshedTarget };
 }
 
 async function waitForCellValue(

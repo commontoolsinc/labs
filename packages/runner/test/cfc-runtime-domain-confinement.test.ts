@@ -13,6 +13,7 @@ import type {
   CfcConfidentialityLabel,
   CfcIntegrityLabel,
 } from "../src/cfc/label-algebra.ts";
+import { normalizeConfidentialityLabel } from "../src/cfc/label-algebra.ts";
 import type { Labels } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -185,11 +186,12 @@ describe("CFC runtime domain confinement", () => {
     const committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    const labels = await readPersistedLabels(target.getAsNormalizedFullLink().id);
-    expect(labels["/"]?.classification).toEqual([
-      [userAliceAtom],
-      [alicePhoneDeviceAtom],
-    ]);
+    const labels = await readPersistedLabels(
+      target.getAsNormalizedFullLink().id,
+    );
+    expect(labels["/"]?.classification).toEqual(
+      normalizeConfidentialityLabel([[userAliceAtom], [alicePhoneDeviceAtom]]),
+    );
   });
 
   it("rejects exact-copy writes of shared-CC-locked data outside the approved runtime", async () => {

@@ -758,6 +758,7 @@ export interface ICfcOutputTransitionViolationError extends IStorageError {
   readonly name: "CfcOutputTransitionViolationError";
   readonly requirement:
     | "confidentialityMonotonicity"
+    | "runtimeConfinement"
     | "writeAuthorizedBy"
     | "exactCopyOf"
     | "projection"

@@ -367,10 +367,19 @@ integrity too:
 4. The acting user’s trust context can now also upgrade structured attestation
    atoms into concept guards; trust statements are no longer limited to
    legacy string concretes.
-5. This is enough for the exact-device, owner-tier, and shared-CC calendar
+5. Prepare now also treats device/runtime confinement clauses on the output
+   label as destination requirements for the current runtime. Exact-copy or
+   otherwise monotone writes of device-locked or shared-CC-locked data fail
+   unless the ambient execution-integrity facts satisfy those confinement
+   clauses.
+6. Only runtime/domain atoms participate in this extra destination check
+   today (`DeviceIdentity`, `DeviceTier`, `RuntimeProfile`, `RuntimeTEE`,
+   `RuntimeProvider`, `RuntimeImage`), so ordinary caveat clauses such as
+   prompt influence are not incorrectly treated as placement locks.
+7. This is enough for the exact-device, owner-tier, and shared-CC calendar
    placement slices plus the device-constrained audio-trigger slice from the
-   worked examples; full destination-confinement enforcement remains a later
-   layer.
+   worked examples, including exact-copy confinement outside explicit
+   declassification rules.
 
 ## Internal Verifier Read Marker
 

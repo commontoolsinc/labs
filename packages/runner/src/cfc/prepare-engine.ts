@@ -44,6 +44,7 @@ import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 import {
   type CfcTrustContext,
+  integrityRequirementSatisfied,
   integritySatisfiesRequiredIntegrity,
 } from "./integrity-trust.ts";
 import {
@@ -207,6 +208,24 @@ function CfcOutputTransitionViolationError(
     type: entity.type,
     path,
     minClassification,
+    actualClassification,
+  };
+}
+
+function CfcRuntimeConfinementViolationError(
+  entity: EntityAddress,
+  path: string,
+  actualClassification: CfcConfidentialityLabel | undefined,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: runtime/device destination does not satisfy confinement clauses",
+    requirement: "runtimeConfinement",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
     actualClassification,
   };
 }
@@ -2450,6 +2469,64 @@ function implementationIdentityAuthorizedForWrite(
   );
 }
 
+const RUNTIME_CONFINEMENT_ATOM_TYPES = new Set<string>([
+  "https://commonfabric.org/cfc/atom/DeviceIdentity",
+  "https://commonfabric.org/cfc/atom/DeviceTier",
+  "https://commonfabric.org/cfc/atom/RuntimeProfile",
+  "https://commonfabric.org/cfc/atom/RuntimeTEE",
+  "https://commonfabric.org/cfc/atom/RuntimeProvider",
+  "https://commonfabric.org/cfc/atom/RuntimeImage",
+]);
+
+function isRuntimeConfinementAtom(atom: CfcAtom): boolean {
+  return typeof atom === "object" && atom !== null && !Array.isArray(atom) &&
+    typeof (atom as { type?: unknown }).type === "string" &&
+    RUNTIME_CONFINEMENT_ATOM_TYPES.has((atom as { type: string }).type);
+}
+
+function ambientRuntimeConfinementFacts(
+  options: PrepareBoundaryCommitOptions,
+): readonly CfcAtom[] {
+  const facts: CfcAtom[] = [...(options.executionIntegrity ?? [])];
+  if (options.actingPrincipal) {
+    facts.push({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: options.actingPrincipal,
+    });
+  }
+  return facts;
+}
+
+function classificationSatisfiedByRuntimeConfinement(
+  classification: CfcConfidentialityLabel | undefined,
+  options: PrepareBoundaryCommitOptions,
+): boolean {
+  const normalized = normalizeConfidentialityLabel(classification);
+  if (!normalized || normalized.length === 0) {
+    return true;
+  }
+
+  const ambientFacts = ambientRuntimeConfinementFacts(options);
+  for (const clause of normalized) {
+    if (!clause.some((atom) => isRuntimeConfinementAtom(atom))) {
+      continue;
+    }
+    const clauseSatisfied = clause.some((atom) =>
+      ambientFacts.some((actual) =>
+        integrityRequirementSatisfied(actual, atom, {
+          actingPrincipal: options.actingPrincipal,
+          trustContext: options.trustContext,
+        })
+      )
+    );
+    if (!clauseSatisfied) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
@@ -2604,6 +2681,26 @@ function verifyOutputTransitionsForAttempt(
           conservativeClassification,
         );
       }
+    }
+
+    const effectiveOutputClassification = joinConfidentialityLabels(
+      actualClassification,
+      effectiveLabelForPath(
+        dynamicLabelsByEntity.get(cfcEntityKey(entity)) ?? {},
+        write.path,
+      )?.classification,
+    );
+    if (
+      !classificationSatisfiedByRuntimeConfinement(
+        effectiveOutputClassification,
+        options,
+      )
+    ) {
+      throw CfcRuntimeConfinementViolationError(
+        entity,
+        write.path,
+        effectiveOutputClassification,
+      );
     }
 
     const statePrecondition = readStatePrecondition(schemaAtWritePath);

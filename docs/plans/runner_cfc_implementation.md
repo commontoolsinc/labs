@@ -1031,6 +1031,6 @@ Primary files:
       attestation facts provided by the runtime.
 - [x] Principal-scoped trust-set evaluation of structured attestation
       evidence for concept guards.
-- [-] Full domain-confinement policy checks for actual runtime/device
+- [x] Full domain-confinement policy checks for actual runtime/device
       destinations beyond prepare-time release guards (device-locked vs
       CC-locked data).
