@@ -873,6 +873,9 @@ Primary docs:
       fresh runtime instance: persisted fetch sink rewrites + minted request
       evidence must satisfy downstream `requiredIntegrity` and policy
       declassify checks without relying on in-memory caches.
+- [x] Step J.14: prove the Gmail send/forward worked-example slice across a
+      fresh runtime instance: committed `IntentOnce` fetch sends must reuse the
+      stored committed result and avoid reissuing the external request.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

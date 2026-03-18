@@ -174,6 +174,14 @@ That composition is now covered end to end for a Gmail-style read flow:
    successfully passes both `requiredIntegrity` and downstream declassify
    checks without relying on phase-1 caches.
 
+The commit-point send path is also now covered in the same way:
+
+1. A Gmail-style send uses `fetchData` with a bound `IntentOnce`.
+2. The first committed attempt stores the committed result alongside the
+   consumed-intent marker.
+3. A second runtime instance replays the same send and gets the stored result
+   back without issuing another network request.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:
