@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   createCfcMultiPartyConsentIntent,
   deriveCfcConsentedByAtom,
+  deriveCfcMultiPartyResultLabels,
   validateCfcMultiPartyConsent,
 } from "../src/cfc/multi-party-consent.ts";
 
@@ -178,6 +179,34 @@ describe("CFC multi-party consent", () => {
     ).toEqual({
       type: "https://commonfabric.org/cfc/atom/ConsentedBy",
       consents: [alice.id, bob.id, carol.id].sort(),
+    });
+  });
+
+  it("derives canonical multi-party result labels from consents and code identity", () => {
+    const alice = createConsent({ participant: "did:key:alice" });
+    const bob = createConsent({ participant: "did:key:bob" });
+    const carol = createConsent({ participant: "did:key:carol" });
+
+    expect(
+      deriveCfcMultiPartyResultLabels({
+        consents: [carol, alice, bob],
+        codeHash: "sha256:findMeetingTimes-v1",
+      }),
+    ).toEqual({
+      classification: [[{
+        type: "https://commonfabric.org/cfc/atom/MultiPartyResult",
+        participants: ["did:key:alice", "did:key:bob", "did:key:carol"],
+      }]],
+      integrity: [
+        {
+          type: "https://commonfabric.org/cfc/atom/ComputedBy",
+          codeHash: "sha256:findMeetingTimes-v1",
+        },
+        {
+          type: "https://commonfabric.org/cfc/atom/ConsentedBy",
+          consents: [alice.id, bob.id, carol.id].sort(),
+        },
+      ],
     });
   });
 });
