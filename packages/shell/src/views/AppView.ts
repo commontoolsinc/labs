@@ -25,7 +25,6 @@ export class XAppView extends BaseView {
       flex-direction: column;
       height: 100%;
       background-color: white;
-      border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
     .content-area {

@@ -31,13 +31,6 @@ export class XRootView extends BaseView {
       display: block;
       width: 100%;
       height: 100vh;
-      padding: var(--padding-desktop, 15px);
-    }
-
-    @media (max-width: 767px) {
-      :host {
-        padding: var(--padding-mobile, 5px);
-      }
     }
 
     #body {
