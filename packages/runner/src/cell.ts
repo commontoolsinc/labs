@@ -594,14 +594,12 @@ export class CellImpl<T extends FabricValue>
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     logger.timeStart("cell", "get");
-    const value = splitRepeatedTopLevelObjectRefs(
-      validateAndTransform(
-        this.runtime,
-        this.tx,
-        this.link,
-        [],
-        { ...options, synced: this.synced },
-      ),
+    const value = validateAndTransform(
+      this.runtime,
+      this.tx,
+      this.link,
+      [],
+      { ...options, synced: this.synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -631,9 +629,7 @@ export class CellImpl<T extends FabricValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return splitRepeatedTopLevelObjectRefs(
-      validateAndTransform(this.runtime, nonReactiveTx, this.link),
-    );
+    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
   }
 
   /**
@@ -2055,62 +2051,6 @@ export function recursivelyAddIDIfNeeded<T>(
 
     return result as T;
   }
-}
-
-function splitRepeatedTopLevelObjectRefs<T>(value: T): T {
-  if (!Array.isArray(value)) {
-    return value;
-  }
-
-  const seen = new Map<object, true>();
-  let changed = false;
-  const result = value.map((item) => {
-    if (
-      !item || typeof item !== "object" || Array.isArray(item) ||
-      isCell(item)
-    ) {
-      return item;
-    }
-
-    if (!seen.has(item)) {
-      seen.set(item, true);
-      return item;
-    }
-
-    changed = true;
-    return cloneObjectGraph(item, new Map());
-  });
-
-  return changed ? result as T : value;
-}
-
-function cloneObjectGraph<T>(
-  value: T,
-  seen: Map<object, unknown>,
-): T {
-  if (!value || typeof value !== "object" || isCell(value)) {
-    return value;
-  }
-
-  if (seen.has(value as object)) {
-    return seen.get(value as object) as T;
-  }
-
-  if (Array.isArray(value)) {
-    const result: unknown[] = new Array(value.length);
-    seen.set(value, result);
-    value.forEach((entry, index) => {
-      result[index] = cloneObjectGraph(entry, seen);
-    });
-    return result as T;
-  }
-
-  const result: Record<string, unknown> = {};
-  seen.set(value as object, result);
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = cloneObjectGraph(entry, seen);
-  }
-  return result as T;
 }
 
 /**

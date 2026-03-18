@@ -54,6 +54,28 @@ describe("stripSymbols", () => {
     ]);
   });
 
+  it("should not mark repeated shared references as circular", () => {
+    const shared = {
+      name: "shared",
+      [testSymbol1]: "removed",
+    };
+
+    expect(stripSymbols([shared, shared])).toEqual([
+      { name: "shared" },
+      { name: "shared" },
+    ]);
+  });
+
+  it("should still mark true cycles as circular", () => {
+    const obj: Record<string, unknown> = { name: "cycle" };
+    obj["self"] = obj;
+
+    expect(stripSymbols(obj)).toEqual({
+      name: "cycle",
+      self: "[Circular]",
+    });
+  });
+
   it("should handle primitives", () => {
     expect(stripSymbols(42)).toBe(42);
     expect(stripSymbols("string")).toBe("string");
@@ -149,6 +171,18 @@ describe("toEqualIgnoringSymbols matcher", () => {
     ];
 
     expect(arr1).toEqualIgnoringSymbols(arr2);
+  });
+
+  it("should handle repeated shared references in arrays", () => {
+    const shared = {
+      value: 40,
+      [testSymbol1]: "ignored",
+    };
+
+    expect([shared, shared]).toEqualIgnoringSymbols([
+      { value: 40 },
+      { value: 40 },
+    ]);
   });
 });
 

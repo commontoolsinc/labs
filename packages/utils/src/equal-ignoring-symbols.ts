@@ -6,28 +6,48 @@ import { isRecord } from "@commontools/utils/types";
  * Strips all symbol properties from an object recursively
  */
 export function stripSymbols(obj: unknown): unknown {
-  return stripSymbolsInternal(obj, new WeakSet<object>());
+  return stripSymbolsInternal(
+    obj,
+    new WeakSet<object>(),
+    new WeakMap<object, unknown>(),
+  );
 }
 
 function stripSymbolsInternal(
   obj: unknown,
-  seen: WeakSet<object>,
+  active: WeakSet<object>,
+  normalized: WeakMap<object, unknown>,
 ): unknown {
   if (!isRecord(obj)) return obj;
-  if (seen.has(obj)) return "[Circular]";
-  seen.add(obj);
 
-  // Handle arrays
-  if (Array.isArray(obj)) {
-    return obj.map((item) => stripSymbolsInternal(item, seen));
-  }
+  if (active.has(obj)) return "[Circular]";
 
-  // Handle plain objects
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(obj)) {
-    result[key] = stripSymbolsInternal(obj[key], seen);
+  const cached = normalized.get(obj);
+  if (cached !== undefined) return cached;
+
+  active.add(obj);
+
+  try {
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      const result: unknown[] = [];
+      normalized.set(obj, result);
+      for (const item of obj) {
+        result.push(stripSymbolsInternal(item, active, normalized));
+      }
+      return result;
+    }
+
+    // Handle plain objects
+    const result: Record<string, unknown> = {};
+    normalized.set(obj, result);
+    for (const key of Object.keys(obj)) {
+      result[key] = stripSymbolsInternal(obj[key], active, normalized);
+    }
+    return result;
+  } finally {
+    active.delete(obj);
   }
-  return result;
 }
 
 /**
