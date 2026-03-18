@@ -76,7 +76,12 @@ describe("fetchData commit-point intent wiring", () => {
     await storageManager.close();
   });
 
-  function createIntent(now: number) {
+  function createIntent(
+    now: number,
+    options: {
+      readonly targetPrincipal?: string;
+    } = {},
+  ) {
     const sourceIntent = createCfcIntentEventEnvelope({
       action: "ForwardEmail",
       sourceGestureId: "gesture-forward-fetch-live-1",
@@ -101,6 +106,7 @@ describe("fetchData commit-point intent wiring", () => {
       exp: now + 4_000,
       maxAttempts: 3,
       duration: "short",
+      targetPrincipal: options.targetPrincipal,
     });
   }
 
@@ -310,6 +316,50 @@ describe("fetchData commit-point intent wiring", () => {
     expect(raw?.pending).toBe(false);
     expect(raw?.result).toBeUndefined();
     expect(raw?.error).toBe("authorization_header_placement_invalid");
+    expect(fetchCalls.length).toBe(0);
+  });
+
+  it("fails closed when a target principal needs fresh audience verification", async () => {
+    const now = Date.now();
+    const intent = createIntent(now, {
+      targetPrincipal: "did:mailto:hotel@example.com",
+    });
+    const fetchData = byRef("fetchData") as (params: unknown) => unknown;
+    const testPattern = pattern(() =>
+      fetchData({
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        mode: "json",
+        options: {
+          method: "POST",
+          body: {
+            raw: "base64url-rfc2822",
+          },
+          headers: {
+            Authorization: "Bearer token",
+            "X-Idempotency-Key": intent.idempotencyKey,
+          },
+        },
+        cfc: {
+          intent,
+          endpoint: "gmail.messages.send",
+        },
+      })
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "fetch-intent-audience-verification-required",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const raw = await pullFinalResult(result);
+    expect(raw?.pending).toBe(false);
+    expect(raw?.result).toBeUndefined();
+    expect(raw?.error).toBe("audience_verification_failed");
     expect(fetchCalls.length).toBe(0);
   });
 });
