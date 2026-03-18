@@ -485,7 +485,10 @@ describe("CFC worked example: runtime placement variants", () => {
     });
     await tx.abort();
 
-    executionIntegrity = [aliceManagedHighTierAtom, strongClientAppAttestedAtom];
+    executionIntegrity = [
+      aliceManagedHighTierAtom,
+      strongClientAppAttestedAtom,
+    ];
 
     tx = runtime.edit();
     releasedAvailability.withTx(tx).asSchema(ownerTierReleaseSchema).set(

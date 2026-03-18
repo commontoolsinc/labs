@@ -17,7 +17,7 @@ type CanonicalValue =
 
 function canonicalizeSchemaValue(
   value: unknown,
-  visited: Set<object> = new Set(),
+  active: Set<object> = new Set(),
 ): CanonicalValue {
   if (value === null) return null;
 
@@ -30,33 +30,41 @@ function canonicalizeSchemaValue(
   }
 
   if (Array.isArray(value)) {
-    if (visited.has(value)) {
+    if (active.has(value)) {
       throw new Error("Cyclic reference detected in schema value");
     }
-    visited.add(value);
-    return value.map((item) => canonicalizeSchemaValue(item, visited));
+    active.add(value);
+    try {
+      return value.map((item) => canonicalizeSchemaValue(item, active));
+    } finally {
+      active.delete(value);
+    }
   }
 
   if (typeof value === "object") {
-    if (visited.has(value)) {
+    if (active.has(value)) {
       throw new Error("Cyclic reference detected in schema value");
     }
-    visited.add(value);
+    active.add(value);
     const record = value as Record<string, unknown>;
     const canonical: Record<string, CanonicalValue> = {};
-    for (const key of Object.keys(record).sort()) {
-      let nextValue = record[key];
-      if (nextValue === undefined) {
-        continue;
+    try {
+      for (const key of Object.keys(record).sort()) {
+        let nextValue = record[key];
+        if (nextValue === undefined) {
+          continue;
+        }
+        if (key === "classification") {
+          nextValue = normalizeConfidentialityLabel(nextValue) ?? nextValue;
+        } else if (key === "integrity") {
+          nextValue = normalizeIntegrityLabel(nextValue) ?? nextValue;
+        }
+        canonical[key] = canonicalizeSchemaValue(nextValue, active);
       }
-      if (key === "classification") {
-        nextValue = normalizeConfidentialityLabel(nextValue) ?? nextValue;
-      } else if (key === "integrity") {
-        nextValue = normalizeIntegrityLabel(nextValue) ?? nextValue;
-      }
-      canonical[key] = canonicalizeSchemaValue(nextValue, visited);
+      return canonical;
+    } finally {
+      active.delete(value);
     }
-    return canonical;
   }
 
   if (typeof value === "bigint") {

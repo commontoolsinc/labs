@@ -1021,8 +1021,9 @@ Primary files:
       same-attempt checked at commit.
 - [x] Allow policy `integrityPre` guards to match against ambient
       execution-integrity facts in addition to consumed-read/output integrity.
-- [x] Prove shared-CC calendar release and triggered-audio release worked
-      example slices with runtime attestation facts provided by the runtime.
+- [x] Prove exact-device lock, owner-tier lock, shared-CC calendar release,
+      and triggered-audio release worked-example slices with runtime
+      attestation facts provided by the runtime.
 - [-] Principal-scoped trust-set evaluation of attestation evidence.
 - [-] Full domain-confinement policy checks for actual runtime/device
       destinations beyond prepare-time release guards (device-locked vs

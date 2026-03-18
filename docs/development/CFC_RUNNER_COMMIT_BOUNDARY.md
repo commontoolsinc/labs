@@ -349,9 +349,10 @@ integrity too:
    acting principal and trust-context snapshot.
 3. Policy `integrityPre` rules can match those ambient runtime facts without
    persisting them onto the output label unless the schema explicitly adds them.
-4. This is enough for the shared-CC calendar placement slice and the
-   device-constrained audio-trigger slice from the worked examples; full
-   destination-confinement enforcement remains a later layer.
+4. This is enough for the exact-device, owner-tier, and shared-CC calendar
+   placement slices plus the device-constrained audio-trigger slice from the
+   worked examples; full destination-confinement enforcement remains a later
+   layer.
 
 ## Internal Verifier Read Marker
 
