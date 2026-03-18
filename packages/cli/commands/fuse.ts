@@ -63,6 +63,37 @@ export async function awaitForegroundMountExit(
   exit(status.code);
 }
 
+export async function awaitBackgroundMountStartup(
+  pid: number,
+  statePath: string,
+  deps: {
+    attempts?: number;
+    delayMs?: number;
+    isAlive?: (pid: number) => boolean;
+    removeStateFile?: (path: string) => Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<void> {
+  const attempts = deps.attempts ?? 20;
+  const delayMs = deps.delayMs ?? 50;
+  const isAliveFn = deps.isAlive ?? isAlive;
+  const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
+  const sleep = deps.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  for (let i = 0; i < attempts; i++) {
+    if (!isAliveFn(pid)) {
+      await removeStateFileFn(statePath);
+      throw new Error(
+        "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.",
+      );
+    }
+    if (i < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+}
+
 export const fuse = new Command()
   .name("fuse")
   .description(fuseDescription)
@@ -100,6 +131,18 @@ export const fuse = new Command()
     const identity = options.identity ? resolve(options.identity) : "";
     const absMountpoint = resolve(mountpoint);
 
+    if (identity) {
+      let stat: Deno.FileInfo;
+      try {
+        stat = await Deno.stat(identity);
+      } catch {
+        throw new Error(`Identity file not found: ${identity}`);
+      }
+      if (!stat.isFile) {
+        throw new Error(`Identity file not found: ${identity}`);
+      }
+    }
+
     // Ensure mountpoint exists
     try {
       await Deno.stat(absMountpoint);
@@ -130,14 +173,16 @@ export const fuse = new Command()
       child.unref();
 
       const pid = child.pid;
+      let statePath: string;
       try {
-        await writeMountState(stateDir, {
+        statePath = await writeMountState(stateDir, {
           pid,
           mountpoint: absMountpoint,
           apiUrl,
           identity,
           startedAt: new Date().toISOString(),
         });
+        await awaitBackgroundMountStartup(pid, statePath);
       } catch (error) {
         try {
           Deno.kill(pid, "SIGTERM");

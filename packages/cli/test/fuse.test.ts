@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join, resolve, toFileUrl } from "@std/path";
-import { awaitForegroundMountExit, fuse } from "../commands/fuse.ts";
+import {
+  awaitBackgroundMountStartup,
+  awaitForegroundMountExit,
+  fuse,
+} from "../commands/fuse.ts";
 import {
   buildDenoArgs,
   ensureExecShim,
@@ -364,6 +368,65 @@ describe("mount state operations", () => {
     ).rejects.toThrow(/exit:23/);
 
     await expect(Deno.stat(statePath)).rejects.toThrow();
+  });
+
+  it("rejects background mounts that die during startup and removes their state file", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: 1073741824,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+
+    const removed: string[] = [];
+    await expect(
+      awaitBackgroundMountStartup(
+        1073741824,
+        statePath,
+        {
+          attempts: 1,
+          isAlive: () => false,
+          removeStateFile: async (path: string) => {
+            removed.push(path);
+            await Deno.remove(path);
+          },
+          sleep: () => Promise.resolve(),
+        },
+      ),
+    ).rejects.toThrow(/Background FUSE process exited during startup/i);
+
+    expect(removed).toEqual([statePath]);
+    await expect(Deno.stat(statePath)).rejects.toThrow();
+  });
+
+  it("allows background mounts that stay alive through the startup window", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+
+    let checks = 0;
+    await expect(
+      awaitBackgroundMountStartup(
+        Deno.pid,
+        statePath,
+        {
+          attempts: 3,
+          isAlive: () => {
+            checks++;
+            return true;
+          },
+          sleep: () => Promise.resolve(),
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(checks).toBe(3);
+    await expect(Deno.stat(statePath)).resolves.toBeDefined();
   });
 });
 
