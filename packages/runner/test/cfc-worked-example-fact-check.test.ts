@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
+import type { Labels, URI } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example fact check test",
@@ -50,48 +57,94 @@ const factCheckOutputSchema = {
 } as const satisfies JSONSchema;
 
 describe("CFC worked example: fact-check assurance", () => {
-  let harness: ReturnType<typeof createCfcPatternTestHarness>;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
 
   beforeEach(() => {
-    harness = createCfcPatternTestHarness({
-      signer,
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
       apiUrl: new URL(import.meta.url),
     });
+    runtime.scheduler.disablePullMode();
   });
 
   afterEach(async () => {
-    await harness.dispose();
+    await runtime.dispose();
   });
 
+  async function seedValueWithLabels(
+    id: URI,
+    value: unknown,
+    labels: Labels,
+  ): Promise<void> {
+    const tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["value"],
+    }, value as never);
+    tx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, { "/": labels });
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  }
+
+  async function readLabels(id: URI): Promise<Record<string, Labels>> {
+    const tx = runtime.edit();
+    const raw = tx.readOrThrow({
+      ...cfcLabelsAddress({
+        space,
+        id,
+        type: "application/json",
+      }),
+    });
+    await tx.abort();
+    return normalizePersistedLabels(raw);
+  }
+
   it("adds structured confidentiality and integrity evidence through policy rewrite", async () => {
-    const source = await harness.seedLabeledValue<string>({
-      id: "fact-check-worked-example-source",
-      labels: {
+    const source = runtime.getCell<string>(
+      space,
+      "fact-check-worked-example-source",
+      undefined,
+    );
+
+    await seedValueWithLabels(
+      source.getAsNormalizedFullLink().id,
+      "Claim text",
+      {
         classification: [userAliceAtom],
         integrity: ["fact-check-proof"],
       },
-      schema: sourceSchema,
-      value: "Claim text",
-    });
-    const factCheckPattern = harness.pattern<{ source: string }>(
-      ({ source }: { source: string }) => source,
-      {
-        type: "object",
-        properties: {
-          source: sourceSchema,
-        },
-        required: ["source"],
-      } as const satisfies JSONSchema,
-      factCheckOutputSchema,
     );
-    const { outputLink, value } = await harness.runPattern({
-      id: "fact-check-worked-example-target",
-      pattern: factCheckPattern,
-      inputs: { source },
-    });
 
-    expect(value).toBe("Claim text");
-    const labels = await harness.readLabels(outputLink.id);
+    const tx = runtime.edit();
+    const freshSource = runtime.getCell<string>(
+      space,
+      "fact-check-worked-example-source",
+      undefined,
+      tx,
+    );
+    const freshTarget = runtime.getCell<string>(
+      space,
+      "fact-check-worked-example-target",
+      undefined,
+      tx,
+    );
+    const value = freshSource.withTx(tx).asSchema(sourceSchema).get() ?? "";
+    freshTarget.withTx(tx).asSchema(factCheckOutputSchema).set(value);
+
+    await prepareCfcCommitIfNeeded(tx);
+    const committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const labels = await readLabels(freshTarget.getAsNormalizedFullLink().id);
     expect(labels["/"]?.classification).toEqual([[publicAudienceAtom]]);
     expect(labels["/"]?.integrity).toEqual(
       expect.arrayContaining([
