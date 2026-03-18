@@ -5,6 +5,7 @@ import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import {
   ENTITY_DOCUMENT_MARKER_KEY,
   ENTITY_DOCUMENT_MARKER_VALUE,
+  type EntityDocument,
   isEntityDocument,
 } from "@commonfabric/memory/v2";
 import type {
@@ -46,6 +47,15 @@ const isStoredDocumentEnvelope = (
   value: StorableValue | undefined,
 ): boolean => isEntityDocument(value);
 
+const isEmptyRecord = (
+  value: StorableValue | undefined,
+): value is Record<string, never> =>
+  value !== null &&
+  value !== undefined &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === 0;
+
 const toStoredDocumentEnvelope = (
   loaded: StorableValue,
   merged: StorableValue | undefined,
@@ -74,9 +84,33 @@ const alignRootWriteWithLoadedShape = (
   type: string,
   loaded: StorableValue | undefined,
   merged: StorableValue | undefined,
+  options: {
+    hasRootWrite: boolean;
+    loadedDocument?: EntityDocument;
+  },
 ): StorableValue | undefined => {
   if (type !== "application/json") {
     return merged;
+  }
+  if (options.loadedDocument !== undefined) {
+    if (!options.hasRootWrite) {
+      return isEmptyRecord(merged) ? undefined : merged;
+    }
+
+    const { value: _value, ...metadata } = (loaded ?? {}) as Record<
+      string,
+      StorableDatum
+    >;
+    if (merged === undefined) {
+      return Object.keys(metadata).length === 0
+        ? undefined
+        : metadata as StorableValue;
+    }
+
+    return {
+      ...metadata,
+      value: merged,
+    } as StorableValue;
   }
   if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
     return merged;
@@ -316,6 +350,12 @@ export class Chronicle {
         // Fast path: reference equality means no change needed.
         edit.claim(loaded);
       } else {
+        const loadedDocument = changes.address.type === "application/json" &&
+            "getDocument" in replica &&
+            typeof replica.getDocument === "function"
+          ? replica.getDocument(changes.address.id as any)
+          : undefined;
+
         // Normalize both values for comparison and potential storage.
         const normalizedMerged = storableFromNativeValue(merged.value);
         const normalizedLoaded = storableFromNativeValue(loaded.is);
@@ -324,6 +364,10 @@ export class Chronicle {
           changes.address.type,
           normalizedLoaded,
           normalizedMerged,
+          {
+            hasRootWrite: changes.hasRootWrite(),
+            loadedDocument,
+          },
         );
 
         if (deepEqual(alignedMerged, normalizedLoaded)) {
@@ -644,6 +688,10 @@ class Changes {
    */
   getWorkingCopy(): IAttestation | undefined {
     return this.#workingCopy;
+  }
+
+  hasRootWrite(): boolean {
+    return this.#pathAttestations.has(JSON.stringify([]));
   }
 
   /**
