@@ -34,6 +34,7 @@ export class SESRuntime {
 
   evaluateBundle(
     compileId: string,
+    evaluationId: string,
     jsScript: JsScript,
     options: {
       console: unknown;
@@ -47,7 +48,7 @@ export class SESRuntime {
     }
 
     const compartment = this.getCompartmentWithHelpers(
-      compileId,
+      evaluationId,
       options.console,
       options.runtimeExports,
     );
@@ -71,14 +72,17 @@ export class SESRuntime {
         main: Exports;
         exportMap: Record<string, Exports>;
       };
-      typedResult.main = this.qualifyImplementationRefs(compileId, typedResult.main);
+      typedResult.main = this.qualifyImplementationRefs(
+        evaluationId,
+        typedResult.main,
+      );
       typedResult.exportMap = this.qualifyImplementationRefs(
-        compileId,
+        evaluationId,
         typedResult.exportMap,
       );
-      this.resetVerifiedFunctions(compileId);
-      this.recordVerifiedFunctions(compileId, typedResult.main);
-      this.recordVerifiedFunctions(compileId, typedResult.exportMap);
+      this.resetVerifiedFunctions(evaluationId);
+      this.recordVerifiedFunctions(evaluationId, typedResult.main);
+      this.recordVerifiedFunctions(evaluationId, typedResult.exportMap);
       return typedResult;
     }
 
@@ -118,16 +122,16 @@ export class SESRuntime {
     this.sourceMaps.clear();
   }
 
-  private getCompartment(compileId: string, console: unknown): SESCompartment {
-    return this.getCompartmentWithHelpers(compileId, console, {});
+  private getCompartment(evaluationId: string, console: unknown): SESCompartment {
+    return this.getCompartmentWithHelpers(evaluationId, console, {});
   }
 
   private getCompartmentWithHelpers(
-    compileId: string,
+    evaluationId: string,
     console: unknown,
     runtimeExports: Record<string, unknown>,
   ): SESCompartment {
-    const existing = this.compartments.get(compileId);
+    const existing = this.compartments.get(evaluationId);
     if (existing) {
       return existing;
     }
@@ -143,7 +147,7 @@ export class SESRuntime {
         harden(helpers),
       ),
     ) as SESCompartment;
-    this.compartments.set(compileId, compartment);
+    this.compartments.set(evaluationId, compartment);
     return compartment;
   }
 
@@ -194,7 +198,7 @@ export class SESRuntime {
   }
 
   private recordVerifiedFunctions(
-    compileId: string,
+    evaluationId: string,
     value: unknown,
     seen = new Set<unknown>(),
   ): void {
@@ -214,10 +218,10 @@ export class SESRuntime {
       "implementation" in (value as Record<string, unknown>) &&
       typeof (value as Record<string, unknown>).implementation === "function"
     ) {
-      let registry = this.verifiedFunctions.get(compileId);
+      let registry = this.verifiedFunctions.get(evaluationId);
       if (!registry) {
         registry = new Map();
-        this.verifiedFunctions.set(compileId, registry);
+        this.verifiedFunctions.set(evaluationId, registry);
       }
       const implementationRef = (value as Record<string, unknown>)
         .implementationRef as string;
@@ -235,10 +239,10 @@ export class SESRuntime {
       const implementationRef = metadata[CT_IMPLEMENTATION_REF] ??
         metadata.implementationRef;
       if (implementationRef) {
-        let registry = this.verifiedFunctions.get(compileId);
+        let registry = this.verifiedFunctions.get(evaluationId);
         if (!registry) {
           registry = new Map();
-          this.verifiedFunctions.set(compileId, registry);
+          this.verifiedFunctions.set(evaluationId, registry);
         }
         registry.set(implementationRef, value);
         this.verifiedFunctionIndex.set(implementationRef, value);
@@ -246,22 +250,22 @@ export class SESRuntime {
     }
 
     for (const entry of Object.values(value as Record<string, unknown>)) {
-      this.recordVerifiedFunctions(compileId, entry, seen);
+      this.recordVerifiedFunctions(evaluationId, entry, seen);
     }
   }
 
-  private resetVerifiedFunctions(compileId: string): void {
-    const existing = this.verifiedFunctions.get(compileId);
+  private resetVerifiedFunctions(evaluationId: string): void {
+    const existing = this.verifiedFunctions.get(evaluationId);
     if (existing) {
       for (const implementationRef of existing.keys()) {
         this.verifiedFunctionIndex.delete(implementationRef);
       }
     }
-    this.verifiedFunctions.set(compileId, new Map());
+    this.verifiedFunctions.set(evaluationId, new Map());
   }
 
   private qualifyImplementationRefs<T>(
-    compileId: string,
+    evaluationId: string,
     value: T,
     seen = new Map<unknown, unknown>(),
   ): T {
@@ -274,11 +278,11 @@ export class SESRuntime {
     }
 
     if (typeof value === "function" && this.hasImplementationRef(value)) {
-      return this.wrapQualifiedFunction(compileId, value, seen) as T;
+      return this.wrapQualifiedFunction(evaluationId, value, seen) as T;
     }
 
     seen.set(value, value);
-    this.qualifyOwnImplementationRef(compileId, value);
+    this.qualifyOwnImplementationRef(evaluationId, value);
 
     for (const key of Reflect.ownKeys(value as object)) {
       const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
@@ -286,7 +290,7 @@ export class SESRuntime {
         continue;
       }
       const qualified = this.qualifyImplementationRefs(
-        compileId,
+        evaluationId,
         descriptor.value,
         seen,
       );
@@ -313,7 +317,7 @@ export class SESRuntime {
   }
 
   private qualifyOwnImplementationRef(
-    compileId: string,
+    evaluationId: string,
     value: unknown,
   ): void {
     if (!value || typeof value !== "object") {
@@ -325,23 +329,23 @@ export class SESRuntime {
       return;
     }
     carrier.implementationRef = this.scopeImplementationRef(
-      compileId,
+      evaluationId,
       carrier.implementationRef,
     );
   }
 
   private scopeImplementationRef(
-    compileId: string,
+    evaluationId: string,
     implementationRef: string,
   ): string {
-    const prefix = `${compileId}::`;
+    const prefix = `${evaluationId}::`;
     return implementationRef.startsWith(prefix)
       ? implementationRef
       : `${prefix}${implementationRef}`;
   }
 
   private wrapQualifiedFunction(
-    compileId: string,
+    evaluationId: string,
     original: Function & {
       implementationRef?: string;
       [CT_IMPLEMENTATION_REF]?: string;
@@ -349,7 +353,7 @@ export class SESRuntime {
     seen: Map<unknown, unknown>,
   ): Function {
     const scopedRef = this.scopeImplementationRef(
-      compileId,
+      evaluationId,
       original[CT_IMPLEMENTATION_REF] ?? original.implementationRef!,
     );
     const wrapped = function(this: unknown, ...args: unknown[]) {
@@ -403,7 +407,7 @@ export class SESRuntime {
         Object.defineProperty(wrapped, key, {
           ...descriptor,
           value: this.qualifyImplementationRefs(
-            compileId,
+            evaluationId,
             descriptor.value,
             seen,
           ),

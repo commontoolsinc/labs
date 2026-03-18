@@ -83,6 +83,8 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private readonly loadIds = new WeakMap<JsScript, string>();
+  private nextLoadId = 0;
 
   constructor(ctRuntime: Runtime) {
     super();
@@ -158,7 +160,8 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
     const { runtime, console, runtimeExports, exportsCallback } = await this
       .getInternals();
-    const result = runtime.evaluateBundle(id, jsScript, {
+    const loadId = this.getLoadId(id, jsScript);
+    const result = runtime.evaluateBundle(id, loadId, jsScript, {
       console,
       runtimeExports: runtimeExports ?? {},
     });
@@ -254,6 +257,17 @@ export class Engine extends EventTarget implements Harness {
 
   static runtimeModuleNames() {
     return [...RuntimeModules.RuntimeModuleIdentifiers];
+  }
+
+  private getLoadId(compileId: string, jsScript: JsScript): string {
+    const existing = this.loadIds.get(jsScript);
+    if (existing) {
+      return existing;
+    }
+
+    const loadId = `${compileId}:load:${this.nextLoadId++}`;
+    this.loadIds.set(jsScript, loadId);
+    return loadId;
   }
 
   private async getInternals(): Promise<Internals> {

@@ -20,8 +20,6 @@ const EXPORT_VOID_PATTERN =
   /^exports\.[A-Za-z_$][\w$]*\s*=\s*void 0$/;
 const CHAINED_EXPORT_VOID_PATTERN =
   /^(?:exports\.[A-Za-z_$][\w$]*\s*=\s*){2,}void 0$/;
-const CONSOLE_STATEMENT_PATTERN =
-  /^console\.[A-Za-z_$][\w$]*\(/;
 const USE_STRICT_PATTERN = /^["']use strict["']$/;
 const EXPORTS_OBJECT_PATTERN =
   /^Object\.defineProperty\(exports,\s*["'][^"']+["'],\s*\{[\s\S]*\}\)$/;
@@ -42,6 +40,8 @@ const SENTINEL_PATTERN = /^\/\*__CT_TOPLEVEL__:(.+?)\*\/\s*([\s\S]+)$/;
 const STRING_LITERAL_PATTERN = /^"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'$/;
 const FORBIDDEN_AUTHORITY_PATTERN =
   /(?:^|[^\w$.])globalThis\b|(?:^|[^\w$.])(?:window|document)\s*\.|(?:^|[^\w$.])eval\s*\(|(?:^|[^\w$.])Function\s*\(/;
+const FORBIDDEN_CALLBACK_PATTERN =
+  /(?:^|[^\w$.])require(?:$|[^\w$])/;
 
 export function verifyAMDFactory(options: VerifyAMDFactoryOptions): void {
   verifyDependencies(options.dependencies, options.registeredModuleIds);
@@ -121,7 +121,7 @@ function isAllowedStatement(statement: string): boolean {
   if (
     USE_STRICT_PATTERN.test(compactWithoutComments) ||
     EXPORTS_OBJECT_PATTERN.test(compactWithoutComments) ||
-    CONSOLE_STATEMENT_PATTERN.test(compactWithoutComments) ||
+    isTrustedConsoleStatement(compactWithoutComments) ||
     SCHEMA_ASSIGNMENT_PATTERN.test(compactWithoutComments) ||
     EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
     CHAINED_EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
@@ -248,6 +248,36 @@ function isSafeExportAssignment(statement: string): boolean {
     /^(?:null|undefined|true|false|void 0)$/.test(rhs) ||
     /^-?\d+(?:\.\d+)?n?$/.test(rhs) ||
     /^["'`][\s\S]*["'`]$/.test(rhs);
+}
+
+function isTrustedConsoleStatement(statement: string): boolean {
+  const match = statement.match(/^console\.([A-Za-z_$][\w$]*)\s*\(/);
+  if (!match) {
+    return false;
+  }
+
+  const openParenIndex = statement.indexOf("(", match[0].length - 1);
+  if (openParenIndex < 0) {
+    return false;
+  }
+  const { end: closeParenIndex } = findBalancedRegion(
+    statement,
+    openParenIndex,
+    "(",
+    ")",
+  );
+  if (statement.slice(closeParenIndex + 1).trim().length > 0) {
+    return false;
+  }
+
+  const argsSource = statement.slice(openParenIndex + 1, closeParenIndex).trim();
+  if (!argsSource) {
+    return true;
+  }
+
+  return splitTopLevelCommaList(argsSource).every((arg) =>
+    isTrustedDataExpression(arg, new Set())
+  );
 }
 
 function splitVerifiableStatements(statement: string): string[] {
@@ -377,7 +407,8 @@ function isTrustedFunctionExpression(source: string): boolean {
   const bodyStart = trimmed.indexOf("{", paramsEnd + 1);
   const bodyEnd = trimmed.lastIndexOf("}");
   const body = trimmed.slice(bodyStart + 1, bodyEnd);
-  return !FORBIDDEN_AUTHORITY_PATTERN.test(body);
+  return !FORBIDDEN_AUTHORITY_PATTERN.test(body) &&
+    !FORBIDDEN_CALLBACK_PATTERN.test(body);
 }
 
 function hasFunctionExpressionShape(source: string): boolean {

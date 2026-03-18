@@ -217,7 +217,7 @@ describe("Engine.evaluate()", () => {
     expect(typeof utilExports["triple"]).toBe("function");
   });
 
-  it("reuses one compartment for repeated evaluation of the same loaded pattern", async () => {
+  it("reuses one compartment for repeated evaluation of the same loaded pattern while isolating separate loads", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -240,25 +240,11 @@ describe("Engine.evaluate()", () => {
     await engine.evaluate(compiled.id, compiled.jsScript, program.files);
     expect(engine.getSESCompartmentCount()).toBe(1);
 
-    const secondProgram: RuntimeProgram = {
-      main: "/second.tsx",
-      files: [
-        {
-          name: "/second.tsx",
-          contents: [
-            "/// <cts-enable />",
-            "import { pattern } from 'commontools';",
-            "export default pattern<{ value: number }>(({ value }) => ({ value }));",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const secondCompiled = await engine.compile(secondProgram);
+    const secondCompiled = await engine.compile(program);
     await engine.evaluate(
       secondCompiled.id,
       secondCompiled.jsScript,
-      secondProgram.files,
+      program.files,
     );
     expect(engine.getSESCompartmentCount()).toBe(2);
   });
@@ -291,8 +277,8 @@ describe("Engine.evaluate()", () => {
     expect(engine.getVerifiedFunction(module.implementationRef!)).toBeDefined();
   });
 
-  it("keeps verified implementation refs scoped per compiled pattern", async () => {
-    const firstProgram: RuntimeProgram = {
+  it("keeps verified implementation refs scoped per loaded pattern even for identical source", async () => {
+    const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
         {
@@ -307,27 +293,12 @@ describe("Engine.evaluate()", () => {
         },
       ],
     };
-    const secondProgram: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [
-        {
-          name: "/main.tsx",
-          contents: [
-            "/// <cts-enable />",
-            "export function helper(value: number) {",
-            "  return value * 3;",
-            "}",
-            "export default helper;",
-          ].join("\n"),
-        },
-      ],
-    };
 
-    const firstCompiled = await engine.compile(firstProgram);
+    const firstCompiled = await engine.compile(program);
     const firstEvaluation = await engine.evaluate(
       firstCompiled.id,
       firstCompiled.jsScript,
-      firstProgram.files,
+      program.files,
     );
     const firstExport = firstEvaluation.main!.helper as {
       [CT_IMPLEMENTATION_REF]?: string;
@@ -335,11 +306,11 @@ describe("Engine.evaluate()", () => {
     const firstRef = firstExport[CT_IMPLEMENTATION_REF]!;
     const firstFn = engine.getVerifiedFunction(firstRef);
 
-    const secondCompiled = await engine.compile(secondProgram);
+    const secondCompiled = await engine.compile(program);
     const secondEvaluation = await engine.evaluate(
       secondCompiled.id,
       secondCompiled.jsScript,
-      secondProgram.files,
+      program.files,
     );
     const secondExport = secondEvaluation.main!.helper as {
       [CT_IMPLEMENTATION_REF]?: string;

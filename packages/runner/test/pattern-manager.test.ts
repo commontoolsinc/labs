@@ -116,6 +116,59 @@ describe("PatternManager program persistence", () => {
     const meta = runtime.patternManager.getPatternMeta({ patternId });
     expect(meta.program?.main).toEqual("/main.ts");
   });
+
+  it("loads a saved compiled pattern in a fresh runtime and rebinds verified refs", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    await runtime.patternManager.saveAndSyncPattern({ patternId, space });
+
+    const reloadedRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const reloadedTx = reloadedRuntime.edit();
+
+    try {
+      const loaded = await reloadedRuntime.patternManager.loadPattern(
+        patternId,
+        space,
+        reloadedTx,
+      );
+      const resultCell = reloadedRuntime.getCell<{ result: number }>(
+        space,
+        "pattern-manager: fresh runtime run loaded",
+        undefined,
+        reloadedTx,
+      );
+      const result = reloadedRuntime.run(
+        reloadedTx,
+        loaded,
+        { value: 5 },
+        resultCell,
+      );
+      await reloadedTx.commit();
+      await result.pull();
+
+      expect(result.getAsQueryResult()).toEqual({ result: 10 });
+    } finally {
+      await reloadedRuntime.dispose();
+    }
+  });
 });
 
 describe("PatternManager.loadPattern error handling", () => {
