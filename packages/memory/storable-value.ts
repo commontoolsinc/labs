@@ -133,22 +133,22 @@ export function nativeFromStorableValue(
  * @param value - An already-valid `StorableValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
  */
-export function cloneIfNecessary(
-  value: StorableValue,
+export function cloneIfNecessary<T extends StorableValue>(
+  value: T,
   options?: CloneOptions & { frozen?: true },
-): Immutable<StorableValue>;
-export function cloneIfNecessary(
-  value: StorableValue,
+): Immutable<T>;
+export function cloneIfNecessary<T extends StorableValue>(
+  value: T,
   options: CloneOptions & { frozen: false },
-): StorableValue;
-export function cloneIfNecessary(
-  value: StorableValue,
+): T;
+export function cloneIfNecessary<T extends StorableValue>(
+  value: T,
   options?: CloneOptions,
-): StorableValue;
-export function cloneIfNecessary(
-  value: StorableValue,
+): T;
+export function cloneIfNecessary<T extends StorableValue>(
+  value: T,
   options?: CloneOptions,
-): StorableValue {
+): T {
   const frozen = options?.frozen ?? true;
   const deep = options?.deep ?? true;
   const force = options?.force ?? (frozen ? false : true);
