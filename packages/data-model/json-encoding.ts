@@ -1,17 +1,17 @@
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "./fabric-value.ts";
 import {
   RECONSTRUCT,
   type StorableInstance,
-} from "@commontools/data-model/storable-instance";
+} from "./storable-instance.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
   type StorableClass,
-} from "@commontools/data-model/storable-protocol";
-import { ExplicitTagStorable } from "@commontools/data-model/explicit-tag-storable";
-import { deepFreeze } from "@commontools/data-model/deep-freeze";
-import { UnknownStorable } from "@commontools/data-model/unknown-storable";
-import { ProblematicStorable } from "@commontools/data-model/problematic-storable";
+} from "./storable-protocol.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+import { deepFreeze } from "./deep-freeze.ts";
+import { UnknownStorable } from "./unknown-storable.ts";
+import { ProblematicStorable } from "./problematic-storable.ts";
 import {
   createDefaultRegistry,
   type JsonWireValue,
@@ -25,7 +25,7 @@ import {
   StorableSet,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
-import { TAGS } from "@commontools/data-model/type-tags";
+import { TAGS } from "./type-tags.ts";
 
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();

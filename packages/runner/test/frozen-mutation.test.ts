@@ -25,7 +25,7 @@ import { resetStorableValueConfig } from "@commontools/memory/storable-value";
 import { resetCanonicalHashConfig } from "@commontools/memory/reference";
 import {
   resetJsonEncodingConfig,
-} from "@commontools/memory/json-encoding-dispatch";
+} from "@commontools/data-model/json-encoding-dispatch";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();

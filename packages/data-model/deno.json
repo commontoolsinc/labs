@@ -36,6 +36,9 @@
     "./hash-impl": "./hash-impl.ts",
     "./canonical-hash": "./canonical-hash.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
-    "./storable-native-instances": "./storable-native-instances.ts"
+    "./storable-native-instances": "./storable-native-instances.ts",
+    "./json-encoding": "./json-encoding.ts",
+    "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
+    "./json-type-handlers": "./json-type-handlers.ts"
   }
 }

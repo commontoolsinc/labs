@@ -1,14 +1,11 @@
-import type { StorableValue } from "./interface.ts";
-import {
-  DECONSTRUCT,
-  type StorableInstance,
-} from "@commontools/data-model/storable-instance";
+import type { StorableValue } from "./fabric-value.ts";
+import { DECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
 import {
   isStorableInstance,
   type ReconstructionContext,
-} from "@commontools/data-model/storable-protocol";
-import { ExplicitTagStorable } from "@commontools/data-model/explicit-tag-storable";
-import { ProblematicStorable } from "@commontools/data-model/problematic-storable";
+} from "./storable-protocol.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+import { ProblematicStorable } from "./problematic-storable.ts";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -22,17 +19,14 @@ export type JsonWireValue =
   | string
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "@commontools/data-model/storable-epoch";
-import { TAGS } from "@commontools/data-model/type-tags";
+import { StorableEpochDays, StorableEpochNsec } from "./storable-epoch.ts";
+import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
   fromBase64url,
   toUnpaddedBase64url,
-} from "@commontools/data-model/bigint-encoding";
+} from "./bigint-encoding.ts";
 
 /**
  * Narrow interface for what type handlers need from the encoding context

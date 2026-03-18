@@ -1,5 +1,5 @@
-import type { StorableValue } from "./interface.ts";
-import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
+import type { StorableValue } from "./fabric-value.ts";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 import { JsonEncodingContext } from "./json-encoding.ts";
 
 // ---------------------------------------------------------------------------
