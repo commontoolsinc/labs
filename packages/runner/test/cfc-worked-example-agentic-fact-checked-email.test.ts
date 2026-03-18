@@ -1,16 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { setPatternEnvironment } from "../src/env.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
 import { refineCfcDirectCommandIntentOnce } from "../src/cfc/direct-command-intent.ts";
 import { refineCfcFactCheckedEmailSendIntent } from "../src/cfc/fact-checked-email-intent.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example agentic fact checked email test",
@@ -86,38 +81,29 @@ const emailRequestSchema = {
   },
 } as const satisfies JSONSchema;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe("CFC worked example: agentic fact-checked email", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 
+  type SettledFetchResult = {
+    pending?: boolean;
+    result?: unknown;
+    error?: unknown;
+  } | undefined;
+
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
-    });
-    tx = runtime.edit();
-
-    const { commontools } = createBuilder();
-    pattern = commontools.pattern;
-    byRef = commontools.byRef;
-
-    setPatternEnvironment({
-      apiUrl: new URL("http://mock-test-server.local"),
+      patternEnvironment: {
+        apiUrl: new URL("http://mock-test-server.local"),
+      },
     });
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (
+    harness.stubFetch((
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -139,18 +125,16 @@ describe("CFC worked example: agentic fact-checked email", () => {
           },
         ),
       );
-    };
+    });
   });
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    await tx.abort();
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
-  function createRootIntent() {
-    const sourceIntent = createCfcIntentEventEnvelope({
+  function createSourceIntent() {
+    return createCfcIntentEventEnvelope({
       action: "AssistantSurfaceSubmitted",
       sourceGestureId: "gesture-agentic-fact-checked-email",
       conditionHash: "Cond.DirectCommand",
@@ -177,51 +161,56 @@ describe("CFC worked example: agentic fact-checked email", () => {
         },
       ],
     });
-
-    return refineCfcDirectCommandIntentOnce(runtime, tx, space, sourceIntent, {
-      actingUser: space,
-      kernelName: "agent-kernel",
-      requiredSurface: "AssistantComposer",
-      refinerHash: "sha256:agent-root-refiner",
-      operation: "Agent.ResearchFactCheckedAndEmail",
-      audience: "agent://root",
-      endpoint: "agent-root",
-      parameters: {
-        topic: "berlin hotels",
-        to: "alice@example.com",
-        requiresFactChecked: true,
-      },
-      exp: Date.now() + 4_000,
-      maxAttempts: 1,
-      duration: "short",
-    });
-  }
-
-  async function pullFinalResult(
-    resultCell: { pull: () => Promise<unknown>; get: () => unknown },
-  ) {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await resultCell.pull();
-      await delay(50);
-      const value = resultCell.get() as
-        | { pending?: boolean; result?: unknown; error?: unknown }
-        | undefined;
-      if (value?.pending === false) {
-        return value;
-      }
-    }
-    return resultCell.get() as
-      | { pending?: boolean; result?: unknown; error?: unknown }
-      | undefined;
   }
 
   it("requires fact-check assurance before refining and sending the final email intent", async () => {
-    const rootIntent = createRootIntent();
-    expect(rootIntent).not.toBeNull();
+    const requestCell = await harness.withCommittedEdit((tx) => {
+      const rootIntent = refineCfcDirectCommandIntentOnce(
+        harness.runtime,
+        tx,
+        space,
+        createSourceIntent(),
+        {
+          actingUser: space,
+          kernelName: "agent-kernel",
+          requiredSurface: "AssistantComposer",
+          refinerHash: "sha256:agent-root-refiner",
+          operation: "Agent.ResearchFactCheckedAndEmail",
+          audience: "agent://root",
+          endpoint: "agent-root",
+          parameters: {
+            topic: "berlin hotels",
+            to: "alice@example.com",
+            requiresFactChecked: true,
+          },
+          exp: Date.now() + 4_000,
+          maxAttempts: 1,
+          duration: "short",
+        },
+      );
+      expect(rootIntent).not.toBeNull();
 
-    const missingFactCheckIntent = refineCfcFactCheckedEmailSendIntent(
-      rootIntent!,
-      {
+      const missingFactCheckIntent = refineCfcFactCheckedEmailSendIntent(
+        rootIntent!,
+        {
+          recipient: "alice@example.com",
+          refinerHash: "sha256:agent-email-refiner",
+          operation: "Agent.EmailSend",
+          audience: sinkAudience,
+          endpoint: "email-send",
+          parameters: JSON.stringify({
+            to: "alice@example.com",
+            body: "Fact-checked report body",
+          }),
+          exp: Date.now() + 4_000,
+          maxAttempts: 1,
+          duration: "short",
+          additionalIntegrity: [disclaimerAttachedAtom],
+        },
+      );
+      expect(missingFactCheckIntent).toBeNull();
+
+      const sendIntent = refineCfcFactCheckedEmailSendIntent(rootIntent!, {
         recipient: "alice@example.com",
         refinerHash: "sha256:agent-email-refiner",
         operation: "Agent.EmailSend",
@@ -234,77 +223,53 @@ describe("CFC worked example: agentic fact-checked email", () => {
         exp: Date.now() + 4_000,
         maxAttempts: 1,
         duration: "short",
-        additionalIntegrity: [disclaimerAttachedAtom],
-      },
-    );
-    expect(missingFactCheckIntent).toBeNull();
+        additionalIntegrity: [disclaimerAttachedAtom, factCheckedAtom],
+      });
+      expect(sendIntent).not.toBeNull();
 
-    const sendIntent = refineCfcFactCheckedEmailSendIntent(rootIntent!, {
-      recipient: "alice@example.com",
-      refinerHash: "sha256:agent-email-refiner",
-      operation: "Agent.EmailSend",
-      audience: sinkAudience,
-      endpoint: "email-send",
-      parameters: JSON.stringify({
-        to: "alice@example.com",
-        body: "Fact-checked report body",
-      }),
-      exp: Date.now() + 4_000,
-      maxAttempts: 1,
-      duration: "short",
-      additionalIntegrity: [disclaimerAttachedAtom, factCheckedAtom],
-    });
-    expect(sendIntent).not.toBeNull();
-
-    const requestCell = runtime.getCell(
-      space,
-      "agentic-fact-checked-email-request",
-      emailRequestSchema,
-      tx,
-    );
-    requestCell.withTx(tx).set({
-      url: `${sinkAudience}/send`,
-      mode: "json",
-      options: {
-        method: "POST",
-        body: {
-          to: "alice@example.com",
-          body: "Fact-checked report body",
+      const requestCell = harness.getCell(
+        "agentic-fact-checked-email-request",
+        emailRequestSchema,
+        tx,
+      );
+      requestCell.withTx(tx).set({
+        url: `${sinkAudience}/send`,
+        mode: "json",
+        options: {
+          method: "POST",
+          body: {
+            to: "alice@example.com",
+            body: "Fact-checked report body",
+          },
+          headers: {
+            "X-Idempotency-Key": sendIntent!.idempotencyKey,
+          },
         },
-        headers: {
-          "X-Idempotency-Key": sendIntent!.idempotencyKey,
+        cfc: {
+          intent: sendIntent,
+          endpoint: "email-send",
         },
-      },
-      cfc: {
-        intent: sendIntent,
-        endpoint: "email-send",
-      },
+      });
+      return requestCell;
+    }, {
+      prepare: "boundary",
     });
-    await prepareBoundaryCommit(tx);
-    const prepared = await tx.commit();
-    expect(prepared.error).toBeUndefined();
 
-    tx = runtime.edit();
-    const fetchData = byRef("fetchData") as (params: unknown) => unknown;
-    const testPattern = pattern<{ request: unknown }>(({ request }) =>
-      fetchData(request)
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
+    const testPattern = harness.pattern<{ request: unknown }>(
+      ({ request }: { request: unknown }) => fetchData(request),
     );
-    const resultCell = runtime.getCell(
-      space,
-      "agentic-fact-checked-email-result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(
-      tx,
-      testPattern,
-      { request: requestCell },
-      resultCell,
-    );
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    const run = await harness.runPattern({
+      id: "agentic-fact-checked-email-result",
+      pattern: testPattern,
+      inputs: { request: requestCell },
+    });
 
-    const raw = await pullFinalResult(result);
+    const raw = await harness.pullSettledResult(
+      run.result,
+    ) as SettledFetchResult;
     expect(raw?.pending).toBe(false);
     expect(raw?.error).toBeUndefined();
     expect(raw?.result).toEqual({

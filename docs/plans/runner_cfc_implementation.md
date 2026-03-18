@@ -1060,10 +1060,12 @@ Primary files:
       inside patterns where the current runner path supports it
       (`gmail-read`, `gmail-send`, `gmail-error`, `safe-probing`,
       `return-to-sender`, `return-to-sender-provider-trust`,
-      `agentic-email`).
+      `agentic-email`, `agentic-fact-checked-email`).
 - [x] Cover durable share-grant worked-example setup/restart via the same
       harness, including the provenance-disclosure variant.
 - [ ] Close the remaining gap where some policy-rewrite worked-example phases
       still need harness-managed direct schema writes because pattern output
       materialization does not yet persist the same integrity additions as the
       direct schema-write path.
+- [-] `calendar-release` / `runtime-placement` remain direct
+      prepare-boundary/runtime-scope tests rather than pattern-flow tests.

@@ -257,12 +257,15 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
    lifecycle, committed edits, labeled input seeding, fetch stubs, label
    inspection, and fresh-runtime restart.
 2. Gmail send/read/error, safe-probing, return-to-sender
-   (including provider-trust), and agentic-email worked-example tests now run
-   mostly as patterns, with the harness keeping only trust/runtime setup
-   outside the pattern body.
+   (including provider-trust), agentic-email, and agentic fact-checked email
+   worked-example tests now run mostly as patterns, with the harness keeping
+   only trust/runtime setup outside the pattern body.
 3. Durable share-grant and provenance-disclosure tests also use the harness
    for labeled seeding, policy-state setup, and restart.
-4. There is still a known gap for some policy-rewrite cases through pattern
+4. The remaining uncovered worked-example tests are the direct
+   prepare-boundary/runtime-scope variants (`calendar-release`,
+   `runtime-placement`); they are not yet pattern-flow tests.
+5. There is still a known gap for some policy-rewrite cases through pattern
    output materialization: root/property output rewrites in worked-example
    scenarios do not yet consistently persist the same integrity additions that
    direct schema writes do. Where that gap appears, tests still use a
