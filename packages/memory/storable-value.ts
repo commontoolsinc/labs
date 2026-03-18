@@ -167,9 +167,9 @@ export function cloneIfNecessary<T extends StorableValue>(
     );
   }
 
-  return currentConfig.richStorableValues
+  return (currentConfig.richStorableValues
     ? cloneIfNecessaryRich(value, frozen, deep, force)
-    : cloneIfNecessaryLegacy(value, frozen, deep, force);
+    : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
 }
 
 // ---------------------------------------------------------------------------
