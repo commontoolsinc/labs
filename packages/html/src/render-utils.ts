@@ -256,7 +256,7 @@ export function sanitizeEvent(event: Event): object {
   }
 
   // Copy dataset as a plain object for serialization
-  if (isObject(target) && "dataset" in target && isRecord(target.dataset)) {
+  if (isRecord(target) && "dataset" in target && isRecord(target.dataset)) {
     const dataset: Record<string, string> = {};
     for (const key in target.dataset) {
       // String() to normalize, just in case
@@ -288,8 +288,8 @@ export function isSelectElement(value: unknown): value is HTMLSelectElement {
 // `{ "$NAME": "<ref>", "$UI": <ref> }` as VNodes, but lack
 // a `type = "vnode"`. This checks for type, $UI property.
 export function isVNodeish(value: unknown): value is VNode {
-  if (!isObject(value)) return false;
-  if ((value as VNode).type === "vnode") return true;
+  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (value.type === "vnode") return true;
   if (UI in value && value[UI]) return true;
   return false;
 }

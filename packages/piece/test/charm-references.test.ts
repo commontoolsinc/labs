@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { EntityId } from "@commontools/runner";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 type MockDoc = {
   get: () => unknown;
@@ -271,7 +271,7 @@ describe("Piece reference detection", () => {
       // Get the doc ID
       // FIXME: types
       const docId = (doc as MockDoc).getEntityId?.();
-      if (!isObject(docId) || !("/" in docId)) return undefined;
+      if (!isRecord(docId) || !("/" in docId)) return undefined;
 
       // If we've already seen this doc, stop to prevent cycles
       const docIdStr = typeof docId["/"] === "string"

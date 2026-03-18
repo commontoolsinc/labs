@@ -49,10 +49,10 @@ Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", 
   const renderer = new VDomRenderer({
     runtimeClient: {} as any,
     connection: connection as any,
-    document: ({
+    document: {
       createElement: (tagName: string) => ({ tagName }),
       createTextNode: (text: string) => ({ text }),
-    } as unknown as Document),
+    } as unknown as Document,
   });
 
   const cellRef = {

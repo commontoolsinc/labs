@@ -1,8 +1,8 @@
 import { type JSONSchema } from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 
 export const isJSONSchema = (source: unknown): source is JSONSchema => {
-  if (!isObject(source)) {
+  if (!isRecord(source)) {
     return false;
   }
 
@@ -138,7 +138,7 @@ export function isGuestError(e: object): e is GuestError {
 }
 
 export const isTaskPerform = (source: unknown): source is TaskPerform =>
-  isObject(source) &&
+  isRecord(source) &&
   "intent" in source && typeof source.intent === "string" &&
   "description" in source && typeof source.description === "string" &&
   "input" in source && isObject(source.input) &&
