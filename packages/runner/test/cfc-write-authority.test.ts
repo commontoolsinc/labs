@@ -3,9 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
+import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import {
   builtinImplementationIdentity,
+  type CfcImplementationIdentity,
   codeHashImplementationIdentity,
 } from "../src/cfc/implementation-identity.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -75,30 +76,48 @@ describe("CFC write authority", () => {
     await storageManager.close();
   });
 
+  async function seedCounter(
+    entityId: string,
+    schema: JSONSchema,
+    implementationIdentity: CfcImplementationIdentity,
+  ) {
+    const counter = runtime.getCell(space, entityId, schema, tx);
+    counter.withTx(tx).set({ count: 0 });
+    await prepareCfcCommitIfNeeded(tx, { implementationIdentity });
+    const committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+    tx = runtime.edit();
+    return runtime.getCell(space, entityId, schema, tx);
+  }
+
   it("allows writes from authorized code identities", async () => {
-    const counter = runtime.getCell(space, "counter-authorized", counterSchema, tx);
+    const incrementIdentity = codeHashImplementationIdentity(
+      "sha256:increment-handler",
+    );
+    const counter = await seedCounter(
+      "counter-authorized",
+      counterSchema,
+      incrementIdentity,
+    );
     counter.key("count").withTx(tx).set(1);
 
     await expect(
-      prepareBoundaryCommit(tx, {
-        implementationIdentity: codeHashImplementationIdentity(
-          "sha256:increment-handler",
-        ),
+      prepareCfcCommitIfNeeded(tx, {
+        implementationIdentity: incrementIdentity,
       }),
     ).resolves.toBeUndefined();
   });
 
   it("rejects writes from unauthorized code identities", async () => {
-    const counter = runtime.getCell(
-      space,
+    const counter = await seedCounter(
       "counter-unauthorized",
       counterSchema,
-      tx,
+      codeHashImplementationIdentity("sha256:increment-handler"),
     );
     counter.key("count").withTx(tx).set(1);
 
     await expect(
-      prepareBoundaryCommit(tx, {
+      prepareCfcCommitIfNeeded(tx, {
         implementationIdentity: codeHashImplementationIdentity(
           "sha256:malicious-handler",
         ),
@@ -111,17 +130,17 @@ describe("CFC write authority", () => {
   });
 
   it("allows builtins named in writeAuthorizedBy", async () => {
-    const counter = runtime.getCell(
-      space,
+    const mapIdentity = builtinImplementationIdentity("map");
+    const counter = await seedCounter(
       "counter-builtin-authorized",
       builtinCounterSchema,
-      tx,
+      mapIdentity,
     );
     counter.key("count").withTx(tx).set(1);
 
     await expect(
-      prepareBoundaryCommit(tx, {
-        implementationIdentity: builtinImplementationIdentity("map"),
+      prepareCfcCommitIfNeeded(tx, {
+        implementationIdentity: mapIdentity,
       }),
     ).resolves.toBeUndefined();
   });

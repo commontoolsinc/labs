@@ -184,6 +184,31 @@ The commit-point send path is also now covered in the same way:
 3. A second runtime instance replays the same send and gets the stored result
    back without issuing another network request.
 
+Intent-backed fetch sends now also have a live request-side sink gate:
+
+1. If the refined `IntentOnce` binds a `targetPrincipal`, `fetchData` requires
+   a fresh audience-verification callback at commit time before any network
+   attempt executes.
+2. Successful verification contributes an `AudienceRepresents(principal,
+   audience)` integrity atom for the current attempt.
+3. Before sending, the fetch path loads persisted request labels and
+   request-schema `allowedSink = "fetchData"` rules, applies matching rewrites,
+   and fails closed unless every remaining confidentiality clause is satisfied
+   by the acting user's own `User(...)` authority.
+4. The same fresh `AudienceRepresents(...)` atom is persisted onto successful
+   fetch results alongside the existing `AuthorizedRequest` and
+   `NetworkProvenance` evidence.
+
+That is now covered by a return-to-sender slice:
+
+1. A value labeled with both `User(Alice)` and `AuthoredBy(hotel)` is written
+   into a fetch request body.
+2. Without a matching sink rule, the live send is rejected even if the
+   audience verifier would otherwise approve the destination.
+3. With a matching rule and a fresh `AudienceRepresents(hotel, audience)`
+   verification, only the `AuthoredBy(...)` clause is cleared for the send,
+   while the result still carries `User(Alice)` confidentiality.
+
 A fact-check assurance slice is also now covered:
 
 1. A policy rewrite authorizes a public-audience output classification from a
@@ -227,6 +252,16 @@ The calendar-consent foundation is now present too:
    only augmented.
 6. Runtime-placement and stronger participant/runtime guards are still a later
    layer on top of this foundation.
+
+Schema-declared write authority is now also enforced in prepare:
+
+1. Schema paths may declare `ifc.writeAuthorizedBy` with `CodeHash(...)` and/or
+   `Builtin(...)` atoms.
+2. Prepare compares that set against the attempt's implementation identity.
+3. Writes from identities outside the declared set fail closed with
+   `CfcOutputTransitionViolationError(requirement = "writeAuthorizedBy")`.
+4. This covers the counter-pattern worked example directly at the field level,
+   before the write reaches storage.
 
 ## Internal Verifier Read Marker
 

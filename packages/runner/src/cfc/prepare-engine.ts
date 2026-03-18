@@ -209,6 +209,22 @@ function CfcOutputTransitionViolationError(
   };
 }
 
+function CfcWriteAuthorizedByViolationError(
+  entity: EntityAddress,
+  path: string,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: write implementation identity is not in writeAuthorizedBy",
+    requirement: "writeAuthorizedBy",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+  };
+}
+
 function CfcOutputExactCopyViolationError(
   entity: EntityAddress,
   path: string,
@@ -1021,6 +1037,16 @@ type ProjectionSpec = {
   readonly path: string;
 };
 
+type WriteAuthorizerSpec =
+  | {
+    readonly kind: "codeHash";
+    readonly hash: string;
+  }
+  | {
+    readonly kind: "builtin";
+    readonly name: string;
+  };
+
 type CollectionConstraintSpec = {
   readonly subsetOf?: string;
   readonly permutationOf?: string;
@@ -1073,6 +1099,55 @@ function readProjection(
     return undefined;
   }
   return { from, path };
+}
+
+function readWriteAuthorizedBy(
+  schema: JSONSchema | undefined,
+): readonly WriteAuthorizerSpec[] | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawWriteAuthorizedBy = (
+    rawIfc as { writeAuthorizedBy?: unknown }
+  ).writeAuthorizedBy;
+  if (
+    !Array.isArray(rawWriteAuthorizedBy) || rawWriteAuthorizedBy.length === 0
+  ) {
+    return undefined;
+  }
+
+  const authorizers: WriteAuthorizerSpec[] = [];
+  for (const entry of rawWriteAuthorizedBy) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const type = (entry as { type?: unknown }).type;
+    if (
+      type === "https://commonfabric.org/cfc/atom/CodeHash" &&
+      typeof (entry as { hash?: unknown }).hash === "string"
+    ) {
+      authorizers.push({
+        kind: "codeHash",
+        hash: (entry as { hash: string }).hash,
+      });
+      continue;
+    }
+    if (
+      type === "https://commonfabric.org/cfc/atom/Builtin" &&
+      typeof (entry as { name?: unknown }).name === "string"
+    ) {
+      authorizers.push({
+        kind: "builtin",
+        name: (entry as { name: string }).name,
+      });
+    }
+  }
+
+  return authorizers.length > 0 ? authorizers : undefined;
 }
 
 function isCanonicalPathString(value: unknown): value is string {
@@ -2323,6 +2398,36 @@ function evaluatePolicyDowngradeDecision(
   };
 }
 
+function implementationIdentityMatchesWriteAuthorizer(
+  implementationIdentity: CfcImplementationIdentity | undefined,
+  authorizer: WriteAuthorizerSpec,
+): boolean {
+  if (!implementationIdentity || implementationIdentity.kind === "unknown") {
+    return false;
+  }
+  if (authorizer.kind === "codeHash") {
+    return implementationIdentity.kind === "codeHash" &&
+      implementationIdentity.hash === authorizer.hash;
+  }
+  return implementationIdentity.kind === "builtin" &&
+    implementationIdentity.name === authorizer.name;
+}
+
+function implementationIdentityAuthorizedForWrite(
+  implementationIdentity: CfcImplementationIdentity | undefined,
+  authorizers: readonly WriteAuthorizerSpec[] | undefined,
+): boolean {
+  if (!authorizers || authorizers.length === 0) {
+    return true;
+  }
+  return authorizers.some((authorizer) =>
+    implementationIdentityMatchesWriteAuthorizer(
+      implementationIdentity,
+      authorizer,
+    )
+  );
+}
+
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
@@ -2363,6 +2468,15 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const writeAuthorizedBy = readWriteAuthorizedBy(schemaAtWritePath);
+    if (
+      !implementationIdentityAuthorizedForWrite(
+        options.implementationIdentity,
+        writeAuthorizedBy,
+      )
+    ) {
+      throw CfcWriteAuthorizedByViolationError(entity, write.path);
+    }
     const flowPrecisionSelection = selectFlowPrecisionConsumedReads(
       rootSchema,
       write.path,

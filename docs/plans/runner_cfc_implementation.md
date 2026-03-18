@@ -276,6 +276,8 @@ Primary files:
 ### 5.2 Output Transition Verification
 
 - [x] Implement transition checks over attempted writes.
+- [x] Enforce schema-declared `writeAuthorizedBy` authority against the
+      attempt implementation identity (`CodeHash` / `Builtin`).
 - [x] Support exact copy / projection checks where applicable.
 - [x] Preserve no-op attempted writes in policy evaluation.
 - [x] Support final-per-path view for rules that depend on final attempted
@@ -713,6 +715,7 @@ Primary test location:
       trusted statement.
 - [x] `cfc-filter-membership-vs-order-precision.test.ts`
 - [x] `cfc-flatmap-multiplicity-vs-content-precision.test.ts`
+- [x] `cfc-write-authority.test.ts`
 
 ### 11.5 Side-Effect Gating Tests
 
@@ -722,6 +725,7 @@ Primary test location:
 - [x] `cfc-retry-emits-once.test.ts`
 - [x] `cfc-event-envelope.test.ts` covers current-event tx context, explicit
       once-per-handler dedup, and unchanged legacy raw-event behavior.
+- [x] `cfc-worked-example-return-to-sender.test.ts`
 
 ### 11.6 Schema Hash Tests
 
@@ -821,6 +825,16 @@ Primary docs:
       without changing legacy raw scheduler event semantics.
 - [x] Confirm once-per-handler event consumption can be expressed as ordinary
       tx conflict/CAS on a derived handled marker.
+- [x] Confirm intent-backed fetch sends fail closed unless fresh audience
+      verification succeeds for the bound target principal.
+- [x] Confirm outgoing fetch sends consult persisted request labels plus
+      `allowedSink = "fetchData"` rules before releasing request-body data to
+      the external sink.
+- [x] Confirm the return-to-sender slice can remove only the
+      `AuthoredBy(...)` clause while preserving `User(...)` confidentiality and
+      minting `AudienceRepresents(...)` integrity on the result.
+- [x] Confirm schema `writeAuthorizedBy` is enforced against the executing
+      `CodeHash(...)` / `Builtin(...)` identity in prepare.
 - [-] Confirm direct CAS writes append boundary-computed effective labels only.
 - [-] Confirm direct CAS reads require exact `expectedLabel` match plus
       principal readability.
@@ -898,6 +912,16 @@ Primary docs:
 - [x] Step J.20: support participant-membership matching on array-valued atom
       fields plus remove-and-replace policy rewrites, then prove a calendar
       release slice to `User($actingUser)`.
+- [x] Step J.21: require fresh audience verification for intent-backed fetch
+      sends when the refined intent binds a `targetPrincipal`.
+- [x] Step J.22: consult persisted request labels and `allowedSink =
+      "fetchData"` rules before releasing request-body data at the live fetch
+      commit point.
+- [x] Step J.23: prove a return-to-sender slice where
+      `AuthoredBy(sender)` confidentiality only clears when
+      `AudienceRepresents(principal, audience)` is freshly verified at commit.
+- [x] Step J.24: enforce schema-declared `writeAuthorizedBy` against
+      implementation identity and cover the counter-pattern worked example.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

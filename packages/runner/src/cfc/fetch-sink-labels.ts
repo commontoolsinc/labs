@@ -389,7 +389,9 @@ function authorizationSatisfiedAfterSinkRewrite(
   if (!normalized || normalized.length === 0) {
     return true;
   }
-  return normalized.every((clause) => isActingUserClause(clause, actingPrincipal));
+  return normalized.every((clause) =>
+    isActingUserClause(clause, actingPrincipal)
+  );
 }
 
 async function loadFetchSinkRequestContext(
