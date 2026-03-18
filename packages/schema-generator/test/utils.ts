@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { StaticCacheFS } from "@commontools/static";
-import { isObject } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import type { JSONSchemaObj } from "@commontools/api";
 
 // Cache for TypeScript library definitions
@@ -337,7 +337,7 @@ function normalizeAnyOf(node: any): any {
   if (node.anyOf.length === 2) {
     const a = node.anyOf[0];
     const b = node.anyOf[1];
-    const isNull = (x: any) => isObject(x) && (x as any).type === "null";
+    const isNull = (x: any) => isRecord(x) && x.type === "null";
     if (isNull(b) && !isNull(a)) {
       node.anyOf = [b, a];
     }
@@ -348,9 +348,9 @@ function normalizeAnyOf(node: any): any {
 function deepCanonicalize(node: unknown): unknown {
   if (Array.isArray(node)) {
     // Sort specific arrays we know should be order-insensitive
-    return (node as unknown[]).map(deepCanonicalize);
+    return node.map(deepCanonicalize);
   }
-  if (!isObject(node)) return node;
+  if (!isRecord(node)) return node;
 
   // Clone and canonicalize children first
   const out: Record<string, unknown> = {};
@@ -360,17 +360,15 @@ function deepCanonicalize(node: unknown): unknown {
 
   // Sort known arrays
   if (Array.isArray(out.required)) {
-    out.required = [...(out.required as unknown[])].sort();
+    out.required = [...out.required].sort();
   }
   if (Array.isArray(out.enum)) {
-    out.enum = [...(out.enum as unknown[])].slice().sort();
+    out.enum = [...out.enum].slice().sort();
   }
 
   // Sort definitions keys deterministically
-  if (isObject(out.definitions)) {
-    out.definitions = sortObjectKeys(
-      out.definitions as Record<string, unknown>,
-    );
+  if (isRecord(out.definitions)) {
+    out.definitions = sortObjectKeys(out.definitions);
   }
 
   // Apply anyOf normalization for nullable patterns
