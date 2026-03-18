@@ -29,7 +29,7 @@ Existing harnesses reused as-is:
 - **Harness**: Direct API Harness
 - **Preconditions**: CTS-enabled source fixtures covering module-scope `lift`, `handler`, helper functions, data initializers, inline `derive`/`computed`, `action`, and `patternTool` / `*WithPattern`.
 - **Actions**: Run the `CommonToolsTransformerPipeline` on the fixtures and inspect the transformed program and fixture goldens.
-- **Expected outcome**: The emitted program contains the canonical wrapper ABI from `SES_SANDBOXING_SPEC.md` and `docs/plans/2026-03-17-ses-sandboxing-implementation.md`: `__ct_builder(...)`, `__ct_fn(...)`, `__ct_pure_fn(...)`, `__ct_data(...)`, and stable `/*__CT_TOPLEVEL__...*/` sentinels on surviving top-level items only. `derive(...)`/`computed(...)` hoists become `lift(...)` factories with call-site parameter application preserved; `action(...)` hoists become `handler(...)` factories with call-site application preserved; `patternTool(...)` and `*WithPattern(...)` remain inner-scope `pattern(...)` forms. This is justified by the spec’s canonical wrapper ABI and the plan’s Task 1 pipeline ordering and hoist rules.
+- **Expected outcome**: The emitted program contains the canonical wrapper ABI from `ses_sandboxing.md` and `docs/plans/2026-03-17-ses-sandboxing-implementation.md`: `__ct_builder(...)`, `__ct_fn(...)`, `__ct_pure_fn(...)`, `__ct_data(...)`, and stable `/*__CT_TOPLEVEL__...*/` sentinels on surviving top-level items only. `derive(...)`/`computed(...)` hoists become `lift(...)` factories with call-site parameter application preserved; `action(...)` hoists become `handler(...)` factories with call-site application preserved; `patternTool(...)` and `*WithPattern(...)` remain inner-scope `pattern(...)` forms. This is justified by the spec’s canonical wrapper ABI and the plan’s Task 1 pipeline ordering and hoist rules.
 - **Interactions**: Closure lowering, capability lowering, schema injection/generation, TypeScript emit.
 
 2. **Name**: CTS rejects disallowed authored forms before AMD emit
@@ -38,7 +38,7 @@ Existing harnesses reused as-is:
 - **Harness**: Direct API Harness
 - **Preconditions**: CTS-enabled sources containing inline `lift()` / `handler()`, non-direct builder callbacks, authored `import()`, and non-trusted external static imports.
 - **Actions**: Run validation/compile on each source through the existing transformer test utilities.
-- **Expected outcome**: Compilation fails with explicit diagnostics for placement violations, non-direct callbacks, v1 dynamic-import rejection, and non-trusted external imports, as required by `SES_SANDBOXING_SPEC.md` and Task 1 Step 5 of the implementation plan. The user-visible proof is the diagnostic stream, not internal AST state.
+- **Expected outcome**: Compilation fails with explicit diagnostics for placement violations, non-direct callbacks, v1 dynamic-import rejection, and non-trusted external imports, as required by `ses_sandboxing.md` and Task 1 Step 5 of the implementation plan. The user-visible proof is the diagnostic stream, not internal AST state.
 - **Interactions**: Pattern-context validation, module resolution, transform diagnostics.
 
 3. **Name**: Bundle preflight rejects authored code outside top-level `define(...)` before any side effect can run
