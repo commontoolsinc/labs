@@ -3,7 +3,7 @@ import type {
   StorableNativeObject,
   StorableValue,
   StorableValueLayer,
-} from "./interface.ts";
+} from "./fabric-value.ts";
 import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
 
 /**

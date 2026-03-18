@@ -32,7 +32,7 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
-} from "@commontools/memory/storable-value";
+} from "@commontools/data-model/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,

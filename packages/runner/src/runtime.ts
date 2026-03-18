@@ -17,7 +17,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   resetStorableValueConfig,
   setStorableValueConfig,
-} from "@commontools/memory/storable-value";
+} from "@commontools/data-model/storable-value";
 import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,

@@ -4,7 +4,7 @@ import type {
   StorableNativeObject,
   StorableValue,
   StorableValueLayer,
-} from "./interface.ts";
+} from "./fabric-value.ts";
 import {
   canBeStoredRich,
   cloneIfNecessaryRich,

@@ -9,7 +9,7 @@ import type {
   StorableDatum,
   StorableValue,
 } from "@commontools/memory/interface";
-import { cloneIfNecessary } from "@commontools/memory/storable-value";
+import { cloneIfNecessary } from "@commontools/data-model/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";

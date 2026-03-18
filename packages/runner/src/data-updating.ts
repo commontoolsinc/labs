@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
-} from "@commontools/memory/storable-value";
+} from "@commontools/data-model/storable-value";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import type {

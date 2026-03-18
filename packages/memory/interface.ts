@@ -8,8 +8,10 @@ import type { JSONSchema, JSONValue } from "@commontools/api";
 export type {
   StorableArray,
   StorableDatum,
+  StorableNativeObject,
   StorableObject,
   StorableValue,
+  StorableValueLayer,
 } from "@commontools/data-model/fabric-value";
 
 // Re-import for use in local type definitions within this file.
@@ -24,48 +26,6 @@ export type SchemaPathSelector = {
 };
 
 export type { JSONValue };
-
-/**
- * A value with storable structure at the top level, but potentially unconverted
- * nested values. This is the result of shallow conversion via `shallowStorableFromNativeValue()`
- * - arrays and objects have the right shape but their contents may still contain
- * values requiring further conversion (e.g., Error instances in a `cause` chain).
- */
-export type StorableValueLayer =
-  | StorableValue
-  | unknown[]
-  | Record<string, unknown>;
-
-/**
- * Union of raw native JS **object** types that the storable type system can
- * convert into `StorableInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `shallowStorableFromNativeValue()` accepts
- * `StorableValue | StorableNativeObject`, meaning callers can pass in either
- * already-storable data or raw native JS objects. The conversion produces
- * `StorableInstance` wrappers (StorableError, StorableMap, etc.) that live
- * inside `StorableValue` via the `StorableInstance` arm of `StorableDatum`.
- *
- * `Blob` is included because `StorableUint8Array.toNativeValue(true)` returns
- * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
- * serialization path throws on `Blob` since its data access methods are async.
- *
- * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to storable form via their `toJSON()` method. This is a legacy
- * conversion path but is included here so the `canBeStored()` type predicate
- * (`value is StorableValue | StorableNativeObject`) remains sound.
- *
- * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `StorableDatum` without wrapping.
- */
-export type StorableNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | RegExp
-  | Uint8Array
-  | Blob
-  | { toJSON(): unknown };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;

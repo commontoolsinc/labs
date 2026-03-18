@@ -1,5 +1,5 @@
 import { refer } from "@commontools/memory/reference";
-import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import { storableFromNativeValue } from "@commontools/data-model/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";

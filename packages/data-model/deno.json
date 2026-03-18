@@ -39,6 +39,10 @@
     "./storable-native-instances": "./storable-native-instances.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
-    "./json-type-handlers": "./json-type-handlers.ts"
+    "./json-type-handlers": "./json-type-handlers.ts",
+    "./storable-value": "./storable-value.ts",
+    "./storable-value-legacy": "./storable-value-legacy.ts",
+    "./storable-value-modern": "./storable-value-modern.ts",
+    "./storable-value-utils": "./storable-value-utils.ts"
   }
 }
