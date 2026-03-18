@@ -269,7 +269,14 @@ There is now also a first direct-CAS helper seam:
 3. Direct CAS reads currently require `(blobHash, expectedLabel)` plus an
    injected readability check; absent hash, label mismatch, and unreadable
    label all normalize to the same `undefined` miss shape.
-4. This is intentionally narrower than the final runtime contract: the helper
+4. There is also a prepared-label bridge helper that can source the CAS
+   effective label from persisted `cfc.labels` metadata after
+   `prepareBoundaryCommit()`, then refresh the prepared digest once the CAS
+   writes are appended.
+5. The public normal-cell surface is currently locked down against an obvious
+   bypass: constructing a normal `application/json` cell link does not expose
+   CAS blob or binding docs.
+6. This is intentionally narrower than the final runtime contract: the helper
    seams still need to be replaced by the runner's concrete IFC/policy engine
    and caller-access semantics before the CAS path is fully integrated.
 

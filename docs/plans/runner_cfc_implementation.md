@@ -759,6 +759,9 @@ Primary test location:
       normalized not-found.
 - [x] `cfc-cas-read` now covers absent-hash vs label-mismatch indistinguishable
       helper results.
+- [x] `cfc-causal-and-cas-no-bypass` now locks the public normal-cell surface
+      so `getCellFromLink(... type = "application/json")` does not expose CAS
+      blob or binding docs.
 - [-] `cfc-cas-low-write-does-not-overwrite-stronger-binding.test.ts`
 - [-] `cfc-causal-and-cas-no-bypass.test.ts`
 
@@ -1011,8 +1014,10 @@ Primary files:
 
 ### 15.4 Parallel-Store Non-Bypass Rules
 
-- [-] Enforce that causal-ID reads/writes continue to use causal-path
-      authorization rules only.
+- [x] Public causal cell reads do not expose direct CAS blob/binding docs
+      through the normal `application/json` cell path.
+- [ ] Enforce that causal-ID reads/writes continue to use causal-path
+      authorization rules only across all remaining read/write surfaces.
 - [-] Enforce that direct CAS reads/writes continue to use hash+label-binding
       rules only.
 - [-] Prevent implicit fallback from one path into the other for authorization
