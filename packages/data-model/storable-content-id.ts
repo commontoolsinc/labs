@@ -7,7 +7,7 @@
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
  */
-import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
+import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
 export class StorableContentId extends SpecialPrimitiveValue {

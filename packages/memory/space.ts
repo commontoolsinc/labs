@@ -69,7 +69,7 @@ export type {
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
 import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
-import type { ReconstructionContext } from "./storable-protocol.ts";
+import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
 export type * from "./interface.ts";
 
 /**

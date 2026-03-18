@@ -4,8 +4,8 @@ import {
   DECONSTRUCT,
   RECONSTRUCT,
 } from "@commontools/data-model/storable-instance";
-import { isStorableInstance } from "../storable-protocol.ts";
-import type { ReconstructionContext } from "../storable-protocol.ts";
+import { isStorableInstance } from "@commontools/data-model/storable-protocol";
+import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
 import type { StorableValue } from "../interface.ts";
 import {
   StorableEpochDays,
@@ -31,7 +31,7 @@ import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../type-tags.ts";
+} from "@commontools/data-model/type-tags";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {

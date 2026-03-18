@@ -7,11 +7,11 @@ import {
   type ReconstructionContext,
   type SerializationContext,
   type StorableClass,
-} from "./storable-protocol.ts";
-import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+} from "@commontools/data-model/storable-protocol";
+import { ExplicitTagStorable } from "@commontools/data-model/explicit-tag-storable";
 import { deepFreeze } from "@commontools/data-model/deep-freeze";
-import { UnknownStorable } from "./unknown-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+import { UnknownStorable } from "@commontools/data-model/unknown-storable";
+import { ProblematicStorable } from "@commontools/data-model/problematic-storable";
 import {
   createDefaultRegistry,
   type JsonWireValue,
@@ -25,7 +25,7 @@ import {
   StorableSet,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
-import { TAGS } from "./type-tags.ts";
+import { TAGS } from "@commontools/data-model/type-tags";
 
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();

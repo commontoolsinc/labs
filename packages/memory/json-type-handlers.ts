@@ -6,9 +6,9 @@ import {
 import {
   isStorableInstance,
   type ReconstructionContext,
-} from "./storable-protocol.ts";
-import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+} from "@commontools/data-model/storable-protocol";
+import { ExplicitTagStorable } from "@commontools/data-model/explicit-tag-storable";
+import { ProblematicStorable } from "@commontools/data-model/problematic-storable";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -26,13 +26,13 @@ import {
   StorableEpochDays,
   StorableEpochNsec,
 } from "@commontools/data-model/storable-epoch";
-import { TAGS } from "./type-tags.ts";
+import { TAGS } from "@commontools/data-model/type-tags";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
   fromBase64url,
   toUnpaddedBase64url,
-} from "./bigint-encoding.ts";
+} from "@commontools/data-model/bigint-encoding";
 
 /**
  * Narrow interface for what type handlers need from the encoding context

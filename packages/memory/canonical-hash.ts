@@ -11,15 +11,18 @@
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
-import { StorableContentId } from "./storable-content-id.ts";
+import { StorableContentId } from "@commontools/data-model/storable-content-id";
 import { StorableUint8Array } from "./storable-native-instances.ts";
 import {
   DECONSTRUCT,
   type StorableInstance,
 } from "@commontools/data-model/storable-instance";
-import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
+import {
+  NATIVE_TAGS,
+  tagFromNativeValue,
+} from "@commontools/data-model/type-tags";
 import { encodeULEB128 } from "@commontools/leb128";
-import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
+import { bigintToMinimalTwosComplement } from "@commontools/data-model/bigint-encoding";
 import { LRUCache } from "@commontools/utils/cache";
 
 // ---------------------------------------------------------------------------

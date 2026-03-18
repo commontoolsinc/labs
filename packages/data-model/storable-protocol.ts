@@ -1,10 +1,10 @@
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "./fabric-value.ts";
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   StorableInstance,
-} from "@commontools/data-model/storable-instance";
+} from "./storable-instance.ts";
 
 /**
  * A class that can reconstruct storable instances from essential state. The

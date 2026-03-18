@@ -5,7 +5,7 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import type { StorableInstance } from "@commontools/data-model/storable-instance";
-import { isStorableInstance } from "./storable-protocol.ts";
+import { isStorableInstance } from "@commontools/data-model/storable-protocol";
 import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
 import { StorableEpochNsec } from "@commontools/data-model/storable-epoch";
 import {
@@ -14,7 +14,10 @@ import {
   StorableRegExp,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
+import {
+  NATIVE_TAGS,
+  tagFromNativeValue,
+} from "@commontools/data-model/type-tags";
 import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
 
 /** Reject native objects with extra enumerable properties. */

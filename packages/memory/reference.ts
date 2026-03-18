@@ -2,8 +2,8 @@ import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
-import { StorableContentId } from "./storable-content-id.ts";
-import { fromBase64url } from "./bigint-encoding.ts";
+import { StorableContentId } from "@commontools/data-model/storable-content-id";
+import { fromBase64url } from "@commontools/data-model/bigint-encoding";
 
 // ---------------------------------------------------------------------------
 // Public types

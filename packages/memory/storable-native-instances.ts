@@ -7,10 +7,14 @@ import {
 import {
   isStorableInstance,
   type ReconstructionContext,
-} from "./storable-protocol.ts";
+} from "@commontools/data-model/storable-protocol";
 import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
 
-import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
+import {
+  NATIVE_TAGS,
+  tagFromNativeValue,
+  TAGS,
+} from "@commontools/data-model/type-tags";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------

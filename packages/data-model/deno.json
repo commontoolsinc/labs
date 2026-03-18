@@ -25,6 +25,13 @@
     "./fabric-value": "./fabric-value.ts",
     "./storable-instance": "./storable-instance.ts",
     "./special-primitive-value": "./special-primitive-value.ts",
-    "./storable-epoch": "./storable-epoch.ts"
+    "./storable-epoch": "./storable-epoch.ts",
+    "./bigint-encoding": "./bigint-encoding.ts",
+    "./storable-content-id": "./storable-content-id.ts",
+    "./storable-protocol": "./storable-protocol.ts",
+    "./type-tags": "./type-tags.ts",
+    "./explicit-tag-storable": "./explicit-tag-storable.ts",
+    "./unknown-storable": "./unknown-storable.ts",
+    "./problematic-storable": "./problematic-storable.ts"
   }
 }

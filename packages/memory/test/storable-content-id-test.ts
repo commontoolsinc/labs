@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as Reference from "merkle-reference";
-import { StorableContentId } from "../storable-content-id.ts";
+import { StorableContentId } from "@commontools/data-model/storable-content-id";
 import {
   contentIdFromJSON,
   fromString,
