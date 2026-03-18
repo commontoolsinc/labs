@@ -259,7 +259,9 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
 2. Gmail send/read, return-to-sender (including provider-trust),
    agentic-email, agentic fact-checked email, and fact-check now run as real
    `pattern(...)` programs, with the harness keeping only trust/runtime setup
-   outside the pattern body.
+   outside the pattern body. Safe-probing now also runs as a true pattern after
+   skipping automatic input-classification propagation onto declassifying lift
+   outputs.
 3. Durable share-grant and provenance-disclosure tests use the harness for
    labeled seeding, policy-state setup, and restart, but their final guarded
    read phase is still direct because the share rewrite is not yet reflected in
@@ -270,8 +272,8 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
 5. There is still a known gap for some policy-rewrite cases through pattern
    outputs: root/property rewrites that succeed for the produced value do not
    always reappear in the downstream effective labels of later pattern reads.
-   Current blocked conversions are safe-probing, Gmail operator-error views,
-   and share-grant/provenance-disclosure.
+   Current blocked conversions are Gmail operator-error views and
+   share-grant/provenance-disclosure.
 
 Prepare-time policy matching now also seeds reserved bindings from the ambient
 prepare context:

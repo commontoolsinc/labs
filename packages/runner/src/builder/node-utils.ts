@@ -15,6 +15,47 @@ import {
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 
+function schemaHasConfidentialityRewrite(
+  schema: JSONSchema | undefined,
+  seen = new Set<JSONSchema>(),
+): boolean {
+  if (!schema || typeof schema === "boolean") {
+    return false;
+  }
+  if (seen.has(schema)) {
+    return false;
+  }
+  seen.add(schema);
+
+  if (schema.ifc?.declassify || schema.ifc?.exchange) {
+    return true;
+  }
+
+  const children: JSONSchema[] = [];
+  if (schema.properties && typeof schema.properties === "object") {
+    children.push(...Object.values(schema.properties));
+  }
+  if (
+    schema.additionalProperties &&
+    typeof schema.additionalProperties === "object"
+  ) {
+    children.push(schema.additionalProperties);
+  }
+  if (schema.items && typeof schema.items === "object") {
+    children.push(schema.items);
+  }
+  if (Array.isArray(schema.prefixItems)) {
+    children.push(...schema.prefixItems);
+  }
+  for (const composed of [schema.anyOf, schema.oneOf, schema.allOf]) {
+    if (Array.isArray(composed)) {
+      children.push(...composed);
+    }
+  }
+
+  return children.some((child) => schemaHasConfidentialityRewrite(child, seen));
+}
+
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -41,6 +82,9 @@ export function applyArgumentIfcToResult(
   resultSchema?: JSONSchema,
 ): JSONSchema | undefined {
   if (argumentSchema !== undefined) {
+    if (schemaHasConfidentialityRewrite(resultSchema)) {
+      return resultSchema;
+    }
     const joined = collectSchemaConfidentiality(argumentSchema);
     return joined
       ? schemaWithConfidentiality(resultSchema ?? true, joined)
@@ -81,6 +125,9 @@ function attachCfcToOutputs<T, R>(
   if (isCell(outputs)) {
     const exported = outputs.export();
     const outputSchema = exported.schema ?? true;
+    if (schemaHasConfidentialityRewrite(outputSchema)) {
+      return;
+    }
     const cfcSchema = schemaWithConfidentiality(
       outputSchema,
       propagatedClassification,

@@ -1059,19 +1059,18 @@ Primary files:
       `pattern(...)` programs with harness-managed runtime setup and restarts
       (`gmail-read`, `gmail-send`, `return-to-sender`,
       `return-to-sender-provider-trust`, `agentic-email`,
-      `agentic-fact-checked-email`, `fact-check`).
+      `agentic-fact-checked-email`, `fact-check`, `safe-probing`).
 - [x] Keep durable share-grant/provenance-disclosure setup and restart under
       the same harness so those tests are ready once pattern-output rewrite
       propagation is fixed.
 - [ ] Close the remaining pattern-output rewrite propagation gap for policy
       rewrites that must remain reusable across later pattern reads. Known
       blocked worked-example conversions:
-      `safe-probing` (lift output declassify not reflected in effective
-      downstream labels),
       `gmail-error` operator views (sanitizer integrity on direct output vs
       request/provenance evidence on effective reads diverge),
       `share-grant` / `share-provenance-disclosure` (policy-state share rewrite
-      succeeds for the produced value but does not yet carry the recipient-added
-      confidentiality into downstream effective labels).
+      still requires an actual materializing write boundary; alias-style
+      pattern outputs stay on the source label and object-valued lift outputs
+      still expose an ancestor/leaf rewrite gap).
 - [-] `calendar-release` / `runtime-placement` remain direct
       prepare-boundary/runtime-scope tests rather than pattern-flow tests.
