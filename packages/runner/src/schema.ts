@@ -37,6 +37,7 @@ import {
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { normalizeIntegrityLabel } from "./cfc/label-algebra.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -381,11 +382,7 @@ function readIfcInputAnnotations(
     : [];
   const rawRequiredIntegrity = (schemaWithIfc.ifc as Record<string, unknown>)
     .requiredIntegrity;
-  const requiredIntegrity = Array.isArray(rawRequiredIntegrity)
-    ? rawRequiredIntegrity.filter(
-      (entry): entry is string => typeof entry === "string" && entry.length > 0,
-    )
-    : [];
+  const requiredIntegrity = normalizeIntegrityLabel(rawRequiredIntegrity) ?? [];
   if (maxConfidentiality.length === 0 && requiredIntegrity.length === 0) {
     return undefined;
   }

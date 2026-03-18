@@ -265,6 +265,9 @@ Primary files:
 - [x] Implement consumed-input label gathering from canonical reads.
 - [x] Implement coherent `requiredIntegrity` verification for object-level
       annotations.
+- [x] Accept structured atom-pattern `requiredIntegrity` schema annotations
+      (subset object match for minted atoms like `AuthorizedRequest` /
+      `NetworkProvenance`), not only legacy string atoms.
 - [x] Implement concept-valued `requiredIntegrity` matching from available
       concrete integrity via acting-user trust closure.
 - [x] Implement `maxConfidentiality` checks.

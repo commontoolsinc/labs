@@ -123,7 +123,7 @@ function CfcMaxConfidentialityViolationError(
 
 function CfcRequiredIntegrityViolationError(
   read: CanonicalBoundaryRead,
-  requiredIntegrity: readonly string[],
+  requiredIntegrity: CfcIntegrityLabel,
   actualIntegrity: CfcIntegrityLabel | undefined,
   path = read.path,
 ): ICfcInputRequirementViolationError {
@@ -803,7 +803,7 @@ function classificationSatisfiesMaxConfidentiality(
 function findRequiredIntegrityCoherenceViolation(
   labelsByPath: Record<string, Labels>,
   readPath: string,
-  requiredIntegrity: readonly string[],
+  requiredIntegrity: CfcIntegrityLabel,
   options: PrepareBoundaryCommitOptions,
 ):
   | { path: string; actualIntegrity: CfcIntegrityLabel | undefined }
@@ -818,7 +818,7 @@ function findRequiredIntegrityCoherenceViolation(
     const actualIntegrity = normalizeIntegrityLabel(label.integrity);
     if (
       !integritySatisfiesRequiredIntegrity(
-        stringIntegrityAtoms(actualIntegrity),
+        actualIntegrity,
         requiredIntegrity,
         options,
       )
@@ -911,7 +911,7 @@ function verifyInputRequirementsForAttempt(
       );
       if (
         !integritySatisfiesRequiredIntegrity(
-          stringIntegrityAtoms(actualIntegrity),
+          actualIntegrity,
           requiredIntegrity,
           options,
         )

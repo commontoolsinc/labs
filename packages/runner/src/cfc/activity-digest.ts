@@ -16,6 +16,7 @@ import {
   computeCfcTrustContextHash,
 } from "./integrity-trust.ts";
 import { encodeImplementationIdentity } from "./implementation-identity.ts";
+import { normalizeIntegrityLabel } from "./label-algebra.ts";
 
 interface NormalizedReadMetadata {
   readonly ignoreReadForScheduling: boolean;
@@ -25,7 +26,7 @@ interface NormalizedReadMetadata {
 interface NormalizedReadCfc {
   readonly internalVerifierRead: boolean;
   readonly maxConfidentiality: readonly string[];
-  readonly requiredIntegrity: readonly string[];
+  readonly requiredIntegrity: readonly unknown[];
   readonly flowPrecisionOutputPath: string | null;
   readonly flowPrecisionSourcePath: string | null;
 }
@@ -70,7 +71,8 @@ function normalizeCfcReadAnnotations(
   cfc: ICfcReadAnnotations | undefined,
 ): NormalizedReadCfc {
   const maxConfidentiality = [...(cfc?.maxConfidentiality ?? [])].sort();
-  const requiredIntegrity = [...(cfc?.requiredIntegrity ?? [])].sort();
+  const requiredIntegrity = normalizeIntegrityLabel(cfc?.requiredIntegrity) ??
+    [];
   return {
     internalVerifierRead: cfc?.internalVerifierRead === true,
     maxConfidentiality,

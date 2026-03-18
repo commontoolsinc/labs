@@ -25,6 +25,7 @@ import {
   ignoreReadForSchedulingMarker,
   markReadAsPotentialWriteMarker,
 } from "../read-metadata.ts";
+import { normalizeIntegrityLabel } from "../../cfc/label-algebra.ts";
 import * as Chronicle from "./chronicle.ts";
 
 export interface UnknownState {
@@ -202,6 +203,25 @@ function validateCfcStringList(
   return { ok: values };
 }
 
+function validateCfcAtomList(
+  field: "requiredIntegrity",
+  value: unknown,
+): ValidationResult<ReturnType<typeof normalizeIntegrityLabel>> {
+  if (value === undefined) {
+    return { ok: undefined };
+  }
+  const normalized = normalizeIntegrityLabel(value);
+  if (!normalized) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        `${field} must be an array of JSON-compatible atoms`,
+      ),
+    };
+  }
+  return { ok: normalized };
+}
+
 function validateCanonicalPathString(
   key: "flowPrecisionOutputPath" | "flowPrecisionSourcePath",
   raw: unknown,
@@ -272,7 +292,7 @@ function validateCfcAnnotations(
   if ("error" in maxConfidentialityResult) {
     return { error: maxConfidentialityResult.error };
   }
-  const requiredIntegrityResult = validateCfcStringList(
+  const requiredIntegrityResult = validateCfcAtomList(
     "requiredIntegrity",
     (cfc as { requiredIntegrity?: unknown }).requiredIntegrity,
   );

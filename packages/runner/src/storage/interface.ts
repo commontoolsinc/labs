@@ -745,7 +745,7 @@ export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly type: string;
   readonly path: string;
   readonly maxConfidentiality?: readonly string[];
-  readonly requiredIntegrity?: readonly string[];
+  readonly requiredIntegrity?: CfcIntegrityLabel;
   readonly actualClassification?: CfcConfidentialityLabel;
   readonly actualIntegrity?: CfcIntegrityLabel;
   readonly requiredReadPath?: string;

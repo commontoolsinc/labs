@@ -145,6 +145,16 @@ The fetch path also now has a conservative authorization-placement guard:
 4. Those labels are written onto the resolved result cell, so callers observe
    the same CFC state through `result.key("result").resolveAsCell()`.
 
+Input-requirement checks now also accept structured atom patterns:
+
+1. `requiredIntegrity` schema annotations can include JSON atoms, not only
+   legacy strings.
+2. Object-pattern requirements use subset matching, so a schema can require
+   only the stable fields it cares about from minted atoms such as
+   `AuthorizedRequest` or `NetworkProvenance`.
+3. Concept-valued requirements still route through the acting principal's
+   trust closure rather than requiring derived concept atoms to be persisted.
+
 ## Internal Verifier Read Marker
 
 Verifier/system reads use metadata marker `internalVerifierRead`:

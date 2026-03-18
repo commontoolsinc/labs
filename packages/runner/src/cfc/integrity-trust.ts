@@ -2,6 +2,8 @@ import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import { toHex } from "./shared.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+import { matchesCfcAtomPattern } from "./atom-patterns.ts";
+import type { CfcAtom, CfcIntegrityLabel } from "./label-algebra.ts";
 
 export interface CfcVerifierDelegation {
   readonly delegator: string;
@@ -222,22 +224,29 @@ function reachesConcept(
 }
 
 function integrityRequirementSatisfiedWithEdges(
-  actual: string | undefined,
-  requirement: string,
+  actual: CfcAtom | undefined,
+  requirement: CfcAtom,
   trustedEdges: readonly CfcTrustConceptEdge[],
 ): boolean {
-  if (!actual || requirement.length === 0) {
+  if (actual === undefined) {
     return false;
   }
-  if (actual === requirement) {
-    return true;
+  if (
+    typeof actual === "string" &&
+    typeof requirement === "string" &&
+    requirement.length > 0
+  ) {
+    if (actual === requirement) {
+      return true;
+    }
+    return reachesConcept(actual, requirement, trustedEdges);
   }
-  return reachesConcept(actual, requirement, trustedEdges);
+  return matchesCfcAtomPattern(actual, requirement);
 }
 
 export function integrityRequirementSatisfied(
-  actual: string | undefined,
-  requirement: string,
+  actual: CfcAtom | undefined,
+  requirement: CfcAtom,
   options: CfcIntegrityTrustOptions = {},
 ): boolean {
   const trustedEdges = trustedEdgesForActingPrincipal(
@@ -252,8 +261,8 @@ export function integrityRequirementSatisfied(
 }
 
 export function integritySatisfiesRequiredIntegrity(
-  actualIntegrity: readonly string[] | undefined,
-  requiredIntegrity: readonly string[],
+  actualIntegrity: CfcIntegrityLabel | undefined,
+  requiredIntegrity: CfcIntegrityLabel,
   options: CfcIntegrityTrustOptions = {},
 ): boolean {
   if (requiredIntegrity.length === 0) {
