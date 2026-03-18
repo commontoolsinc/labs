@@ -1,15 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { Labels, URI } from "../src/storage/interface.ts";
+import type { Labels } from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example fact check test",
@@ -42,6 +36,14 @@ const sourceSchema = {
   ifc: { classification: [userAliceAtom] },
 } as const satisfies JSONSchema;
 
+const factCheckInputSchema = {
+  type: "object",
+  properties: {
+    source: sourceSchema,
+  },
+  required: ["source"],
+} as const satisfies JSONSchema;
+
 const factCheckOutputSchema = {
   type: "string",
   ifc: {
@@ -57,94 +59,45 @@ const factCheckOutputSchema = {
 } as const satisfies JSONSchema;
 
 describe("CFC worked example: fact-check assurance", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
     });
-    runtime.scheduler.disablePullMode();
   });
 
   afterEach(async () => {
-    await runtime.dispose();
+    await harness.dispose();
   });
 
-  async function seedValueWithLabels(
-    id: URI,
-    value: unknown,
-    labels: Labels,
-  ): Promise<void> {
-    const tx = runtime.edit();
-    tx.writeOrThrow({
-      space,
-      id,
-      type: "application/json",
-      path: ["value"],
-    }, value as never);
-    tx.writeOrThrow({
-      space,
-      id,
-      type: "application/json",
-      path: ["cfc", "labels"],
-    }, { "/": labels });
-    const { error } = await tx.commit();
-    expect(error).toBeUndefined();
-  }
-
-  async function readLabels(id: URI): Promise<Record<string, Labels>> {
-    const tx = runtime.edit();
-    const raw = tx.readOrThrow({
-      ...cfcLabelsAddress({
-        space,
-        id,
-        type: "application/json",
-      }),
-    });
-    await tx.abort();
-    return normalizePersistedLabels(raw);
-  }
-
-  it("adds structured confidentiality and integrity evidence through policy rewrite", async () => {
-    const source = runtime.getCell<string>(
-      space,
-      "fact-check-worked-example-source",
-      undefined,
-    );
-
-    await seedValueWithLabels(
-      source.getAsNormalizedFullLink().id,
-      "Claim text",
-      {
+  it("adds structured confidentiality and integrity evidence through a pattern output rewrite", async () => {
+    const source = await harness.seedLabeledValue({
+      id: "fact-check-worked-example-source",
+      schema: sourceSchema,
+      value: "Claim text",
+      labels: {
         classification: [userAliceAtom],
         integrity: ["fact-check-proof"],
-      },
+      } satisfies Labels,
+    });
+
+    const factCheckPattern = harness.pattern(
+      ({ source }) => source,
+      factCheckInputSchema,
+      factCheckOutputSchema,
     );
 
-    const tx = runtime.edit();
-    const freshSource = runtime.getCell<string>(
-      space,
-      "fact-check-worked-example-source",
-      undefined,
-      tx,
-    );
-    const freshTarget = runtime.getCell<string>(
-      space,
-      "fact-check-worked-example-target",
-      undefined,
-      tx,
-    );
-    const value = freshSource.withTx(tx).asSchema(sourceSchema).get() ?? "";
-    freshTarget.withTx(tx).asSchema(factCheckOutputSchema).set(value);
+    const run = await harness.runPattern({
+      id: "fact-check-worked-example-target",
+      pattern: factCheckPattern,
+      inputs: { source },
+      prepare: "cfc",
+    });
+    expect(await run.result.pull()).toBe("Claim text");
 
-    await prepareCfcCommitIfNeeded(tx);
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    const labels = await readLabels(freshTarget.getAsNormalizedFullLink().id);
+    const labels = await harness.readLabels(run.outputLink.id);
     expect(labels["/"]?.classification).toEqual([[publicAudienceAtom]]);
     expect(labels["/"]?.integrity).toEqual(
       expect.arrayContaining([
