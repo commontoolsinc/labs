@@ -216,7 +216,10 @@ The calendar-consent foundation is now present too:
 2. Consent validation intersects time ranges and hours conservatively, takes
    the minimum `maxResults`, preserves `onlyFuture` when any participant
    requires it, and derives a deterministic `ConsentedBy` atom.
-3. Runtime-placement and acting-user release rules are still a later layer on
+3. Canonical result labels can now be derived directly from those consents:
+   `MultiPartyResult(participants=...)` plus `ComputedBy(...)` and
+   `ConsentedBy(...)`.
+4. Runtime-placement and acting-user release rules are still a later layer on
    top of this helper foundation.
 
 ## Internal Verifier Read Marker

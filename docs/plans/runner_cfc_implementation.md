@@ -892,6 +892,9 @@ Primary docs:
 - [x] Step J.18: add deterministic `MultiPartyConsentIntent` helpers and
       conservative consent validation so the calendar worked example has a
       runner-local foundation before runtime-attestation work.
+- [x] Step J.19: derive canonical calendar-result labels
+      (`MultiPartyResult`, `ConsentedBy`, `ComputedBy`) from validated consent
+      intents and code identity.
 - [-] Step K: complete Section 15 (direct CAS + dual-path safety).
 - [x] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 

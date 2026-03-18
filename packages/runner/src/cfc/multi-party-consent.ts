@@ -1,5 +1,6 @@
 import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import type { Labels } from "../storage/interface.ts";
 import { toHex } from "./shared.ts";
 
 export interface CfcConsentTimeRange {
@@ -220,5 +221,27 @@ export function deriveCfcConsentedByAtom(
   return {
     type: "https://commonfabric.org/cfc/atom/ConsentedBy",
     consents: sortStrings(consents.map((consent) => consent.id)),
+  };
+}
+
+export function deriveCfcMultiPartyResultLabels(options: {
+  readonly consents: readonly CfcMultiPartyConsentIntent[];
+  readonly codeHash: string;
+}): Labels {
+  const participants = sortStrings(
+    options.consents.map((consent) => consent.participant),
+  );
+  return {
+    classification: [[{
+      type: "https://commonfabric.org/cfc/atom/MultiPartyResult",
+      participants,
+    }]],
+    integrity: [
+      {
+        type: "https://commonfabric.org/cfc/atom/ComputedBy",
+        codeHash: options.codeHash,
+      },
+      deriveCfcConsentedByAtom(options.consents),
+    ],
   };
 }
