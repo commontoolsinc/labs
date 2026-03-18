@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertThrows } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
 import { deepFreeze } from "../deep-freeze.ts";
-import { toDeepFrozenSchema } from "../schema-utils.ts";
+import { isNontrivialSchema, toDeepFrozenSchema } from "../schema-utils.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
@@ -276,6 +276,87 @@ describe("toDeepFrozenSchema", () => {
       // Both should be deeply frozen in the result.
       assertEquals(Object.isFrozen(result.properties), true);
       assertEquals(Object.isFrozen(result.required), true);
+    });
+  });
+});
+
+describe("isNontrivialSchema", () => {
+  describe("nullish inputs", () => {
+    it("returns false for undefined", () => {
+      assertEquals(isNontrivialSchema(undefined), false);
+    });
+
+    it("returns false for null", () => {
+      assertEquals(isNontrivialSchema(null), false);
+    });
+  });
+
+  describe("boolean schemas", () => {
+    it("returns false for true", () => {
+      assertEquals(isNontrivialSchema(true), false);
+    });
+
+    it("returns false for false", () => {
+      assertEquals(isNontrivialSchema(false), false);
+    });
+  });
+
+  describe("empty object schema", () => {
+    it("returns false for {}", () => {
+      assertEquals(isNontrivialSchema({}), false);
+    });
+  });
+
+  describe("non-trivial schemas", () => {
+    it("returns true for a schema with type", () => {
+      assertEquals(isNontrivialSchema({ type: "string" }), true);
+    });
+
+    it("returns true for a schema with properties", () => {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      assertEquals(isNontrivialSchema(schema), true);
+    });
+
+    it("returns true for a schema with only $ref", () => {
+      assertEquals(isNontrivialSchema({ $ref: "#/definitions/Foo" }), true);
+    });
+
+    it("returns true for a schema with anyOf", () => {
+      assertEquals(
+        isNontrivialSchema({ anyOf: [{ type: "string" }, { type: "number" }] }),
+        true,
+      );
+    });
+
+    it("returns true for a frozen non-empty schema", () => {
+      const schema = Object.freeze({ type: "number" as const });
+      assertEquals(isNontrivialSchema(schema), true);
+    });
+
+    it("returns true for a deep-frozen schema", () => {
+      const schema: JSONSchemaObj = deepFreeze({
+        type: "object",
+        properties: { x: { type: "number" } },
+      });
+      assertEquals(isNontrivialSchema(schema), true);
+    });
+  });
+
+  describe("type narrowing", () => {
+    it("narrows to JSONSchemaObj (allows property access)", () => {
+      const schema: JSONSchemaObj | undefined = {
+        type: "object",
+        properties: { a: { type: "string" } },
+      };
+      if (isNontrivialSchema(schema)) {
+        assertEquals(schema.type, "object");
+        assertEquals(typeof schema.properties, "object");
+      } else {
+        throw new Error("Expected isNontrivialSchema to return true");
+      }
     });
   });
 });

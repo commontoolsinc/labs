@@ -2,8 +2,23 @@
  * Runtime utilities for working with JSONSchema values.
  */
 
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
+
+/**
+ * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
+ * non-trivial schema is defined as one that is an `object` with at least one
+ * property.
+ */
+export function isNontrivialSchema(
+  schema: JSONSchema | undefined | null,
+): schema is JSONSchemaObj {
+  if ((schema === null) || (typeof schema !== "object")) {
+    return false;
+  }
+
+  return Object.keys(schema).length !== 0;
+}
 
 /**
  * Return a deep-frozen copy of (or reference to) a JSONSchema.
