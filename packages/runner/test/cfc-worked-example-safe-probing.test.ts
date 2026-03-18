@@ -1,19 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { NormalizedFullLink } from "../src/link-types.ts";
-import type {
-  IExtendedStorageTransaction,
-  Labels,
-} from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example safe probing test",
@@ -68,63 +57,48 @@ const wordCountSchema = {
 } as const satisfies JSONSchema;
 
 describe("CFC worked example: safe probing", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
     });
-    tx = runtime.edit();
   });
 
   afterEach(async () => {
-    await tx.abort();
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
-  async function readLabelsForCell(
-    cell: { getAsNormalizedFullLink: () => NormalizedFullLink },
-  ): Promise<Record<string, Labels>> {
-    const readTx = runtime.edit();
-    const raw = readTx.readOrThrow(
-      cfcLabelsAddress(cell.getAsNormalizedFullLink()),
-    );
-    await readTx.abort();
-    return normalizePersistedLabels(raw);
-  }
-
   it("clears material-risk caveats for a numeric probe while preserving prompt influence", async () => {
-    const report = runtime.getCell(
-      space,
-      "safe-probing-report",
-      reportSchema,
-      tx,
+    await harness.writeCellValue({
+      id: "safe-probing-report",
+      schema: reportSchema,
+      value: "Malicious instructions hidden in a report",
+      prepare: "cfc",
+    });
+
+    const wordCount = await harness.withCommittedEdit((tx) => {
+      const reportInTx = harness.getCell<string>(
+        "safe-probing-report",
+        reportSchema,
+        tx,
+      );
+      const wordCount = harness.getCell<number>(
+        "safe-probing-word-count",
+        wordCountSchema,
+        tx,
+      );
+      reportInTx.withTx(tx).get();
+      wordCount.withTx(tx).set(42);
+      return wordCount;
+    }, {
+      prepare: "cfc",
+    });
+
+    const labels = await harness.readLabels(
+      wordCount.getAsNormalizedFullLink().id,
     );
-    report.withTx(tx).set("Malicious instructions hidden in a report");
-    await prepareCfcCommitIfNeeded(tx);
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    tx = runtime.edit();
-    const wordCount = runtime.getCell(
-      space,
-      "safe-probing-word-count",
-      wordCountSchema,
-      tx,
-    );
-    report.withTx(tx).get();
-    wordCount.withTx(tx).set(42);
-
-    await prepareCfcCommitIfNeeded(tx);
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    const labels = await readLabelsForCell(wordCount);
     expect(labels["/"]?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],

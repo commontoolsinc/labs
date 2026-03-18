@@ -1058,7 +1058,9 @@ Primary files:
 - [x] Cover fetch/send worked examples with harness-managed runtime setup,
       fetch stubs, restarts, and label inspection while keeping the main logic
       inside patterns where the current runner path supports it
-      (`gmail-read`, `gmail-send`, `return-to-sender`, `agentic-email`).
+      (`gmail-read`, `gmail-send`, `gmail-error`, `safe-probing`,
+      `return-to-sender`, `return-to-sender-provider-trust`,
+      `agentic-email`).
 - [x] Cover durable share-grant worked-example setup/restart via the same
       harness, including the provenance-disclosure variant.
 - [ ] Close the remaining gap where some policy-rewrite worked-example phases

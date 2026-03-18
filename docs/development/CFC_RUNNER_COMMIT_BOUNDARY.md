@@ -256,9 +256,10 @@ Worked-example tests now also have a dedicated pattern-oriented harness:
 1. `packages/runner/test/helpers/cfc-pattern-harness.ts` owns runtime
    lifecycle, committed edits, labeled input seeding, fetch stubs, label
    inspection, and fresh-runtime restart.
-2. Gmail send/read, return-to-sender, and agentic-email worked-example tests
-   now run mostly as patterns, with the harness keeping only trust/runtime
-   setup outside the pattern body.
+2. Gmail send/read/error, safe-probing, return-to-sender
+   (including provider-trust), and agentic-email worked-example tests now run
+   mostly as patterns, with the harness keeping only trust/runtime setup
+   outside the pattern body.
 3. Durable share-grant and provenance-disclosure tests also use the harness
    for labeled seeding, policy-state setup, and restart.
 4. There is still a known gap for some policy-rewrite cases through pattern

@@ -1,15 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { setPatternEnvironment } from "../src/env.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { createCfcIntentEventEnvelope } from "../src/cfc/intent-event.ts";
 import { refineCfcReturnToSenderIntent } from "../src/cfc/return-to-sender-intent.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example return to sender provider trust test",
@@ -86,42 +81,35 @@ const membershipSendSchema = {
   },
 } as const satisfies JSONSchema;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe("CFC worked example: return-to-sender with provider trust", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
   let verifiedBindings = new Set<string>();
 
+  type SettledFetchResult = {
+    pending?: boolean;
+    result?: unknown;
+    error?: unknown;
+  } | undefined;
+
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
     verifiedBindings = new Set<string>();
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
-      cfcAudienceVerifier: ({ principal, audience }) =>
-        verifiedBindings.has(`${principal}@@${audience}`),
-    });
-    tx = runtime.edit();
-
-    const { commontools } = createBuilder();
-    pattern = commontools.pattern;
-    byRef = commontools.byRef;
-
-    setPatternEnvironment({
-      apiUrl: new URL("http://mock-test-server.local"),
+      patternEnvironment: {
+        apiUrl: new URL("http://mock-test-server.local"),
+      },
+      runtimeOptions: {
+        cfcAudienceVerifier: ({ principal, audience }) =>
+          verifiedBindings.has(`${principal}@@${audience}`),
+      },
     });
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (
+    harness.stubFetch((
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -143,14 +131,12 @@ describe("CFC worked example: return-to-sender with provider trust", () => {
           },
         ),
       );
-    };
+    });
   });
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    await tx.abort();
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
   function createSourceIntent() {
@@ -165,24 +151,6 @@ describe("CFC worked example: return-to-sender with provider trust", () => {
         { type: "https://commonfabric.org/cfc/atom/UIRuntime", hash: "ui-99" },
       ],
     });
-  }
-
-  async function pullFinalResult(
-    resultCell: { pull: () => Promise<unknown>; get: () => unknown },
-  ) {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await resultCell.pull();
-      await delay(50);
-      const value = resultCell.get() as
-        | { pending?: boolean; result?: unknown; error?: unknown }
-        | undefined;
-      if (value?.pending === false) {
-        return value;
-      }
-    }
-    return resultCell.get() as
-      | { pending?: boolean; result?: unknown; error?: unknown }
-      | undefined;
   }
 
   it("requires trusted provider evidence before refining and sending the return intent", async () => {
@@ -223,54 +191,44 @@ describe("CFC worked example: return-to-sender with provider trust", () => {
 
     verifiedBindings.add(`${hotelPrincipal}@@${hotelAudience}`);
 
-    const requestCell = runtime.getCell(
-      space,
-      "return-to-sender-provider-trust-request",
-      membershipSendSchema,
-      tx,
-    );
-    requestCell.withTx(tx).set({
-      url: `${hotelAudience}/membership/return`,
-      mode: "json",
-      options: {
-        method: "POST",
-        body: {
-          membershipNumber: "H-1234",
+    const requestCell = await harness.writeCellValue({
+      id: "return-to-sender-provider-trust-request",
+      schema: membershipSendSchema,
+      value: {
+        url: `${hotelAudience}/membership/return`,
+        mode: "json",
+        options: {
+          method: "POST",
+          body: {
+            membershipNumber: "H-1234",
+          },
+          headers: {
+            "X-Idempotency-Key": sendIntent!.idempotencyKey,
+          },
         },
-        headers: {
-          "X-Idempotency-Key": sendIntent!.idempotencyKey,
+        cfc: {
+          intent: sendIntent,
+          endpoint: "hotel.membership.send",
         },
       },
-      cfc: {
-        intent: sendIntent,
-        endpoint: "hotel.membership.send",
-      },
+      prepare: "boundary",
     });
-    await prepareBoundaryCommit(tx);
-    const prepared = await tx.commit();
-    expect(prepared.error).toBeUndefined();
 
-    tx = runtime.edit();
-    const fetchData = byRef("fetchData") as (params: unknown) => unknown;
-    const testPattern = pattern<{ request: unknown }>(({ request }) =>
-      fetchData(request)
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
+    const testPattern = harness.pattern<{ request: unknown }>(
+      ({ request }: { request: unknown }) => fetchData(request),
     );
-    const resultCell = runtime.getCell(
-      space,
-      "return-to-sender-provider-trust-result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(
-      tx,
-      testPattern,
-      { request: requestCell },
-      resultCell,
-    );
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    const run = await harness.runPattern({
+      id: "return-to-sender-provider-trust-result",
+      pattern: testPattern,
+      inputs: { request: requestCell },
+    });
 
-    const raw = await pullFinalResult(result);
+    const raw = await harness.pullSettledResult(
+      run.result,
+    ) as SettledFetchResult;
     expect(raw?.pending).toBe(false);
     expect(raw?.error).toBeUndefined();
     expect(raw?.result).toEqual({
