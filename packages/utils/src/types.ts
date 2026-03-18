@@ -21,15 +21,12 @@ export function isFunction(
 }
 
 /**
- * Predicate for narrowing an instance, that is, a non-`null` non-plain
- * non-array `object`.
+ * Check whether the value is a non-`null`, non-plain, non-array `object`.
  * @param value - The value to check
  * @returns True if the value is an instance
  */
-export function isInstance(value: unknown): value is object {
-  if ((typeof value !== "object") || (value === null) || Array.isArray(value)) {
-    return false;
-  }
+export function isInstance(value: unknown): boolean {
+  if (!isObject(value)) return false;
 
   const proto = Object.getPrototypeOf(value);
 

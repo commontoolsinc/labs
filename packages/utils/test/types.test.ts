@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isBoolean,
+  isFiniteNumber,
   isFunction,
   isInstance,
   isNumber,
@@ -206,12 +207,12 @@ describe("types", () => {
     });
 
     it("returns false for Infinity", () => {
-      expect(isNumber(Infinity)).toBe(false);
-      expect(isNumber(-Infinity)).toBe(false);
+      expect(isFiniteNumber(Infinity)).toBe(false);
+      expect(isFiniteNumber(-Infinity)).toBe(false);
     });
 
     it("returns false for NaN", () => {
-      expect(isNumber(NaN)).toBe(false);
+      expect(isFiniteNumber(NaN)).toBe(false);
     });
 
     it("returns false for non-numbers", () => {

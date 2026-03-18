@@ -241,8 +241,12 @@ export function shallowStorableFromNativeValueLegacy(
           });
           return result;
         }
-      } else {
+      } else if (isRecord(value)) {
         return value;
+      } else {
+        throw new Error(
+          "Shouldn't happen: Encontered non-null, non-array, non-record object value",
+        );
       }
     }
 

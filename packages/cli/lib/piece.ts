@@ -15,7 +15,7 @@ import { PiecesController } from "@commontools/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
-import { isObject } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface EntryConfig {
@@ -678,7 +678,7 @@ export async function removePiece(
 
 function isVNodeLike(value: unknown): value is VNode {
   const visited = new Set<object>();
-  while (isObject(value) && UI in value) {
+  while (isRecord(value) && UI in value) {
     if (visited.has(value)) return false; // Cycle detected
     visited.add(value);
     value = value[UI];
