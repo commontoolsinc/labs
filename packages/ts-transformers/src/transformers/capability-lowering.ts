@@ -350,6 +350,13 @@ function rewritePatternBody(
       );
 
       if (unsupported.length > 0 || defaults.length > 0) {
+        if (defaults.length > 0) {
+          reportComputationError(
+            context,
+            declaration.name,
+            "Destructuring defaults on opaque local bindings are not lowerable in pattern context; move defaulting into computed().",
+          );
+        }
         for (const message of unsupported) {
           reportComputationError(context, declaration.name, message);
         }

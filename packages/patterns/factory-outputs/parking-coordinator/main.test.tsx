@@ -21,11 +21,16 @@ import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
-const TODAY = new Date().toISOString().split("T")[0];
+const toLocalDateStr = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+    String(d.getDate()).padStart(2, "0")
+  }`;
+
+const TODAY = toLocalDateStr(new Date());
 const TOMORROW = (() => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split("T")[0];
+  return toLocalDateStr(d);
 })();
 
 export default pattern(() => {

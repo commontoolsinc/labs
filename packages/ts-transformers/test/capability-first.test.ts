@@ -564,6 +564,42 @@ const p = pattern(({ foo = fallback }) => <div>{foo}</div>);
 );
 
 Deno.test(
+  "Capability-first diagnostics: opaque local default destructuring is non-lowerable",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, generateObject, pattern } from "commontools";
+const p = pattern<{ messages: string[] }>(({ messages }) => {
+  const preview = computed(() => messages[0] ?? "");
+  const { result = { title: "fallback" } } = generateObject({
+    prompt: preview,
+    schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+      required: ["title"],
+    },
+  });
+  return <div>{result.title}</div>;
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 1);
+    assertStringIncludes(
+      computationDiagnostics[0]!.message,
+      "opaque local bindings",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first diagnostics: computed binding key destructuring is lowerable",
   async () => {
     const source = `/// <cts-enable />
