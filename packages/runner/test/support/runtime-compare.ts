@@ -345,5 +345,20 @@ function captureError(callback: () => unknown): Error {
 }
 
 function normalizeStack(stack: string): string[] {
-  return stack.split("\n").slice(0, 3);
+  const lines = stack.split("\n");
+  const message = lines[0] ? [lines[0]] : [];
+  const firstMeaningfulFrame = lines.slice(1).find((line) =>
+    !isInternalRuntimeFrame(line)
+  );
+  return firstMeaningfulFrame ? [...message, firstMeaningfulFrame] : message;
+}
+
+function isInternalRuntimeFrame(line: string): boolean {
+  return line.includes("/packages/runner/src/sandbox/ses-runtime.ts:") ||
+    line.includes("/packages/runner/src/runner.ts:") ||
+    line.includes("/packages/runner/src/harness/engine.ts:") ||
+    line.includes("/packages/runner/src/scheduler.ts:") ||
+    line.includes(" at wrapped ") ||
+    line.includes(" at handler:wrapped ") ||
+    line.includes(" at action:wrapped ");
 }

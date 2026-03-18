@@ -415,7 +415,7 @@ function isTrustedDataExpression(
 
   if (
     STRING_LITERAL_PATTERN.test(trimmed) ||
-    /^`(?:[^`\\]|\\.)*`$/.test(trimmed) ||
+    isTrustedTemplateLiteral(trimmed) ||
     /^(?:null|undefined|true|false|void 0)$/.test(trimmed) ||
     /^[+-]?\d+(?:\.\d+)?n?$/.test(trimmed)
   ) {
@@ -448,6 +448,30 @@ function isTrustedDataExpression(
   }
 
   return false;
+}
+
+function isTrustedTemplateLiteral(source: string): boolean {
+  if (!source.startsWith("`") || !source.endsWith("`")) {
+    return false;
+  }
+
+  let escaped = false;
+  for (let index = 1; index < source.length - 1; index++) {
+    const current = source[index]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (current === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (current === "$" && source[index + 1] === "{") {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isTrustedObjectProperty(

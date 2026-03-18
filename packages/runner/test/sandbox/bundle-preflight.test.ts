@@ -110,6 +110,19 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
   });
 
+  await t.step("rejects interpolated template literals in __ct_data third arguments", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          "function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data(\"main.tsx#000:value\",[],`${(() => { globalThis.__pwned = true; return 1; })()}`);exports.default=value;}",
+      })
+    );
+    assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+  });
+
   await t.step("allows console module-load side effects while rejecting other globals", () => {
     verifyAMDFactory({
       moduleId: "main",

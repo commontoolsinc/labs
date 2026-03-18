@@ -83,7 +83,6 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
-  private evaluationCounter = 0;
 
   constructor(ctRuntime: Runtime) {
     super();
@@ -159,9 +158,7 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
     const { runtime, console, runtimeExports, exportsCallback } = await this
       .getInternals();
-    const evaluationId = `${id}:evaluation:${this.evaluationCounter++}`;
-
-    const result = runtime.evaluateBundle(evaluationId, jsScript, {
+    const result = runtime.evaluateBundle(id, jsScript, {
       console,
       runtimeExports: runtimeExports ?? {},
     });

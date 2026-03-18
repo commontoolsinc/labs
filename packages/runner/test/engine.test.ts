@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { moduleToJSON } from "../src/builder/json-utils.ts";
+import { CT_IMPLEMENTATION_REF } from "../src/sandbox/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -216,7 +217,7 @@ describe("Engine.evaluate()", () => {
     expect(typeof utilExports["triple"]).toBe("function");
   });
 
-  it("creates one compartment per loaded pattern evaluation while reusing the same loaded pattern", async () => {
+  it("reuses one compartment for repeated evaluation of the same loaded pattern", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -237,7 +238,7 @@ describe("Engine.evaluate()", () => {
     expect(engine.getSESCompartmentCount()).toBe(1);
 
     await engine.evaluate(compiled.id, compiled.jsScript, program.files);
-    expect(engine.getSESCompartmentCount()).toBe(2);
+    expect(engine.getSESCompartmentCount()).toBe(1);
 
     const secondProgram: RuntimeProgram = {
       main: "/second.tsx",
@@ -259,7 +260,7 @@ describe("Engine.evaluate()", () => {
       secondCompiled.jsScript,
       secondProgram.files,
     );
-    expect(engine.getSESCompartmentCount()).toBe(3);
+    expect(engine.getSESCompartmentCount()).toBe(2);
   });
 
   it("rebinds verified implementation refs after JSON round-trip", async () => {
@@ -288,6 +289,68 @@ describe("Engine.evaluate()", () => {
     const module = serialized.nodes[0].module as Parameters<typeof moduleToJSON>[0];
     expect(typeof module.implementationRef).toBe("string");
     expect(engine.getVerifiedFunction(module.implementationRef!)).toBeDefined();
+  });
+
+  it("keeps verified implementation refs scoped per compiled pattern", async () => {
+    const firstProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "export function helper(value: number) {",
+            "  return value * 2;",
+            "}",
+            "export default helper;",
+          ].join("\n"),
+        },
+      ],
+    };
+    const secondProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "export function helper(value: number) {",
+            "  return value * 3;",
+            "}",
+            "export default helper;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const firstCompiled = await engine.compile(firstProgram);
+    const firstEvaluation = await engine.evaluate(
+      firstCompiled.id,
+      firstCompiled.jsScript,
+      firstProgram.files,
+    );
+    const firstExport = firstEvaluation.main!.helper as {
+      [CT_IMPLEMENTATION_REF]?: string;
+    };
+    const firstRef = firstExport[CT_IMPLEMENTATION_REF]!;
+    const firstFn = engine.getVerifiedFunction(firstRef);
+
+    const secondCompiled = await engine.compile(secondProgram);
+    const secondEvaluation = await engine.evaluate(
+      secondCompiled.id,
+      secondCompiled.jsScript,
+      secondProgram.files,
+    );
+    const secondExport = secondEvaluation.main!.helper as {
+      [CT_IMPLEMENTATION_REF]?: string;
+    };
+    const secondRef = secondExport[CT_IMPLEMENTATION_REF]!;
+    const secondFn = engine.getVerifiedFunction(secondRef);
+
+    expect(firstRef).not.toBe(secondRef);
+    expect(firstFn).toBeDefined();
+    expect(secondFn).toBeDefined();
+    expect(firstFn).not.toBe(secondFn);
   });
 });
 
