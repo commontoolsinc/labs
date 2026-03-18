@@ -3,12 +3,19 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+} from "../src/cfc/shared.ts";
 import {
   cfcCasLabelBindingsAddress,
   readCfcCasBlob,
   writeCfcCasBlob,
+  writeCfcCasBlobFromPreparedPath,
   writeCfcCasBlobWithBoundary,
 } from "../src/cfc/cas-storage.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("cfc cas write test");
 const space = signer.did();
@@ -30,6 +37,21 @@ const attestedLabel = {
     profile: "approved-profile",
   }],
 } as const;
+
+const preparedSourceSchema = {
+  type: "object",
+  properties: {
+    secret: {
+      type: "string",
+      ifc: {
+        classification: [[{
+          type: "https://commonfabric.org/cfc/atom/User",
+          subject: space,
+        }]],
+      },
+    },
+  },
+} as const satisfies JSONSchema;
 
 describe("CFC direct CAS write substrate", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -198,5 +220,44 @@ describe("CFC direct CAS write substrate", () => {
 
     expect(storedPayload).toBeUndefined();
     expect(storedBindings).toBeUndefined();
+  });
+
+  it("can source the CAS binding label from prepared cfc.labels metadata", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ secret: string }>(
+      space,
+      "cfc-cas-from-prepared-labels",
+      preparedSourceSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({ secret: "top secret" });
+
+    await prepareBoundaryCommit(tx);
+
+    const preparedLabels = normalizePersistedLabels(
+      tx.readOrThrow(cfcLabelsAddress(link)),
+    );
+    expect(preparedLabels["/secret"]).toEqual(aliceLabel);
+
+    const { blobHash } = writeCfcCasBlobFromPreparedPath(tx, {
+      space,
+      payload: new TextEncoder().encode("top secret"),
+      source: link,
+      sourcePath: "/secret",
+    });
+    const committed = await tx.commit();
+    expect(committed.error).toBeUndefined();
+
+    const verifyTx = runtime.edit();
+    const storedBindings = verifyTx.readOrThrow(
+      cfcCasLabelBindingsAddress(space, blobHash),
+    ) as {
+      blobHash: string;
+      bindings: Array<{ label: unknown }>;
+    };
+    await verifyTx.abort();
+
+    expect(storedBindings.bindings).toEqual([{ label: aliceLabel }]);
   });
 });
