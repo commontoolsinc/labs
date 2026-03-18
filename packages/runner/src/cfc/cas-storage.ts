@@ -29,6 +29,15 @@ export interface WriteCfcCasBlobWithBoundaryOptions {
   ) => Labels | Promise<Labels>;
 }
 
+export interface ReadCfcCasBlobByExpectedLabelOptions {
+  readonly space: MemorySpace;
+  readonly blobHash: string;
+  readonly expectedLabel: Labels;
+  readonly canReadLabel: (
+    label: Labels,
+  ) => boolean | Promise<boolean>;
+}
+
 export interface CfcCasBlobRecord {
   readonly blobHash: string;
   readonly bytes: readonly number[];
@@ -145,4 +154,29 @@ export function readCfcCasBlob(
     return undefined;
   }
   return new Uint8Array(stored.bytes);
+}
+
+export async function readCfcCasBlobByExpectedLabel(
+  tx: IExtendedStorageTransaction,
+  options: ReadCfcCasBlobByExpectedLabelOptions,
+): Promise<Uint8Array | undefined> {
+  const bindings = tx.readOrThrow(
+    cfcCasLabelBindingsAddress(options.space, options.blobHash),
+  ) as CfcCasLabelBindingRecord | undefined;
+  if (!bindings) {
+    return undefined;
+  }
+
+  const expectedLabelKey = casLabelKey(options.expectedLabel);
+  for (const binding of bindings.bindings) {
+    if (casLabelKey(binding.label) !== expectedLabelKey) {
+      continue;
+    }
+    if (!await options.canReadLabel(binding.label)) {
+      return undefined;
+    }
+    return readCfcCasBlob(tx, options.space, options.blobHash);
+  }
+
+  return undefined;
 }
