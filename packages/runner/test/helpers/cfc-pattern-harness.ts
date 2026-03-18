@@ -74,6 +74,8 @@ export class CfcPatternTestHarness {
   readonly storageManager: ReturnType<typeof StorageManager.emulate>;
   readonly pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   readonly byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  readonly lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  readonly handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
 
   runtime: Runtime;
 
@@ -94,6 +96,8 @@ export class CfcPatternTestHarness {
     const { commontools } = createBuilder();
     this.pattern = commontools.pattern;
     this.byRef = commontools.byRef;
+    this.lift = commontools.lift;
+    this.handler = commontools.handler;
 
     this.runtime = this.#createRuntime();
   }

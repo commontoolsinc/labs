@@ -45,6 +45,59 @@ const factCheckInputSchema = {
 } as const satisfies JSONSchema;
 
 const factCheckOutputSchema = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      ifc: {
+        classification: [publicAudienceAtom],
+        declassify: {
+          confidentialityPre: [userAliceAtom],
+          integrityPre: ["fact-check-proof"],
+          addAlternatives: [publicAudienceAtom],
+          addIntegrity: [factCheckedAtom, sourcesDisclosedAtom],
+          releaseCondition: true,
+        },
+      },
+    },
+  },
+  required: ["text"],
+} as const satisfies JSONSchema;
+
+const publishedFactCheckInputSchema = {
+  type: "object",
+  properties: {
+    report: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          ifc: {
+            classification: [publicAudienceAtom],
+            requiredIntegrity: [factCheckedAtom, sourcesDisclosedAtom],
+          },
+        },
+      },
+      required: ["text"],
+    },
+  },
+  required: ["report"],
+} as const satisfies JSONSchema;
+
+const publishedFactCheckOutputSchema = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      ifc: {
+        classification: [publicAudienceAtom],
+      },
+    },
+  },
+  required: ["text"],
+} as const satisfies JSONSchema;
+
+const factCheckTextSchema = {
   type: "string",
   ifc: {
     classification: [publicAudienceAtom],
@@ -84,27 +137,51 @@ describe("CFC worked example: fact-check assurance", () => {
     });
 
     const factCheckPattern = harness.pattern(
-      ({ source }) => source,
+      ({ source }) => ({
+        text: harness.lift(sourceSchema, factCheckTextSchema, (value) => value)(
+          source,
+        ),
+      }),
       factCheckInputSchema,
       factCheckOutputSchema,
     );
-
     const run = await harness.runPattern({
       id: "fact-check-worked-example-target",
       pattern: factCheckPattern,
       inputs: { source },
+      outputSchema: factCheckOutputSchema,
+      initialOutput: { text: "" },
       prepare: "cfc",
     });
-    expect(await run.result.pull()).toBe("Claim text");
+    expect(await run.result.pull()).toEqual({ text: "Claim text" });
 
-    const labels = await harness.readLabels(run.outputLink.id);
-    expect(labels["/"]?.classification).toEqual([[publicAudienceAtom]]);
-    expect(labels["/"]?.integrity).toEqual(
-      expect.arrayContaining([
-        "fact-check-proof",
-        factCheckedAtom,
-        sourcesDisclosedAtom,
-      ]),
+    await harness.restart();
+
+    const publishedReport = harness.getCell<{ text: string }>(
+      "fact-check-worked-example-target",
+      factCheckOutputSchema,
     );
+    const publishPattern = harness.pattern(
+      ({ report }) => ({ text: report.text }),
+      publishedFactCheckInputSchema,
+      publishedFactCheckOutputSchema,
+    );
+    const publishedRun = await harness.runPattern({
+      id: "fact-check-worked-example-published",
+      pattern: publishPattern,
+      inputs: { report: publishedReport },
+      outputSchema: publishedFactCheckOutputSchema,
+      initialOutput: { text: "" },
+      prepare: "cfc",
+    });
+    expect(await publishedRun.result.pull()).toEqual({ text: "Claim text" });
+
+    await harness.runtime.scheduler.idle();
+    const publishedLabels = await harness.readLabels(
+      publishedRun.outputLink.id,
+    );
+    expect(publishedLabels["/text"]?.classification).toEqual([
+      [publicAudienceAtom],
+    ]);
   });
 });
