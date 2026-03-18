@@ -69,11 +69,211 @@ describe("cloneIfNecessary", () => {
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
-    it("ignores options (identity passthrough regardless)", () => {
+    it("returns identity for frozen=true (default)", () => {
       const value = { a: 1 } as StorableValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
-      expect(cloneIfNecessary(value, { frozen: false })).toBe(value);
+    });
+
+    it("returns identity for deep=false with frozen=true (default)", () => {
+      const value = { a: 1 } as StorableValue;
       expect(cloneIfNecessary(value, { deep: false })).toBe(value);
+    });
+
+    it("clones when frozen=false (mutable copy via structuredClone)", () => {
+      const value = { a: 1 } as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false });
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: 1 });
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Legacy path: deep mutable clone (frozen=false, deep=true, force=true)
+  // --------------------------------------------------------------------------
+
+  describe("legacy path: deep mutable clone (frozen=false)", () => {
+    it("deep-clones a nested object", () => {
+      const inner = { x: 1 };
+      const value = { a: inner, b: [2, 3] } as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
+        string,
+        unknown
+      >;
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: { x: 1 }, b: [2, 3] });
+      // Inner objects are also cloned (deep).
+      expect(result.a).not.toBe(inner);
+      expect(result.b).not.toBe((value as Record<string, unknown>).b);
+    });
+
+    it("deep-clones an array of objects", () => {
+      const obj1 = { x: 1 };
+      const obj2 = { y: 2 };
+      const value = [obj1, obj2] as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false }) as unknown[];
+      expect(result).not.toBe(value);
+      expect(result).toEqual([{ x: 1 }, { y: 2 }]);
+      expect(result[0]).not.toBe(obj1);
+      expect(result[1]).not.toBe(obj2);
+    });
+
+    it("deep-clones a frozen object into a mutable copy", () => {
+      const value = Object.freeze({
+        a: Object.freeze({ b: 1 }),
+      }) as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
+        string,
+        unknown
+      >;
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: { b: 1 } });
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
+    it("primitives pass through unchanged", () => {
+      expect(cloneIfNecessary(42 as StorableValue, { frozen: false })).toBe(42);
+      expect(cloneIfNecessary("hi" as StorableValue, { frozen: false })).toBe(
+        "hi",
+      );
+      expect(cloneIfNecessary(null, { frozen: false })).toBe(null);
+      expect(cloneIfNecessary(true as StorableValue, { frozen: false })).toBe(
+        true,
+      );
+    });
+
+    it("preserves null values in objects", () => {
+      const value = { a: null, b: 1 } as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
+        string,
+        unknown
+      >;
+      expect(result).not.toBe(value);
+      expect(result.a).toBe(null);
+      expect(result.b).toBe(1);
+    });
+
+    it("clones deeply nested structures", () => {
+      const value = { a: { b: { c: { d: 42 } } } } as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false }) as Record<
+        string,
+        unknown
+      >;
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: { b: { c: { d: 42 } } } });
+      const innerA = result.a as Record<string, unknown>;
+      const origA = (value as Record<string, unknown>).a as Record<
+        string,
+        unknown
+      >;
+      expect(innerA).not.toBe(origA);
+    });
+
+    it("handles empty object", () => {
+      const value = {} as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false });
+      expect(result).not.toBe(value);
+      expect(result).toEqual({});
+    });
+
+    it("handles empty array", () => {
+      const value = [] as unknown as StorableValue;
+      const result = cloneIfNecessary(value, { frozen: false });
+      expect(result).not.toBe(value);
+      expect(result).toEqual([]);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Legacy path: shallow mutable clone (frozen=false, deep=false)
+  // --------------------------------------------------------------------------
+
+  describe("legacy path: shallow mutable clone (frozen=false, deep=false)", () => {
+    it("shallow-clones an object, preserving inner references", () => {
+      const inner = { x: 1 };
+      const value = { a: inner, b: 2 } as StorableValue;
+      const result = cloneIfNecessary(value, {
+        frozen: false,
+        deep: false,
+      }) as Record<string, unknown>;
+      expect(result).not.toBe(value);
+      expect(result).toEqual({ a: { x: 1 }, b: 2 });
+      // Shallow: inner is same reference.
+      expect(result.a).toBe(inner);
+    });
+
+    it("shallow-clones an array, preserving inner references", () => {
+      const inner = { x: 1 };
+      const value = [inner, 2, 3] as StorableValue;
+      const result = cloneIfNecessary(value, {
+        frozen: false,
+        deep: false,
+      }) as unknown[];
+      expect(result).not.toBe(value);
+      expect(result).toEqual([{ x: 1 }, 2, 3]);
+      // Shallow: inner is same reference.
+      expect(result[0]).toBe(inner);
+    });
+
+    it("shallow-clones a frozen object into a mutable copy", () => {
+      const frozenInner = Object.freeze({ x: 1 });
+      const value = Object.freeze({ a: frozenInner }) as StorableValue;
+      const result = cloneIfNecessary(value, {
+        frozen: false,
+        deep: false,
+      }) as Record<string, unknown>;
+      expect(result).not.toBe(value);
+      expect(Object.isFrozen(result)).toBe(false);
+      // Shallow: inner stays frozen (same reference).
+      expect(result.a).toBe(frozenInner);
+      expect(Object.isFrozen(result.a)).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Legacy path: frozen=true (identity passthrough)
+  // --------------------------------------------------------------------------
+
+  describe("legacy path: frozen=true options (identity passthrough)", () => {
+    it("returns identity for unfrozen object", () => {
+      const value = { a: 1, b: { c: 2 } } as StorableValue;
+      expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
+    });
+
+    it("returns identity for frozen object", () => {
+      const value = Object.freeze({ a: 1 }) as StorableValue;
+      expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
+    });
+
+    it("returns identity for unfrozen array", () => {
+      const value = [1, 2, 3] as StorableValue;
+      expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
+    });
+
+    it("returns identity for frozen array", () => {
+      const value = Object.freeze([1, 2, 3]) as StorableValue;
+      expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
+    });
+
+    it("returns identity with deep=false, frozen=true", () => {
+      const value = { a: { b: 1 } } as StorableValue;
+      expect(cloneIfNecessary(value, { frozen: true, deep: false })).toBe(
+        value,
+      );
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Legacy path: undefined handling
+  // --------------------------------------------------------------------------
+
+  describe("legacy path: undefined handling", () => {
+    it("passes through undefined as top-level value", () => {
+      expect(cloneIfNecessary(undefined, { frozen: false })).toBe(undefined);
+    });
+
+    it("passes through undefined with default options", () => {
+      expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
   });
 
