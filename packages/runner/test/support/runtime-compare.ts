@@ -22,7 +22,10 @@ export async function compareExports(program: RuntimeProgram): Promise<void> {
     const legacy = await executeLegacy(jsScript);
 
     assertEquals(normalizeValue(ses.main), normalizeValue(legacy.main));
-    assertEquals(normalizeValue(ses.exportMap), normalizeValue(legacy.exportMap));
+    assertEquals(
+      normalizeValue(ses.exportMap),
+      normalizeValue(legacy.exportMap),
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -45,7 +48,9 @@ export async function compareMappedError(
     const ses = await runtime.harness.evaluate(id, jsScript, program.files);
     const legacy = await executeLegacy(jsScript);
 
-    const sesError = captureError(() => runtime.harness.invoke(() => invokeExport(ses.main!)));
+    const sesError = captureError(() =>
+      runtime.harness.invoke(() => invokeExport(ses.main!))
+    );
     const legacyError = captureError(() => invokeExport(legacy.main));
 
     assertEquals(
@@ -62,7 +67,9 @@ export async function comparePatternResult<TArgument>(
   program: RuntimeProgram,
   argument: TArgument,
 ): Promise<void> {
-  const sesSigner = await Identity.fromPassphrase("runtime-compare ses pattern");
+  const sesSigner = await Identity.fromPassphrase(
+    "runtime-compare ses pattern",
+  );
   const sesStorageManager = StorageManager.emulate({ as: sesSigner });
   const sesRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -97,7 +104,11 @@ export async function comparePatternResult<TArgument>(
       legacyPattern.resultSchema,
     );
 
-    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const sesResult = await sesRuntime.runSynced(
+      sesResultCell,
+      sesPattern,
+      argument,
+    );
     const legacyResult = await legacyRuntime.runSynced(
       legacyResultCell,
       legacyPattern,
@@ -131,14 +142,18 @@ export async function comparePatternScenario<TArgument>(
   argument: TArgument,
   steps: RuntimeCompareStep[],
 ): Promise<void> {
-  const sesSigner = await Identity.fromPassphrase("runtime-compare ses scenario");
+  const sesSigner = await Identity.fromPassphrase(
+    "runtime-compare ses scenario",
+  );
   const sesStorageManager = StorageManager.emulate({ as: sesSigner });
   const sesRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sesStorageManager,
   });
 
-  const legacySigner = await Identity.fromPassphrase("runtime-compare legacy scenario");
+  const legacySigner = await Identity.fromPassphrase(
+    "runtime-compare legacy scenario",
+  );
   const legacyStorageManager = StorageManager.emulate({ as: legacySigner });
   const legacyRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -164,7 +179,11 @@ export async function comparePatternScenario<TArgument>(
       legacyPattern.resultSchema,
     );
 
-    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const sesResult = await sesRuntime.runSynced(
+      sesResultCell,
+      sesPattern,
+      argument,
+    );
     const legacyResult = await legacyRuntime.runSynced(
       legacyResultCell,
       legacyPattern,
@@ -210,7 +229,9 @@ export async function comparePatternMappedError<TArgument>(
     errorHandlers: [(error) => sesErrors.push(error)],
   });
 
-  const legacySigner = await Identity.fromPassphrase("runtime-compare legacy error");
+  const legacySigner = await Identity.fromPassphrase(
+    "runtime-compare legacy error",
+  );
   const legacyStorageManager = StorageManager.emulate({ as: legacySigner });
   const legacyRuntime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -237,7 +258,11 @@ export async function comparePatternMappedError<TArgument>(
       legacyPattern.resultSchema,
     );
 
-    const sesResult = await sesRuntime.runSynced(sesResultCell, sesPattern, argument);
+    const sesResult = await sesRuntime.runSynced(
+      sesResultCell,
+      sesPattern,
+      argument,
+    );
     const legacyResult = await legacyRuntime.runSynced(
       legacyResultCell,
       legacyPattern,
@@ -315,7 +340,9 @@ async function sendRuntimeEvent(
   event: RuntimeCompareEvent,
 ): Promise<void> {
   const targetCell = getResultPath(result, event.stream);
-  await runtime.editWithRetry((tx) => targetCell.withTx(tx).send(event.payload));
+  await runtime.editWithRetry((tx) =>
+    targetCell.withTx(tx).send(event.payload)
+  );
 }
 
 async function readResultPath(result: any, path: string): Promise<unknown> {
@@ -353,14 +380,18 @@ function normalizeMappedStack(stack: string): string[] {
   if (authoredFrames.length > 0) {
     return [...message, ...authoredFrames];
   }
-  const fallbackFrame = lines.slice(1).find((line) => !isIgnorableRuntimeFrame(line));
+  const fallbackFrame = lines.slice(1).find((line) =>
+    !isIgnorableRuntimeFrame(line)
+  );
   return fallbackFrame ? [...message, fallbackFrame] : message;
 }
 
 function assertNoInternalRuntimeFrames(stack: string): void {
   const leakingLine = stack.split("\n").find(isInternalRuntimeFrame);
   if (leakingLine) {
-    throw new Error(`Unexpected internal runtime frame in surfaced stack: ${leakingLine}`);
+    throw new Error(
+      `Unexpected internal runtime frame in surfaced stack: ${leakingLine}`,
+    );
   }
 }
 

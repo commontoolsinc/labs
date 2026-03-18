@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
-  Default,
   computed,
+  Default,
   derive,
   handler,
   lift,
@@ -32,7 +32,9 @@ const increment = handler(
     step: Cell<number>;
   }) => {
     const fallbackStep = context.step.get() ?? 1;
-    const amount = typeof event?.amount === "number" ? event.amount : fallbackStep;
+    const amount = typeof event?.amount === "number"
+      ? event.amount
+      : fallbackStep;
     context.value.set((context.value.get() ?? 0) + amount);
   },
 );

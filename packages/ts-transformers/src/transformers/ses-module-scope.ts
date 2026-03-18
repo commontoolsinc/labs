@@ -959,18 +959,6 @@ function usesCellMethodCalls(
   return found;
 }
 
-function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
-  if (ts.isIdentifier(name)) {
-    names.add(name.text);
-    return;
-  }
-  for (const element of name.elements) {
-    if (!ts.isOmittedExpression(element)) {
-      collectBindingNames(element.name, names);
-    }
-  }
-}
-
 function isPropertyName(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;

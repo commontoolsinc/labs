@@ -2816,7 +2816,9 @@ export class Scheduler {
 
     // Transform stack trace to show original source locations
     if (error.stack) {
-      error.stack = sanitizeUserVisibleStack(this.runtime.harness.parseStack(error.stack));
+      error.stack = sanitizeUserVisibleStack(
+        this.runtime.harness.parseStack(error.stack),
+      );
     }
 
     const errorWithContext = error as ErrorWithContext;

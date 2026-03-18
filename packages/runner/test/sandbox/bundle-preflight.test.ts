@@ -27,7 +27,7 @@ Deno.test("bundle preflight accepts trusted AMD wrapper and rejects outer side e
     verifyBundlePreflight(validBundle);
   });
 
-  await t.step("rejects statements before define()", async () => {
+  await t.step("rejects statements before define()", () => {
     const malicious = createTrustedBundle(
       `globalThis.__sideEffect = true;define("main",["exports"],function(exports){});return require("main");`,
     );
@@ -63,7 +63,7 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     });
   });
 
-  await t.step("rejects malformed wrappers", async () => {
+  await t.step("rejects malformed wrappers", () => {
     assertThrows(() =>
       verifyAMDFactory({
         moduleId: "main",
@@ -168,7 +168,7 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
 
   await t.step(
     "rejects non-trusted imports and AMD async require",
-    async () => {
+    () => {
       assertThrows(() =>
         verifyAMDFactory({
           moduleId: "main",

@@ -11,6 +11,7 @@ import {
   createFunctionWrapper,
   createPureFunctionWrapper,
 } from "../../src/sandbox/runtime-helpers.ts";
+import type { VerifiedCallable } from "../../src/sandbox/types.ts";
 
 Deno.test("runtime wrappers tag and harden approved values", () => {
   const builder = createBuilderWrapper("lift", "main.tsx#000:lifted", function (
@@ -77,13 +78,17 @@ Deno.test("runtime data wrappers reject values outside the v1 inert subset", () 
 
 Deno.test("runtime wrappers reject obviously invalid input", () => {
   assertThrows(() =>
-    createBuilderWrapper("lift", "main.tsx#000:oops", 1 as unknown as Function)
+    createBuilderWrapper(
+      "lift",
+      "main.tsx#000:oops",
+      1 as unknown as VerifiedCallable,
+    )
   );
   assertThrows(() =>
     createPureFunctionWrapper(
       "main.tsx#001:oops",
       ["A"],
-      {} as unknown as Function,
+      {} as unknown as VerifiedCallable,
     )
   );
 });

@@ -1,24 +1,18 @@
-import {
-  createVerifiedHandlerFactory,
-  lift,
-} from "../builder/module.ts";
+import { createVerifiedHandlerFactory, lift } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
-import type {
-  JSONSchema,
-  Pattern,
-} from "../builder/types.ts";
-import { ensureSESLockdown } from "./compartment-globals.ts";
+import type { JSONSchema, Pattern } from "../builder/types.ts";
 import { freezeVerifiedPlainData } from "./plain-data.ts";
 import {
   CT_CAPTURE_IDS,
   CT_IMPLEMENTATION_REF,
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
+  type VerifiedCallable,
   type VerifiedMetadataCarrier,
   type VerifiedWrapperKind,
 } from "./types.ts";
 
-export function createBuilderWrapper<T extends Function>(
+export function createBuilderWrapper<T extends VerifiedCallable>(
   kind: "pattern" | "recipe" | "lift" | "handler",
   itemId: string,
   callback: T,
@@ -28,10 +22,12 @@ export function createBuilderWrapper<T extends Function>(
   const wrapped = kind === "lift"
     ? lift(callback as unknown as (input: unknown) => unknown)
     : kind === "handler"
-    ? createVerifiedHandlerFactory(callback as unknown as (
-      event: unknown,
-      props: unknown,
-    ) => unknown)
+    ? createVerifiedHandlerFactory(
+      callback as unknown as (
+        event: unknown,
+        props: unknown,
+      ) => unknown,
+    )
     : pattern(callback as unknown as (input: unknown) => unknown);
   if (kind === "pattern" || kind === "recipe") {
     installPatternResultSchemaNormalizer(
@@ -45,7 +41,7 @@ export function createBuilderWrapper<T extends Function>(
   );
 }
 
-export function createFunctionWrapper<T extends Function>(
+export function createFunctionWrapper<T extends VerifiedCallable>(
   itemId: string,
   fn: T,
 ): T & VerifiedMetadataCarrier {
@@ -53,7 +49,7 @@ export function createFunctionWrapper<T extends Function>(
   return tagAndFreeze(fn, itemId, "fn");
 }
 
-export function createPureFunctionWrapper<T extends Function>(
+export function createPureFunctionWrapper<T extends VerifiedCallable>(
   itemId: string,
   captureIds: readonly string[],
   fn: T,
@@ -67,7 +63,9 @@ export function createDataWrapper<T>(
   captureIds: readonly string[],
   value: T,
 ): T & VerifiedMetadataCarrier {
-  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+  if (
+    value === null || (typeof value !== "object" && typeof value !== "function")
+  ) {
     return freezeVerifiedPlainData(value) as T & VerifiedMetadataCarrier;
   }
 
@@ -80,7 +78,7 @@ export function createDataWrapper<T>(
   return freezeVerifiedPlainData(tagged) as T & VerifiedMetadataCarrier;
 }
 
-function tagAndFreeze<T extends Function>(
+function tagAndFreeze<T extends VerifiedCallable>(
   value: T,
   itemId: string,
   kind: VerifiedWrapperKind,
@@ -124,7 +122,7 @@ function defineMetadata<T>(
   });
 }
 
-function assertCallable(value: unknown): asserts value is Function {
+function assertCallable(value: unknown): asserts value is VerifiedCallable {
   if (typeof value !== "function") {
     throw new Error("Expected a callable wrapper target");
   }
@@ -168,7 +166,10 @@ function normalizePatternResultSchema(
       return schema;
     }
 
-    const normalizedItems = normalizePatternResultSchema(binding[0], schema.items);
+    const normalizedItems = normalizePatternResultSchema(
+      binding[0],
+      schema.items,
+    );
     if (normalizedItems === schema.items) {
       return schema;
     }
@@ -176,7 +177,10 @@ function normalizePatternResultSchema(
     return { ...schema, items: normalizedItems };
   }
 
-  if (!isRecord(binding) || !schema.properties || typeof schema.properties !== "object") {
+  if (
+    !isRecord(binding) || !schema.properties ||
+    typeof schema.properties !== "object"
+  ) {
     return schema;
   }
 
@@ -194,7 +198,9 @@ function normalizePatternResultSchema(
   return changed ? { ...schema, properties } : schema;
 }
 
-function isAliasBinding(value: unknown): value is { $alias: { path?: unknown } } {
+function isAliasBinding(
+  value: unknown,
+): value is { $alias: { path?: unknown } } {
   return !!value &&
     typeof value === "object" &&
     !Array.isArray(value) &&

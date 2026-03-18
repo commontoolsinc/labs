@@ -263,7 +263,9 @@ describe("runPattern", () => {
       ],
     });
 
-    const reloadedPattern = JSON.parse(JSON.stringify(compiledPattern)) as Pattern;
+    const reloadedPattern = JSON.parse(
+      JSON.stringify(compiledPattern),
+    ) as Pattern;
     const resultCell = runtime.getCell(
       space,
       "runs serialized verified-ref javascript modules after round-trip",

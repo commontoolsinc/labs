@@ -20,7 +20,9 @@ export function createSESItemId(
   ordinal: number,
   localName: string,
 ): string {
-  return `${normalizePath(sourceFile.fileName)}#${String(ordinal).padStart(3, "0")}:${localName}`;
+  return `${normalizePath(sourceFile.fileName)}#${
+    String(ordinal).padStart(3, "0")
+  }:${localName}`;
 }
 
 export function createSESSentinelText(
@@ -102,7 +104,9 @@ export function collectReferencedIdentifiers(
 function isPropertyName(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    return true;
+  }
   if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
   if (ts.isMethodDeclaration(parent) && parent.name === node) return true;
   if (ts.isPropertyDeclaration(parent) && parent.name === node) return true;

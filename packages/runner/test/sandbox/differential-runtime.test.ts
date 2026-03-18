@@ -132,7 +132,8 @@ Deno.test("SES runtime matches legacy mapped named-export helper failures", asyn
         },
       ],
     },
-    (main) => (main.fail as (event: { value: string }) => never)({ value: "x" }),
+    (main) =>
+      (main.fail as (event: { value: string }) => never)({ value: "x" }),
   );
 });
 

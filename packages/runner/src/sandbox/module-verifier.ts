@@ -104,7 +104,6 @@ function extractFactoryBody(source: string): string {
 
 function isAllowedStatement(statement: string): boolean {
   const normalized = stripTrailingSemicolon(statement.trim());
-  const compact = normalized.replace(/\s+/g, " ").trim();
   const commentStripped = stripTrustedLeadingScaffolding(normalized);
   const compactWithoutComments = commentStripped.replace(/\s+/g, " ").trim();
   if (!normalized) {

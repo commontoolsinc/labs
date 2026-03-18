@@ -26,6 +26,7 @@ import { hashOf } from "@commontools/data-model/value-hash";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 import { SESRuntime } from "../sandbox/ses-runtime.ts";
+import type { VerifiedCallable } from "../sandbox/types.ts";
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -242,7 +243,7 @@ export class Engine extends EventTarget implements Harness {
   getVerifiedFunction(
     implementationRef: string,
     patternId?: string,
-  ): Function | undefined {
+  ): VerifiedCallable | undefined {
     if (!this.internals) {
       return undefined;
     }

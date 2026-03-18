@@ -3,6 +3,8 @@ export const CT_ITEM_ID = Symbol.for("ct.itemId");
 export const CT_WRAPPER_KIND = Symbol.for("ct.wrapperKind");
 export const CT_CAPTURE_IDS = Symbol.for("ct.captureIds");
 
+export type VerifiedCallable = (...args: any[]) => unknown;
+
 export type VerifiedWrapperKind =
   | "pattern"
   | "recipe"

@@ -1,8 +1,4 @@
-import {
-  assertEquals,
-  assertMatch,
-  assertStringIncludes,
-} from "@std/assert";
+import { assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
 import { transformSource } from "./utils.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
@@ -70,7 +66,10 @@ export default pattern<{ count: number }>(({ count }) => {
     /const __ct_hoisted_handler_\d+ = (?:__ctHelpers\.)?__ct_builder\("handler"/,
   );
   assertMatch(output, /const derived = __ct_hoisted_lift_\d+\(count\)/);
-  assertMatch(output, /const clicked = __ct_hoisted_handler_\d+\(\{\s*count: count\s*\}\)/);
+  assertMatch(
+    output,
+    /const clicked = __ct_hoisted_handler_\d+\(\{\s*count: count\s*\}\)/,
+  );
   assertEquals(
     output.includes("__ct_hoisted_lift_0.argumentSchema"),
     false,
@@ -95,7 +94,8 @@ export default pattern<{ count: number }>(({ count }) => {
     sesMode: true,
   });
 
-  const topLevelPatternWrappers = output.match(/__ct_builder\("pattern"/g) ?? [];
+  const topLevelPatternWrappers = output.match(/__ct_builder\("pattern"/g) ??
+    [];
   assertEquals(
     topLevelPatternWrappers.length,
     1,

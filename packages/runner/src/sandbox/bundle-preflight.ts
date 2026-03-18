@@ -55,7 +55,10 @@ export function verifyBundlePreflight(bundleSource: string): void {
 
 function parseBundle(bundleSource: string): { defineStatements: string[] } {
   const normalizedSource = normalizeBundleSource(bundleSource);
-  if (!normalizedSource.startsWith(BUNDLE_PREFIX) || !normalizedSource.endsWith(BUNDLE_SUFFIX)) {
+  if (
+    !normalizedSource.startsWith(BUNDLE_PREFIX) ||
+    !normalizedSource.endsWith(BUNDLE_SUFFIX)
+  ) {
     throw new Error("Bundle is missing the trusted AMD wrapper structure");
   }
 
@@ -78,7 +81,9 @@ function parseBundle(bundleSource: string): { defineStatements: string[] } {
     }
   }
 
-  const remainingStatements = statements.slice(TRUSTED_PRELUDE_STATEMENTS.length);
+  const remainingStatements = statements.slice(
+    TRUSTED_PRELUDE_STATEMENTS.length,
+  );
   let helperIndex = 0;
   while (
     helperIndex < remainingStatements.length &&
@@ -102,7 +107,9 @@ function parseBundle(bundleSource: string): { defineStatements: string[] } {
     throw new Error("Bundle does not register any AMD modules");
   }
 
-  const returnStatements = statementsAfterHelpers.slice(index).map(stripTrailingSemicolon);
+  const returnStatements = statementsAfterHelpers.slice(index).map(
+    stripTrailingSemicolon,
+  );
   if (!isTrustedReturnWrapper(returnStatements)) {
     throw new Error("Bundle is missing the trusted return wrapper");
   }
@@ -128,7 +135,11 @@ function isTrustedReturnWrapper(statements: string[]): boolean {
   if (middleStatements.length === 0) {
     return false;
   }
-  if (!middleStatements.every((statement) => EXPORT_MAP_ASSIGNMENT_PATTERN.test(statement))) {
+  if (
+    !middleStatements.every((statement) =>
+      EXPORT_MAP_ASSIGNMENT_PATTERN.test(statement)
+    )
+  ) {
     return false;
   }
   return RETURN_OBJECT_PATTERN.test(statements.at(-1)!);

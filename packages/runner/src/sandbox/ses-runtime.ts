@@ -1,4 +1,4 @@
-import "npm:ses";
+import "ses";
 import {
   type JsScript,
   type MappedPosition,
@@ -14,7 +14,7 @@ import {
   ensureSESLockdown,
 } from "./compartment-globals.ts";
 import { verifyAMDFactory } from "./module-verifier.ts";
-import { CT_IMPLEMENTATION_REF } from "./types.ts";
+import { CT_IMPLEMENTATION_REF, type VerifiedCallable } from "./types.ts";
 
 interface BundleEvaluationResult {
   main?: Exports;
@@ -28,12 +28,18 @@ type SESCompartment = {
 export class SESRuntime {
   private readonly sourceMaps = new SourceMapParser();
   private readonly compartments = new Map<string, SESCompartment>();
-  private readonly verifiedFunctions = new Map<string, Map<string, Function>>();
-  private readonly verifiedFunctionIndex = new Map<string, Function>();
-  private readonly patternFunctions = new Map<string, Map<string, Function>>();
+  private readonly verifiedFunctions = new Map<
+    string,
+    Map<string, VerifiedCallable>
+  >();
+  private readonly verifiedFunctionIndex = new Map<string, VerifiedCallable>();
+  private readonly patternFunctions = new Map<
+    string,
+    Map<string, VerifiedCallable>
+  >();
 
   evaluateBundle(
-    compileId: string,
+    _compileId: string,
     evaluationId: string,
     jsScript: JsScript,
     options: {
@@ -100,7 +106,7 @@ export class SESRuntime {
   getVerifiedFunction(
     implementationRef: string,
     patternId?: string,
-  ): Function | undefined {
+  ): VerifiedCallable | undefined {
     if (patternId) {
       const registry = this.patternFunctions.get(patternId);
       if (registry?.has(implementationRef)) {
@@ -123,7 +129,7 @@ export class SESRuntime {
   }
 
   associatePattern(patternId: string, value: unknown): void {
-    const registry = new Map<string, Function>();
+    const registry = new Map<string, VerifiedCallable>();
     this.collectAssociatedFunctions(value, registry, new Set());
     this.patternFunctions.set(patternId, registry);
   }
@@ -238,13 +244,13 @@ export class SESRuntime {
       const implementationRef = (value as Record<string, unknown>)
         .implementationRef as string;
       const implementation = (value as Record<string, unknown>)
-        .implementation as Function;
+        .implementation as VerifiedCallable;
       registry.set(implementationRef, implementation);
       this.verifiedFunctionIndex.set(implementationRef, implementation);
     }
 
     if (typeof value === "function") {
-      const metadata = value as Function & {
+      const metadata = value as VerifiedCallable & {
         implementationRef?: string;
         [CT_IMPLEMENTATION_REF]?: string;
       };
@@ -256,8 +262,11 @@ export class SESRuntime {
           registry = new Map();
           this.verifiedFunctions.set(evaluationId, registry);
         }
-        registry.set(implementationRef, value);
-        this.verifiedFunctionIndex.set(implementationRef, value);
+        registry.set(implementationRef, value as VerifiedCallable);
+        this.verifiedFunctionIndex.set(
+          implementationRef,
+          value as VerifiedCallable,
+        );
       }
     }
 
@@ -282,7 +291,7 @@ export class SESRuntime {
 
   private collectAssociatedFunctions(
     value: unknown,
-    registry: Map<string, Function>,
+    registry: Map<string, VerifiedCallable>,
     seen: Set<unknown>,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
@@ -309,16 +318,19 @@ export class SESRuntime {
 
   private extractAssociatedFunction(
     value: unknown,
-  ): { implementationRef: string; implementation: Function } | null {
+  ): { implementationRef: string; implementation: VerifiedCallable } | null {
     if (typeof value === "function") {
-      const metadata = value as Function & {
+      const metadata = value as VerifiedCallable & {
         implementationRef?: string;
         [CT_IMPLEMENTATION_REF]?: string;
       };
       const implementationRef = metadata[CT_IMPLEMENTATION_REF] ??
         metadata.implementationRef;
       return implementationRef
-        ? { implementationRef, implementation: value }
+        ? {
+          implementationRef,
+          implementation: value as VerifiedCallable,
+        }
         : null;
     }
 
@@ -332,7 +344,7 @@ export class SESRuntime {
     if (typeof record.implementation === "function") {
       return {
         implementationRef: record.implementationRef,
-        implementation: record.implementation,
+        implementation: record.implementation as VerifiedCallable,
       };
     }
 

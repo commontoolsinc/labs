@@ -1,4 +1,4 @@
-import "npm:ses";
+import "ses";
 
 let lockdownApplied = false;
 

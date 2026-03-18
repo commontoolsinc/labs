@@ -198,10 +198,16 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!this.isAtModuleScope(node)) {
       return;
     }
-    if (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) {
+    if (
+      ts.isArrowFunction(node.initializer) ||
+      ts.isFunctionExpression(node.initializer)
+    ) {
       return;
     }
-    if (ts.isCallExpression(node.initializer) && detectCallKind(node.initializer, checker)) {
+    if (
+      ts.isCallExpression(node.initializer) &&
+      detectCallKind(node.initializer, checker)
+    ) {
       return;
     }
     if (!isDisallowedModuleScopeDataInitializer(node.initializer)) {
@@ -454,7 +460,10 @@ export class PatternContextValidationTransformer extends Transformer {
     node: ts.ImportEqualsDeclaration,
     context: TransformationContext,
   ): void {
-    if (!context.options.sesMode || !ts.isExternalModuleReference(node.moduleReference)) {
+    if (
+      !context.options.sesMode ||
+      !ts.isExternalModuleReference(node.moduleReference)
+    ) {
       return;
     }
     const expression = node.moduleReference.expression;

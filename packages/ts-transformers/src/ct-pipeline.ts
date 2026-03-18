@@ -5,10 +5,10 @@ import {
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
-  SESCanonicalWrapperTransformer,
-  SESModuleScopeHoistTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  SESCanonicalWrapperTransformer,
+  SESModuleScopeHoistTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";

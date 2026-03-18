@@ -28,6 +28,7 @@ import {
   CT_IMPLEMENTATION_REF,
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
+  type VerifiedCallable,
   type VerifiedMetadataCarrier,
   type VerifiedWrapperKind,
 } from "../sandbox/types.ts";
@@ -37,8 +38,9 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    const verifiedImplementation =
-      !!(moduleSpec.implementation as Function & VerifiedMetadataCarrier)[
+    const verifiedImplementation = !!(moduleSpec.implementation as
+      & VerifiedCallable
+      & VerifiedMetadataCarrier)[
         CT_IMPLEMENTATION_REF
       ];
     if (!verifiedImplementation) {
@@ -140,7 +142,7 @@ function getExternalSourceLocation(): string | null {
   return null;
 }
 
-function annotateImplementation(implementation: Function): void {
+function annotateImplementation(implementation: VerifiedCallable): void {
   const location = getExternalSourceLocation();
   if (location) {
     defineDebugProperty(implementation, "name", location);
@@ -151,7 +153,7 @@ function annotateImplementation(implementation: Function): void {
 }
 
 function defineDebugProperty(
-  target: Function,
+  target: VerifiedCallable,
   key: "name" | "src" | "preview",
   value: string,
 ): void {
@@ -174,10 +176,12 @@ function defineDebugProperty(
 }
 
 function ensureImplementationRef(
-  implementation: Function,
+  implementation: VerifiedCallable,
   kind: VerifiedWrapperKind,
 ): string {
-  const metadata = implementation as Function & VerifiedMetadataCarrier;
+  const metadata = implementation as
+    & VerifiedCallable
+    & VerifiedMetadataCarrier;
   const existing = metadata[CT_IMPLEMENTATION_REF];
   if (existing) {
     return existing;

@@ -1,9 +1,10 @@
-import { isProxy } from "node:util/types";
+import { isProxy } from "nodeUtilTypes";
 import {
   CT_CAPTURE_IDS,
   CT_IMPLEMENTATION_REF,
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
+  type VerifiedMetadataCarrier,
 } from "./types.ts";
 
 const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -13,6 +14,7 @@ const INTERNAL_SYMBOL_KEYS = new Set([
   CT_ITEM_ID,
   CT_WRAPPER_KIND,
 ]);
+type MetadataTaggedRecord = Record<string, unknown> & VerifiedMetadataCarrier;
 
 export function assertPlainData(value: unknown): void {
   walkPlainData(value, new Set());
@@ -78,7 +80,9 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
 
   for (const key of Object.keys(value)) {
     if (RESERVED_KEYS.has(key)) {
-      throw new Error(`Reserved key '${key}' is not allowed in verified plain data`);
+      throw new Error(
+        `Reserved key '${key}' is not allowed in verified plain data`,
+      );
     }
     const descriptor = getOwnDescriptorOrThrow(value, key);
     if (!("value" in descriptor)) {
@@ -116,7 +120,7 @@ function deepFreeze<T>(value: T): T {
   Object.freeze(value);
   const entries = Array.isArray(value)
     ? value
-    : Object.values(value as Record<string, unknown>);
+    : Object.values(value as MetadataTaggedRecord);
   for (const entry of entries) {
     deepFreeze(entry);
   }
