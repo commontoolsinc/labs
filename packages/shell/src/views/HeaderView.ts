@@ -30,6 +30,11 @@ export class XHeaderView extends BaseView {
       height: auto;
     }
 
+    svg {
+      width: 100%;
+      height: 100%;
+    }
+
     /* Header bar */
     .header {
       display: flex;

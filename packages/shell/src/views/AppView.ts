@@ -31,7 +31,7 @@ export class XAppView extends BaseView {
       flex: 1;
       display: flex;
       flex-direction: column;
-      overflow-y: auto;
+      overflow: hidden;
       background-color: white;
       min-height: 0; /* Important for flex children */
       isolation: isolate; /* Contain pattern z-indexes */

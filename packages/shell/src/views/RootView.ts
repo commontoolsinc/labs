@@ -30,7 +30,8 @@ export class XRootView extends BaseView {
     :host {
       display: block;
       width: 100%;
-      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
     }
 
     #body {
