@@ -6,7 +6,7 @@ import {
 } from "@commontools/data-model/storable-instance";
 import { isStorableInstance } from "@commontools/data-model/storable-protocol";
 import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
-import type { StorableValue } from "../interface.ts";
+import type { StorableValue } from "../fabric-value.ts";
 import {
   StorableEpochDays,
   StorableEpochNsec,

@@ -7,7 +7,7 @@ import {
 } from "@commontools/data-model/storable-instance";
 import { isStorableInstance } from "@commontools/data-model/storable-protocol";
 import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
-import type { StorableValue } from "../interface.ts";
+import type { StorableValue } from "../fabric-value.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownStorable } from "@commontools/data-model/unknown-storable";
 import { ProblematicStorable } from "@commontools/data-model/problematic-storable";

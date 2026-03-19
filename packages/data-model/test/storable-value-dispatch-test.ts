@@ -6,7 +6,7 @@ import {
   setStorableValueConfig,
   storableFromNativeValue,
 } from "../storable-value.ts";
-import type { StorableValue } from "../interface.ts";
+import type { StorableValue } from "../fabric-value.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
