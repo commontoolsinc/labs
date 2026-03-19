@@ -429,7 +429,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 | Fact/Receipt types | `packages/memory/interface.ts` |
 | Commit creation | `packages/memory/commit.ts` |
 | Fact operations | `packages/memory/fact.ts` |
-| Merkle hashing | `packages/memory/reference.ts` |
+| Merkle hashing | `packages/data-model/value-hash.ts` |
 | Transaction interface | `packages/runner/src/storage/interface.ts` |
 | Transaction impl | `packages/runner/src/storage/transaction.ts` |
 | Journal | `packages/runner/src/storage/transaction/journal.ts` |

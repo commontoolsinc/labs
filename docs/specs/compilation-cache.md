@@ -108,9 +108,9 @@ LRU and never touches persistent storage.
 The `programHash` is the content hash of the input `RuntimeProgram`, computed
 via `createRef({ src: program }, "pattern source")`.
 
-`pretransformProgram()` adds a content-derived prefix (via `refer()`) to
+`pretransformProgram()` adds a content-derived prefix (via `hashOf()`) to
 filenames before compilation. Since both the cache key and the prefix are derived
-from the same hash function, if `refer()` behavior ever changes, the cache key
+from the same hash function, if `hashOf()` behavior ever changes, the cache key
 changes too — resulting in a cache miss, not a stale hit. This is safe by
 construction.
 
@@ -121,7 +121,7 @@ the cache to intercept compilation without infecting Engine internals, we split
 it into `compile()` and `evaluate()`.
 
 The cache stores `CompileResult { id, jsScript }` — not just `JsScript`. The
-`id` field is critical: `compile()` derives a content-based id (via `refer()`)
+`id` field is critical: `compile()` derives a content-based id (via `hashOf()`)
 that becomes a filename prefix in the compiled output. `evaluate()` needs this
 same id to strip the prefix from export map keys. Caching `CompileResult`
 ensures the id travels with the compiled output and is never recomputed —

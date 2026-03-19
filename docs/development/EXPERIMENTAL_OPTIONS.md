@@ -61,7 +61,7 @@ Server Process (Deno)
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-                                    +-- setStorableValueConfig(...)
+                                    +-- setDataModelConfig(...)
                                     +-- setCanonicalHashConfig(...)
 ```
 
@@ -92,12 +92,12 @@ Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setStorableValueConfig(...)
+              +-- setDataModelConfig(...)
               |    +-- currentConfig.modernDataModel = true
               |         +-- fabricFromNativeValue() checks currentConfig
               +-- setCanonicalHashConfig(...)
                    +-- canonicalHashingEnabled = true
-                        +-- refer() dispatches to modernHash()
+                        +-- hashOf() dispatches to modernHash()
 ```
 
 Key points:
@@ -107,7 +107,7 @@ Key points:
 2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
-4. The **Runtime constructor** calls `setStorableValueConfig()`, which
+4. The **Runtime constructor** calls `setDataModelConfig()`, which
    sets the module-level ambient config used by `fabricFromNativeValue()` and related
    functions.
 
@@ -167,9 +167,9 @@ with defaults (all `false`) and stores the resolved result as
 `runtime.experimental` (type `Required<ExperimentalOptions>`).
 
 The memory layer uses module-level ambient config variables:
-`currentConfig` in `packages/memory/fabric-value.ts` (set by
-`setStorableValueConfig()`) and `canonicalHashingEnabled` in
-`packages/memory/reference.ts` (set by `setCanonicalHashConfig()`). This means:
+`currentConfig` in `packages/data-model/fabric-value.ts` (set by
+`setDataModelConfig()`) and `canonicalHashingEnabled` in
+`packages/data-model/value-hash.ts` (set by `setCanonicalHashConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

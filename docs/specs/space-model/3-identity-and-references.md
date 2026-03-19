@@ -69,14 +69,14 @@ from recognition entirely.
 
 ### Entity Identifiers
 
-Entities are identified by content-derived hashes computed via the `refer()`
+Entities are identified by content-derived hashes computed via the `hashOf()`
 function. See [Data Model](./1-data-model.md#hashing-and-content-addressing) for
 details on the hashing mechanism.
 
-The `refer()` function is used for:
-- Pattern ID generation: `refer({ causal: { patternId, type: "pattern" } })`
-- Request deduplication: `refer(llmParams).toString()`
-- Cache keys: `refer(JSON.stringify(selector)).toString()`
+The `hashOf()` function is used for:
+- Pattern ID generation: `hashOf({ causal: { patternId, type: "pattern" } })`
+- Request deduplication: `hashOf(llmParams).toString()`
+- Cache keys: `hashOf(JSON.stringify(selector)).toString()`
 - Causal chain references
 
 ### Internal Representation

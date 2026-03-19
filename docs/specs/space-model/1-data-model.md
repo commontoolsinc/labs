@@ -47,7 +47,7 @@ Fabric values are JSON-compatible with specific constraints:
 
 - Plain objects only (no class instances)
 - Keys must be strings; symbol keys cause rejection as non-fabric
-- Values must be storable
+- Values must be valid fabric values
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
 
@@ -262,10 +262,10 @@ Keep rich types as themselves within the runtime:
 - **Streams are first-class** rather than marker objects
 - Serialization becomes a "last mile" concern at specific boundary points
 
-The `StorableValue` type would expand to a union of three categories:
+The `FabricValue` type would expand to a union of three categories:
 
 ```typescript
-type StorableValue =
+type FabricValue =
   // (a) Primitives
   | null | boolean | number | string
   | undefined                             // currently has special semantics; could become first-class
@@ -273,17 +273,17 @@ type StorableValue =
 
   // (b) Built-in JS types (cannot be patched with symbols)
   | Error
-  | Map<StorableValue, StorableValue>
-  | Set<StorableValue>
+  | Map<FabricValue, FabricValue>
+  | Set<FabricValue>
   | Uint8Array                           // or other byte-array type
   | Date                                 // or Temporal type
 
-  // (c) Branded storables (our types implementing the protocol)
+  // (c) Branded fabric types (our types implementing the protocol)
   | FabricInstance
 
   // Recursive containers
-  | StorableValue[]
-  | { [key: string]: StorableValue }
+  | FabricValue[]
+  | { [key: string]: FabricValue }
 ```
 
 Built-in JS types require explicit serialization handling — we cannot (and
@@ -323,7 +323,7 @@ constructor for two reasons:
 The presence of `[DECONSTRUCT]` doubles as the brand — no separate marker needed:
 
 ```typescript
-function isStorable(value: unknown): value is FabricInstance {
+function isFabricInstance(value: unknown): value is FabricInstance {
   return value != null &&
          typeof value === 'object' &&
          DECONSTRUCT in value;
@@ -459,8 +459,8 @@ Each boundary would use a serialization context:
 
 ```typescript
 // At boundary exit
-function serialize(value: StorableValue, context: SerializationContext): SerializedForm {
-  if (isStorable(value)) {
+function serialize(value: FabricValue, context: SerializationContext): SerializedForm {
+  if (isFabricInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
     return context.wrap(tag, state);
@@ -469,7 +469,7 @@ function serialize(value: StorableValue, context: SerializationContext): Seriali
 }
 
 // At boundary entry
-function deserialize(data: SerializedForm, context: SerializationContext, runtime: Runtime): StorableValue {
+function deserialize(data: SerializedForm, context: SerializationContext, runtime: Runtime): FabricValue {
   const { tag, state } = context.unwrap(data);
   if (tag) {
     const cls = context.getClassFor(tag);
@@ -522,7 +522,7 @@ This makes identity hashing independent of any particular wire encoding.
 - How is the type registry within a context managed? (Static registration?
   Dynamic discovery? Who owns the registry?)
 - What happens when `[DECONSTRUCT]` or `[RECONSTRUCT]` fails partway through?
-  (Might want a `ProblematicStorable` with similar structure/use to
+  (Might want a `ProblematicValue` with similar structure/use to
   `UnknownValue`.)
 - How do schemas integrate with the fabric protocol? Each `FabricInstance`
   type implies a schema for its deconstructed state. The fabric layer should
