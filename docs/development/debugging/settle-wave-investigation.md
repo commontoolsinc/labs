@@ -225,6 +225,18 @@ const trace = await commontools.rt.getTriggerTrace()
 trace.slice(-5)
 ```
 
+If you want the shell to resolve the hottest changes for you, use the console
+helper instead of hand-writing grouping code:
+
+```js
+await commontools.explainTriggerTrace({ rootOnly: true, limit: 8 })
+```
+
+That helper groups exact `space/entity/path` changes, counts direct schedules,
+counts downstream scheduled effects, reads the changed cells back through
+`CellHandle`, and adds shape hints such as `ui-result`,
+`runtime-process-cell`, `default-app-or-home-state`, and `index-state`.
+
 To group repeated actions quickly:
 
 ```js

@@ -334,7 +334,8 @@ a piece, debugging reactivity issues, or watching values change in real time.
 
 All three functions default `space` to the current shell space and `did` to
 the piece ID from the URL bar (`/<spaceName>/<pieceId>`). Override any default
-by passing an options object.
+by passing an options object. If you already have a full trigger-trace entity
+id such as `of:baedrei...`, pass it as `id`.
 
 ### readCell
 
@@ -352,6 +353,12 @@ await commontools.readCell({
   space: "did:key:z6Mkm...",
   did: "baedrei...",
   path: ["$UI"]
+})
+
+// Read a trigger-trace entity directly using its full id
+await commontools.readCell({
+  space: "did:key:z6Mkm...",
+  id: "of:baedrei..."
 })
 ```
 
@@ -388,6 +395,32 @@ const cancelVariant = commontools.subscribeToCell({
 // Clean up
 cancelVariant()
 ```
+
+### explainTriggerTrace
+
+Group recent trigger-trace entries, resolve the hottest changed cells, and add
+semantic summaries for the current values.
+
+```javascript
+await commontools.explainTriggerTrace()
+
+// Focus on broad root writes only
+await commontools.explainTriggerTrace({ rootOnly: true })
+
+// Limit how many hot changes are resolved
+await commontools.explainTriggerTrace({ limit: 5 })
+
+// Include the full current values in the returned result
+await commontools.explainTriggerTrace({ includeCurrentValue: true })
+```
+
+This helper:
+
+- groups `commontools.rt.getTriggerTrace()` by exact `space/entity/path`
+- counts direct action schedules and downstream scheduled effects
+- reads the hottest changed cells through `CellHandle`
+- annotates them with shape hints like `ui-result`, `runtime-process-cell`,
+  `default-app-or-home-state`, and `index-state`
 
 ### Agent-Browser Usage
 
@@ -448,6 +481,7 @@ agent-browser eval "window._cancel()"
 | `commontools.readCell(opts?)` | Read piece output cell (async) |
 | `commontools.readArgumentCell(opts?)` | Read piece argument cell (async) |
 | `commontools.subscribeToCell(opts?)` | Subscribe to cell updates, returns cancel fn |
+| `commontools.explainTriggerTrace(opts?)` | Group and annotate hot trigger-trace changes |
 | `commontools.space` | Current space DID |
 | `commontools.detectNonIdempotent(ms?)` | Run non-idempotent diagnosis (default 5s) |
 | `commontools.rt.detectNonIdempotent(ms?)` | Same, via RuntimeClient IPC |

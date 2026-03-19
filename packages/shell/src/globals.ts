@@ -6,6 +6,11 @@ declare global {
   var commontools: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
+    explainTriggerTrace?: (options?: {
+      limit?: number;
+      rootOnly?: boolean;
+      includeCurrentValue?: boolean;
+    }) => Promise<unknown>;
     [key: string]: unknown;
   };
 }
