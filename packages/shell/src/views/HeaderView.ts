@@ -88,39 +88,15 @@ export class XHeaderView extends BaseView {
       color: var(--gray-800, #2c3138);
     }
 
-    /* Close button */
-    .close-button {
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      border: none;
-      background: none;
-      border-radius: 6px;
-      padding: 4px;
-    }
-
-    .close-button:hover {
-      background: rgba(0, 0, 0, 0.04);
-    }
-
-    .close-icon {
-      width: 24px;
-      height: 24px;
-      color: var(--gray-800, #2c3138);
-    }
-
     /* Menu overlay - desktop: dropdown, mobile: full-width */
     .menu-container {
       position: fixed;
       inset: 0;
       z-index: 4;
-      opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s ease;
     }
 
     .menu-container.open {
-      opacity: 1;
       pointer-events: auto;
     }
 
@@ -139,6 +115,7 @@ export class XHeaderView extends BaseView {
         0px 0px 3px 0px rgba(0, 0, 0, 0.12);
       z-index: 1;
       position: relative;
+      box-sizing: border-box;
     }
 
     /* Desktop: positioned dropdown */
@@ -165,24 +142,63 @@ export class XHeaderView extends BaseView {
       }
     }
 
-    /* Mobile: full-width slide-down */
+    /* Mobile: clip-path reveal */
     @media (max-width: 768px) {
       .menu-backdrop {
         background: rgba(13, 18, 24, 0.5);
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+
+      .menu-container.open .menu-backdrop {
+        opacity: 1;
       }
 
       .menu-panel {
         width: 100%;
-        padding: 80px 24px 24px;
+        padding: 24px;
+        padding-top: 24px;
         border-radius: 0 0 16px 16px;
         overflow: hidden;
-        transform: translateY(-100%);
-        transition: transform 0.25s ease;
+        clip-path: inset(0 0 100% 0);
+        transition: clip-path 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
       .menu-container.open .menu-panel {
-        transform: translateY(0);
+        clip-path: inset(0 0 0 0);
       }
+
+      .menu-panel .menu-inner {
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+
+      .menu-container.open .menu-panel .menu-inner {
+        opacity: 1;
+        transition: opacity 0.2s ease 0.1s;
+      }
+    }
+
+    .menu-close {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-radius: 6px;
+      padding: 4px;
+      align-self: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .menu-close:hover {
+      background: rgba(0, 0, 0, 0.04);
+    }
+
+    .menu-close-icon {
+      width: 24px;
+      height: 24px;
+      color: var(--gray-800, #2c3138);
     }
 
     /* Menu title section */
@@ -820,27 +836,17 @@ export class XHeaderView extends BaseView {
     return html`
       <div class="header">
         <div class="header-start">
-          ${
-      this.menuOpen
-        ? html`
-              <button class="close-button" @click="${this.handleCloseMenu}">
-                <span class="close-icon">${this.iconClose()}</span>
-              </button>
-            `
-        : html`
-              <button class="nav-picker" @click="${this.handleLogoClick}">
-                <span class="nav-picker-container">
-                  <ct-logo
-                    .backgroundColor="${connectionColor}"
-                    .width="${24}"
-                    .height="${24}"
-                  ></ct-logo>
-                  <span class="chevron-down">${this.iconChevronDown()}</span>
-                </span>
-              </button>
-              ${reloadIcon}
-            `
-    }
+          <button class="nav-picker" @click="${this.handleLogoClick}">
+            <span class="nav-picker-container">
+              <ct-logo
+                .backgroundColor="${connectionColor}"
+                .width="${24}"
+                .height="${24}"
+              ></ct-logo>
+              <span class="chevron-down">${this.iconChevronDown()}</span>
+            </span>
+          </button>
+          ${reloadIcon}
         </div>
       </div>
 
@@ -848,72 +854,77 @@ export class XHeaderView extends BaseView {
         <div class="menu-backdrop"
           @click="${this.handleBackdropClick}"></div>
         <div class="menu-panel">
-          <div class="menu-title">
-            ${
+          <div class="menu-inner">
+            <button class="menu-close" @click="${this.handleCloseMenu}">
+              <span class="menu-close-icon">${this.iconClose()}</span>
+            </button>
+            <div class="menu-title">
+              ${
       this.spaceName
         ? html`
-                <div class="breadcrumb">
-                  <span class="breadcrumb-icon">${this.iconFolder()}</span>
-                  <span class="breadcrumb-text">${this.spaceName}</span>
-                  <span class="breadcrumb-chevron">
-                    ${this.iconChevronRight()}
-                  </span>
-                </div>
-              `
+                  <div class="breadcrumb">
+                    <span class="breadcrumb-icon">${this.iconFolder()}</span>
+                    <span class="breadcrumb-text">${this.spaceName}</span>
+                    <span class="breadcrumb-chevron">
+                      ${this.iconChevronRight()}
+                    </span>
+                  </div>
+                `
         : nothing
     }
-            <div class="piece-title-row"
-              @click="${this.handleTogglePieceList}">
-              <span class="piece-title-text">
-                ${this.pieceTitle || "Untitled"}
-              </span>
-              <span class="piece-title-chevron ${this.pieceListExpanded ? "expanded" : ""}">
-                ${this.iconChevronDown()}
-              </span>
+              <div class="piece-title-row"
+                @click="${this.handleTogglePieceList}">
+                <span class="piece-title-text">
+                  ${this.pieceTitle || "Untitled"}
+                </span>
+                <span class="piece-title-chevron ${this.pieceListExpanded ? "expanded" : ""}">
+                  ${this.iconChevronDown()}
+                </span>
+              </div>
+              ${this.pieceListExpanded ? this.renderPieceList() : nothing}
             </div>
-            ${this.pieceListExpanded ? this.renderPieceList() : nothing}
-          </div>
 
-          <div class="menu-rows">
-            <button class="menu-item"
-              @click="${this.handleGoToWorkspace}">
-              <span class="menu-item-icon">${this.iconArrowLeft()}</span>
-              <span class="menu-item-label">Go to Workspace</span>
-            </button>
+            <div class="menu-rows">
+              <button class="menu-item"
+                @click="${this.handleGoToWorkspace}">
+                <span class="menu-item-icon">${this.iconArrowLeft()}</span>
+                <span class="menu-item-label">Go to Workspace</span>
+              </button>
 
-            <div class="divider"><div class="divider-line"></div></div>
+              <div class="divider"><div class="divider-line"></div></div>
 
-            ${
+              ${
       this.pieceId
         ? html`
-                <button class="menu-item"
-                  @click="${this.handleToggleFavorite}">
-                  <span class="menu-item-icon">${this.iconStar(this._isFavorite())}</span>
-                  <span class="menu-item-label">${this._isFavorite() ? "Remove from Favorites" : "Add to Favorites"}</span>
-                </button>
-              `
+                  <button class="menu-item"
+                    @click="${this.handleToggleFavorite}">
+                    <span class="menu-item-icon">${this.iconStar(this._isFavorite())}</span>
+                    <span class="menu-item-label">${this._isFavorite() ? "Remove from Favorites" : "Add to Favorites"}</span>
+                  </button>
+                `
         : nothing
     }
 
-            <button class="menu-item"
-              @click="${this.handleCopyLink}">
-              <span class="menu-item-icon">${this.iconLink()}</span>
-              <span class="menu-item-label">Copy link</span>
-            </button>
+              <button class="menu-item"
+                @click="${this.handleCopyLink}">
+                <span class="menu-item-icon">${this.iconLink()}</span>
+                <span class="menu-item-label">Copy link</span>
+              </button>
 
-            <button class="menu-item"
-              @click="${this.handleDebuggerToggleClick}">
-              <span class="menu-item-icon">${this.iconBug()}</span>
-              <span class="menu-item-label">Toggle debug mode</span>
-            </button>
+              <button class="menu-item"
+                @click="${this.handleDebuggerToggleClick}">
+                <span class="menu-item-icon">${this.iconBug()}</span>
+                <span class="menu-item-label">Toggle debug mode</span>
+              </button>
 
-            <div class="divider"><div class="divider-line"></div></div>
+              <div class="divider"><div class="divider-line"></div></div>
 
-            <button class="menu-item"
-              @click="${this.handleAuthClick}">
-              <span class="menu-item-icon">${this.iconLogOut()}</span>
-              <span class="menu-item-label">Sign out</span>
-            </button>
+              <button class="menu-item"
+                @click="${this.handleAuthClick}">
+                <span class="menu-item-icon">${this.iconLogOut()}</span>
+                <span class="menu-item-label">Sign out</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
