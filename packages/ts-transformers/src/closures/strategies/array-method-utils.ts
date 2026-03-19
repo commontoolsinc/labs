@@ -1,5 +1,7 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
+import { createDataFlowAnalyzer } from "../../ast/mod.ts";
+import { rewriteExpression } from "../../transformers/opaque-ref/mod.ts";
 import { createCaptureAccessExpression } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -7,6 +9,7 @@ import {
   maybeReuseIdentifier,
   normalizeBindingName,
 } from "../../utils/identifiers.ts";
+import { unwrapExpression } from "../../utils/expression.ts";
 import { createDeriveCall } from "../../transformers/builtins/derive.ts";
 
 function isBindingPattern(name: ts.BindingName): name is ts.BindingPattern {
@@ -251,6 +254,89 @@ export function analyzeElementBinding(
   };
 }
 
+function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
+  if (ts.isBinaryExpression(expr)) {
+    const op = expr.operatorToken.kind;
+    if (
+      op === ts.SyntaxKind.AmpersandAmpersandToken ||
+      op === ts.SyntaxKind.BarBarToken
+    ) {
+      return true;
+    }
+  }
+
+  let found = false;
+  expr.forEachChild((child) => {
+    if (!found && ts.isExpression(child)) {
+      if (containsLogicalBinaryOperator(child)) {
+        found = true;
+      }
+    }
+  });
+  return found;
+}
+
+function rewriteCallbackRootControlFlowExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.Expression {
+  const unwrapped = unwrapExpression(expression);
+  if (
+    !ts.isConditionalExpression(unwrapped) &&
+    !containsLogicalBinaryOperator(unwrapped)
+  ) {
+    return expression;
+  }
+
+  const analyze = createDataFlowAnalyzer(context.checker);
+  const analysis = analyze(expression);
+  const rewritten = rewriteExpression({
+    expression,
+    analysis,
+    context,
+    analyze,
+    reactiveContextKind: "pattern",
+    inSafeContext: false,
+  });
+
+  return rewritten ?? expression;
+}
+
+function rewriteCallbackRootControlFlowBody(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const { factory } = context;
+
+  if (!ts.isBlock(body)) {
+    return rewriteCallbackRootControlFlowExpression(body, context);
+  }
+
+  let changed = false;
+  const statements = body.statements.map((statement) => {
+    if (!ts.isReturnStatement(statement) || !statement.expression) {
+      return statement;
+    }
+
+    const rewrittenExpression = rewriteCallbackRootControlFlowExpression(
+      statement.expression,
+      context,
+    );
+    if (rewrittenExpression === statement.expression) {
+      return statement;
+    }
+
+    changed = true;
+    return factory.updateReturnStatement(statement, rewrittenExpression);
+  });
+
+  if (!changed) {
+    return body;
+  }
+
+  return factory.updateBlock(body, statements);
+}
+
 function createDerivedAliasExpression(
   info: ComputedAliasInfo,
   elementIdentifier: ts.Identifier,
@@ -303,18 +389,23 @@ export function rewriteCallbackBody(
   analysis: ElementBindingAnalysis,
   context: TransformationContext,
 ): ts.ConciseBody {
+  const rewrittenControlFlowBody = rewriteCallbackRootControlFlowBody(
+    body,
+    context,
+  );
+
   if (analysis.computedAliases.length === 0) {
-    return body;
+    return rewrittenControlFlowBody;
   }
 
   const { factory } = context;
 
   let block: ts.Block;
-  if (ts.isBlock(body)) {
-    block = body;
+  if (ts.isBlock(rewrittenControlFlowBody)) {
+    block = rewrittenControlFlowBody;
   } else {
     block = factory.createBlock([
-      factory.createReturnStatement(body as ts.Expression),
+      factory.createReturnStatement(rewrittenControlFlowBody as ts.Expression),
     ], true);
   }
 
