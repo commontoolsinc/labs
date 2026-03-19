@@ -16,6 +16,6 @@
  *
  * See Section 1.4.5 and 1.4.6 of the formal spec.
  */
-export abstract class SpecialPrimitiveValue {
+export abstract class FabricPrimitive {
   constructor() {}
 }

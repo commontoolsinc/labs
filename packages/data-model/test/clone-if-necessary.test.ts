@@ -600,10 +600,10 @@ describe("cloneIfNecessary", () => {
   });
 
   // --------------------------------------------------------------------------
-  // SpecialPrimitiveValue pass-through
+  // FabricPrimitive pass-through
   // --------------------------------------------------------------------------
 
-  describe("SpecialPrimitiveValue", () => {
+  describe("FabricPrimitive", () => {
     it("passes through FabricEpochNsec unchanged", () => {
       setDataModelConfig({ modernDataModel: true });
       const epoch = new FabricEpochNsec(1234567890n);

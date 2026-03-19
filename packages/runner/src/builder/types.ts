@@ -305,8 +305,8 @@ export interface BuilderFunctionsAndConstants {
   // Fabric value classes
   FabricInstance:
     typeof import("@commontools/data-model/fabric-instance").FabricInstance;
-  SpecialPrimitiveValue:
-    typeof import("@commontools/data-model/special-primitive-value").SpecialPrimitiveValue;
+  FabricPrimitive:
+    typeof import("@commontools/data-model/fabric-primitive").FabricPrimitive;
   FabricEpochNsec:
     typeof import("@commontools/data-model/fabric-epoch").FabricEpochNsec;
   FabricEpochDays:

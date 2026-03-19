@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
+import { FabricPrimitive } from "../fabric-primitive.ts";
 import { isFabricInstance } from "../fabric-protocol.ts";
 import {
   resetDataModelConfig,
@@ -36,8 +36,8 @@ describe("FabricEpochNsec", () => {
     expect(sn instanceof FabricEpochNsec).toBe(true);
   });
 
-  it("is instanceof SpecialPrimitiveValue", () => {
-    expect(new FabricEpochNsec(0n) instanceof SpecialPrimitiveValue).toBe(
+  it("is instanceof FabricPrimitive", () => {
+    expect(new FabricEpochNsec(0n) instanceof FabricPrimitive).toBe(
       true,
     );
   });
@@ -68,8 +68,8 @@ describe("FabricEpochDays", () => {
     expect(sd instanceof FabricEpochDays).toBe(true);
   });
 
-  it("is instanceof SpecialPrimitiveValue", () => {
-    expect(new FabricEpochDays(0n) instanceof SpecialPrimitiveValue).toBe(
+  it("is instanceof FabricPrimitive", () => {
+    expect(new FabricEpochDays(0n) instanceof FabricPrimitive).toBe(
       true,
     );
   });
@@ -93,7 +93,7 @@ describe("FabricEpochDays (protocol)", () => {
   });
 });
 
-describe("SpecialPrimitiveValue (fabric-value integration)", () => {
+describe("FabricPrimitive (fabric-value integration)", () => {
   it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
     setDataModelConfig({ modernDataModel: true });
     try {

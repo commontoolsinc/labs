@@ -974,7 +974,7 @@ Deno.test("modernHash", async (t) => {
     assertEquals(str.includes("="), false);
   });
 
-  await t.step("FabricHash is frozen (SpecialPrimitiveValue)", () => {
+  await t.step("FabricHash is frozen (FabricPrimitive)", () => {
     const result = canonicalHashRaw(42);
     assertEquals(Object.isFrozen(result), true);
   });

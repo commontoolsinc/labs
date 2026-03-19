@@ -4,7 +4,7 @@ import {
   isFabricInstance,
   type ReconstructionContext,
 } from "./fabric-protocol.ts";
-import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { FabricPrimitive } from "./fabric-primitive.ts";
 
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
@@ -481,7 +481,7 @@ export class FabricUint8Array extends FabricNativeWrapper<Blob | Uint8Array> {
  *   `toNativeValue(frozen)`, which adjusts freeze state.
  * - **Arrays and plain objects**: freeze state is adjusted to match `frozen`
  *   (shallow copy if needed).
- * - **SpecialPrimitiveValue** (EpochNsec, EpochDays, ContentId): pass through
+ * - **FabricPrimitive** (EpochNsec, EpochDays, ContentId): pass through
  *   as-is (always frozen by construction).
  * - **Non-native FabricInstance** (Cell, Stream, UnknownValue, etc.):
  *   pass through as-is (freeze state is an internal concern of the wrapper).
@@ -498,7 +498,7 @@ export function nativeValueFromFabricValue(
 
   // Special primitives (FabricEpochNsec, FabricEpochDays) are simple
   // value wrappers -- pass through as-is.
-  if (value instanceof SpecialPrimitiveValue) {
+  if (value instanceof FabricPrimitive) {
     return value;
   }
 
@@ -572,7 +572,7 @@ export function nativeFromFabricValueModern(
 
   // Special primitives (FabricEpochNsec, FabricEpochDays) are simple
   // value wrappers -- pass through as-is.
-  if (value instanceof SpecialPrimitiveValue) {
+  if (value instanceof FabricPrimitive) {
     return value;
   }
 

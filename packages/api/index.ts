@@ -33,21 +33,21 @@ export interface FabricInstanceConstructor {
 
 export declare const FabricInstance: FabricInstanceConstructor;
 
-/** Abstract base class for "special primitive" fabric types. */
+/** Abstract base class for fabric primitive types. */
 // deno-lint-ignore no-empty-interface
-export interface SpecialPrimitiveValue {}
+export interface FabricPrimitive {}
 
-export interface SpecialPrimitiveValueConstructor {
-  prototype: SpecialPrimitiveValue;
+export interface FabricPrimitiveConstructor {
+  prototype: FabricPrimitive;
 }
 
-export declare const SpecialPrimitiveValue: SpecialPrimitiveValueConstructor;
+export declare const FabricPrimitive: FabricPrimitiveConstructor;
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch.
  * Wraps a `bigint` value.
  */
-export interface FabricEpochNsec extends SpecialPrimitiveValue {
+export interface FabricEpochNsec extends FabricPrimitive {
   readonly value: bigint;
 }
 
@@ -62,7 +62,7 @@ export declare const FabricEpochNsec: FabricEpochNsecConstructor;
  * Temporal type representing days from the POSIX Epoch.
  * Wraps a `bigint` value.
  */
-export interface FabricEpochDays extends SpecialPrimitiveValue {
+export interface FabricEpochDays extends FabricPrimitive {
   readonly value: bigint;
 }
 

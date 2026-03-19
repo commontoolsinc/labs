@@ -1,4 +1,4 @@
-import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { FabricPrimitive } from "./fabric-primitive.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
@@ -6,7 +6,7 @@ import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
  * `FabricDatum` (not a `FabricInstance`).
  * See Section 1.4.6 of the formal spec.
  */
-export class FabricEpochNsec extends SpecialPrimitiveValue {
+export class FabricEpochNsec extends FabricPrimitive {
   constructor(
     /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
     readonly value: bigint,
@@ -22,7 +22,7 @@ export class FabricEpochNsec extends SpecialPrimitiveValue {
  * `FabricDatum` (not a `FabricInstance`).
  * See Section 1.4.7 of the formal spec.
  */
-export class FabricEpochDays extends SpecialPrimitiveValue {
+export class FabricEpochDays extends FabricPrimitive {
   constructor(
     /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
     readonly value: bigint,

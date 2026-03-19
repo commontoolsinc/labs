@@ -48,7 +48,7 @@ import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import { FabricInstance } from "@commontools/data-model/fabric-instance";
-import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
+import { FabricPrimitive } from "@commontools/data-model/fabric-primitive";
 import {
   FabricEpochDays,
   FabricEpochNsec,
@@ -156,7 +156,7 @@ export const createBuilder = (): {
       // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
       // checks in patterns.
       FabricInstance,
-      SpecialPrimitiveValue,
+      FabricPrimitive,
       FabricEpochNsec,
       FabricEpochDays,
     },

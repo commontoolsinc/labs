@@ -1,16 +1,16 @@
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `SpecialPrimitiveValue` -- treated like a primitive in the fabric
+ * Extends `FabricPrimitive` -- treated like a primitive in the fabric
  * type system (always frozen, passes through conversion unchanged).
  *
  * Stringification produces `<algorithmTag>:<base64urlHash>` where
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
  */
-import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { FabricPrimitive } from "./fabric-primitive.ts";
 import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
-export class FabricHash extends SpecialPrimitiveValue {
+export class FabricHash extends FabricPrimitive {
   constructor(
     /** The raw hash bytes. */
     readonly hash: Uint8Array,
