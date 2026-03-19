@@ -30,7 +30,7 @@ describe("header menu tests", () => {
     const menuContainer = await page.waitForSelector(".menu-container", {
       strategy: "pierce",
     });
-    let classes = await menuContainer.evaluate(
+    const classes = await menuContainer.evaluate(
       (el: Element) => el.className,
     );
     assert(!classes.includes("open"), "Menu should be closed initially");
