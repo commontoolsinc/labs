@@ -1,4 +1,4 @@
-# Storable Values
+# Fabric Values
 
 This document specifies the immutable data representation for the Space Model:
 what values can be stored, how custom types participate in serialization, and how
@@ -10,11 +10,11 @@ Draft formal spec — extracted from the data model proposal.
 
 ---
 
-## 1. Storable Value Types
+## 1. Fabric Value Types
 
 ### 1.1 Overview
 
-The system stores **storable values** — data that can flow through the runtime
+The system stores **fabric values** — data that can flow through the runtime
 as rich types and be serialized to wire/storage formats at boundary crossings.
 All persistent data and in-flight messages use this representation.
 
@@ -27,48 +27,51 @@ boundary crossings (persistence, IPC, network).
 The data model is organized into three explicit layers:
 
 ```
-JavaScript "wild west" (unknown/any) <-> Strongly typed (StorableValue) <-> Serialized (Uint8Array)
+JavaScript "wild west" (unknown/any) <-> Strongly typed (FabricValue) <-> Serialized (Uint8Array)
 ```
 
 - **Left layer — JS wild west.** Arbitrary JavaScript values (`unknown`/`any`),
   including native objects like `Error`, `Map`, `Set`, `Date`, `RegExp`, and `Uint8Array`.
   Code in this layer has no type guarantees about what it is handling.
 
-- **Middle layer — `StorableValue`.** The strongly typed core of the data model.
-  Contains only primitives, `StorableInstance` implementations (including wrapper
+- **Middle layer — `FabricValue`.** The strongly typed core of the data model.
+  Contains only primitives, `FabricInstance` implementations (including wrapper
   classes for native JS types), and recursive containers. No raw native JS
-  objects appear at this layer — they are wrapped into `StorableInstance`
+  objects appear at this layer — they are wrapped into `FabricInstance`
   implementations by the conversion functions (Section 8).
 
 - **Right layer — Serialized form.** The wire/storage representation
   (`Uint8Array` for binary formats, JSON-compatible trees for the JSON context).
-  Serialization operates exclusively on `StorableValue` input; it never sees raw
+  Serialization operates exclusively on `FabricValue` input; it never sees raw
   native JS objects.
 
 Conversion functions bridge the left and middle layers:
-`toStorableValue()` / `toDeepStorableValue()` convert from JS values to
-`StorableValue`, wrapping native objects into `StorableInstance` wrappers and
-freezing the result. `nativeValueFromStorableValue()` converts back, unwrapping
-`StorableInstance` wrappers to their native JS equivalents. See Section 8 for
+`toFabricValue()` / `toDeepFabricValue()` convert from JS values to
+`FabricValue`, wrapping native objects into `FabricInstance` wrappers and
+freezing the result. `nativeValueFromFabricValue()` converts back, unwrapping
+`FabricInstance` wrappers to their native JS equivalents. See Section 8 for
 the full specification of these functions.
 
 ### 1.2 Type Universe
 
-A `StorableValue` is defined as the following union. This is the **middle
+A `FabricValue` is defined as the following union. This is the **middle
 layer** — the strongly typed core. Raw native JS objects (`Error`, `Map`, `Set`,
 `Date`, `RegExp`, `Uint8Array`) do not appear here; they are handled by the conversion
-layer (Section 8) and represented in `StorableValue` trees as `StorableInstance`
+layer (Section 8) and represented in `FabricValue` trees as `FabricInstance`
 wrapper classes (Section 1.4).
 
-> **Package note:** The implementation lives in `packages/memory/`. The
-> storable-value types are defined in `packages/memory/interface.ts`, the
-> protocol types in `packages/memory/storable-protocol.ts`, and the conversion
-> functions in `packages/memory/storable-value.ts`. Some code stubs in this
-> spec still use `packages/common/` as a placeholder path; these are
-> equivalent to the `packages/memory/` paths.
+> **Package note:** The data model implementation lives in
+> `packages/data-model/`. The fabric-value types are defined in
+> `packages/data-model/fabric-value.ts`, the protocol types in
+> `packages/data-model/fabric-protocol.ts` and
+> `packages/data-model/fabric-instance.ts`, and the conversion functions in
+> `packages/data-model/fabric-value.ts`. Type declarations visible to
+> patterns are in `packages/api/index.ts` (inline `interface` + `declare
+> const` pattern). The `packages/runner/` wires concrete implementations
+> into builder exports.
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
  * The complete set of values that can flow through the runtime, be stored
@@ -76,72 +79,72 @@ wrapper classes (Section 1.4).
  * layer" of the three-layer architecture — no raw native JS objects appear
  * here.
  */
-type StorableValue =
+type FabricValue =
   // (a) Primitives
   | null
   | boolean
   | number    // finite only; `NaN` and `Infinity` rejected
   | string
-  | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
+  | undefined // first-class fabric value; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
 
   // (b) Special primitives (SpecialPrimitiveValue subclasses — direct datum
-  //     members, not StorableInstance; always frozen)
-  | StorableEpochNsec
-  | StorableEpochDays
-  | StorableContentId
+  //     members, not FabricInstance; always frozen)
+  | FabricEpochNsec
+  | FabricEpochDays
+  | FabricHash
 
-  // (c) Branded storables (custom types implementing the storable protocol)
+  // (c) Branded fabric types (custom types implementing the fabric protocol)
   //     This arm covers:
-  //       - Native object wrappers: `StorableError`, `StorableMap`,
-  //         `StorableSet`, `StorableRegExp`, `StorableUint8Array` (Section 1.4)
+  //       - Native object wrappers: `FabricError`, `FabricMap`,
+  //         `FabricSet`, `FabricRegExp`, `FabricUint8Array` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
-  //       - System types: `UnknownStorable`, `ProblematicStorable`
-  | StorableInstance
+  //       - System types: `UnknownValue`, `ProblematicValue`
+  | FabricInstance
 
   // (d) Recursive containers
-  | StorableValue[]
-  | { [key: string]: StorableValue };
+  | FabricValue[]
+  | { [key: string]: FabricValue };
 ```
 
 > **Excluded JS types.** The following JavaScript types are explicitly **not**
-> storable and cause rejection (thrown error) in `toStorableValueOrThrow()` and
-> `canBeStored()`:
+> representable as fabric values and cause rejection (thrown error) in
+> `toFabricValueOrThrow()` and `canBeStored()`:
 >
 > - `symbol` — Symbols are inherently local (not serializable across realms or
 >   processes). Symbol-keyed properties on objects are silently ignored; a bare
 >   `symbol` value is rejected outright.
 > - `function` — Functions are opaque closures with no portable representation.
 >   Objects with a `[DECONSTRUCT]` method are not functions in this sense — they
->   are `StorableInstance`s.
+>   are `FabricInstance`s.
 >
 > These are the two JS primitive types (`typeof` returns `"symbol"` or
-> `"function"`) that are absent from the `StorableValue` union. All other
+> `"function"`) that are absent from the `FabricValue` union. All other
 > `typeof` results (`"undefined"`, `"boolean"`, `"number"`, `"string"`,
-> `"bigint"`, `"object"`) have corresponding `StorableValue` arms.
+> `"bigint"`, `"object"`) have corresponding `FabricValue` arms.
 
-#### `StorableNativeObject`
+#### `FabricNativeObject`
 
-A separate type — **outside** the `StorableValue` hierarchy — defines the raw
+A separate type — **outside** the `FabricValue` hierarchy — defines the raw
 native JS object types that the conversion layer can handle:
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
  * Union of raw native JS object types that the conversion layer can translate
- * to and from `StorableValue`. These types sit outside the `StorableValue`
+ * to and from `FabricValue`. These types sit outside the `FabricValue`
  * hierarchy and only appear at conversion function boundaries (Section 8).
  *
  * Primitives like `bigint` and `undefined` are NOT included — they are
- * directly part of `StorableValue`. The wrapper classes (`StorableError`,
- * `StorableMap`, `StorableRegExp`, etc.) are also NOT this type — they are `StorableInstance`
- * implementations that live inside `StorableValue`.
+ * directly part of `FabricValue`. The wrapper classes (`FabricError`,
+ * `FabricMap`, `FabricRegExp`, etc.) are also NOT this type — they are `FabricInstance`
+ * implementations that live inside `FabricValue`.
  */
-type StorableNativeObject =
+type FabricNativeObject =
   | Error
-  | Map<StorableValue | StorableNativeObject, StorableValue | StorableNativeObject>
-  | Set<StorableValue | StorableNativeObject>
+  | Map<FabricValue | FabricNativeObject, FabricValue | FabricNativeObject>
+  | Set<FabricValue | FabricNativeObject>
   | Date
   | RegExp
   | Uint8Array
@@ -149,16 +152,16 @@ type StorableNativeObject =
   | { toJSON(): unknown }; // Legacy — see below.
 ```
 
-The `StorableNativeObject` type exists solely at function parameter/return
-boundaries — for example, `toStorableValue()` accepts
-`StorableValue | StorableNativeObject` as input (Section 8). It is never a
-member of `StorableValue` or `StorableDatum`.
+The `FabricNativeObject` type exists solely at function parameter/return
+boundaries — for example, `toFabricValue()` accepts
+`FabricValue | FabricNativeObject` as input (Section 8). It is never a
+member of `FabricValue` or `FabricDatum`.
 
 > **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
-> `StorableNativeObject` represents objects that provide a `toJSON()` method.
+> `FabricNativeObject` represents objects that provide a `toJSON()` method.
 > The conversion functions call `toJSON()` and process the
 > result (Section 8.2). This variant is **legacy and marked for removal** —
-> callers should migrate to the storable protocol
+> callers should migrate to the fabric protocol
 > (`[DECONSTRUCT]`/`[RECONSTRUCT]`). See Section 7.1 for migration guidance.
 
 ### 1.3 Primitive Types
@@ -169,11 +172,11 @@ member of `StorableValue` or `StorableDatum`.
 | `boolean` | None | `true` or `false` |
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
-| `undefined` | None | First-class storable; see note below |
+| `undefined` | None | First-class fabric value; see note below |
 | `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 5.3) |
 
-> **`undefined` as a first-class storable.** `undefined` is a first-class
-> storable value that round-trips faithfully through serialization. Because most
+> **`undefined` as a first-class fabric value.** `undefined` is a first-class
+> fabric value that round-trips faithfully through serialization. Because most
 > wire formats (including JSON) have no native `undefined` representation, the
 > serialization system uses a dedicated tagged form for `undefined` — the same
 > tagged form regardless of context (array element, object property value, or
@@ -184,11 +187,11 @@ member of `StorableValue` or `StorableDatum`.
 > the result.
 
 > **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
-> (`0`) during storable-value conversion (i.e., `toStorableValue()`), before the
+> (`0`) during fabric-value conversion (i.e., `toFabricValue()`), before the
 > value reaches a serialization boundary. This matches `JSON.stringify` behavior
 > and ensures that `0` and `-0` produce the same serialized form and canonical
 > hash. In the current codebase, this normalization happens in
-> `packages/memory/storable-value.ts` at the `toStorableValue()` call site.
+> `packages/data-model/fabric-value.ts` at the `toFabricValue()` call site.
 
 > **Future: `-0` and non-finite numbers.** The current design normalizes `-0`
 > and rejects `NaN`/`Infinity`/`-Infinity`. Because the serialization system
@@ -202,20 +205,20 @@ Certain built-in JS types (`Error`, `Map`, `Set`, `RegExp`, `Uint8Array`) cannot
 have `Symbol`-keyed methods added via prototype patching in a reliable,
 cross-realm way. Rather than handling them with special-case logic in the
 serializer, the system defines **wrapper classes** — one per native type — that
-implement `StorableInstance`. The conversion layer (Section 8) wraps raw native
-objects into these classes when bridging from the JS wild west to `StorableValue`,
+implement `FabricInstance`. The conversion layer (Section 8) wraps raw native
+objects into these classes when bridging from the JS wild west to `FabricValue`,
 and unwraps them when bridging back.
 
-Because each wrapper genuinely implements `StorableInstance` (with real
+Because each wrapper genuinely implements `FabricInstance` (with real
 `[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization system
-processes them through the same uniform `StorableInstance` path — no special
+processes them through the same uniform `FabricInstance` path — no special
 cases needed in the serializer. The hashing system also uses the standard
-`TAG_INSTANCE` path for most wrappers, but optimizes `StorableUint8Array`
+`TAG_INSTANCE` path for most wrappers, but optimizes `FabricUint8Array`
 with a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3).
 
-The **special primitive** types (`StorableEpochNsec`, `StorableEpochDays`,
-`StorableContentId`) are **not** `StorableInstance`s — they are direct members
-of `StorableDatum`, like `bigint`. They all extend `SpecialPrimitiveValue`
+The **special primitive** types (`FabricEpochNsec`, `FabricEpochDays`,
+`FabricHash`) are **not** `FabricInstance`s — they are direct members
+of `FabricDatum`, like `bigint`. They all extend `SpecialPrimitiveValue`
 (Section 1.4.6), which marks them as always-frozen value types that bypass the
 `freeze` option in conversion functions. They have dedicated canonical hash tags
 and dedicated `TypeHandler`s for wire format serialization, but they do not
@@ -225,45 +228,45 @@ implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 
 | Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
 |---------------|-------|----------|---------------------|-------|
-| `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
-| `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
-| `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
-| `StorableRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
-| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64url, RFC 4648 Section 5; see Section 5.3) | Deconstructed state is a string. |
+| `FabricError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `FabricValue` when `[DECONSTRUCT]` runs. |
+| `FabricMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
+| `FabricSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
+| `FabricRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
+| `FabricUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64url, RFC 4648 Section 5; see Section 5.3) | Deconstructed state is a string. |
 
 Each wrapper class above:
 
-- **Extends `StorableNativeWrapper<T>`** (which in turn extends
-  `StorableInstance`), inheriting the `shallowClone()` frozenness-management
+- **Extends `FabricNativeWrapper<T>`** (which in turn extends
+  `FabricInstance`), inheriting the `shallowClone()` frozenness-management
   method and providing a `toNativeValue(frozen)` method for unwrapping.
 - **Has a `[DECONSTRUCT]` method** that extracts essential state from the
   wrapped native object.
-- **Has a static `[RECONSTRUCT]` method** (following the `StorableClass<T>`
+- **Has a static `[RECONSTRUCT]` method** (following the `FabricClass<T>`
   pattern) that returns an instance of the wrapper class — **not** the raw
   native type. Callers who need the underlying native object use
-  `nativeValueFromStorableValue()` (Section 8) to unwrap it.
+  `nativeValueFromFabricValue()` (Section 8) to unwrap it.
 - **Carries a `typeTag` property** (e.g., `"Error@1"`) used by the
   serialization context for tag resolution, following the pattern established
-  by `UnknownStorable` and `ProblematicStorable`.
+  by `UnknownValue` and `ProblematicValue`.
 
-##### `StorableNativeWrapper<T>` Base Class
+##### `FabricNativeWrapper<T>` Base Class
 
 All native object wrappers share an abstract base class that extends
-`StorableInstance` and adds methods for unwrapping back to native form:
+`FabricInstance` and adds methods for unwrapping back to native form:
 
 ```typescript
-// file: packages/memory/storable-native-instances.ts
+// file: packages/data-model/fabric-native-instances.ts
 
 /**
- * Abstract base class for `StorableInstance` wrappers that bridge native JS
- * objects (Error, Map, Set, RegExp, Uint8Array) into the `StorableValue`
+ * Abstract base class for `FabricInstance` wrappers that bridge native JS
+ * objects (Error, Map, Set, RegExp, Uint8Array) into the `FabricValue`
  * layer. Provides a common `toNativeValue()` method used by the unwrap
- * functions (`nativeValueFromStorableValue`, Section 8.5), replacing
- * `instanceof` cascades with a single `instanceof StorableNativeWrapper`
+ * functions (`nativeValueFromFabricValue`, Section 8.5), replacing
+ * `instanceof` cascades with a single `instanceof FabricNativeWrapper`
  * check.
  */
-abstract class StorableNativeWrapper<T extends object>
-  extends StorableInstance {
+abstract class FabricNativeWrapper<T extends object>
+  extends FabricInstance {
   abstract readonly typeTag: string;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
@@ -290,28 +293,28 @@ instance only when a freeze-state change is needed. This avoids defensive
 copying in the common case and centralizes the freeze-state logic for all
 wrapper types.
 
-Unlike the wrappers above, the special primitive types (`StorableEpochNsec`,
-`StorableEpochDays`, `StorableContentId`) are **direct members of
-`StorableDatum`** and do not extend `StorableInstance`. They all extend
+Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
+`FabricEpochDays`, `FabricHash`) are **direct members of
+`FabricDatum`** and do not extend `FabricInstance`. They all extend
 `SpecialPrimitiveValue` (Section 1.4.6), which provides always-frozen semantics.
 See Sections 1.4.6 through 1.4.9.
 
 | Direct Datum Type | Extends | Wire Tag | Stored Value | Notes |
 |-------------------|---------|----------|--------------|-------|
-| `StorableEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
-| `StorableEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
-| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). |
+| `FabricEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
+| `FabricEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
+| `FabricHash` | `SpecialPrimitiveValue` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 
 #### Extra Enumerable Properties
 
-**`StorableError`** MAY carry extra enumerable properties beyond the standard
+**`FabricError`** MAY carry extra enumerable properties beyond the standard
 fields (`type`, `name`, `message`, `stack`, `cause`). Custom properties on `Error`
 objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
-so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
+so `FabricError` preserves them: `[DECONSTRUCT]` includes them in its output,
 and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 
-**`StorableMap`, `StorableSet`, `StorableRegExp`, `StorableEpochNsec`,
-`StorableEpochDays`, `StorableContentId`, `StorableUint8Array`** must NOT carry
+**`FabricMap`, `FabricSet`, `FabricRegExp`, `FabricEpochNsec`,
+`FabricEpochDays`, `FabricHash`, `FabricUint8Array`** must NOT carry
 extra enumerable
 properties. Their
 stored value contains only the essential native data (entries, items,
@@ -322,33 +325,33 @@ loudly than to silently lose data. This matches the treatment of arrays, where
 extra non-index properties also cause rejection (Section 1.5). Unlike `Error`,
 these native types have no established convention for custom properties.
 
-#### 1.4.2 `StorableError`
+#### 1.4.2 `FabricError`
 
 ```typescript
-// file: packages/memory/storable-native-instances.ts
+// file: packages/data-model/fabric-native-instances.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
-  StorableInstance, type ReconstructionContext,
-} from './storable-protocol';
+  FabricInstance, type ReconstructionContext,
+} from './fabric-instance';
 
 /**
- * Wrapper for native `Error` values. Extends `StorableNativeWrapper<Error>`
+ * Wrapper for native `Error` values. Extends `FabricNativeWrapper<Error>`
  * so that errors participate in the standard serialization, hashing, and
  * unwrapping paths.
  */
-export class StorableError extends StorableNativeWrapper<Error> {
+export class FabricError extends FabricNativeWrapper<Error> {
   readonly typeTag = 'Error@1';
 
   constructor(readonly error: Error) {
     super();
   }
 
-  [DECONSTRUCT](): StorableValue {
+  [DECONSTRUCT](): FabricValue {
     // IMPORTANT: By the time [DECONSTRUCT] is called, all nested values
-    // must already be StorableValue. The conversion layer (Section 8.2)
+    // must already be FabricValue. The conversion layer (Section 8.2)
     // is responsible for recursively converting Error internals (cause,
-    // custom properties) BEFORE wrapping into StorableError. This method
+    // custom properties) BEFORE wrapping into FabricError. This method
     // simply extracts the already-converted state.
     //
     // `type` is the constructor name (e.g. "TypeError"), while `name` is
@@ -357,7 +360,7 @@ export class StorableError extends StorableNativeWrapper<Error> {
     // when it matches `type` to avoid redundancy. `[RECONSTRUCT]`
     // interprets `null` name as "same as type."
     const type = this.error.constructor.name;
-    const state: Record<string, StorableValue> = {
+    const state: Record<string, FabricValue> = {
       type,
       name:    this.error.name === type ? null : this.error.name,
       message: this.error.message,
@@ -366,21 +369,21 @@ export class StorableError extends StorableNativeWrapper<Error> {
       state.stack = this.error.stack;
     }
     if (this.error.cause !== undefined) {
-      state.cause = this.error.cause as StorableValue;
+      state.cause = this.error.cause as FabricValue;
     }
     for (const key of Object.keys(this.error)) {
       if (!(key in state) && key !== '__proto__' && key !== 'constructor') {
-        state[key] = (this.error as Record<string, unknown>)[key] as StorableValue;
+        state[key] = (this.error as Record<string, unknown>)[key] as FabricValue;
       }
     }
-    return state as StorableValue;
+    return state as FabricValue;
   }
 
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableError {
-    const s = state as Record<string, StorableValue>;
+  ): FabricError {
+    const s = state as Record<string, FabricValue>;
     // Use `type` (constructor name) for class lookup. Fall back to `name`
     // for backward compatibility with data serialized before `type` was
     // added. A `null` or absent `name` means "same as type."
@@ -405,72 +408,72 @@ export class StorableError extends StorableNativeWrapper<Error> {
         (error as Record<string, unknown>)[key] = s[key];
       }
     }
-    return new StorableError(error);
+    return new FabricError(error);
   }
 }
 ```
 
-#### 1.4.3 `StorableMap`
+#### 1.4.3 `FabricMap`
 
 ```typescript
-export class StorableMap
-  extends StorableNativeWrapper<Map<StorableValue, StorableValue>> {
+export class FabricMap
+  extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
   readonly typeTag = 'Map@1';
 
-  constructor(readonly map: Map<StorableValue, StorableValue>) {
+  constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
   }
 
-  [DECONSTRUCT](): StorableValue {
-    return [...this.map.entries()] as StorableValue;
+  [DECONSTRUCT](): FabricValue {
+    return [...this.map.entries()] as FabricValue;
   }
 
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableMap {
-    const entries = state as [StorableValue, StorableValue][];
-    return new StorableMap(new Map(entries));
+  ): FabricMap {
+    const entries = state as [FabricValue, FabricValue][];
+    return new FabricMap(new Map(entries));
   }
 }
 ```
 
-#### 1.4.4 `StorableSet`
+#### 1.4.4 `FabricSet`
 
 ```typescript
-export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
+export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   readonly typeTag = 'Set@1';
 
-  constructor(readonly set: Set<StorableValue>) {
+  constructor(readonly set: Set<FabricValue>) {
     super();
   }
 
-  [DECONSTRUCT](): StorableValue {
-    return [...this.set] as StorableValue;
+  [DECONSTRUCT](): FabricValue {
+    return [...this.set] as FabricValue;
   }
 
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableSet {
-    const elements = state as StorableValue[];
-    return new StorableSet(new Set(elements));
+  ): FabricSet {
+    const elements = state as FabricValue[];
+    return new FabricSet(new Set(elements));
   }
 }
 ```
 
-#### 1.4.5 `StorableRegExp`
+#### 1.4.5 `FabricRegExp`
 
 ```typescript
-// file: packages/memory/storable-native-instances.ts
+// file: packages/data-model/fabric-native-instances.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
-  StorableInstance, type ReconstructionContext,
-} from './storable-protocol';
+  FabricInstance, type ReconstructionContext,
+} from './fabric-instance';
 
 /**
- * Wrapper for native `RegExp` values. Extends `StorableNativeWrapper<RegExp>`
+ * Wrapper for native `RegExp` values. Extends `FabricNativeWrapper<RegExp>`
  * so that regular expressions participate in the standard serialization,
  * hashing, and unwrapping paths.
  *
@@ -490,7 +493,7 @@ import {
  * immutable-forward design — callers who need stateful matching should
  * construct a new `RegExp` from the source and flags.
  */
-export class StorableRegExp extends StorableNativeWrapper<RegExp> {
+export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   readonly typeTag = 'RegExp@1';
 
   constructor(
@@ -500,7 +503,7 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
     super();
   }
 
-  [DECONSTRUCT](): StorableValue {
+  [DECONSTRUCT](): FabricValue {
     return {
       source: this.regex.source,
       flags: this.regex.flags,
@@ -509,43 +512,43 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
   }
 
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableRegExp {
+  ): FabricRegExp {
     const s = state as { source: string; flags: string; flavor?: string };
     const flavor = s.flavor ?? 'es2025';
-    return new StorableRegExp(new RegExp(s.source, s.flags), flavor);
+    return new FabricRegExp(new RegExp(s.source, s.flags), flavor);
   }
 }
 ```
 
 #### 1.4.6 `SpecialPrimitiveValue` (Base Class)
 
-`SpecialPrimitiveValue` is the abstract base class for non-`StorableInstance`
-datum types that sit directly in the `StorableValue` union alongside JS
-primitives. It is analogous to `ExplicitTagStorable` (Section 3.2) — both are
+`SpecialPrimitiveValue` is the abstract base class for non-`FabricInstance`
+datum types that sit directly in the `FabricValue` union alongside JS
+primitives. It is analogous to `ExplicitTagValue` (Section 3.2) — both are
 abstract bases that factor out shared structure — but for a different arm of
 the type hierarchy:
 
-- `ExplicitTagStorable` is the base for `StorableInstance` subtypes that carry
-  an explicit wire-format tag (`UnknownStorable`, `ProblematicStorable`).
+- `ExplicitTagValue` is the base for `FabricInstance` subtypes that carry
+  an explicit wire-format tag (`UnknownValue`, `ProblematicValue`).
 - `SpecialPrimitiveValue` is the base for direct datum types that behave like
-  primitives but need a class wrapper (`StorableEpochNsec`, `StorableEpochDays`,
-  `StorableContentId`).
+  primitives but need a class wrapper (`FabricEpochNsec`, `FabricEpochDays`,
+  `FabricHash`).
 
 ```typescript
-// file: packages/memory/special-primitive-value.ts
+// file: packages/data-model/special-primitive-value.ts
 
 /**
- * Abstract base class for storable datum types that behave like primitives
+ * Abstract base class for fabric datum types that behave like primitives
  * but need a class wrapper for identity and type dispatch. Subclasses are
- * direct members of `StorableValue` (not `StorableInstance`s) and have
+ * direct members of `FabricValue` (not `FabricInstance`s) and have
  * dedicated canonical hash tags and wire-format `TypeHandler`s.
  *
  * **Always-frozen semantics:** `SpecialPrimitiveValue` instances are
  * treated as inherently frozen, like JS primitives (`number`, `string`,
  * `bigint`, etc.). The `freeze` option on conversion functions
- * (`toStorableValue()`, `toDeepStorableValue()`, etc.) does not affect
+ * (`toFabricValue()`, `toDeepFabricValue()`, etc.) does not affect
  * them — they are always returned as-is, regardless of the `freeze`
  * setting. This is because their state is immutable by construction
  * (readonly fields, no mutation methods), so freezing is a no-op and
@@ -560,13 +563,13 @@ content IDs). The base class holds no state — its purpose is to provide a sing
 `instanceof SpecialPrimitiveValue` check where code needs to identify these
 types uniformly (e.g., the conversion functions' freeze-bypass logic).
 
-#### 1.4.7 `StorableEpochNsec`
+#### 1.4.7 `FabricEpochNsec`
 
 ```typescript
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch
- * (1970-01-01T00:00:00Z). Direct member of `StorableDatum` (not a
- * `StorableInstance`). This is the primary temporal type.
+ * (1970-01-01T00:00:00Z). Direct member of `FabricDatum` (not a
+ * `FabricInstance`). This is the primary temporal type.
  *
  * JS `Date` has only millisecond precision, so conversion from `Date`
  * multiplies by 10^6 (losing sub-millisecond information). When `Temporal`
@@ -577,19 +580,19 @@ types uniformly (e.g., the conversion functions' freeze-bypass logic).
  * in any particular string representation (ISO 8601, etc.) and lets the
  * serialization layer use the same bigint encoding as `BigInt@1`.
  */
-export class StorableEpochNsec extends SpecialPrimitiveValue {
+export class FabricEpochNsec extends SpecialPrimitiveValue {
   constructor(readonly value: bigint) {
     super();
   }
 }
 ```
 
-#### 1.4.8 `StorableEpochDays`
+#### 1.4.8 `FabricEpochDays`
 
 ```typescript
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
- * Extends `SpecialPrimitiveValue` (not a `StorableInstance`).
+ * Extends `SpecialPrimitiveValue` (not a `FabricInstance`).
  * Anticipates `Temporal.PlainDate`.
  *
  * Mostly nascent — the class and spec entry are defined, but full
@@ -597,22 +600,22 @@ export class StorableEpochNsec extends SpecialPrimitiveValue {
  *
  * The underlying value is a `bigint`.
  */
-export class StorableEpochDays extends SpecialPrimitiveValue {
+export class FabricEpochDays extends SpecialPrimitiveValue {
   constructor(readonly value: bigint) {
     super();
   }
 }
 ```
 
-#### 1.4.9 `StorableContentId`
+#### 1.4.9 `FabricHash`
 
 ```typescript
-// file: packages/memory/storable-content-id.ts
+// file: packages/data-model/fabric-hash.ts
 
 /**
- * A content identifier — a hash that identifies a storable value by its
+ * A content identifier — a hash that identifies a fabric value by its
  * canonical hash bytes and an algorithm tag. Extends `SpecialPrimitiveValue`
- * (not a `StorableInstance`): it is a direct member of `StorableDatum`,
+ * (not a `FabricInstance`): it is a direct member of `FabricDatum`,
  * has a dedicated canonical hash tag, and is always-frozen.
  *
  * The first algorithm tag is `fid1` ("fabric ID, v1"), which corresponds
@@ -624,7 +627,7 @@ export class StorableEpochDays extends SpecialPrimitiveValue {
  * no `=` padding. For example, a `fid1` content ID might stringify as
  * `fid1:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg`.
  */
-export class StorableContentId extends SpecialPrimitiveValue {
+export class FabricHash extends SpecialPrimitiveValue {
   constructor(
     /** The raw hash bytes (e.g., 32 bytes for SHA-256). */
     readonly hash: Uint8Array,
@@ -649,29 +652,29 @@ The `algorithmTag` field is an opaque string identifier. Known algorithm tags:
 
 Future algorithm tags may be added for different hash algorithms or versioned
 content-addressing schemes. The algorithm tag is part of the content ID's
-identity — two `StorableContentId` instances with the same hash bytes but
+identity — two `FabricHash` instances with the same hash bytes but
 different algorithm tags are distinct values.
 
-#### 1.4.10 `StorableUint8Array`
+#### 1.4.10 `FabricUint8Array`
 
 ```typescript
-export class StorableUint8Array
-  extends StorableNativeWrapper<Blob | Uint8Array> {
+export class FabricUint8Array
+  extends FabricNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = 'Bytes@1';
 
   constructor(readonly bytes: Uint8Array) {
     super();
   }
 
-  [DECONSTRUCT](): StorableValue {
+  [DECONSTRUCT](): FabricValue {
     return base64urlEncode(this.bytes);
   }
 
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableUint8Array {
-    return new StorableUint8Array(base64urlDecode(state as string));
+  ): FabricUint8Array {
+    return new FabricUint8Array(base64urlDecode(state as string));
   }
 }
 ```
@@ -679,38 +682,38 @@ export class StorableUint8Array
 #### 1.4.11 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
-rides through the `StorableValue` layer directly, like `undefined`. No
-`StorableBigInt` wrapper class is needed. The serialization layer handles
+rides through the `FabricValue` layer directly, like `undefined`. No
+`FabricBigInt` wrapper class is needed. The serialization layer handles
 `bigint` with a dedicated handler (analogous to `UndefinedHandler`); see
 Section 4.5.
 
 #### 1.4.12 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
-> genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
-> them. The serialization system dispatches all `StorableInstance` values through
-> a single `StorableInstanceHandler` path — no per-type branches. This gives the
+> genuinely implements `FabricInstance`, so `isFabricInstance()` returns `true` for
+> them. The serialization system dispatches all `FabricInstance` values through
+> a single `FabricInstanceHandler` path — no per-type branches. This gives the
 > serialization layer a uniform, simpler structure: it handles
-> `StorableInstance`, `undefined`, `bigint`, and the structural types
+> `FabricInstance`, `undefined`, `bigint`, and the structural types
 > (arrays, objects, primitives), with no knowledge of specific native JS types.
 >
-> **Reconstruction returns the wrapper.** `StorableError[RECONSTRUCT]` returns
-> a `StorableError`, not a raw `Error`. This is consistent with the three-layer
-> separation: the middle layer (`StorableValue`) contains wrappers, not raw
+> **Reconstruction returns the wrapper.** `FabricError[RECONSTRUCT]` returns
+> a `FabricError`, not a raw `Error`. This is consistent with the three-layer
+> separation: the middle layer (`FabricValue`) contains wrappers, not raw
 > native objects. Code that needs the underlying native type uses
-> `nativeValueFromStorableValue()` (Section 8) as a separate step.
+> `nativeValueFromFabricValue()` (Section 8) as a separate step.
 >
-> **File organization.** The native object wrapper classes (`StorableError`,
-> `StorableMap`, `StorableSet`, `StorableRegExp`, `StorableUint8Array`) and the
-> `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
-> `StorableEpochDays`, `StorableContentId`) are each small (~30 lines) and
+> **File organization.** The native object wrapper classes (`FabricError`,
+> `FabricMap`, `FabricSet`, `FabricRegExp`, `FabricUint8Array`) and the
+> `SpecialPrimitiveValue` subclasses (`FabricEpochNsec`,
+> `FabricEpochDays`, `FabricHash`) are each small (~30 lines) and
 > may be organized into one or a few files as an implementation decision.
 
 ### 1.5 Recursive Containers
 
 **Arrays:**
 - May be dense or sparse
-- Elements may be `undefined` (a first-class storable; see Section 1.3)
+- Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
   (see below and Section 5.3 for the specific JSON encoding)
@@ -738,9 +741,9 @@ Section 4.5.
 > for the specific JSON encoding and examples.
 
 **Objects:**
-- Plain objects only (class instances must implement the storable protocol)
+- Plain objects only (class instances must implement the fabric protocol)
 - Keys must be strings; symbol keys cause rejection
-- Values must be storable; properties whose value is `undefined` are preserved
+- Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
@@ -757,7 +760,7 @@ in the output. Note that this preserves _structural_ sharing (the same converted
 subtree appears at multiple positions), not JS _identity_ sharing (the converted
 objects may not be `===` to each other in all serialization paths).
 
-Cycles *across* documents are supported via explicit links (storable instances
+Cycles *across* documents are supported via explicit links (fabric instances
 that reference other documents). Two cells can reference each other, forming a
 cycle in the broader data graph. The no-cycles constraint applies only to the
 serializable content of a single cell.
@@ -767,7 +770,7 @@ be relaxed if a future storage format supports cyclic references natively.
 
 ---
 
-## 2. The Storable Protocol
+## 2. The Fabric Protocol
 
 ### 2.1 Overview
 
@@ -778,18 +781,18 @@ deserialize custom types without central registration at the type level.
 ### 2.2 Symbols
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
- * Well-known symbol for deconstructing a storable instance into its
- * essential state. The returned value may be or contain nested `StorableValue`s
- * (including other `StorableInstance`s); the serialization system handles
+ * Well-known symbol for deconstructing a fabric instance into its
+ * essential state. The returned value may be or contain nested `FabricValue`s
+ * (including other `FabricInstance`s); the serialization system handles
  * recursion.
  */
 export const DECONSTRUCT = Symbol.for('common.deconstruct');
 
 /**
- * Well-known symbol for reconstructing a storable instance from its
+ * Well-known symbol for reconstructing a fabric instance from its
  * essential state. Static method on the class.
  */
 export const RECONSTRUCT = Symbol.for('common.reconstruct');
@@ -800,10 +803,10 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
 ### 2.3 Instance Protocol
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
- * Abstract base class for values that participate in the storable protocol.
+ * Abstract base class for values that participate in the fabric protocol.
  *
  * Subclasses must implement:
  * - `[DECONSTRUCT]()` -- returns essential state for serialization.
@@ -816,31 +819,31 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
  *   instance is already unfrozen. The caller gets a distinct, mutable object.
  *
- * The native object wrapper classes (`StorableError`, `StorableMap`,
- * `StorableSet`, `StorableRegExp`, `StorableUint8Array`) extend this class, as
+ * The native object wrapper classes (`FabricError`, `FabricMap`,
+ * `FabricSet`, `FabricRegExp`, `FabricUint8Array`) extend this class, as
  * do user-defined types (`Cell`, `Stream`) and system types
- * (`UnknownStorable`, `ProblematicStorable`).
+ * (`UnknownValue`, `ProblematicValue`).
  *
- * Note: `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
- * `StorableEpochDays`, `StorableContentId`) are direct `StorableDatum`
+ * Note: `SpecialPrimitiveValue` subclasses (`FabricEpochNsec`,
+ * `FabricEpochDays`, `FabricHash`) are direct `FabricDatum`
  * members and do NOT extend this class.
  */
-export abstract class StorableInstance {
+export abstract class FabricInstance {
   /**
-   * Returns the essential state of this instance as a `StorableValue`. The
-   * returned value may contain any `StorableValue`, including other
-   * `StorableInstance`s, primitives, and plain objects/arrays.
+   * Returns the essential state of this instance as a `FabricValue`. The
+   * returned value may contain any `FabricValue`, including other
+   * `FabricInstance`s, primitives, and plain objects/arrays.
    *
    * Implementations must NOT recursively deconstruct nested values --
    * the serialization system handles that.
    */
-  abstract [DECONSTRUCT](): StorableValue;
+  abstract [DECONSTRUCT](): FabricValue;
 
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
-  protected abstract shallowUnfrozenClone(): StorableInstance;
+  protected abstract shallowUnfrozenClone(): FabricInstance;
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
@@ -850,34 +853,34 @@ export abstract class StorableInstance {
    * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
    * it if requested.
    */
-  shallowClone(frozen: boolean): StorableInstance {
+  shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
     const copy = this.shallowUnfrozenClone();
-    return frozen ? Object.freeze(copy) as StorableInstance : copy;
+    return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
 }
 ```
 
 > **Return type rationale:** The return type of `[DECONSTRUCT]` is
-> `StorableValue` rather than `unknown` to make the contract explicit: a
+> `FabricValue` rather than `unknown` to make the contract explicit: a
 > deconstructor must return a value that the serialization system can process.
-> Returning a non-storable value (e.g., a `WeakMap` or a DOM node) would be a
+> Returning a non-fabric value (e.g., a `WeakMap` or a DOM node) would be a
 > bug.
 
 > **Why an abstract class, not an interface?** The earlier spec defined
-> `StorableInstance` as an interface with `[DECONSTRUCT]` as the sole method.
+> `FabricInstance` as an interface with `[DECONSTRUCT]` as the sole method.
 > The current design uses an abstract class so that `shallowClone()` can be
 > an effectively-final method on the base class, encapsulating the
 > frozenness-management contract (clone-if-necessary, freeze-if-requested) in
 > one place. Subclasses implement only `shallowUnfrozenClone()` (the
 > type-specific copy logic) and `[DECONSTRUCT]` (the serialization state
-> extraction). The `isStorableInstance()` type guard (Section 2.6) uses
-> `instanceof StorableInstance` instead of a property-brand check.
+> extraction). The `isFabricInstance()` type guard (Section 2.6) uses
+> `instanceof FabricInstance` instead of a property-brand check.
 
 ### 2.4 Class Protocol
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
  * A class that can reconstruct instances from essential state. This is a
@@ -890,26 +893,26 @@ export abstract class StorableInstance {
  *    creating new ones -- essential for types like `Cell` where identity
  *    matters.
  */
-export interface StorableClass<T extends StorableInstance> {
+export interface FabricClass<T extends FabricInstance> {
   /**
    * Reconstruct an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
    */
-  [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
+  [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
 ```
 
 ### 2.5 Reconstruction Context
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
  * The minimal interface that `[RECONSTRUCT]` implementations may depend on.
  * In practice this is provided by the `Runtime` class from
  * `packages/runner/src/runtime.ts`, but defining it as an interface here
- * avoids a circular dependency between the storable protocol and the runner.
+ * avoids a circular dependency between the fabric protocol and the runner.
  *
  * Implementors of `[RECONSTRUCT]` should depend on this interface, not on
  * the concrete `Runtime` class.
@@ -919,43 +922,43 @@ export interface ReconstructionContext {
    * Resolve a cell reference. Used by `Cell[RECONSTRUCT]` and similar types
    * that need to intern or look up existing instances.
    */
-  getCell(ref: { id: string; path: string[]; space: string }): StorableInstance;
+  getCell(ref: { id: string; path: string[]; space: string }): FabricInstance;
 }
 ```
 
-> **Why an interface, not the concrete `Runtime`?** The storable protocol is
-> intended to live in a foundational package (`packages/common/` or
-> `packages/memory/`). If `[RECONSTRUCT]` depended on the full `Runtime` type
+> **Why an interface, not the concrete `Runtime`?** The fabric protocol is
+> intended to live in a foundational package (`packages/data-model/`).
+> If `[RECONSTRUCT]` depended on the full `Runtime` type
 > from `packages/runner/`, it would create a circular dependency. The
 > `ReconstructionContext` interface captures the minimal surface needed for
 > reconstruction. The `Runtime` class satisfies this interface. Future
-> storable types may extend `ReconstructionContext` if they need additional
+> fabric types may extend `ReconstructionContext` if they need additional
 > capabilities beyond `getCell`.
 
 ### 2.6 Brand Detection
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
- * Type guard: checks whether a value is a `StorableInstance`.
+ * Type guard: checks whether a value is a `FabricInstance`.
  * Uses `instanceof` against the abstract base class.
  */
-export function isStorableInstance(value: unknown): value is StorableInstance {
-  return value instanceof StorableInstance;
+export function isFabricInstance(value: unknown): value is FabricInstance {
+  return value instanceof FabricInstance;
 }
 ```
 
 > **`instanceof` vs. property-brand check.** The earlier spec used a
-> property-brand check (`DECONSTRUCT in value`) because `StorableInstance` was
-> an interface. Now that `StorableInstance` is an abstract class, `instanceof`
+> property-brand check (`DECONSTRUCT in value`) because `FabricInstance` was
+> an interface. Now that `FabricInstance` is an abstract class, `instanceof`
 > is the natural and more robust check. It avoids false positives from objects
 > that happen to have a `[DECONSTRUCT]` property without extending the base
 > class.
 
 ### 2.7 Example: Temperature (Illustrative)
 
-The following example is artificial, designed to illustrate the `StorableInstance`
+The following example is artificial, designed to illustrate the `FabricInstance`
 protocol. It is not part of the codebase.
 
 A `Temperature` value type demonstrates why the protocol exists: without it, a
@@ -969,14 +972,14 @@ serialization system can round-trip it back to a real `Temperature` instance.
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  StorableInstance,
-  type StorableValue,
+  FabricInstance,
+  type FabricValue,
   type ReconstructionContext,
-} from '@common/storable-protocol';
+} from '@commontools/data-model';
 
 type TemperatureUnit = "C" | "F" | "K";
 
-class Temperature extends StorableInstance {
+class Temperature extends FabricInstance {
   constructor(
     readonly value: number,
     readonly unit: TemperatureUnit,
@@ -1004,7 +1007,7 @@ class Temperature extends StorableInstance {
 
   /** Reconstruct from essential state. */
   static [RECONSTRUCT](
-    state: StorableValue,
+    state: FabricValue,
     _context: ReconstructionContext,
   ): Temperature {
     const s = state as { value: number; unit: TemperatureUnit };
@@ -1022,13 +1025,13 @@ class Temperature extends StorableInstance {
 > conform to the expected TypeScript type. See Section 7.4 for the full
 > rationale.
 
-**Why the protocol matters.** Without `StorableInstance`, the serialization
+**Why the protocol matters.** Without `FabricInstance`, the serialization
 system would see a `Temperature` as an opaque object and either reject it or
 flatten it into `{ value: 100, unit: "C" }`. With the protocol, the
 serialization system:
 
 1. Calls `[DECONSTRUCT]()` to extract the essential state.
-2. Serializes that state (recursively handling any nested `StorableValue`s).
+2. Serializes that state (recursively handling any nested `FabricValue`s).
 3. On deserialization, calls `Temperature[RECONSTRUCT](state, context)` to
    produce a real `Temperature` instance with its methods intact.
 
@@ -1042,7 +1045,7 @@ object.
 ### 2.8 Deconstructed State and Recursion
 
 The value returned by `[DECONSTRUCT]()` can contain any value that is itself a
-`StorableValue` — including other `StorableInstance`s (such as native object
+`FabricValue` — including other `FabricInstance`s (such as native object
 wrappers), primitives, and plain objects/arrays.
 
 **The serialization system handles recursion, not the individual deconstructor
@@ -1054,9 +1057,9 @@ violation.
 Similarly, `[RECONSTRUCT]` receives state where nested values have already been
 reconstructed by the serialization system. Importantly, `[RECONSTRUCT]` returns
 the **wrapper type**, not the raw native type. For example,
-`StorableError[RECONSTRUCT]` returns a `StorableError` instance (which wraps an
+`FabricError[RECONSTRUCT]` returns a `FabricError` instance (which wraps an
 `Error`), not a raw `Error`. Unwrapping to native types is a separate step via
-`nativeValueFromStorableValue()` (Section 8).
+`nativeValueFromFabricValue()` (Section 8).
 
 ### 2.9 Reconstruction Guarantees
 
@@ -1066,7 +1069,7 @@ The system follows an **immutable-forward** design:
   reconstruction. This applies to all deserialization output paths, including
   `/quote` (Section 5.6) — the freeze is a property of the deserialization
   boundary, not of whether type-tag reconstruction occurred.
-- **`StorableInstance`s** should ideally be frozen as well — this is the north
+- **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
 - **No distinction** is made between regular and null-prototype plain objects;
   reconstruction always produces regular plain objects.
@@ -1075,14 +1078,14 @@ This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
 
 > **Immutability of native object wrappers.** Under the three-layer
-> architecture, deserialization produces `StorableInstance` wrappers
-> (`StorableMap`, `StorableSet`, `StorableRegExp`, etc.), not raw native types. Because the
+> architecture, deserialization produces `FabricInstance` wrappers
+> (`FabricMap`, `FabricSet`, `FabricRegExp`, etc.), not raw native types. Because the
 > system controls the shape of these wrapper classes, they can be properly
 > frozen with `Object.freeze()` — unlike the native types they wrap (e.g.,
 > `Object.freeze()` on a `Map` does not prevent mutation via `set()`/`delete()`).
 > The underlying native objects stored inside wrappers (e.g.,
-> `StorableMap.map`) are not directly exposed to consumers of `StorableValue`
-> — callers who need the native types use `nativeValueFromStorableValue()`
+> `FabricMap.map`) are not directly exposed to consumers of `FabricValue`
+> — callers who need the native types use `nativeValueFromFabricValue()`
 > (Section 8), which returns `FrozenMap` and `FrozenSet`
 > (effectively-immutable wrappers) for collection types, preserving the
 > immutability guarantee even after unwrapping.
@@ -1097,32 +1100,32 @@ When deserializing, a context may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
-### 3.2 `ExplicitTagStorable` (Base Class)
+### 3.2 `ExplicitTagValue` (Base Class)
 
-Both `UnknownStorable` and `ProblematicStorable` share a common pattern: they
+Both `UnknownValue` and `ProblematicValue` share a common pattern: they
 carry an explicit wire-format type tag and raw state for round-tripping. The
-abstract base class `ExplicitTagStorable` factors out these shared fields,
-enabling a single `instanceof ExplicitTagStorable` check where code needs to
+abstract base class `ExplicitTagValue` factors out these shared fields,
+enabling a single `instanceof ExplicitTagValue` check where code needs to
 handle both subtypes uniformly (e.g., serialization dispatch).
 
 ```typescript
-// file: packages/memory/explicit-tag-storable.ts
+// file: packages/data-model/explicit-tag-value.ts
 
 /**
- * Base class for storable types that carry an explicit wire-format tag.
- * Used by UnknownStorable (unrecognized types) and ProblematicStorable
+ * Base class for fabric types that carry an explicit wire-format tag.
+ * Used by UnknownValue (unrecognized types) and ProblematicValue
  * (failed deconstruction/reconstruction). Enables a single instanceof
  * check where code needs to handle both.
  *
- * Extends `StorableInstance` so subclasses inherit the `shallowClone()`
+ * Extends `FabricInstance` so subclasses inherit the `shallowClone()`
  * method.
  */
-export abstract class ExplicitTagStorable extends StorableInstance {
+export abstract class ExplicitTagValue extends FabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,
     /** The raw state, already recursively processed by the deserializer. */
-    readonly state: StorableValue,
+    readonly state: FabricValue,
   ) {
     super();
   }
@@ -1133,17 +1136,17 @@ Each subclass provides `[DECONSTRUCT]` and a static `[RECONSTRUCT]`
 independently. The base class holds only the shared fields — `DECONSTRUCT`
 stays on each subclass since the deconstruction payloads differ in shape.
 
-### 3.3 `UnknownStorable`
+### 3.3 `UnknownValue`
 
 ```typescript
-// file: packages/memory/unknown-storable.ts
+// file: packages/data-model/unknown-value.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
-} from './storable-protocol';
-import { ExplicitTagStorable } from './explicit-tag-storable';
+} from './fabric-instance';
+import { ExplicitTagValue } from './explicit-tag-value';
 
 /**
  * Holds an unrecognized type's data for round-tripping. The serialization
@@ -1151,8 +1154,8 @@ import { ExplicitTagStorable } from './explicit-tag-storable';
  * tag, it wraps the tag and state here; on re-serialization, it uses the
  * preserved `typeTag` to produce the original wire format.
  */
-export class UnknownStorable extends ExplicitTagStorable {
-  constructor(typeTag: string, state: StorableValue) {
+export class UnknownValue extends ExplicitTagValue {
+  constructor(typeTag: string, state: FabricValue) {
     super(typeTag, state);
   }
 
@@ -1161,10 +1164,10 @@ export class UnknownStorable extends ExplicitTagStorable {
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: StorableValue },
+    state: { type: string; state: FabricValue },
     _context: ReconstructionContext,
-  ): UnknownStorable {
-    return new UnknownStorable(state.type, state.state);
+  ): UnknownValue {
+    return new UnknownValue(state.type, state.state);
   }
 }
 ```
@@ -1173,37 +1176,37 @@ export class UnknownStorable extends ExplicitTagStorable {
 
 - When the serialization system encounters an unknown type tag during
   deserialization, it wraps the original tag and state into `{ type, state }`
-  and passes that to `UnknownStorable[RECONSTRUCT]`.
-- When re-serializing an `UnknownStorable`, the system uses the preserved
+  and passes that to `UnknownValue[RECONSTRUCT]`.
+- When re-serializing an `UnknownValue`, the system uses the preserved
   `typeTag` to produce the original wire format.
 - This allows data to round-trip through systems that don't understand it.
 
-### 3.5 `ProblematicStorable` (Recommended)
+### 3.5 `ProblematicValue` (Recommended)
 
-It is recommended that implementations provide a `ProblematicStorable` type,
-analogous to `UnknownStorable`, for cases where deconstruction or reconstruction
+It is recommended that implementations provide a `ProblematicValue` type,
+analogous to `UnknownValue`, for cases where deconstruction or reconstruction
 fails partway through. This allows graceful degradation rather than hard
 failures — for example, a type whose `[RECONSTRUCT]` throws can be preserved as
-a `ProblematicStorable` with the original tag, state, and error information.
+a `ProblematicValue` with the original tag, state, and error information.
 
 ```typescript
-// file: packages/memory/problematic-storable.ts
+// file: packages/data-model/problematic-value.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
-} from './storable-protocol';
-import { ExplicitTagStorable } from './explicit-tag-storable';
+} from './fabric-instance';
+import { ExplicitTagValue } from './explicit-tag-value';
 
 /**
  * Holds a value whose deconstruction or reconstruction failed. Preserves
  * the original tag and raw state for round-tripping and debugging.
  */
-export class ProblematicStorable extends ExplicitTagStorable {
+export class ProblematicValue extends ExplicitTagValue {
   constructor(
     typeTag: string,
-    state: StorableValue,
+    state: FabricValue,
     /** A description of what went wrong. */
     readonly error: string,
   ) {
@@ -1215,18 +1218,18 @@ export class ProblematicStorable extends ExplicitTagStorable {
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: StorableValue; error: string },
+    state: { type: string; state: FabricValue; error: string },
     _context: ReconstructionContext,
-  ): ProblematicStorable {
-    return new ProblematicStorable(state.type, state.state, state.error);
+  ): ProblematicValue {
+    return new ProblematicValue(state.type, state.state, state.error);
   }
 }
 ```
 
-Like `UnknownStorable`, a `ProblematicStorable` round-trips through
+Like `UnknownValue`, a `ProblematicValue` round-trips through
 serialization, preserving the original data so it is not silently lost. The
 `error` field aids debugging by recording what went wrong. Whether to wrap
-failures in `ProblematicStorable` or to throw is an implementation decision that
+failures in `ProblematicValue` or to throw is an implementation decision that
 may vary by context — strict contexts (e.g., tests) may prefer to throw, while
 lenient contexts (e.g., production reconstruction) may prefer graceful
 degradation.
@@ -1237,7 +1240,7 @@ degradation.
 
 ### 4.1 Overview
 
-Classes provide the *capability* to serialize via the storable protocol, but
+Classes provide the *capability* to serialize via the fabric protocol, but
 they don't own the wire format. A **serialization context** owns the mapping
 between classes and wire format tags, and handles format-specific
 encoding/decoding.
@@ -1249,7 +1252,7 @@ serialization and deserialization. This type is internal to the JSON
 implementation — it is not part of the public boundary interface.
 
 ```typescript
-// file: packages/memory/json-type-handlers.ts
+// file: packages/data-model/json-type-handlers.ts
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -1268,10 +1271,10 @@ External callers use only `encode()` and `decode()`; all internal machinery
 implementation.
 
 ```typescript
-// file: packages/memory/storable-protocol.ts
+// file: packages/data-model/fabric-protocol.ts
 
 /**
- * Public boundary interface for serialization contexts. Encodes storable
+ * Public boundary interface for serialization contexts. Encodes fabric
  * values into a serialized form and decodes them back. The type parameter
  * `SerializedForm` is the boundary type: `string` for JSON contexts,
  * `Uint8Array` for binary contexts.
@@ -1280,21 +1283,21 @@ implementation.
  * machinery is private to the context implementation.
  */
 export interface SerializationContext<SerializedForm = unknown> {
-  /** Whether failed reconstructions produce `ProblematicStorable` instead of
+  /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. @default false */
   readonly lenient: boolean;
 
-  /** Encode a storable value into serialized form for boundary crossing. */
-  encode(value: StorableValue): SerializedForm;
+  /** Encode a fabric value into serialized form for boundary crossing. */
+  encode(value: FabricValue): SerializedForm;
 
-  /** Decode a serialized form back into a storable value. */
-  decode(data: SerializedForm, runtime: ReconstructionContext): StorableValue;
+  /** Decode a serialized form back into a fabric value. */
+  decode(data: SerializedForm, runtime: ReconstructionContext): FabricValue;
 }
 ```
 
 The JSON encoding context implements `SerializationContext<string>`:
 
-- `encode(value)` serializes a `StorableValue` into the `/<Type>@<Version>`
+- `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, runtime)` parses a JSON string, then deserializes tagged forms
   back into rich runtime types.
@@ -1304,7 +1307,7 @@ The JSON encoding context implements `SerializationContext<string>`:
 > state)`, and `decode(data)` methods — essentially exposing the tag
 > wrapping/unwrapping mechanics as the public API. The current design pushes all
 > of that machinery inside the context class, leaving only the clean
-> `encode(value) -> SerializedForm` / `decode(data, runtime) -> StorableValue`
+> `encode(value) -> SerializedForm` / `decode(data, runtime) -> FabricValue`
 > boundary. This better reflects the principle that the context owns the full
 > pipeline, not just the tag encoding step.
 
@@ -1312,11 +1315,11 @@ The JSON encoding context implements `SerializationContext<string>`:
 
 ```
 Encode:  value -> context.encode(value) -> serialized form (e.g., JSON string)
-Decode:  serialized form -> context.decode(data, runtime) -> StorableValue
+Decode:  serialized form -> context.decode(data, runtime) -> FabricValue
 ```
 
 Internally, the JSON encoding context's `encode()` method calls a private
-`serialize()` to walk the `StorableValue` tree and produce a `JsonWireValue`
+`serialize()` to walk the `FabricValue` tree and produce a `JsonWireValue`
 tree, then stringifies it. The `decode()` method parses the JSON string, then
 calls a private `deserialize()` to walk the `JsonWireValue` tree and
 reconstruct rich runtime types. The recursive descent and type dispatch are
@@ -1330,7 +1333,7 @@ handlers** — small objects that know how to serialize values of a specific typ
 and how to deserialize them from a specific tag.
 
 ```typescript
-// file: packages/memory/json-type-handlers.ts
+// file: packages/data-model/json-type-handlers.ts
 
 /**
  * Narrow interface for what type handlers need from the encoding context
@@ -1343,8 +1346,8 @@ and how to deserialize them from a specific tag.
 interface TypeHandlerCodec {
   /** Wrap a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
-  /** Get the wire format tag for a storable instance's type. */
-  getTagFor(value: StorableInstance): string;
+  /** Get the wire format tag for a fabric instance's type. */
+  getTagFor(value: FabricInstance): string;
 }
 
 /**
@@ -1357,7 +1360,7 @@ interface TypeHandler {
   readonly tag: string;
 
   /** Returns `true` if this handler can serialize the given value. */
-  canSerialize(value: StorableValue): boolean;
+  canSerialize(value: FabricValue): boolean;
 
   /**
    * Serialize the value. Only called after `canSerialize` returned `true`.
@@ -1365,9 +1368,9 @@ interface TypeHandler {
    * for recursively serializing nested values via the `recurse` callback.
    */
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    recurse: (v: StorableValue) => JsonWireValue,
+    recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue;
 
   /**
@@ -1378,8 +1381,8 @@ interface TypeHandler {
   deserialize(
     state: JsonWireValue,
     runtime: ReconstructionContext,
-    recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue;
+    recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue;
 }
 ```
 
@@ -1387,22 +1390,22 @@ The built-in type handlers are:
 
 | Handler | Tag | Serializes | Notes |
 |---------|-----|------------|-------|
-| `EpochNsecHandler` | `EpochNsec@1` | `StorableEpochNsec` | Direct `StorableDatum` member; matched by `instanceof`. |
-| `EpochDaysHandler` | `EpochDays@1` | `StorableEpochDays` | Direct `StorableDatum` member; matched by `instanceof`. |
-| `StorableInstanceHandler` | _(empty)_ | `StorableInstance` | Generic handler for all `StorableInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
+| `EpochNsecHandler` | `EpochNsec@1` | `FabricEpochNsec` | Direct `FabricDatum` member; matched by `instanceof`. |
+| `EpochDaysHandler` | `EpochDays@1` | `FabricEpochDays` | Direct `FabricDatum` member; matched by `instanceof`. |
+| `FabricInstanceHandler` | _(empty)_ | `FabricInstance` | Generic handler for all `FabricInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
 | `BigIntHandler` | `BigInt@1` | `bigint` | Encodes as unpadded base64url of minimal two's complement big-endian bytes. |
 | `UndefinedHandler` | `Undefined@1` | `undefined` | Stateless; state is `null`. |
 
 Handler registration order matters for serialization: `EpochNsec` and
-`EpochDays` are checked first (they are direct `StorableDatum` members matched
-by `instanceof` and must be found before the generic `StorableInstanceHandler`),
-then `StorableInstance` (generic protocol types via `isStorableInstance`), then
+`EpochDays` are checked first (they are direct `FabricDatum` members matched
+by `instanceof` and must be found before the generic `FabricInstanceHandler`),
+then `FabricInstance` (generic protocol types via `isFabricInstance`), then
 `bigint` and `undefined`. Primitives, arrays, and plain objects are handled as
 fallthrough after no handler matches.
 
 #### Private `serialize()` method
 
-The context's private `serialize()` method walks the `StorableValue` tree:
+The context's private `serialize()` method walks the `FabricValue` tree:
 
 1. **Type handler dispatch** — scans the handler registry; if a handler
    matches, delegates to it (with a `recurse` callback for nested values).
@@ -1424,11 +1427,11 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
    (Section 5.6).
 3. **Type handler dispatch** — looks up the tag in the registry; if found,
    delegates to the handler's `deserialize()`. When the context is in lenient
-   mode, handler exceptions produce `ProblematicStorable` (Section 3.5).
+   mode, handler exceptions produce `ProblematicValue` (Section 3.5).
 4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
    `Error@1`, `Map@1`, `Set@1`, `Bytes@1`, `RegExp@1`), the context looks up
-   the `StorableClass` in its class registry, recursively deserializes the
-   state, and calls `[RECONSTRUCT]`. Unknown tags produce `UnknownStorable`.
+   the `FabricClass` in its class registry, recursively deserializes the
+   state, and calls `[RECONSTRUCT]`. Unknown tags produce `UnknownValue`.
 5. **Primitives** — pass through.
 6. **Arrays** — recursively deserialized; `hole` entries reconstructed as true
    holes (absent indices).
@@ -1436,10 +1439,10 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
 
 > **Implementation guidance: class registry.** The `JsonEncodingContext`
 > constructor registers native wrapper classes for deserialization:
-> `StorableError`, `StorableMap`, `StorableSet`, `StorableUint8Array`,
-> `StorableRegExp`. For tag resolution (`getTagFor`), the context checks for
+> `FabricError`, `FabricMap`, `FabricSet`, `FabricUint8Array`,
+> `FabricRegExp`. For tag resolution (`getTagFor`), the context checks for
 > a `typeTag` property on the instance — the same pattern used by
-> `UnknownStorable` and `ProblematicStorable`. `ExplicitTagStorable` instances
+> `UnknownValue` and `ProblematicValue`. `ExplicitTagValue` instances
 > use their preserved `typeTag` directly. This avoids `instanceof` cascades
 > and scales cleanly as new wrapper types are added.
 
@@ -1486,27 +1489,27 @@ version requirements.
 
 The storage boundary in `space.ts` routes through flag-gated dispatch functions
 that bridge between the storage layer (JSON strings) and the runtime layer
-(`StorableValue`). These functions live in a dedicated dispatch module
-(`packages/memory/json-encoding-dispatch.ts`) and are reassigned at runtime
+(`FabricValue`). These functions live in a dedicated dispatch module
+(`packages/data-model/json-encoding-dispatch.ts`) and are reassigned at runtime
 based on whether unified JSON encoding is enabled.
 
 ```typescript
-// file: packages/memory/json-encoding-dispatch.ts
+// file: packages/data-model/json-encoding-dispatch.ts
 
 /**
- * Encode a storable value to a JSON string. When unified JSON encoding is
+ * Encode a fabric value to a JSON string. When unified JSON encoding is
  * ON, serializes rich types (bigint, undefined, Map, etc.) into the
  * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
  * equivalent to `JSON.stringify(value)`.
  */
-let jsonFromValue: (value: StorableValue) => string;
+let jsonFromValue: (value: FabricValue) => string;
 
 /**
- * Decode a JSON string back into a storable value. When unified JSON
+ * Decode a JSON string back into a fabric value. When unified JSON
  * encoding is ON, parses the string and deserializes tagged forms back
  * into rich runtime types. When OFF, equivalent to `JSON.parse(json)`.
  */
-let valueFromJson: (json: string, runtime: ReconstructionContext) => StorableValue;
+let valueFromJson: (json: string, runtime: ReconstructionContext) => FabricValue;
 ```
 
 The dispatch is configured by `setJsonEncodingConfig(enabled)` /
@@ -1515,7 +1518,7 @@ The dispatch is configured by `setJsonEncodingConfig(enabled)` /
 
 - **Flag OFF (default):** `jsonFromValue` wraps `JSON.stringify` with a
   defensive guard that throws if the result is `undefined` — this can happen
-  when the input is `undefined` (a first-class `StorableValue` per Section
+  when the input is `undefined` (a first-class `FabricValue` per Section
   1.3), since `JSON.stringify(undefined)` returns `undefined` rather than a
   string. The guard ensures `jsonFromValue` always returns a `string` as its
   type signature promises. `valueFromJson` = `JSON.parse`. This is the legacy
@@ -1535,58 +1538,58 @@ In `space.ts`, the dispatch functions replace direct `JSON.stringify` /
 - **Read path:** `valueFromJson(json, context)` replaces `JSON.parse(json)` at
   `recall()`, `getFact()`, and `toFact()`.
 
-### 4.9 Storable Value Dispatch
+### 4.9 Fabric Value Dispatch
 
-The native-to-storable value boundary is managed by a similar flag-gated
-dispatch module (`packages/memory/storable-value.ts`). This consolidated module
-provides `storableFromNativeValue()` / `nativeFromStorableValue()` functions
+The native-to-fabric-value boundary is managed by a similar flag-gated
+dispatch module (`packages/data-model/fabric-value.ts`). This consolidated module
+provides `fabricFromNativeValue()` / `nativeFromFabricValue()` functions
 that bridge the left layer (JS wild west) and the middle layer
-(`StorableValue`) at the `Cell` read/write boundary.
+(`FabricValue`) at the `Cell` read/write boundary.
 
 The module also re-exports flag-dispatched type-check functions
-(`isStorableValue()`, `canBeStored()`), a shallow conversion function
-(`shallowStorableFromNativeValue()`), and a comparison function
+(`isFabricValue()`, `canBeStored()`), a shallow conversion function
+(`shallowFabricFromNativeValue()`), and a comparison function
 (`valueEqual()`).
 
 ```typescript
-// file: packages/memory/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
- * Convert a native JS value to storable form (deep, recursive).
- * Flag OFF (legacy): performs deep conversion via `storableFromNativeValueLegacy`.
- * Flag ON (rich): wraps native types into storable wrappers and deep-freezes
- * via `storableFromNativeValueRich`.
+ * Convert a native JS value to fabric form (deep, recursive).
+ * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy`.
+ * Flag ON (modern): wraps native types into fabric wrappers and deep-freezes
+ * via `fabricFromNativeValueModern`.
  */
-export function storableFromNativeValue(value: unknown, freeze?: boolean): StorableValue {
+export function fabricFromNativeValue(value: unknown, freeze?: boolean): FabricValue {
   return currentConfig.modernDataModel
-    ? storableFromNativeValueRich(value, freeze)
-    : storableFromNativeValueLegacy(value);
+    ? fabricFromNativeValueModern(value, freeze)
+    : fabricFromNativeValueLegacy(value);
 }
 
 /**
- * Convert a storable value back to native form.
+ * Convert a fabric value back to native form.
  * Flag OFF (legacy): identity passthrough.
- * Flag ON (rich): unwraps storable wrappers via `nativeFromStorableValueRich`.
+ * Flag ON (modern): unwraps fabric wrappers via `nativeFromFabricValueModern`.
  */
-export function nativeFromStorableValue(value: StorableValue, frozen?: boolean): StorableValue {
+export function nativeFromFabricValue(value: FabricValue, frozen?: boolean): FabricValue {
   return currentConfig.modernDataModel
-    ? nativeFromStorableValueRich(value, frozen) as StorableValue
+    ? nativeFromFabricValueModern(value, frozen) as FabricValue
     : value;
 }
 ```
 
-The dispatch flag is set by `setStorableValueConfig(config)` /
-`resetStorableValueConfig()`, called from the `Runtime` constructor and
+The dispatch flag is set by `setDataModelConfig(config)` /
+`resetDataModelConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 
-- **Flag OFF (default):** `storableFromNativeValue` routes through
-  `storableFromNativeValueLegacy` (the legacy conversion function).
-  `nativeFromStorableValue` is an identity passthrough.
-- **Flag ON:** `storableFromNativeValue` routes through
-  `storableFromNativeValueRich` (which wraps native objects into
-  `StorableInstance` wrappers per Section 8.2). `nativeFromStorableValue`
-  routes through `nativeFromStorableValueRich` (which unwraps
-  `StorableInstance` wrappers back to native JS types per Section 8.5).
+- **Flag OFF (default):** `fabricFromNativeValue` routes through
+  `fabricFromNativeValueLegacy` (the legacy conversion function).
+  `nativeFromFabricValue` is an identity passthrough.
+- **Flag ON (modern):** `fabricFromNativeValue` routes through
+  `fabricFromNativeValueModern` (which wraps native objects into
+  `FabricInstance` wrappers per Section 8.2). `nativeFromFabricValue`
+  routes through `nativeFromFabricValueModern` (which unwraps
+  `FabricInstance` wrappers back to native JS types per Section 8.5).
 
 #### Module structure
 
@@ -1594,21 +1597,21 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `storable-value.ts` | Dispatch module: flag-gated public API, config lifecycle |
-| `storable-value-modern.ts` | Rich (flag-ON) conversion: `shallowStorableFromNativeValueRich`, `storableFromNativeValueRich`, `isStorableValueRich`, `canBeStoredRich` |
-| `storable-value-legacy.ts` | Legacy (flag-OFF) conversion: `storableFromNativeValueLegacy`, `isStorableValueLegacy`, `canBeStoredLegacy` |
-| `storable-value-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
-| `storable-native-instances.ts` | Native object wrapper classes (`StorableError`, `StorableMap`, etc.) and unwrap functions (`nativeValueFromStorableValue`, `nativeFromStorableValueRich`) |
+| `fabric-value.ts` | Dispatch module: flag-gated public API, config lifecycle |
+| `fabric-value-modern.ts` | Modern (flag-ON) conversion: `shallowFabricFromNativeValueModern`, `fabricFromNativeValueModern`, `isFabricValueModern`, `canBeStoredRich` |
+| `fabric-value-legacy.ts` | Legacy (flag-OFF) conversion: `fabricFromNativeValueLegacy`, `isFabricValueLegacy`, `canBeStoredLegacy` |
+| `fabric-value-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
+| `fabric-native-instances.ts` | Native object wrapper classes (`FabricError`, `FabricMap`, etc.) and unwrap functions (`nativeValueFromFabricValue`, `nativeFromFabricValueModern`) |
 
 In the `Cell` implementation:
 
-- **Read path:** `Cell.getRaw()` calls `nativeFromStorableValue(value)` to
-  unwrap storable wrappers before returning values to the JS wild west.
-- **Write path:** `Cell.setRaw()` calls `storableFromNativeValue(value)` to
-  wrap native types into storable form before storing.
+- **Read path:** `Cell.getRaw()` calls `nativeFromFabricValue(value)` to
+  unwrap fabric wrappers before returning values to the JS wild west.
+- **Write path:** `Cell.setRaw()` calls `fabricFromNativeValue(value)` to
+  wrap native types into fabric form before storing.
 
 > **Config lifecycle.** Both dispatch modules (`json-encoding-dispatch` and
-> `storable-value`) follow the same lifecycle pattern: the `Runtime`
+> `fabric-value`) follow the same lifecycle pattern: the `Runtime`
 > constructor calls the `set*Config()` function to activate the dispatch based
 > on `ExperimentalOptions`, and `Runtime.dispose()` calls `reset*Config()` to
 > restore defaults. This prevents flag leakage between runtime instances or
@@ -1650,7 +1653,7 @@ round-trip correctly.
 > to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
 
 ```typescript
-// file: packages/memory/json-type-handlers.ts (illustrative -- tag-to-format map)
+// file: packages/data-model/json-type-handlers.ts (illustrative -- tag-to-format map)
 
 /**
  * Standard JSON encodings for all built-in special types.
@@ -1730,7 +1733,7 @@ round-trip correctly.
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
 > its state is a `string` containing valid unpadded base64url before decoding. On
 > malformed input — wrong type, invalid format, or missing fields — the handler
-> should produce a `ProblematicStorable` (Section 3.5) rather than throwing or
+> should produce a `ProblematicValue` (Section 3.5) rather than throwing or
 > silently producing garbage. This principle applies to all type handlers. Wire
 > data is untrusted input. See Section 7.4 for the broader principle that
 > applies to all code consuming deserialized values.
@@ -1835,10 +1838,10 @@ generate and parse `/<Type>@<Version>` keys. The context is also responsible
 for:
 
 - Re-wrapping unknown types using the `typeTag` preserved in
-  `UnknownStorable` and `ExplicitTagStorable`.
-- Managing the class registry for deserialization of known `StorableInstance`
-  types (e.g., `StorableError`, `StorableMap`, `StorableSet`, `StorableRegExp`,
-  `StorableUint8Array`).
+  `UnknownValue` and `ExplicitTagValue`.
+- Managing the class registry for deserialization of known `FabricInstance`
+  types (e.g., `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`,
+  `FabricUint8Array`).
 - Providing a narrow `TypeHandlerCodec` view to type handlers during tree
   walking, exposing only `wrapTag()` and `getTagFor()`.
 
@@ -1849,7 +1852,7 @@ escaping rather than type encoding.
 ### 5.8 Unknown Type Handling
 
 When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
-it wraps the data in `UnknownStorable` (see Section 3) to preserve it for
+it wraps the data in `UnknownValue` (see Section 3) to preserve it for
 round-tripping.
 
 ---
@@ -1867,7 +1870,7 @@ tree construction.
 - Traverse the natural data structure directly (no intermediate tree
   construction).
 - Sort plain-object keys lexicographically; preserve array element order and
-  `StorableMap`/`StorableSet` insertion order.
+  `FabricMap`/`FabricSet` insertion order.
 - Hash type tags + content in a single pass.
 - No intermediate allocations beyond the hash state.
 - The hash reflects the logical content, not any particular encoding or
@@ -1876,7 +1879,7 @@ tree construction.
 ### 6.3 Suggested Tag Bytes
 
 The following single-byte type tags are used by the canonical hash byte format
-and are recommended for any binary encoding of `StorableValue`s. They are
+and are recommended for any binary encoding of `FabricValue`s. They are
 organized into three categories by high nibble:
 
 **Meta tags (`0x0N`)** — structural markers that are not themselves value types:
@@ -1892,7 +1895,7 @@ organized into three categories by high nibble:
 |:------------------|:-------|:--------|:--------------------------------|
 | `TAG_ARRAY`       | `0x10` | 16      | plain arrays                    |
 | `TAG_OBJECT`      | `0x11` | 17      | plain objects                   |
-| `TAG_INSTANCE`    | `0x12` | 18      | `StorableInstance` (general)    |
+| `TAG_INSTANCE`    | `0x12` | 18      | `FabricInstance` (general)    |
 
 **Primitive tags (`0x2N`)** — leaf value types:
 
@@ -1903,11 +1906,11 @@ organized into three categories by high nibble:
 | `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                       |
 | `TAG_NUMBER`      | `0x23` | 35      | `number` (finite, non-NaN)      |
 | `TAG_STRING`      | `0x24` | 36      | `string`                        |
-| `TAG_BYTES`       | `0x25` | 37      | `StorableUint8Array`            |
+| `TAG_BYTES`       | `0x25` | 37      | `FabricUint8Array`            |
 | `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
-| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
-| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
-| `TAG_CONTENT_ID`  | `0x29` | 41      | `StorableContentId`             |
+| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`             |
+| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`             |
+| `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`             |
 
 All unassigned values are reserved for future use. The category structure
 (meta/compound/primitive) is a convention for readability and is not enforced by
@@ -1915,17 +1918,17 @@ the encoding — a decoder should handle any tag byte it encounters regardless o
 nibble range.
 
 > **Scope.** These tag bytes are defined here for use by any wire format that
-> needs to distinguish `StorableValue` types at the byte level. The canonical
+> needs to distinguish `FabricValue` types at the byte level. The canonical
 > hash byte format (`2-canonical-hash-byte-format.md`) is the first consumer;
 > future binary serialization formats may reuse the same tag assignments.
 
 ### 6.4 Hashing Algorithm
 
 ```typescript
-// file: packages/common/canonical-hash.ts (stub)
+// file: packages/data-model/value-hash.ts
 
 /**
- * Compute a canonical hash for a storable value. The hash is
+ * Compute a canonical hash for a fabric value. The hash is
  * encoding-independent: the same identity whether later serialized
  * to JSON, CBOR, or any other format.
  *
@@ -1938,7 +1941,7 @@ nibble range.
  * Specific hashing contexts (e.g., pattern ID generation vs. request
  * deduplication) specify which algorithm is used in that context.
  *
- * The return value is a `StorableContentId` instance (Section 1.4.9),
+ * The return value is a `FabricHash` instance (Section 1.4.9),
  * which encapsulates the raw hash bytes and the algorithm tag. The
  * algorithm tag for SHA-256 is `fid1` ("fabric ID, v1"). Callers who
  * need a string representation can call `toString()` on the result,
@@ -1947,9 +1950,9 @@ nibble range.
  * see Section 5.3).
  */
 export function canonicalHash(
-  value: StorableValue,
+  value: FabricValue,
   algorithm?: 'sha256' | 'blake2b',
-): StorableContentId {
+): FabricHash {
   // Type tag bytes — see Section 6.3 for the full table.
   // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N).
   //
@@ -1963,13 +1966,13 @@ export function canonicalHash(
   // - `string`:            hash(TAG_STRING, leb128(utf8ByteLen), utf8Bytes)
   // - `bigint`:            hash(TAG_BIGINT, leb128(byteLen), signedTwosComplementBytes)
   // - `undefined`:         hash(TAG_UNDEFINED)
-  // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
+  // - `FabricUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //                        (hashes the underlying byte content)
-  // - `StorableEpochNsec`: hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  // - `FabricEpochNsec`: hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   //                        (same payload format as TAG_BIGINT but distinct tag)
-  // - `StorableEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
+  // - `FabricEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   //                        (same payload format as TAG_BIGINT but distinct tag)
-  // - `StorableContentId`: hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  // - `FabricHash`: hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
   //                              leb128(hashByteLen), hashBytes)
   //                        (algorithm tag as UTF-8 string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
@@ -2004,34 +2007,34 @@ export function canonicalHash(
   //                        Keys sorted lexicographically by UTF-8.
   //                        Each pair: TAG_STRING key + tagged value.
   //                        TAG_END marks the end of the pair sequence.
-  // - `StorableInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
+  // - `FabricInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //                              canonicalHash(deconstructedState))
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `StorableError`, `StorableMap`, `StorableSet`, `StorableRegExp`,
-  //   and other `StorableInstance`s with recursively-processable
+  // - `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`,
+  //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //          canonicalHash(deconstructedState))
   //
-  // - `StorableUint8Array` uses TAG_BYTES (dedicated primitive tag).
-  // - `StorableEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
-  // - `StorableEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
-  // - `StorableContentId` uses TAG_CONTENT_ID (dedicated primitive tag).
+  // - `FabricUint8Array` uses TAG_BYTES (dedicated primitive tag).
+  // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
+  // - `FabricEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
+  // - `FabricHash` uses TAG_CONTENT_ID (dedicated primitive tag).
   //
   // Examples:
-  // - `StorableError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
-  // - `StorableMap`:        hash(TAG_INSTANCE, ..., "Map@1", canonicalHash(entries))
+  // - `FabricError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
+  // - `FabricMap`:        hash(TAG_INSTANCE, ..., "Map@1", canonicalHash(entries))
   //                         where entries are hashed in insertion order
-  // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
+  // - `FabricSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
-  // - `StorableRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", canonicalHash({source, flags, flavor}))
-  // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
-  // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
-  // - `StorableContentId`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  // - `FabricRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", canonicalHash({source, flags, flavor}))
+  // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
+  // - `FabricHash`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
   //                               leb128(hashByteLen), hashBytes)
-  // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
+  // - `FabricUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),
@@ -2052,8 +2055,8 @@ export function canonicalHash(
 > (`2-canonical-hash-byte-format.md`, Section 4.4) for the precise encoding.
 
 > **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
-> for `StorableMap` entries and `StorableSet` elements, matching the serialized
-> form. This means two `StorableMap`s or `StorableSet`s with the same elements
+> for `FabricMap` entries and `FabricSet` elements, matching the serialized
+> form. This means two `FabricMap`s or `FabricSet`s with the same elements
 > in different insertion order will hash differently. This is intentional:
 > insertion order is part of the observable semantics of `Map`/`Set` in
 > JavaScript, so values that behave differently should not hash the same. (By
@@ -2062,8 +2065,8 @@ export function canonicalHash(
 
 ### 6.5 Relationship to Late Serialization
 
-Canonical hashing operates on `StorableValue` directly, using deconstructed
-state for `StorableInstance`s (including the native object wrappers) and
+Canonical hashing operates on `FabricValue` directly, using deconstructed
+state for `FabricInstance`s (including the native object wrappers) and
 type-specific handling for primitives and containers. This makes identity
 hashing independent of any particular wire encoding — the same hash whether
 later serialized to JSON, CBOR, or Automerge.
@@ -2088,28 +2091,28 @@ most current version of the data. Hashes are not used as entity addresses.
 Migration to the spec involves replacing early JSON-form conversion with
 boundary-only serialization and the three-layer architecture:
 
-1. Update `StorableValue` to exclude raw native JS types, include
-   `StorableInstance` (Section 1.2).
-2. Introduce the native object wrapper classes (`StorableError`, etc.) that
-   implement `StorableInstance` (Section 1.4).
-3. Rework `toStorableValue()` / `toDeepStorableValue()` to wrap native types
-   into `StorableInstance` wrappers and return frozen results (Section 8).
-4. Add `nativeValueFromStorableValue()` for unwrapping back to native types
+1. Update `FabricValue` to exclude raw native JS types, include
+   `FabricInstance` (Section 1.2).
+2. Introduce the native object wrapper classes (`FabricError`, etc.) that
+   implement `FabricInstance` (Section 1.4).
+3. Rework `toFabricValue()` / `toDeepFabricValue()` to wrap native types
+   into `FabricInstance` wrappers and return frozen results (Section 8).
+4. Add `nativeValueFromFabricValue()` for unwrapping back to native types
    (Section 8).
 5. Remove early conversion points (e.g., `convertCellsToLinks()`,
-   `toStorableValue()` wrapping `Error` as `{ "@Error": ... }`).
+   `toFabricValue()` wrapping `Error` as `{ "@Error": ... }`).
 6. Introduce `SerializationContext` at each boundary (Section 4.7).
-7. Update internal code to work with `StorableValue` types rather than JSON
+7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 
-> **`toJSON()` compatibility and migration.** `toStorableValue()` and its
+> **`toJSON()` compatibility and migration.** `toFabricValue()` and its
 > variants currently honor `toJSON()` methods on objects that have them — if an
-> object has a `toJSON()` method and does not implement `StorableInstance`, the
+> object has a `toJSON()` method and does not implement `FabricInstance`, the
 > conversion functions call `toJSON()` and process the result. This preserves
 > backward compatibility with existing code. However, `toJSON()` support is
 > **marked for removal**: it eagerly converts to JSON-compatible shapes, which
 > is incompatible with late serialization. Implementors should migrate to the
-> storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers
+> fabric protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers
 > have migrated, `toJSON()` support will be removed from the conversion
 > functions.
 
@@ -2121,7 +2124,7 @@ Four legacy conventions in the current codebase must be migrated to the unified
 | Legacy Convention | Where Used | Example | New Form |
 |-------------------|------------|---------|----------|
 | IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
-| `@` prefix | Errors (`storable-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
+| `@` prefix | Errors (`fabric-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
 | `$` prefix (stream) | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
 | `$` prefix (alias) | Internal refs (`json-utils.ts`, `cell-handle.ts`) | `{ "$alias": { path, cell?, schema? } }` | `{ "/Link@1": { id, path, space, overwrite? } }` |
 
@@ -2153,7 +2156,7 @@ whose runtime shape does not match their static type.
 This applies at every point where deserialized data is consumed:
 
 - **`[RECONSTRUCT]` implementations** (Section 2.4) receive `state:
-  StorableValue`. The state has been deserialized by the serialization system,
+  FabricValue`. The state has been deserialized by the serialization system,
   but its internal structure is determined by whatever was on the wire.
   Implementations must validate the shape of `state` at runtime — checking
   property existence, types, and constraints — rather than relying on a type
@@ -2161,12 +2164,12 @@ This applies at every point where deserialized data is consumed:
   concrete example.
 
 - **JSON type handlers** (Section 5.3) must validate the format of their state
-  before processing. Malformed input should produce a `ProblematicStorable`
+  before processing. Malformed input should produce a `ProblematicValue`
   rather than throwing or silently producing garbage.
 
 - **Canonical hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from
-  `StorableInstance` values (e.g., casting to `{ typeTag: string }`) must
+  `FabricInstance` values (e.g., casting to `{ typeTag: string }`) must
   validate those properties at runtime.
 
 - **Application code** that reads values from cells, IPC messages, or any other
@@ -2184,45 +2187,45 @@ confirm a value's shape is runtime checking.
 ### 8.1 Overview
 
 The conversion functions bridge the left layer (JS wild west) and the middle
-layer (`StorableValue`). They form the boundary between arbitrary JavaScript
+layer (`FabricValue`). They form the boundary between arbitrary JavaScript
 values and the strongly typed data model.
 
 There are two directions:
 
-- **JS wild west -> `StorableValue`:** `toStorableValue()`,
-  `toDeepStorableValue()`, and `toStorableValueOrThrow()`.
-- **`StorableValue` -> JS wild west:** `nativeValueFromStorableValue()` and
-  `nativeFromStorableValueRich()`.
+- **JS wild west -> `FabricValue`:** `toFabricValue()`,
+  `toDeepFabricValue()`, and `toFabricValueOrThrow()`.
+- **`FabricValue` -> JS wild west:** `nativeValueFromFabricValue()` and
+  `nativeFromFabricValueModern()`.
 
-### 8.2 `toStorableValue()` and `toDeepStorableValue()`
+### 8.2 `toFabricValue()` and `toDeepFabricValue()`
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
- * Convert a value to `StorableValue`. Wraps native JS types (`Error`, `Map`,
- * etc.) into their `StorableInstance` wrapper classes. If the value is already
- * a valid `StorableValue`, returns it as-is.
+ * Convert a value to `FabricValue`. Wraps native JS types (`Error`, `Map`,
+ * etc.) into their `FabricInstance` wrapper classes. If the value is already
+ * a valid `FabricValue`, returns it as-is.
  *
- * The input type is `StorableValue | StorableNativeObject` — the function
- * accepts values that are already storable (pass-through) or raw native JS
+ * The input type is `FabricValue | FabricNativeObject` — the function
+ * accepts values that are already fabric values (pass-through) or raw native JS
  * objects that need wrapping. Passing an unsupported type is a type error.
  *
  * **Freeze semantics (shallow):** By default, the returned value is frozen
  * at the top level via `Object.freeze()`. Nested values are NOT recursively
  * frozen. The caller's input is never mutated — if the top-level value is
  * an unfrozen array or object, a shallow copy is made before freezing. If
- * the input is already a frozen `StorableValue`, returns the same object.
+ * the input is already a frozen `FabricValue`, returns the same object.
  * Pass `freeze: false` to skip freezing (see below).
  */
-export function toStorableValue(
-  value: StorableValue | StorableNativeObject,
+export function toFabricValue(
+  value: FabricValue | FabricNativeObject,
   freeze?: boolean, // default: true
-): StorableValue;
+): FabricValue;
 
 /**
- * Convert a value to `StorableValue`, recursively processing nested values.
- * Like `toStorableValue()` but:
+ * Convert a value to `FabricValue`, recursively processing nested values.
+ * Like `toFabricValue()` but:
  *
  * - Recursively descends into arrays and plain objects.
  * - Wraps native JS objects at any depth.
@@ -2232,43 +2235,43 @@ export function toStorableValue(
  *   returns from that level.
  * - **No caller mutation:** The caller's input objects are never frozen or
  *   modified in place. When freezing is needed, shallow copies are made
- *   first. If the input is already a deeply-frozen `StorableValue`, returns
+ *   first. If the input is already a deeply-frozen `FabricValue`, returns
  *   the same object (no copying needed).
  * - Detects circular references and throws.
  *
  * Pass `freeze: false` to perform wrapping and validation without freezing
  * (see "Freeze Semantics" below).
  */
-export function toDeepStorableValue(
-  value: StorableValue | StorableNativeObject,
+export function toDeepFabricValue(
+  value: FabricValue | FabricNativeObject,
   freeze?: boolean, // default: true
-): StorableValue;
+): FabricValue;
 ```
 
 #### Conversion Rules
 
 | Input Type | Output |
 |------------|--------|
-| `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
-| `SpecialPrimitiveValue` (`StorableEpochNsec`, `StorableEpochDays`, `StorableContentId`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
-| `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
-| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
-| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `RegExp` | Wrapped into `StorableRegExp`. The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a wrapper-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
-| `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
-| `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
+| `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
+| `SpecialPrimitiveValue` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
+| `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
+| `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `FabricError.[DECONSTRUCT]` runs, all nested values are already valid `FabricValue`. |
+| `Map` | Wrapped into `FabricMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Set` | Wrapped into `FabricSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Date` | Wrapped into `FabricEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `RegExp` | Wrapped into `FabricRegExp`. The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a wrapper-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Uint8Array` | Wrapped into `FabricUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toFabricValue()`. A future async conversion path may accept `Blob` directly. |
+| `FabricValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
+| `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
 > **Implementation: tag-based type dispatch.** The conversion functions use a
 > tag-based dispatch mechanism (`tagFromNativeValue()` in
-> `packages/memory/type-tags.ts`) to classify values in O(1) via a `switch` on
+> `packages/data-model/type-tags.ts`) to classify values in O(1) via a `switch` on
 > the value's constructor. This replaces sequential `instanceof` chains with a
 > single constructor lookup that returns a tag string (e.g., `"Error"`,
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
-> `"StorableInstance"`). The conversion function then switches on the tag to
+> `"FabricInstance"`). The conversion function then switches on the tag to
 > route to the appropriate wrapping logic. Fallback paths handle exotic Error
 > subclasses (via `Error.isError()`), cross-realm arrays (via
 > `Array.isArray()`), null-prototype objects, and objects with `toJSON()`
@@ -2276,22 +2279,22 @@ export function toDeepStorableValue(
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `shallowCloneIfNecessary()` utility (in
-> `packages/memory/storable-value-modern.ts`) to handle frozenness adjustment
-> for values that are already valid `StorableValue` but whose freeze state
+> `packages/data-model/fabric-value-modern.ts`) to handle frozenness adjustment
+> for values that are already valid `FabricValue` but whose freeze state
 > does not match the requested `freeze` argument. This function dispatches on
 > the same native tag to clone primitives (no-op), arrays (shallow copy
 > preserving sparse holes), plain objects (spread copy), and
-> `StorableInstance` values (via the protocol's `shallowClone()` method from
+> `FabricInstance` values (via the protocol's `shallowClone()` method from
 > Section 2.3). It centralizes clone-for-frozenness logic that was previously
 > duplicated across conversion call sites.
 
 #### Freeze Semantics
 
-The immutable-forward design requires that `StorableValue` trees produced by
+The immutable-forward design requires that `FabricValue` trees produced by
 conversion are frozen **by default**:
 
-- **`toStorableValue()` (shallow):** `Object.freeze()` on the top-level result.
-- **`toDeepStorableValue()` (deep):** `Object.freeze()` at every level of
+- **`toFabricValue()` (shallow):** `Object.freeze()` on the top-level result.
+- **`toDeepFabricValue()` (deep):** `Object.freeze()` at every level of
   nesting, performed in the **same recursive pass** as validation and wrapping.
   There are no separate passes — each node is checked, wrapped, and frozen
   before the recursion returns from that level.
@@ -2301,12 +2304,12 @@ conversion are frozen **by default**:
 the input is an unfrozen array or plain object, the function creates a shallow
 copy and freezes the copy. This ensures that callers can safely pass mutable
 data structures without side effects — the caller's objects remain mutable
-after the call returns. (Wrapper objects like `StorableError` are freshly
+after the call returns. (Wrapper objects like `FabricError` are freshly
 constructed by the conversion function, so freezing them is not a mutation of
 caller state.)
 
 **`deepFreeze` at schema merge/combine sites.** The `deepFreeze()` utility
-(in `packages/memory/deep-freeze.ts`) recursively freezes an object tree in
+(in `packages/data-model/deep-freeze.ts`) recursively freezes an object tree in
 place. At sites where schema objects are merged or combined (e.g., schema
 `merge()` and `combine()` functions), pass-through paths — where the input is
 returned as the result without structural modification — must copy the value
@@ -2319,8 +2322,8 @@ relying on the input being "safe to freeze."
 **Always-frozen types bypass the `freeze` option.** JS primitives (`null`,
 `boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
 and pass through unchanged regardless of the `freeze` setting.
-`SpecialPrimitiveValue` instances (`StorableEpochNsec`, `StorableEpochDays`,
-`StorableContentId`) are treated the same way — they are always returned as-is,
+`SpecialPrimitiveValue` instances (`FabricEpochNsec`, `FabricEpochDays`,
+`FabricHash`) are treated the same way — they are always returned as-is,
 never copied or modified by the freeze/thaw logic. Their state is immutable by
 construction (readonly fields, no mutation methods), so `Object.freeze()` is
 unnecessary and thawing is meaningless. See Section 1.4.6.
@@ -2341,30 +2344,30 @@ but skips freezing:
 
 ```typescript
 // Frozen (default) -- immutable result, safe for sharing.
-const frozen = toDeepStorableValue(input);
+const frozen = toDeepFabricValue(input);
 
 // Unfrozen -- mutable result, caller can modify before freezing later.
-const mutable = toDeepStorableValue(input, false);
+const mutable = toDeepFabricValue(input, false);
 ```
 
 This exists because JavaScript makes it difficult to update frozen values —
-there is no "thaw" operation. Callers that need to build up a `StorableValue`
+there is no "thaw" operation. Callers that need to build up a `FabricValue`
 tree incrementally (e.g., merging data from multiple sources) can use
 `freeze: false` to get a mutable tree, then freeze it when construction is
 complete. The `freeze` parameter does not affect validation or wrapping — the
-returned value is always a valid `StorableValue` regardless of its frozen state.
+returned value is always a valid `FabricValue` regardless of its frozen state.
 
-### 8.3 `toStorableValueOrThrow()`
+### 8.3 `toFabricValueOrThrow()`
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
- * Convert an arbitrary JavaScript value to `StorableValue`, throwing on
+ * Convert an arbitrary JavaScript value to `FabricValue`, throwing on
  * unsupported types. This is the boundary function for code that receives
  * `unknown` values from external sources.
  *
- * Behaves identically to `toStorableValue()` for supported types. For
+ * Behaves identically to `toFabricValue()` for supported types. For
  * unsupported types (e.g., `WeakMap`, `Promise`, DOM nodes), throws a
  * descriptive error.
  *
@@ -2372,33 +2375,33 @@ returned value is always a valid `StorableValue` regardless of its frozen state.
  * function may throw for type reasons" in the function name, making the
  * failure mode visible at call sites.
  *
- * The optional `freeze` parameter works the same as in `toStorableValue()`
+ * The optional `freeze` parameter works the same as in `toFabricValue()`
  * (default: `true`; pass `false` to skip freezing).
  */
-export function toStorableValueOrThrow(
+export function toFabricValueOrThrow(
   value: unknown,
   freeze?: boolean, // default: true
-): StorableValue;
+): FabricValue;
 
 /**
- * Deep variant of `toStorableValueOrThrow()`. Recursively converts and
+ * Deep variant of `toFabricValueOrThrow()`. Recursively converts and
  * deep-freezes (single pass). Throws on unsupported types at any depth.
  *
  * Pass `freeze: false` to skip freezing.
  */
-export function toDeepStorableValueOrThrow(
+export function toDeepFabricValueOrThrow(
   value: unknown,
   freeze?: boolean, // default: true
-): StorableValue;
+): FabricValue;
 ```
 
-The distinction between `toStorableValue()` and `toStorableValueOrThrow()`:
+The distinction between `toFabricValue()` and `toFabricValueOrThrow()`:
 
-- **`toStorableValue()`** accepts `StorableValue | StorableNativeObject` —
+- **`toFabricValue()`** accepts `FabricValue | FabricNativeObject` —
   the caller has already ensured the value is a supported type. The function
   handles wrapping and freezing but does not need to validate type membership.
 
-- **`toStorableValueOrThrow()`** accepts `unknown` — the caller is at a system
+- **`toFabricValueOrThrow()`** accepts `unknown` — the caller is at a system
   boundary and cannot guarantee the type. The function validates and throws on
   unsupported types.
 
@@ -2409,13 +2412,13 @@ code (which doesn't) gets explicit error handling.
 ### 8.4 `canBeStored()`
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
- * Type predicate: returns `true` if `toDeepStorableValue()` would succeed on
- * the given value — i.e., the value is a `StorableValue`, a
- * `StorableNativeObject`, or a tree of these types. The return type is a
- * type predicate (`value is StorableValue | StorableNativeObject`), so
+ * Type predicate: returns `true` if `toDeepFabricValue()` would succeed on
+ * the given value — i.e., the value is a `FabricValue`, a
+ * `FabricNativeObject`, or a tree of these types. The return type is a
+ * type predicate (`value is FabricValue | FabricNativeObject`), so
  * callers can use `canBeStored(x)` as a type guard in conditionals.
  *
  * This is a check-without-conversion function for system boundaries where
@@ -2424,17 +2427,17 @@ code (which doesn't) gets explicit error handling.
  * and allocation).
  *
  * Relationship to other functions:
- * - `isStorableValue(x)`: "Is `x` already a `StorableValue`?" Does NOT
+ * - `isFabricValue(x)`: "Is `x` already a `FabricValue`?" Does NOT
  *   return `true` for raw native types like `Error` or `Map`.
- * - `canBeStored(x)`: "Could `x` be converted to a `StorableValue` via
- *   `toDeepStorableValue()`?" Returns `true` for both `StorableValue`
- *   values AND `StorableNativeObject` values (and deep trees thereof).
- * - `toDeepStorableValueOrThrow(x)`: Actually performs the conversion,
+ * - `canBeStored(x)`: "Could `x` be converted to a `FabricValue` via
+ *   `toDeepFabricValue()`?" Returns `true` for both `FabricValue`
+ *   values AND `FabricNativeObject` values (and deep trees thereof).
+ * - `toDeepFabricValueOrThrow(x)`: Actually performs the conversion,
  *   throwing on unsupported types.
  */
 export function canBeStored(
   value: unknown,
-): value is StorableValue | StorableNativeObject;
+): value is FabricValue | FabricNativeObject;
 ```
 
 The function recursively checks the value tree. It returns `true` if and only
@@ -2442,44 +2445,44 @@ if the value is:
 
 - A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
   `bigint`)
-- A `StorableInstance` (including the native object wrapper classes)
-- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
+- A `FabricInstance` (including the native object wrapper classes)
+- A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`, or an object with a `toJSON()` method — legacy)
 - An array where every present element satisfies `canBeStored()`
 - A plain object where every value satisfies `canBeStored()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
-class instances that don't implement `StorableInstance`, non-finite numbers,
+class instances that don't implement `FabricInstance`, non-finite numbers,
 etc.).
 
 > **Performance note.** `canBeStored()` walks the value tree without
 > allocating wrappers or frozen copies. For large trees, this is cheaper than
-> calling `toDeepStorableValueOrThrow()` inside a try/catch, since it avoids
+> calling `toDeepFabricValueOrThrow()` inside a try/catch, since it avoids
 > the wrapping and freezing work that would be discarded on failure. However,
 > if the caller intends to convert on success, calling
-> `toDeepStorableValueOrThrow()` directly (and catching the error) avoids
+> `toDeepFabricValueOrThrow()` directly (and catching the error) avoids
 > walking the tree twice.
 
-### 8.5 `nativeValueFromStorableValue()`
+### 8.5 `nativeValueFromFabricValue()`
 
 ```typescript
-// file: packages/common/storable-value.ts
+// file: packages/data-model/fabric-value.ts
 
 /**
- * Convert a `StorableValue` back to a value tree containing native JS types.
+ * Convert a `FabricValue` back to a value tree containing native JS types.
  * Wrapper classes are unwrapped to their native equivalents:
  *
- * - `StorableError`      -> `Error` (original if freeze state matches; copy otherwise)
- * - `StorableMap`        -> `FrozenMap` / `Map` (original if freeze state matches; copy otherwise)
- * - `StorableSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
- * - `StorableRegExp`     -> `RegExp` (frozen or unfrozen; see note on `lastIndex`)
- * - `StorableEpochNsec`  -> the bigint value (nanoseconds from POSIX Epoch)
- * - `StorableEpochDays`  -> the bigint value (days from POSIX Epoch)
- * - `StorableContentId`  -> passed through unchanged (always-frozen; Section 1.4.6)
- * - `StorableUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
+ * - `FabricError`      -> `Error` (original if freeze state matches; copy otherwise)
+ * - `FabricMap`        -> `FrozenMap` / `Map` (original if freeze state matches; copy otherwise)
+ * - `FabricSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
+ * - `FabricRegExp`     -> `RegExp` (frozen or unfrozen; see note on `lastIndex`)
+ * - `FabricEpochNsec`  -> the bigint value (nanoseconds from POSIX Epoch)
+ * - `FabricEpochDays`  -> the bigint value (days from POSIX Epoch)
+ * - `FabricHash`  -> passed through unchanged (always-frozen; Section 1.4.6)
+ * - `FabricUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
  *
- * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
- * `ProblematicStorable`, etc.) pass through unchanged.
+ * Non-wrapper `FabricInstance` values (`Cell`, `Stream`, `UnknownValue`,
+ * `ProblematicValue`, etc.) pass through unchanged.
  *
  * **Shallow:** Only unwraps the top-level value. Array elements and object
  * property values are not recursively unwrapped. However, non-wrapper values
@@ -2489,14 +2492,14 @@ etc.).
  *
  * **The `frozen` argument is always honored.** The freeze state of every
  * value in the output matches the `frozen` argument. When `freeze` is `true`
- * (the default), `StorableMap` and `StorableSet` unwrap to `FrozenMap` and
+ * (the default), `FabricMap` and `FabricSet` unwrap to `FrozenMap` and
  * `FrozenSet` respectively — effectively-immutable wrappers that expose
  * read-only interfaces and throw on mutation attempts. The temporal types
- * (`StorableEpochNsec`, `StorableEpochDays`) unwrap to their bigint values,
- * which are inherently immutable primitives. `StorableContentId` passes
+ * (`FabricEpochNsec`, `FabricEpochDays`) unwrap to their bigint values,
+ * which are inherently immutable primitives. `FabricHash` passes
  * through unchanged — it is always-frozen (Section 1.4.5).
- * `StorableUint8Array` unwraps to `Blob`, which is
- * inherently immutable (see rationale below). `StorableError` unwraps to a
+ * `FabricUint8Array` unwraps to `Blob`, which is
+ * inherently immutable (see rationale below). `FabricError` unwraps to a
  * frozen `Error`. This preserves the immutable-forward guarantee even in the
  * "JS wild west" layer. When `freeze` is `false`, mutable native types are
  * returned instead.
@@ -2505,52 +2508,52 @@ etc.).
  * when the freeze state already matches. A new object is constructed only
  * when the type must change to satisfy the `frozen` argument (e.g., wrapping
  * a plain `Map` in `FrozenMap`). The wrapper's purpose is to provide the
- * storable interface, not to
+ * fabric interface, not to
  * act as a data firewall.
  */
-export function nativeValueFromStorableValue(
-  value: StorableValue,
+export function nativeValueFromFabricValue(
+  value: FabricValue,
   freeze?: boolean, // default: true
-): StorableValue | StorableNativeObject;
+): FabricValue | FabricNativeObject;
 
 /**
  * Deep variant: recursively unwraps wrapper classes throughout the value tree.
  * The `freeze` parameter controls whether immutable variants are used for
  * collections and binary data (default: `true`).
  */
-export function nativeFromStorableValueRich(
-  value: StorableValue,
+export function nativeFromFabricValueModern(
+  value: FabricValue,
   freeze?: boolean, // default: true
-): StorableValue | StorableNativeObject;
+): FabricValue | FabricNativeObject;
 ```
 
 #### Unwrapping Rules
 
 | Input | Output (frozen) | Output (not frozen) |
 |-------|-----------------|---------------------|
-| `StorableError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
-| `StorableMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
-| `StorableSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
-| `StorableRegExp` | `RegExp` (frozen via `Object.freeze()`; `lastIndex` immutable) | `RegExp` (original reference; mutable `lastIndex`) |
-| `StorableEpochNsec` | `bigint` (the nanosecond value; inherently immutable) | `bigint` (same — primitives have no mutable/immutable distinction) |
-| `StorableEpochDays` | `bigint` (the day value; inherently immutable) | `bigint` (same) |
-| `StorableContentId` | Passed through unchanged (always-frozen; Section 1.4.6) | Passed through unchanged (same) |
-| `StorableUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
-| Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
+| `FabricError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
+| `FabricMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
+| `FabricSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
+| `FabricRegExp` | `RegExp` (frozen via `Object.freeze()`; `lastIndex` immutable) | `RegExp` (original reference; mutable `lastIndex`) |
+| `FabricEpochNsec` | `bigint` (the nanosecond value; inherently immutable) | `bigint` (same — primitives have no mutable/immutable distinction) |
+| `FabricEpochDays` | `bigint` (the day value; inherently immutable) | `bigint` (same) |
+| `FabricHash` | Passed through unchanged (always-frozen; Section 1.4.6) | Passed through unchanged (same) |
+| `FabricUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
+| Other `FabricInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
 | Arrays (deep variant) | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 | Plain objects (deep variant) | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 
-The output type is `StorableValue | StorableNativeObject`, reflecting that the
+The output type is `FabricValue | FabricNativeObject`, reflecting that the
 result may contain native JS types at any depth.
 
-> **Implementation: `StorableNativeWrapper` dispatch.** The unwrapping
-> functions use a single `instanceof StorableNativeWrapper` check to identify
+> **Implementation: `FabricNativeWrapper` dispatch.** The unwrapping
+> functions use a single `instanceof FabricNativeWrapper` check to identify
 > all native object wrappers, then delegate to `toNativeValue(frozen)` on the
 > base class. This replaces the previous pattern of per-wrapper `instanceof`
-> cascades (`instanceof StorableError`, `instanceof StorableMap`, etc.) with
+> cascades (`instanceof FabricError`, `instanceof FabricMap`, etc.) with
 > a single branch. The `toNativeValue()` method (defined on
-> `StorableNativeWrapper`, Section 1.4.1) handles the freeze-state check and
+> `FabricNativeWrapper`, Section 1.4.1) handles the freeze-state check and
 > delegates to the subclass's `toNativeFrozen()` or `toNativeThawed()` when a
 > state change is needed.
 
@@ -2575,13 +2578,13 @@ state differs between the stored value and the requested output.
 For the **shallow** function, non-wrapper values (arrays and plain objects) may
 be copied to match the `frozen` argument. Primitives pass through unchanged.
 
-**Deep variant recurses into `StorableError` internals.** The deep variant
-(`nativeFromStorableValueRich`) recurses into `StorableError` internals —
+**Deep variant recurses into `FabricError` internals.** The deep variant
+(`nativeFromFabricValueModern`) recurses into `FabricError` internals —
 specifically, the `cause` chain and custom enumerable properties — unwrapping any
-nested `StorableInstance` values. This ensures the output is fully "native JS"
-with no storable wrappers at any depth. Without this recursion, an Error's
-`cause` could still contain `StorableInstance` wrappers (e.g., a nested
-`StorableError`).
+nested `FabricInstance` values. This ensures the output is fully "native JS"
+with no fabric wrappers at any depth. Without this recursion, an Error's
+`cause` could still contain `FabricInstance` wrappers (e.g., a nested
+`FabricError`).
 
 > **Why `FrozenMap` / `FrozenSet`?** `Object.freeze()` does not prevent
 > mutation of `Map` and `Set` — their `set()`, `delete()`, `add()`, and
@@ -2589,11 +2592,11 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 > `FrozenSet` are thin wrappers that expose the read-only subset of the
 > `Map`/`Set` API (`get`, `has`, `entries`, `forEach`, `size`, etc.) and throw
 > on any mutation attempt. This ensures that data round-tripped through the
-> storable layer remains effectively immutable even after unwrapping. The exact
+> fabric layer remains effectively immutable even after unwrapping. The exact
 > API of `FrozenMap` and `FrozenSet` is an implementation decision.
 
-> **Why bigint for temporal unwrapping?** `StorableEpochNsec` and
-> `StorableEpochDays` unwrap to their raw `bigint` values rather than to
+> **Why bigint for temporal unwrapping?** `FabricEpochNsec` and
+> `FabricEpochDays` unwrap to their raw `bigint` values rather than to
 > `Date` objects. This avoids precision loss (JS `Date` has only millisecond
 > precision, while epoch nanoseconds can represent sub-millisecond instants)
 > and bigint is an immutable primitive, so no freeze/thaw action is needed.
@@ -2609,10 +2612,10 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 > `blob.stream()` to read the data. When `freeze` is `false`, a regular
 > mutable `Uint8Array` is returned instead.
 >
-> **Asymmetry note:** `Blob` is an output type only — `nativeValueFromStorableValue()`
-> may return a `Blob`, but `toStorableValue()` does not accept `Blob` as input
+> **Asymmetry note:** `Blob` is an output type only — `nativeValueFromFabricValue()`
+> may return a `Blob`, but `toFabricValue()` does not accept `Blob` as input
 > because `Blob` content is only accessible asynchronously. Callers converting
-> a `Blob` back to `StorableValue` must first extract its bytes (e.g.,
+> a `Blob` back to `FabricValue` must first extract its bytes (e.g.,
 > `new Uint8Array(await blob.arrayBuffer())`) and pass the `Uint8Array`. A
 > future async conversion path may accept `Blob` directly.
 
@@ -2621,7 +2624,7 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 For any supported value `v`:
 
 ```
-nativeFromStorableValue(storableFromNativeValue(v))
+nativeFromFabricValue(fabricFromNativeValue(v))
 ```
 
 produces a value that is structurally equivalent to `v` — the same data at the
@@ -2637,13 +2640,13 @@ a `Blob`, and `Error`s are frozen. When `frozen` is `false`, the output tree is
 fully mutable. The data content is preserved; the mutability matches the `frozen`
 argument.
 
-Similarly, for any `StorableValue` `sv`:
+Similarly, for any `FabricValue` `sv`:
 
 ```
-storableFromNativeValue(nativeFromStorableValue(sv))
+fabricFromNativeValue(nativeFromFabricValue(sv))
 ```
 
-produces a `StorableValue` that is structurally equivalent to `sv`.
+produces a `FabricValue` that is structurally equivalent to `sv`.
 
 ---
 
@@ -2665,7 +2668,7 @@ spec from being implementable.
   per-`Runtime` configuration via `ExperimentalOptions`, which provides a
   natural place for registry configuration per runtime instance.
 
-- **Schema integration**: Each `StorableInstance` type implies a schema for its
+- **Schema integration**: Each `FabricInstance` type implies a schema for its
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
@@ -2679,22 +2682,22 @@ spec from being implementable.
   default-on) will be addressed in a separate document.
 
 - **`ReconstructionContext` extensibility**: The minimal interface defined in
-  Section 2.5 covers `Cell` reconstruction. Other future storable types may
+  Section 2.5 covers `Cell` reconstruction. Other future fabric types may
   need additional context methods. Should the interface be extended, or should
   types cast to a broader interface? Recommendation: extend the interface as
   needed; the indirection through an interface (rather than depending on
   `Runtime` directly) makes this straightforward.
 
 - **`getRaw()` / `setRaw()` middle-layer contract**: Emerging consensus is
-  that `Cell.getRaw()` and `Cell.setRaw()` should traffic in `StorableValue`
+  that `Cell.getRaw()` and `Cell.setRaw()` should traffic in `FabricValue`
   (middle layer), not arbitrary native JS values (wild west). A usage survey
   of all call sites in the codebase found that every existing caller operates
-  on well-defined storable data (plain objects, arrays, strings, links, stream
+  on well-defined fabric data (plain objects, arrays, strings, links, stream
   markers) — no call site stores or retrieves raw native types like `Error`,
   `Date`, `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods.
   Formalizing this contract (e.g., refining the type parameter `T` of
-  `IAnyCell` to `extends StorableValue`) would make the implicit expectation
-  explicit without breaking any current caller. The `nativeFromStorableValue()` /
-  `storableFromNativeValue()` dispatch in these methods (Section 4.9) is correct but
+  `IAnyCell` to `extends FabricValue`) would make the implicit expectation
+  explicit without breaking any current caller. The `nativeFromFabricValue()` /
+  `fabricFromNativeValue()` dispatch in these methods (Section 4.9) is correct but
   forward-looking: it will become load-bearing when user-facing patterns
   start storing rich types through the schema-aware `set()` path.

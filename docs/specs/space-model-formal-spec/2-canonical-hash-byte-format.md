@@ -1,15 +1,15 @@
 # Canonical Hash Byte Format
 
 This document specifies the precise byte-level format for canonical hashing of
-`StorableValue`s. It is the implementation-ready companion to Section 6.4 of the
-formal spec (`1-storable-values.md`), which defines the algorithm at the
+`FabricValue`s. It is the implementation-ready companion to Section 6.4 of the
+formal spec (`1-fabric-values.md`), which defines the algorithm at the
 pseudocode level. The tag byte assignments used here are defined in formal spec
 Section 6.3.
 
 An implementer can work from this document alone to produce a byte-for-byte
 compatible canonical hasher. All encodings are deterministic; two conforming
 implementations must produce identical byte streams (and therefore identical
-hashes) for any given `StorableValue`.
+hashes) for any given `FabricValue`.
 
 ## Status
 
@@ -24,7 +24,7 @@ The hash function is **SHA-256** (FIPS 180-4). All byte sequences described in
 this document are fed to a SHA-256 context in the order specified.
 
 The digest output is **32 raw bytes** (256 bits). The `modernHash()` function
-wraps the raw bytes into a `StorableContentId` instance (Section 1.4.9 of the
+wraps the raw bytes into a `FabricHash` instance (Section 1.4.9 of the
 formal spec) with algorithm tag `fid1`. Callers who need a string
 representation call `toString()` on the result, which produces
 `fid1:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5).
@@ -172,7 +172,7 @@ Bytes: TAG_UNDEFINED
 
 Total: 1 byte. No payload.
 
-### 4.7 `StorableUint8Array` (bytes)
+### 4.7 `FabricUint8Array` (bytes)
 
 ```
 Bytes: TAG_BYTES  LENGTH_LEB128  RAW_BYTES
@@ -187,7 +187,7 @@ Total: 1 + len(LEB128) + N bytes, where N is the byte array length.
 Empty byte array is encoded as `0x25 0x00` — the tag plus a zero-length prefix
 and no payload bytes.
 
-### 4.8 `StorableEpochNsec`
+### 4.8 `FabricEpochNsec`
 
 ```
 Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
@@ -196,8 +196,8 @@ Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
 
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
-`StorableEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
-is a direct `StorableDatum` member (not a `FabricInstance`) and has a dedicated
+`FabricEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
+is a direct `FabricDatum` member (not a `FabricInstance`) and has a dedicated
 type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -206,10 +206,10 @@ type tag.
   two's-complement, big-endian, minimal bytes.
 
 The encoding is structurally identical to `TAG_BIGINT` but uses a different type
-tag (`0x27` instead of `0x26`), ensuring that `StorableEpochNsec(42n)` and
+tag (`0x27` instead of `0x26`), ensuring that `FabricEpochNsec(42n)` and
 `42n` produce distinct hashes.
 
-### 4.9 `StorableEpochDays`
+### 4.9 `FabricEpochDays`
 
 ```
 Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
@@ -218,8 +218,8 @@ Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
 
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
-`StorableEpochDays` represents a day-precision Unix epoch timestamp. It is a
-direct `StorableDatum` member (not a `FabricInstance`) and has a dedicated type
+`FabricEpochDays` represents a day-precision Unix epoch timestamp. It is a
+direct `FabricDatum` member (not a `FabricInstance`) and has a dedicated type
 tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -228,11 +228,11 @@ tag.
   two's-complement, big-endian, minimal bytes.
 
 The encoding is structurally identical to `TAG_BIGINT` but uses a different type
-tag (`0x28` instead of `0x26`), ensuring that `StorableEpochDays(42n)` and
-`42n` produce distinct hashes. It also differs from `StorableEpochNsec` (`0x27`)
+tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDays(42n)` and
+`42n` produce distinct hashes. It also differs from `FabricEpochNsec` (`0x27`)
 so the two temporal types are always distinguishable.
 
-### 4.10 `StorableContentId`
+### 4.10 `FabricHash`
 
 ```
 Bytes: TAG_CONTENT_ID  ALG_TAG_LEN_LEB128  ALG_TAG_UTF8  HASH_LEN_LEB128  HASH_BYTES
@@ -242,8 +242,8 @@ Bytes: TAG_CONTENT_ID  ALG_TAG_LEN_LEB128  ALG_TAG_UTF8  HASH_LEN_LEB128  HASH_B
 Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
 of the algorithm tag in UTF-8 and H is the number of hash bytes.
 
-`StorableContentId` represents a content identifier — a hash with an algorithm
-tag. It is a direct `StorableDatum` member (not a `FabricInstance`) and has a
+`FabricHash` represents a content identifier — a hash with an algorithm
+tag. It is a direct `FabricDatum` member (not a `FabricInstance`) and has a
 dedicated type tag.
 
 - **Algorithm tag length**: The byte length of the algorithm tag string in
@@ -306,8 +306,8 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
 
-> **Note on types with dedicated tags.** `StorableUint8Array`,
-> `StorableEpochNsec`, `StorableEpochDays`, and `StorableContentId` are **not**
+> **Note on types with dedicated tags.** `FabricUint8Array`,
+> `FabricEpochNsec`, `FabricEpochDays`, and `FabricHash` are **not**
 > hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is encoded
 > directly (see Sections 4.7, 4.8, 4.9, and 4.10 respectively).
 
@@ -456,7 +456,7 @@ Length 5 in LEB128 is `0x05`.
 21
 ```
 
-### 7.9 `StorableEpochNsec(0n)`
+### 7.9 `FabricEpochNsec(0n)`
 
 ```
 27  01  00
@@ -465,7 +465,7 @@ Length 5 in LEB128 is `0x05`.
 `TAG_EPOCH_NSEC` (`0x27`), followed by the bigint `0n` encoded as minimal
 two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
-### 7.10 `StorableEpochDays(42n)`
+### 7.10 `FabricEpochDays(42n)`
 
 `42n` in minimal two's-complement is `0x2A` (1 byte).
 
@@ -475,7 +475,7 @@ two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
 `TAG_EPOCH_DAYS` (`0x28`), length 1 (`0x01`), payload `0x2A`.
 
-### 7.11 `StorableContentId("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
+### 7.11 `FabricHash("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
 
 Algorithm tag `"fid1"` is 4 bytes in UTF-8: `0x66`, `0x69`, `0x64`, `0x31`.
 Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
@@ -487,9 +487,9 @@ Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 `TAG_CONTENT_ID` (`0x29`), algorithm tag length 4 (`0x04`), algorithm tag
 `"fid1"`, hash byte length 4 (`0x04`), hash bytes.
 
-### 7.12 `StorableRegExp(/abc/gi)`
+### 7.12 `FabricRegExp(/abc/gi)`
 
-`StorableRegExp` is a `FabricInstance` and is hashed via `TAG_INSTANCE`.
+`FabricRegExp` is a `FabricInstance` and is hashed via `TAG_INSTANCE`.
 
 Type tag `"RegExp@1"` is 8 bytes in UTF-8: `0x52`, `0x65`, `0x67`, `0x45`,
 `0x78`, `0x70`, `0x40`, `0x31`.
@@ -609,11 +609,11 @@ rather than producing a hash.
 |:----------------------------------|:----------------|:---------------------------------|
 | String byte length                | unsigned LEB128 | Byte count of UTF-8 payload      |
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
-| Byte array (`StorableUint8Array`) | unsigned LEB128 | Byte count of raw payload        |
-| `StorableEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
-| `StorableEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
-| `StorableContentId` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
-| `StorableContentId` hash bytes    | unsigned LEB128 | Byte count of raw hash payload   |
+| Byte array (`FabricUint8Array`) | unsigned LEB128 | Byte count of raw payload        |
+| `FabricEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
+| `FabricEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
+| `FabricHash` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
+| `FabricHash` hash bytes    | unsigned LEB128 | Byte count of raw hash payload   |
 | `FabricInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |

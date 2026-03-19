@@ -17,7 +17,7 @@ This spec covers:
   strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
 - **JSON encoding** (Section 5) -- the `/<Type>@<Version>` wire format for
   special types, escaping, and detection rules
-- **Canonical hashing** (Section 6) -- content-based identity for storable
+- **Canonical hashing** (Section 6) -- content-based identity for fabric
   values
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
@@ -26,5 +26,5 @@ system, schemas.
 
 ## Documents
 
-- [1-storable-values.md](./1-storable-values.md) -- The complete data model
+- [1-fabric-values.md](./1-fabric-values.md) -- The complete data model
   specification. All topics above are covered in this single document.
