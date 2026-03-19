@@ -7,7 +7,7 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type ContentId, refer } from "./reference.ts";
+import { type ContentId, refer } from "@commontools/data-model/value-hash";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";

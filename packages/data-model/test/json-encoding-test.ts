@@ -1,22 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
+import { DECONSTRUCT, StorableInstance } from "../storable-instance.ts";
+import { isStorableInstance } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import {
-  DECONSTRUCT,
-  isStorableInstance,
-  StorableInstance,
-} from "../storable-protocol.ts";
-import type { StorableValue } from "../interface.ts";
+import type { StorableValue } from "../fabric-value.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
 import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
+import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import {
   nativeFromStorableValueRich,
   nativeValueFromStorableValue,
-  StorableEpochDays,
-  StorableEpochNsec,
   StorableError,
   StorableMap,
   StorableSet,

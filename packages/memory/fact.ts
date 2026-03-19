@@ -16,7 +16,7 @@ import {
   fromString,
   isContentId,
   refer,
-} from "./reference.ts";
+} from "@commontools/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.

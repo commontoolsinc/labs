@@ -5,6 +5,106 @@
  * Workspace code should import these types via `@commontools/builder`.
  */
 
+// ============================================================================
+// Storable Value Types
+// ============================================================================
+//
+// Pattern-visible declarations for the storable value type system. Canonical
+// implementations live in submodule files (fabric-value.ts, storable-instance.ts,
+// etc.) — these inline declarations mirror the public surface so the pattern
+// compiler can resolve them without relative imports.
+//
+// SYNC NOTE: These declarations must stay in sync with the canonical
+// definitions in the submodule files. If they drift, pattern type-checking
+// will diverge from runtime behavior.
+
+/**
+ * Abstract base class for values that participate in the storable protocol.
+ * Subclasses include Cell, Stream, and native-object wrappers (StorableError,
+ * StorableMap, etc.).
+ */
+export interface StorableInstance {
+  shallowClone(frozen: boolean): StorableInstance;
+}
+
+export interface StorableInstanceConstructor {
+  prototype: StorableInstance;
+}
+
+export declare const StorableInstance: StorableInstanceConstructor;
+
+/** Abstract base class for "special primitive" storable types. */
+// deno-lint-ignore no-empty-interface
+export interface SpecialPrimitiveValue {}
+
+export interface SpecialPrimitiveValueConstructor {
+  prototype: SpecialPrimitiveValue;
+}
+
+export declare const SpecialPrimitiveValue: SpecialPrimitiveValueConstructor;
+
+/**
+ * Temporal type representing nanoseconds from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface StorableEpochNsec extends SpecialPrimitiveValue {
+  readonly value: bigint;
+}
+
+export interface StorableEpochNsecConstructor {
+  new (value: bigint): StorableEpochNsec;
+  prototype: StorableEpochNsec;
+}
+
+export declare const StorableEpochNsec: StorableEpochNsecConstructor;
+
+/**
+ * Temporal type representing days from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface StorableEpochDays extends SpecialPrimitiveValue {
+  readonly value: bigint;
+}
+
+export interface StorableEpochDaysConstructor {
+  new (value: bigint): StorableEpochDays;
+  prototype: StorableEpochDays;
+}
+
+export declare const StorableEpochDays: StorableEpochDaysConstructor;
+
+/**
+ * A value that can be stored in the storage layer. Similar to `JSONValue` but
+ * intended for use at storage boundaries.
+ */
+export type StorableValue = StorableDatum | undefined;
+
+/**
+ * The full set of values that the storage layer can represent.
+ */
+export type StorableDatum =
+  | null
+  | boolean
+  | number
+  | string
+  | bigint
+  | StorableEpochNsec
+  | StorableEpochDays
+  | StorableArray
+  | StorableObject
+  | StorableInstance
+  | undefined;
+
+/** An array of storable data. */
+export interface StorableArray extends ArrayLike<StorableDatum> {}
+
+/** An object/record of storable data. */
+export interface StorableObject extends Record<string, StorableDatum> {}
+
+// ============================================================================
+// Runtime Constants
+// ============================================================================
+
 // Runtime constants - defined by @commontools/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;

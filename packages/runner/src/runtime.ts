@@ -17,15 +17,15 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   resetStorableValueConfig,
   setStorableValueConfig,
-} from "@commontools/memory/storable-value";
+} from "@commontools/data-model/storable-value";
 import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+} from "@commontools/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
-} from "@commontools/memory/json-encoding-dispatch";
+} from "@commontools/data-model/json-encoding-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {

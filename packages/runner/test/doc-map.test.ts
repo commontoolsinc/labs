@@ -13,7 +13,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+} from "@commontools/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";

@@ -1,4 +1,4 @@
-import { fromString, refer } from "@commontools/memory/reference";
+import { fromString, refer } from "@commontools/data-model/value-hash";
 import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   CauseString,

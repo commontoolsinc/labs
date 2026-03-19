@@ -8,7 +8,7 @@ import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
-} from "@commontools/memory/storable-value";
+} from "@commontools/data-model/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";

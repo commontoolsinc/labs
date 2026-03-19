@@ -6,7 +6,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "../reference.ts";
+} from "@commontools/data-model/value-hash";
 import { type ACL, type Invocation } from "../interface.ts";
 import { ANYONE_USER, checkACL } from "../acl.ts";
 

@@ -1,9 +1,8 @@
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "./fabric-value.ts";
+import { DECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
 import {
-  DECONSTRUCT,
   isStorableInstance,
   type ReconstructionContext,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
@@ -20,10 +19,7 @@ export type JsonWireValue =
   | string
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "./storable-native-instances.ts";
+import { StorableEpochDays, StorableEpochNsec } from "./storable-epoch.ts";
 import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,

@@ -5,11 +5,9 @@ import {
   resetStorableValueConfig,
   setStorableValueConfig,
 } from "../storable-value.ts";
-import type { StorableValue } from "../interface.ts";
-import {
-  StorableEpochNsec,
-  StorableError,
-} from "../storable-native-instances.ts";
+import type { StorableValue } from "../fabric-value.ts";
+import { StorableEpochNsec } from "../storable-epoch.ts";
+import { StorableError } from "../storable-native-instances.ts";
 
 // ============================================================================
 // Tests

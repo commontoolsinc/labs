@@ -8,9 +8,9 @@ import type {
   Revision,
   Transaction,
 } from "./interface.ts";
-import type { ContentId } from "./reference.ts";
+import type { ContentId } from "@commontools/data-model/value-hash";
 import { assert } from "./fact.ts";
-import { fromString } from "./reference.ts";
+import { fromString } from "@commontools/data-model/value-hash";
 
 export const COMMIT_LOG_TYPE = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({

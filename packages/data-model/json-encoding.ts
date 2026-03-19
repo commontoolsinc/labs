@@ -1,13 +1,12 @@
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "./fabric-value.ts";
+import { RECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
 import {
-  RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
   type StorableClass,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
-import { deepFreeze } from "@commontools/data-model/deep-freeze";
+import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {

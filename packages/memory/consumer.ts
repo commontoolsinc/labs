@@ -48,7 +48,11 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { type ContentId, contentIdFromJSON, refer } from "./reference.ts";
+import {
+  type ContentId,
+  contentIdFromJSON,
+  refer,
+} from "@commontools/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -62,7 +66,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { storableFromNativeValue } from "./storable-value.ts";
+import { storableFromNativeValue } from "@commontools/data-model/storable-value";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";

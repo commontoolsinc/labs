@@ -1,4 +1,4 @@
-import { refer } from "@commontools/memory/reference";
+import { refer } from "@commontools/data-model/value-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -10,7 +10,7 @@ import type {
   Unit,
 } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
 // TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
 // but rollup has issues
 import {

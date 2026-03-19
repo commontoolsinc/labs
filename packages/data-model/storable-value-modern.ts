@@ -3,15 +3,13 @@ import type {
   StorableNativeObject,
   StorableValue,
   StorableValueLayer,
-} from "./interface.ts";
-import {
-  isStorableInstance,
-  type StorableInstance,
-} from "./storable-protocol.ts";
+} from "./fabric-value.ts";
+import type { StorableInstance } from "./storable-instance.ts";
+import { isStorableInstance } from "./storable-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { StorableEpochNsec } from "./storable-epoch.ts";
 import {
   isConvertibleNativeInstance,
-  StorableEpochNsec,
   StorableError,
   StorableRegExp,
   UNSAFE_KEYS,

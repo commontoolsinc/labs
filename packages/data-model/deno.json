@@ -21,6 +21,29 @@
   },
   "exports": {
     "./deep-freeze": "./deep-freeze.ts",
-    "./schema-utils": "./schema-utils.ts"
+    "./schema-utils": "./schema-utils.ts",
+    "./fabric-value": "./fabric-value.ts",
+    "./storable-instance": "./storable-instance.ts",
+    "./special-primitive-value": "./special-primitive-value.ts",
+    "./storable-epoch": "./storable-epoch.ts",
+    "./bigint-encoding": "./bigint-encoding.ts",
+    "./storable-content-id": "./storable-content-id.ts",
+    "./storable-protocol": "./storable-protocol.ts",
+    "./type-tags": "./type-tags.ts",
+    "./explicit-tag-storable": "./explicit-tag-storable.ts",
+    "./unknown-storable": "./unknown-storable.ts",
+    "./problematic-storable": "./problematic-storable.ts",
+    "./hash-impl": "./hash-impl.ts",
+    "./canonical-hash": "./canonical-hash.ts",
+    "./frozen-builtins": "./frozen-builtins.ts",
+    "./storable-native-instances": "./storable-native-instances.ts",
+    "./json-encoding": "./json-encoding.ts",
+    "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
+    "./json-type-handlers": "./json-type-handlers.ts",
+    "./storable-value": "./storable-value.ts",
+    "./storable-value-legacy": "./storable-value-legacy.ts",
+    "./storable-value-modern": "./storable-value-modern.ts",
+    "./storable-value-utils": "./storable-value-utils.ts",
+    "./value-hash": "./value-hash.ts"
   }
 }

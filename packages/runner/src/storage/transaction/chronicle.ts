@@ -1,6 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { storableFromNativeValue } from "@commontools/memory/storable-value";
+import { storableFromNativeValue } from "@commontools/data-model/storable-value";
 import type {
   Assertion,
   IAttestation,
@@ -33,7 +33,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "@commontools/memory/reference";
+import { refer } from "@commontools/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);

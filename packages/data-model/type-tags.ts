@@ -1,7 +1,4 @@
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "./storable-native-instances.ts";
+import { StorableEpochDays, StorableEpochNsec } from "./storable-epoch.ts";
 import { StorableContentId } from "./storable-content-id.ts";
 import { isStorableInstance } from "./storable-protocol.ts";
 

@@ -8,7 +8,11 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import { type ContentId, fromString, refer } from "./reference.ts";
+import {
+  type ContentId,
+  fromString,
+  refer,
+} from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -68,8 +72,11 @@ export type {
 } from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isRecord } from "../utils/src/types.ts";
-import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
-import type { ReconstructionContext } from "./storable-protocol.ts";
+import {
+  jsonFromValue,
+  valueFromJson,
+} from "@commontools/data-model/json-encoding-dispatch";
+import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
 export type * from "./interface.ts";
 
 /**

@@ -6,9 +6,8 @@ import {
 } from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
 import { StorableContentId } from "../storable-content-id.ts";
+import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import {
-  StorableEpochDays,
-  StorableEpochNsec,
   StorableError,
   StorableUint8Array,
 } from "../storable-native-instances.ts";

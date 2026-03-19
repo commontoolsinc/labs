@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  DECONSTRUCT,
-  isStorableInstance,
-  RECONSTRUCT,
-} from "../storable-protocol.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
+import { isStorableInstance } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import type { StorableValue } from "../interface.ts";
+import type { StorableValue } from "../fabric-value.ts";
 import {
   isConvertibleNativeInstance,
   nativeValueFromStorableValue,

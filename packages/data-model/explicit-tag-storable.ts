@@ -1,5 +1,5 @@
-import type { StorableValue } from "./interface.ts";
-import { StorableInstance } from "./storable-protocol.ts";
+import type { StorableValue } from "./fabric-value.ts";
+import { StorableInstance } from "./storable-instance.ts";
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.

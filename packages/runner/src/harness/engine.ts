@@ -27,7 +27,7 @@ import {
 } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { refer } from "@commontools/memory/reference";
+import { refer } from "@commontools/data-model/value-hash";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 

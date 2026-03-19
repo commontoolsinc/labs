@@ -7,7 +7,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "../reference.ts";
+} from "@commontools/data-model/value-hash";
 import { Invocation } from "../interface.ts";
 
 // Some generated service key.
