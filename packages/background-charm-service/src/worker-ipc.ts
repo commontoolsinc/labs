@@ -13,7 +13,6 @@ export type InitializationData = {
   rawIdentity: KeyPairRaw;
   experimental?: {
     modernDataModel?: boolean;
-    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
 };

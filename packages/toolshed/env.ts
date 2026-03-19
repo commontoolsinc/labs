@@ -190,9 +190,6 @@ const EnvSchema = z.object({
   EXPERIMENTAL_MODERN_DATA_MODEL: z.string().default("false").transform((
     v,
   ) => v === "true"),
-  EXPERIMENTAL_DATA_MODEL_PROTOCOL: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
     v,
   ) => v === "true"),

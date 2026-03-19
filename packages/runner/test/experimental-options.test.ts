@@ -41,7 +41,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
-        dataModelProtocol: false,
         unifiedJsonEncoding: false,
         modernHash: false,
       });
@@ -61,7 +60,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
-        dataModelProtocol: false,
         unifiedJsonEncoding: false,
         modernHash: true,
       });

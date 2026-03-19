@@ -96,8 +96,6 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean;
-  /** Enable the fabric protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
-  dataModelProtocol?: boolean;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
@@ -211,7 +209,6 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernDataModel: false,
-      dataModelProtocol: false,
       unifiedJsonEncoding: false,
       modernHash: false,
       ...options.experimental,

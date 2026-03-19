@@ -10,7 +10,6 @@ affecting users who haven't opted in.
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
-| `dataModelProtocol` | `EXPERIMENTAL_DATA_MODEL_PROTOCOL` | Enables the fabric protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
 | `modernHash` | `EXPERIMENTAL_MODERN_HASH` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
 
@@ -29,7 +28,7 @@ EXPERIMENTAL_MODERN_DATA_MODEL=true deno task dev
 
 # Enable multiple flags
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
-EXPERIMENTAL_DATA_MODEL_PROTOCOL=true \
+EXPERIMENTAL_UNIFIED_JSON_ENCODING=true \
 deno task dev
 ```
 

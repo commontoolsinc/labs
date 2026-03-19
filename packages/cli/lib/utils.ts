@@ -19,7 +19,6 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   const read = (name: string) => Deno.env.get(name) === "true";
   const opts: ExperimentalOptions = {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
-    dataModelProtocol: read("EXPERIMENTAL_DATA_MODEL_PROTOCOL"),
     unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
     modernHash: read("EXPERIMENTAL_MODERN_HASH"),
   };

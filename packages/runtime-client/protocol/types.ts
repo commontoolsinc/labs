@@ -106,7 +106,6 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;
-    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
   // Content hash of the worker bundle, used for compilation cache

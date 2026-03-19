@@ -26,7 +26,6 @@ export interface WorkerOptions {
   timeoutMs?: number;
   experimental?: {
     modernDataModel?: boolean;
-    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
 }
