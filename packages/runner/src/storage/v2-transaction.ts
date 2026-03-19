@@ -83,8 +83,6 @@ type SpaceBranch = {
   writer?: ITransactionWriter;
 };
 
-type ActivityOrderEntry = number;
-
 type ReadyState = {
   status: "ready";
 };
@@ -603,7 +601,10 @@ class V2TransactionJournal implements ITransactionJournal {
   constructor(private readonly tx: V2StorageTransaction) {}
 
   activity(): Iterable<Activity> {
-    return this.tx.activity();
+    throw new Error(
+      "V2 transactions do not support journal.activity(); " +
+        "use getReadActivities(), getReactivityLog(), or getWriteDetails().",
+    );
   }
 
   novelty(space: MemorySpace): Iterable<IAttestation> {
@@ -673,13 +674,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
-  #writeActivities: IMemorySpaceAddress[] = [];
-  #activityOrder: ActivityOrderEntry[] = [];
-  #reactivityLog: TransactionReactivityLog = {
-    reads: [],
-    shallowReads: [],
-    writes: [],
-  };
+  #reactivityLogCache?: TransactionReactivityLog;
   #writeSpace?: MemorySpace;
   #readOnlySource?: string;
   #lastDocument?: {
@@ -707,21 +702,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     return new this(manager);
   }
 
-  activity(): Iterable<Activity> {
-    const reads = this.#readActivities;
-    const writes = this.#writeActivities;
-    const order = this.#activityOrder;
-    return (function* (): Iterable<Activity> {
-      for (const entry of order) {
-        if (entry > 0) {
-          yield { read: reads[entry - 1]! };
-          continue;
-        }
-        yield { write: writes[-entry - 1]! };
-      }
-    })();
-  }
-
   status(): StorageTransactionStatus {
     if (this.#state.status === "done") {
       if (this.#state.result.error) {
@@ -744,7 +724,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   getReactivityLog() {
-    return this.#reactivityLog;
+    this.#reactivityLogCache ??= this.buildReactivityLog();
+    return this.#reactivityLogCache;
   }
 
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
@@ -842,24 +823,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
     };
     this.#readActivities.push(readActivity);
-    this.#activityOrder.push(this.#readActivities.length);
-    if (!isReadIgnoredForScheduling(readMeta)) {
-      const logAddress = {
-        space: address.space,
-        id: address.id,
-        type: address.type,
-        path: address.path.slice(1),
-      };
-      if (options?.nonRecursive === true) {
-        this.#reactivityLog.shallowReads.push(logAddress);
-      } else {
-        this.#reactivityLog.reads.push(logAddress);
-      }
-      if (isReadMarkedAsPotentialWrite(readMeta)) {
-        this.#reactivityLog.potentialWrites ??= [];
-        this.#reactivityLog.potentialWrites.push(logAddress);
-      }
-    }
+    this.invalidateReactivityLog();
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
@@ -1044,15 +1008,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       type: address.type,
       path: address.path,
     };
-    this.#writeActivities.push(writeActivity);
-    this.#activityOrder.push(-this.#writeActivities.length);
-    this.#reactivityLog.writes.push({
-      space,
-      id: address.id,
-      type: address.type,
-      path: address.path.slice(1),
-    });
-
     const key = encodePointer(address.path);
     const existingDetail = doc.writeDetails.get(key);
     if (existingDetail) {
@@ -1064,6 +1019,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         previousValue: previous.kind === "ok" ? previous.value : undefined,
       });
     }
+    this.invalidateReactivityLog();
 
     return { ok: collapsedNext };
   }
@@ -1156,15 +1112,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       type: address.type,
       path: address.path,
     };
-    this.#writeActivities.push(writeActivity);
-    this.#activityOrder.push(-this.#writeActivities.length);
-    this.#reactivityLog.writes.push({
-      space,
-      id: address.id,
-      type: address.type,
-      path: address.path.slice(1),
-    });
-
     const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
     if (existing) {
@@ -1176,6 +1123,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         previousValue: undefined,
       });
     }
+    this.invalidateReactivityLog();
 
     return { ok: collapsedNext };
   }
@@ -1281,19 +1229,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       type: address.type,
       path: address.path,
     };
-    this.#writeActivities.push(writeActivity);
-    this.#activityOrder.push(-this.#writeActivities.length);
-    this.#reactivityLog.writes.push({
-      space,
-      id: address.id,
-      type: address.type,
-      path: address.path.slice(1),
-    });
-
     const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
     if (existing) {
       existing.value = value;
+      this.invalidateReactivityLog();
       return;
     }
 
@@ -1302,6 +1242,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       value,
       previousValue,
     });
+    this.invalidateReactivityLog();
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -1366,6 +1307,64 @@ export class V2StorageTransaction implements IStorageTransaction {
       error: this.#state.status === "done" && this.#state.result.error
         ? this.#state.result.error
         : TransactionCompleteError(),
+    };
+  }
+
+  private invalidateReactivityLog(): void {
+    this.#reactivityLogCache = undefined;
+  }
+
+  private buildReactivityLog(): TransactionReactivityLog {
+    const reads: IMemorySpaceAddress[] = [];
+    const shallowReads: IMemorySpaceAddress[] = [];
+    let potentialWrites: IMemorySpaceAddress[] | undefined;
+
+    for (const read of this.#readActivities) {
+      const meta = read.meta ?? EMPTY_META;
+      if (isReadIgnoredForScheduling(meta)) {
+        continue;
+      }
+
+      const address = {
+        space: read.space,
+        id: read.id,
+        type: read.type,
+        path: read.path.slice(1),
+      };
+
+      if (read.nonRecursive === true) {
+        shallowReads.push(address);
+      } else {
+        reads.push(address);
+      }
+
+      if (isReadMarkedAsPotentialWrite(meta)) {
+        potentialWrites ??= [];
+        potentialWrites.push(address);
+      }
+    }
+
+    const writes: IMemorySpaceAddress[] = [];
+    for (const branch of this.#branches.values()) {
+      for (const doc of branch.docs.values()) {
+        for (const detail of doc.writeDetails.values()) {
+          writes.push({
+            space: detail.address.space,
+            id: detail.address.id,
+            type: detail.address.type,
+            path: detail.address.path.slice(1),
+          });
+        }
+      }
+    }
+
+    return {
+      reads,
+      shallowReads,
+      writes,
+      ...(potentialWrites && potentialWrites.length > 0
+        ? { potentialWrites }
+        : {}),
     };
   }
 

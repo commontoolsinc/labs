@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -294,7 +294,7 @@ describe("transaction inspection", () => {
     }
   });
 
-  it("preserves interleaved journal activity order on the native v2 path", async () => {
+  it("throws when native v2 code tries to replay journal activity", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -322,33 +322,11 @@ describe("transaction inspection", () => {
         path: ["value", "count"],
       }, 2);
 
-      assertEquals([...tx.journal.activity()], [
-        {
-          write: {
-            space,
-            id,
-            type: "application/json",
-            path: [],
-          },
-        },
-        {
-          read: {
-            space,
-            id,
-            type: "application/json",
-            path: ["value"],
-            meta: {},
-          },
-        },
-        {
-          write: {
-            space,
-            id,
-            type: "application/json",
-            path: ["value", "count"],
-          },
-        },
-      ]);
+      assertThrows(
+        () => [...tx.journal.activity()],
+        Error,
+        "V2 transactions do not support journal.activity()",
+      );
     } finally {
       await storageManager.close();
     }

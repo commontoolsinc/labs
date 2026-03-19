@@ -462,18 +462,14 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
       })],
       claims: [],
     }, {
-      journal: {
-        activity() {
-          return [{
-            read: {
-              space,
-              id: uri,
-              type: DOCUMENT_MIME,
-              path: [],
-              meta: { seq },
-            },
-          }];
-        },
+      getReadActivities() {
+        return [{
+          space,
+          id: uri,
+          type: DOCUMENT_MIME,
+          path: [],
+          meta: { seq },
+        }];
       },
     });
 

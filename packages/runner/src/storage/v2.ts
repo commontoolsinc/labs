@@ -57,7 +57,7 @@ import type {
   Unit,
 } from "./interface.ts";
 import * as SubscriptionManager from "./subscription.ts";
-import { getTransactionReadActivities } from "./transaction-inspection.ts";
+import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import {
   fromMemoryV2Document,
   toMemoryV2DocumentFromStorageValue,
@@ -1017,7 +1017,15 @@ class SpaceReplica implements ISpaceReplica {
       return { confirmed, pending };
     }
 
-    for (const read of getTransactionReadActivities(source)) {
+    const reads = getDirectTransactionReadActivities(source);
+    if (!reads) {
+      throw new Error(
+        "Memory v2 commit tracking requires source.getReadActivities(); " +
+          "journal.activity() fallback is unsupported.",
+      );
+    }
+
+    for (const read of reads) {
       if (read.space !== this.#space || read.type !== DOCUMENT_MIME) {
         continue;
       }

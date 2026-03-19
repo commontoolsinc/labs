@@ -19,10 +19,16 @@ export function getDirectTransactionReactivityLog(
   return tx.getReactivityLog?.() ?? unwrap(tx).getReactivityLog?.();
 }
 
+export function getDirectTransactionReadActivities(
+  tx: TxLike,
+): Iterable<IReadActivity> | undefined {
+  return tx.getReadActivities?.() ?? unwrap(tx).getReadActivities?.();
+}
+
 export function getTransactionReadActivities(
   tx: TxLike,
 ): Iterable<IReadActivity> {
-  const direct = tx.getReadActivities?.() ?? unwrap(tx).getReadActivities?.();
+  const direct = getDirectTransactionReadActivities(tx);
   if (direct) {
     return direct;
   }

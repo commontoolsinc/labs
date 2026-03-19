@@ -150,18 +150,14 @@ describe("Memory v2 storage notifications", () => {
     );
 
     const source = {
-      journal: {
-        activity() {
-          return [{
-            read: {
-              space,
-              id: uri,
-              type: "application/json",
-              path: [],
-              meta: { seq: 1 },
-            },
-          }];
-        },
+      getReadActivities() {
+        return [{
+          space,
+          id: uri,
+          type: "application/json",
+          path: [],
+          meta: { seq: 1 },
+        }];
       },
     } as any;
 
@@ -226,18 +222,14 @@ describe("Memory v2 storage notifications", () => {
     });
 
     const source = {
-      journal: {
-        activity() {
-          return [{
-            read: {
-              space,
-              id: uri,
-              type: "application/json",
-              path: [],
-              meta: { seq: 1 },
-            },
-          }];
-        },
+      getReadActivities() {
+        return [{
+          space,
+          id: uri,
+          type: "application/json",
+          path: [],
+          meta: { seq: 1 },
+        }];
       },
     } as any;
 

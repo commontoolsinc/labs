@@ -488,22 +488,21 @@ const sourceFromReads = (
     seq?: number;
     nonRecursive?: boolean;
   }>,
-) => ({
-  journal: {
-    activity() {
-      return reads.map((read) => ({
-        read: {
-          space,
-          id: read.id,
-          type: DOCUMENT_MIME,
-          path: read.path ?? [],
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-          meta: read.seq === undefined ? {} : { seq: read.seq },
-        },
-      }));
+) => {
+  const activities = reads.map((read) => ({
+    space,
+    id: read.id,
+    type: DOCUMENT_MIME,
+    path: read.path ?? [],
+    ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+    meta: read.seq === undefined ? {} : { seq: read.seq },
+  }));
+  return {
+    getReadActivities() {
+      return activities;
     },
-  },
-});
+  };
+};
 
 const visibleValue = (provider: TestProvider, id: URI) => {
   const value = provider.get(id)?.value;
