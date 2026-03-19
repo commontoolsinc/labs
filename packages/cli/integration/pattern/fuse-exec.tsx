@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  computed,
   handler,
   NAME,
   pattern,
   patternTool,
   type PatternToolResult,
   schema,
+  str,
   type Stream,
 } from "commontools";
 import "commontools/schema";
@@ -26,7 +26,7 @@ interface Output {
   messages: string[];
   recordMessage: Stream<{ message: string }>;
   legacyWrite: Stream<Record<string, never>>;
-  search: PatternToolResult<{ messages: string[] }>;
+  search: PatternToolResult<{ source: string }>;
 }
 
 const model = schema({
@@ -79,34 +79,34 @@ const legacyWrite = handler(
 
 const searchTool = pattern(
   (
-    { query, messages }: { query: string; messages: string[] },
+    { query, help, source }: { query: string; help?: string; source: string },
   ) => {
-    const results = computed(() => {
-      const q = query.toLowerCase();
-      return messages.filter((m) => m.toLowerCase().includes(q));
-    });
+    const helpValue = help ?? "";
     return {
       query,
-      results,
-      count: computed(() => results.length),
+      help: helpValue,
+      source,
+      summary: str`${source}:${query}:${helpValue}`,
     };
   },
   {
     type: "object",
     properties: {
       query: { type: "string" },
-      messages: { type: "array", items: { type: "string" } },
+      help: { type: "string" },
+      source: { type: "string" },
     },
-    required: ["query", "messages"],
+    required: ["query", "source"],
   },
   {
     type: "object",
     properties: {
       query: { type: "string" },
-      results: { type: "array", items: { type: "string" } },
-      count: { type: "number" },
+      help: { type: "string" },
+      source: { type: "string" },
+      summary: { type: "string" },
     },
-    required: ["query", "results", "count"],
+    required: ["query", "help", "source", "summary"],
   },
 );
 
@@ -121,7 +121,7 @@ export const customPatternExport = pattern<Input, Output>(
       recordMessage: recordMessage(cell),
       legacyWrite: legacyWrite(cell),
       search: patternTool(searchTool, {
-        messages: cell.messages,
+        source: "bound-source",
       }),
     };
   },
