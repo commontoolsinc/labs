@@ -47,10 +47,18 @@ describe("default-app flow test", () => {
       return innerText === "📝 New Note";
     });
 
-    // Navigate back to the space page and wait for new note to appear
+    // Navigate back to the space page via header breadcrumb
     console.log("Navigate back to space page...");
     await waitFor(async () => {
-      return await clickPieceLinkWithText(page, spaceName);
+      const el = await page.waitForSelector(".header-space", {
+        strategy: "pierce",
+      });
+      const text = await el.innerText();
+      if (text?.trim() === spaceName) {
+        await el.click();
+        return true;
+      }
+      return false;
     });
     await shell.waitForState({ view: { spaceName }, identity });
 
