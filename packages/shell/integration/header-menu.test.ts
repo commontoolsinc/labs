@@ -3,9 +3,34 @@ import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
+import type { Page } from "@astral/astral";
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;
+
+/** Pierce shadow DOM to find an element by selector. */
+function pierce(page: Page, selector: string, timeout?: number) {
+  return page.waitForSelector(selector, {
+    strategy: "pierce",
+    ...(timeout != null ? { timeout } : {}),
+  });
+}
+
+/** Wait until the menu container has (or lacks) the "open" class. */
+async function waitForMenuState(page: Page, open: boolean) {
+  await waitFor(async () => {
+    const el = await pierce(page, ".menu-container");
+    const cls = await el.evaluate((e: Element) => e.className);
+    return open ? cls.includes("open") : !cls.includes("open");
+  });
+}
+
+/** Click the nav-picker trigger to open the menu. */
+async function openMenu(page: Page) {
+  const trigger = await pierce(page, ".nav-picker");
+  await trigger.click();
+  await waitForMenuState(page, true);
+}
 
 describe("header menu tests", () => {
   const shell = new ShellIntegration();
@@ -27,108 +52,42 @@ describe("header menu tests", () => {
     await loginAndGoto();
 
     // Menu should be closed initially
-    const menuContainer = await page.waitForSelector(".menu-container", {
-      strategy: "pierce",
-    });
+    const menuContainer = await pierce(page, ".menu-container");
     const classes = await menuContainer.evaluate(
       (el: Element) => el.className,
     );
     assert(!classes.includes("open"), "Menu should be closed initially");
 
-    // Click the logo/nav-picker to open
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
-    await trigger.click();
-
-    // Menu should be open
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return cls.includes("open");
-    });
+    // Open menu
+    await openMenu(page);
 
     // Click close button
-    const closeBtn = await page.waitForSelector(".menu-close", {
-      strategy: "pierce",
-    });
+    const closeBtn = await pierce(page, ".menu-close");
     await closeBtn.click();
 
     // Menu should be closed
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return !cls.includes("open");
-    });
+    await waitForMenuState(page, false);
   });
 
   it("closes the menu via Escape key", async () => {
     const page = shell.page();
     await loginAndGoto();
 
-    // Open the menu
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
-    await trigger.click();
-
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return cls.includes("open");
-    });
-
-    // Press Escape
+    await openMenu(page);
     await page.keyboard.press("Escape");
-
-    // Menu should be closed
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return !cls.includes("open");
-    });
+    await waitForMenuState(page, false);
   });
 
   it("closes the menu via backdrop click", async () => {
     const page = shell.page();
     await loginAndGoto();
 
-    // Open the menu
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
-    await trigger.click();
+    await openMenu(page);
 
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return cls.includes("open");
-    });
-
-    // Click the backdrop
-    const backdrop = await page.waitForSelector(".menu-backdrop", {
-      strategy: "pierce",
-    });
+    const backdrop = await pierce(page, ".menu-backdrop");
     await backdrop.click();
 
-    // Menu should be closed
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return !cls.includes("open");
-    });
+    await waitForMenuState(page, false);
   });
 
   it("shows space name in desktop breadcrumb", async () => {
@@ -137,10 +96,7 @@ describe("header menu tests", () => {
 
     await waitFor(async () => {
       try {
-        const el = await page.waitForSelector(".header-space", {
-          strategy: "pierce",
-          timeout: 500,
-        });
+        const el = await pierce(page, ".header-space", 500);
         const text = await el.innerText();
         return text?.trim() === SPACE_NAME;
       } catch {
@@ -153,9 +109,7 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
+    const trigger = await pierce(page, ".nav-picker");
 
     const hasPopup = await trigger.evaluate(
       (el: Element) => el.getAttribute("aria-haspopup"),
@@ -170,9 +124,7 @@ describe("header menu tests", () => {
     // Open menu and check expanded state changes
     await trigger.click();
     await waitFor(async () => {
-      const el = await page.waitForSelector(".nav-picker", {
-        strategy: "pierce",
-      });
+      const el = await pierce(page, ".nav-picker");
       const val = await el.evaluate(
         (e: Element) => e.getAttribute("aria-expanded"),
       );
@@ -184,24 +136,10 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
-    // Open the menu
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
-    await trigger.click();
-
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return cls.includes("open");
-    });
+    await openMenu(page);
 
     // Check role=menu on panel
-    const panel = await page.waitForSelector(".menu-panel", {
-      strategy: "pierce",
-    });
+    const panel = await pierce(page, ".menu-panel");
     const panelRole = await panel.evaluate(
       (el: Element) => el.getAttribute("role"),
     );
@@ -230,27 +168,16 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
-    // Open menu at space root — should show "Go Home"
-    const trigger = await page.waitForSelector(".nav-picker", {
-      strategy: "pierce",
-    });
-    await trigger.click();
-
-    await waitFor(async () => {
-      const el = await page.waitForSelector(".menu-container", {
-        strategy: "pierce",
-      });
-      const cls = await el.evaluate((e: Element) => e.className);
-      return cls.includes("open");
-    });
+    await openMenu(page);
 
     await waitFor(async () => {
       try {
-        const items = await page.waitForSelector(
+        const el = await pierce(
+          page,
           '[role="menuitem"] .menu-item-label',
-          { strategy: "pierce", timeout: 500 },
+          500,
         );
-        const text = await items.innerText();
+        const text = await el.innerText();
         return text?.trim() === "Go Home";
       } catch {
         return false;
