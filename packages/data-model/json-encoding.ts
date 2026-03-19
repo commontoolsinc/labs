@@ -1,14 +1,14 @@
 import type { FabricValue } from "./fabric-value.ts";
-import { type FabricInstance, RECONSTRUCT } from "./storable-instance.ts";
+import { type FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
   type FabricClass,
-} from "./storable-protocol.ts";
-import { ExplicitTagValue } from "./explicit-tag-storable.ts";
+} from "./fabric-protocol.ts";
+import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { deepFreeze } from "./deep-freeze.ts";
-import { UnknownValue } from "./unknown-storable.ts";
-import { ProblematicValue } from "./problematic-storable.ts";
+import { UnknownValue } from "./unknown-value.ts";
+import { ProblematicValue } from "./problematic-value.ts";
 import {
   createDefaultRegistry,
   type JsonWireValue,
@@ -21,7 +21,7 @@ import {
   FabricRegExp,
   FabricSet,
   FabricUint8Array,
-} from "./storable-native-instances.ts";
+} from "./fabric-native-instances.ts";
 import { TAGS } from "./type-tags.ts";
 
 /** Shared default handler registry, created once. */

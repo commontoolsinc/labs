@@ -11,9 +11,9 @@
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "./storable-content-id.ts";
-import { FabricUint8Array } from "./storable-native-instances.ts";
-import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
+import { FabricHash } from "./fabric-hash.ts";
+import { FabricUint8Array } from "./fabric-native-instances.ts";
+import { DECONSTRUCT, type FabricInstance } from "./fabric-instance.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";

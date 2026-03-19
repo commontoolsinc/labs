@@ -8,7 +8,7 @@ import {
   shallowFabricFromNativeValue,
   fabricFromNativeValue,
 } from "../storable-value.ts";
-import { FabricError } from "../storable-native-instances.ts";
+import { FabricError } from "../fabric-native-instances.ts";
 
 describe("storable-value", () => {
   // Explicitly pin richStorableValues off so the legacy-path tests (below the

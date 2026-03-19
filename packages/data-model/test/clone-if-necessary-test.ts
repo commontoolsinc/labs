@@ -6,8 +6,8 @@ import {
   setDataModelConfig,
 } from "../storable-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
-import { FabricEpochNsec } from "../storable-epoch.ts";
-import { FabricError } from "../storable-native-instances.ts";
+import { FabricEpochNsec } from "../fabric-epoch.ts";
+import { FabricError } from "../fabric-native-instances.ts";
 
 // ============================================================================
 // Tests

@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
-import { DECONSTRUCT, FabricInstance } from "../storable-instance.ts";
-import { isFabricInstance } from "../storable-protocol.ts";
-import type { ReconstructionContext } from "../storable-protocol.ts";
+import { DECONSTRUCT, FabricInstance } from "../fabric-instance.ts";
+import { isFabricInstance } from "../fabric-protocol.ts";
+import type { ReconstructionContext } from "../fabric-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
-import { UnknownValue } from "../unknown-storable.ts";
-import { ProblematicValue } from "../problematic-storable.ts";
-import { ExplicitTagValue } from "../explicit-tag-storable.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
+import { UnknownValue } from "../unknown-value.ts";
+import { ProblematicValue } from "../problematic-value.ts";
+import { ExplicitTagValue } from "../explicit-tag-value.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import {
   nativeFromFabricValueModern,
   nativeValueFromFabricValue,
   FabricError,
   FabricMap,
   FabricSet,
-} from "../storable-native-instances.ts";
+} from "../fabric-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   canBeStored,

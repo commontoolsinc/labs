@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
-import { isFabricInstance } from "../storable-protocol.ts";
-import type { ReconstructionContext } from "../storable-protocol.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
+import { isFabricInstance } from "../fabric-protocol.ts";
+import type { ReconstructionContext } from "../fabric-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
   isConvertibleNativeInstance,
   nativeValueFromFabricValue,
   FabricNativeWrapper,
   FabricRegExp,
-} from "../storable-native-instances.ts";
+} from "../fabric-native-instances.ts";
 import {
   canBeStored,
   resetDataModelConfig,

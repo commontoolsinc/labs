@@ -1,6 +1,6 @@
-import { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
-import { FabricHash } from "./storable-content-id.ts";
-import { isFabricInstance } from "./storable-protocol.ts";
+import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
+import { FabricHash } from "./fabric-hash.ts";
+import { isFabricInstance } from "./fabric-protocol.ts";
 
 /**
  * Canonical type tags for the `/<Type>@<Version>` wire format. Collected in a

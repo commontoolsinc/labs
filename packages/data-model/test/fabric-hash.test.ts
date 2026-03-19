@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as Reference from "merkle-reference";
-import { FabricHash } from "../storable-content-id.ts";
+import { FabricHash } from "../fabric-hash.ts";
 import {
   contentIdFromJSON,
   fromString,

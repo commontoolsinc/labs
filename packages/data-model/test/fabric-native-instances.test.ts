@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
-import { isFabricInstance } from "../storable-protocol.ts";
-import type { ReconstructionContext } from "../storable-protocol.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
+import { isFabricInstance } from "../fabric-protocol.ts";
+import type { ReconstructionContext } from "../fabric-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
   isConvertibleNativeInstance,
@@ -13,7 +13,7 @@ import {
   FabricNativeWrapper,
   FabricSet,
   FabricUint8Array,
-} from "../storable-native-instances.ts";
+} from "../fabric-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   NATIVE_TAGS,

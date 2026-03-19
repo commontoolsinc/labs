@@ -1,7 +1,7 @@
 import type { FabricValue } from "./fabric-value.ts";
-import { DECONSTRUCT, RECONSTRUCT } from "./storable-instance.ts";
-import type { ReconstructionContext } from "./storable-protocol.ts";
-import { ExplicitTagValue } from "./explicit-tag-storable.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "./fabric-instance.ts";
+import type { ReconstructionContext } from "./fabric-protocol.ts";
+import { ExplicitTagValue } from "./explicit-tag-value.ts";
 
 /**
  * Holds an unrecognized type's data for round-tripping. When the serialization

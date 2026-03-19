@@ -1,5 +1,5 @@
 import type { FabricValue } from "./fabric-value.ts";
-import { FabricInstance } from "./storable-instance.ts";
+import { FabricInstance } from "./fabric-instance.ts";
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.

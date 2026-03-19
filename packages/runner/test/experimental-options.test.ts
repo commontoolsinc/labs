@@ -11,7 +11,7 @@ import {
   shallowFabricFromNativeValue,
   fabricFromNativeValue,
 } from "@commontools/data-model/storable-value";
-import { FabricError } from "@commontools/data-model/storable-native-instances";
+import { FabricError } from "@commontools/data-model/fabric-native-instances";
 import {
   hashOf,
   resetCanonicalHashConfig,

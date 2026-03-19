@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
-import { isFabricInstance } from "../storable-protocol.ts";
+import { isFabricInstance } from "../fabric-protocol.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,

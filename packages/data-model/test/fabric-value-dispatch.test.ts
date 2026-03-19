@@ -7,7 +7,7 @@ import {
   fabricFromNativeValue,
 } from "../storable-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
-import { FabricError } from "../storable-native-instances.ts";
+import { FabricError } from "../fabric-native-instances.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {

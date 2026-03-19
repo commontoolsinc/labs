@@ -5,12 +5,12 @@ import {
   assertThrows,
 } from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../value-hash-modern.ts";
-import { FabricHash } from "../storable-content-id.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
+import { FabricHash } from "../fabric-hash.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import {
   FabricError,
   FabricUint8Array,
-} from "../storable-native-instances.ts";
+} from "../fabric-native-instances.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");

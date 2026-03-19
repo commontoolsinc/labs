@@ -1,5 +1,5 @@
-import type { FabricInstance } from "./storable-instance.ts";
-import type { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
+import type { FabricInstance } from "./fabric-instance.ts";
+import type { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 
 /**
  * A value that can be stored in the storage layer. This is similar to

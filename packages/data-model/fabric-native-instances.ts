@@ -3,11 +3,11 @@ import {
   DECONSTRUCT,
   FabricInstance,
   RECONSTRUCT,
-} from "./storable-instance.ts";
+} from "./fabric-instance.ts";
 import {
   isFabricInstance,
   type ReconstructionContext,
-} from "./storable-protocol.ts";
+} from "./fabric-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";

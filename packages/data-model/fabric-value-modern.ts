@@ -4,18 +4,18 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./fabric-value.ts";
-import type { FabricInstance } from "./storable-instance.ts";
-import { isFabricInstance } from "./storable-protocol.ts";
+import type { FabricInstance } from "./fabric-instance.ts";
+import { isFabricInstance } from "./fabric-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
-import { FabricEpochNsec } from "./storable-epoch.ts";
+import { FabricEpochNsec } from "./fabric-epoch.ts";
 import {
   isConvertibleNativeInstance,
   FabricError,
   FabricRegExp,
   UNSAFE_KEYS,
-} from "./storable-native-instances.ts";
+} from "./fabric-native-instances.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
-import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
+import { isArrayWithOnlyIndexProperties } from "./fabric-value-utils.ts";
 
 /** Reject native objects with extra enumerable properties. */
 function rejectExtraProperties(value: object, typeName: string): void {

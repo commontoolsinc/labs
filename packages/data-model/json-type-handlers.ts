@@ -1,11 +1,11 @@
 import type { FabricValue } from "./fabric-value.ts";
-import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
+import { DECONSTRUCT, type FabricInstance } from "./fabric-instance.ts";
 import {
   isFabricInstance,
   type ReconstructionContext,
-} from "./storable-protocol.ts";
-import { ExplicitTagValue } from "./explicit-tag-storable.ts";
-import { ProblematicValue } from "./problematic-storable.ts";
+} from "./fabric-protocol.ts";
+import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { ProblematicValue } from "./problematic-value.ts";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -19,7 +19,7 @@ export type JsonWireValue =
   | string
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
-import { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
+import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,

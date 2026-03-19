@@ -12,20 +12,20 @@ import {
   isFabricValueModern,
   shallowFabricFromNativeValueModern,
   fabricFromNativeValueModern,
-} from "./storable-value-modern.ts";
-export type { CloneOptions } from "./storable-value-modern.ts";
-import { nativeFromFabricValueModern } from "./storable-native-instances.ts";
+} from "./fabric-value-modern.ts";
+export type { CloneOptions } from "./fabric-value-modern.ts";
+import { nativeFromFabricValueModern } from "./fabric-native-instances.ts";
 import {
   canBeStoredLegacy,
   cloneIfNecessaryLegacy,
   isFabricValueLegacy,
   shallowFabricFromNativeValueLegacy,
   fabricFromNativeValueLegacy,
-} from "./storable-value-legacy.ts";
+} from "./fabric-value-legacy.ts";
 export {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
-} from "./storable-value-utils.ts";
+} from "./fabric-value-utils.ts";
 
 // ---------------------------------------------------------------------------
 // Experimental storable value configuration

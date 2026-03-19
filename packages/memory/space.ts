@@ -76,7 +76,7 @@ import {
   jsonFromValue,
   valueFromJson,
 } from "@commontools/data-model/json-encoding-dispatch";
-import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
+import type { ReconstructionContext } from "@commontools/data-model/fabric-protocol";
 export type * from "./interface.ts";
 
 /**
