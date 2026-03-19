@@ -40,8 +40,14 @@ function extractSummary(piece: any): string | undefined {
 }
 
 /** Search sub-pattern: filters entries by query matching summary or name. */
+interface SearchInput {
+  /** Substring to match against piece names and summaries. Pass an empty string to return all entries. */
+  query: string;
+  entries: Writable<SummaryIndexEntry>[];
+}
+
 export const searchPattern = pattern<
-  { query: string; entries: Writable<SummaryIndexEntry>[] },
+  SearchInput,
   Writable<SummaryIndexEntry>[]
 >(({ query, entries }) => {
   return computed(() => {
