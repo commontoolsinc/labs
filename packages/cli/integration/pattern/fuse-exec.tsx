@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  computed,
   handler,
   NAME,
   pattern,
@@ -81,7 +82,7 @@ const searchTool = pattern(
   (
     { query, help, source }: { query: string; help?: string; source: string },
   ) => {
-    const helpValue = help ?? "";
+    const helpValue = computed(() => help ?? "");
     return {
       query,
       help: helpValue,
