@@ -1,7 +1,7 @@
 // Re-export from data-model where the implementation now lives.
 export {
-  contentIdFromJSON,
   type ContentId,
+  contentIdFromJSON,
   type DefinedReferent,
   fromString,
   isContentId,
