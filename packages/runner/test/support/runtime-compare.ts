@@ -6,6 +6,10 @@ import type { RuntimeProgram } from "../../src/harness/types.ts";
 import * as RuntimeModules from "../../src/harness/runtime-modules.ts";
 import type { JsScript } from "@commontools/js-compiler";
 import type { Pattern } from "../../src/builder/types.ts";
+import {
+  VerifiedPlainMap,
+  VerifiedPlainSet,
+} from "../../src/sandbox/plain-data.ts";
 import { LegacyEvalRuntime } from "./legacy-eval-runtime.ts";
 import {
   assertNoInternalRuntimeFrames,
@@ -323,6 +327,21 @@ async function executeLegacy(jsScript: JsScript): Promise<{
 function normalizeValue(value: unknown): unknown {
   if (typeof value === "function") {
     return "[Function]";
+  }
+  if (value instanceof Map || value instanceof VerifiedPlainMap) {
+    return {
+      __kind: "Map",
+      entries: Array.from(value.entries(), ([key, entry]) => [
+        normalizeValue(key),
+        normalizeValue(entry),
+      ]),
+    };
+  }
+  if (value instanceof Set || value instanceof VerifiedPlainSet) {
+    return {
+      __kind: "Set",
+      values: Array.from(value.values(), normalizeValue),
+    };
   }
   if (Array.isArray(value)) {
     return value.map(normalizeValue);

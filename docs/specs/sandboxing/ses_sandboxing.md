@@ -383,20 +383,26 @@ Version 1 of the allowed domain is a deliberate subset of
 - `bigint`
 - non-stateful `RegExp` values (no `g` or `y` flags, no extra own properties,
   `lastIndex === 0`)
+- `Map` values whose keys and values are allowed values and which have no extra
+  own properties; authored native `Map` instances are normalized to immutable
+  runtime-owned verified map wrappers before they escape module load
+- `Set` values whose members are allowed values and which have no extra own
+  properties; authored native `Set` instances are normalized to immutable
+  runtime-owned verified set wrappers before they escape module load
 - arrays of allowed values
 - plain object records with allowed values
 
-Future widening of this set, including support for `Map`, `Set`, temporal
-primitives, or other richer `StorableValue` members, requires an explicit spec
-revision and validator version bump. The v1 verifier MUST NOT silently widen
-with upstream `StorableValue` changes.
+Future widening of this set, including temporal primitives or other richer
+`StorableValue` members, requires an explicit spec revision and validator
+version bump. The v1 verifier MUST NOT silently widen with upstream
+`StorableValue` changes.
 
 The default rejected domain includes:
 
 - functions
 - `Promise`
 - `Error`
-- `Map` / `Set`
+- `WeakMap` / `WeakSet`
 - `Date`
 - class instances
 - proxies
@@ -417,6 +423,12 @@ mutable state or ambient capability may escape module load except through the
 validated plain-data result and the separately controlled console channel. This
 is enforced by the narrower module-load authority surface plus hardening of the
 Compartment global and module namespace objects.
+
+For collection values, "validated plain-data result" means the escaping value
+is immutable by construction, not merely `Object.freeze(...)`-ed in place.
+Native `Map` / `Set` instances are copied into verified read-only wrapper
+classes so mutator APIs such as `.set()`, `.add()`, `.delete()`, and `.clear()`
+do not survive module load.
 
 `__ct_data(...)` validates the value that survives module load. It no longer
 attempts to classify the authored third argument beyond wrapper shape and

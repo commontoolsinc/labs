@@ -82,6 +82,8 @@ const stageLabels: Record<AssetStage, string> = {
   retired: "Retired",
 };
 
+const lifecycleStageSet = new Set<AssetStage>(lifecycleStages);
+
 const defaultAssets: AssetRecord[] = [
   {
     id: "SRV-001",
@@ -127,7 +129,7 @@ const sanitizeOwner = (value: unknown): string => {
 const sanitizeStage = (value: unknown): AssetStage => {
   if (typeof value !== "string") return "procured";
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (lifecycleStages.includes(normalized as AssetStage)) {
+  if (lifecycleStageSet.has(normalized as AssetStage)) {
     return normalized as AssetStage;
   }
   return "procured";

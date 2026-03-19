@@ -73,11 +73,11 @@ const allowedStyles: readonly CitationStyle[] = [
   "Chicago",
 ];
 
-const styleOrder: Record<CitationStyle, number> = {
-  APA: 0,
-  MLA: 1,
-  Chicago: 2,
-};
+const styleOrder = new Map<CitationStyle, number>([
+  ["APA", 0],
+  ["MLA", 1],
+  ["Chicago", 2],
+]);
 
 const normalizeStyle = (
   value: unknown,
@@ -228,9 +228,9 @@ const buildGroups = (
 
   const styleResult: Record<string, CitationRecord[]> = {};
   const sortedStyles = Array.from(byStyle.keys()).sort((lhs, rhs) => {
-    const leftOrder = styleOrder[lhs as CitationStyle] ??
+    const leftOrder = styleOrder.get(lhs as CitationStyle) ??
       Number.MAX_SAFE_INTEGER;
-    const rightOrder = styleOrder[rhs as CitationStyle] ??
+    const rightOrder = styleOrder.get(rhs as CitationStyle) ??
       Number.MAX_SAFE_INTEGER;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
     return lhs.localeCompare(rhs);

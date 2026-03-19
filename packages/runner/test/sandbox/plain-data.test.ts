@@ -2,22 +2,45 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   assertPlainData,
   freezeVerifiedPlainData,
+  VerifiedPlainMap,
+  VerifiedPlainSet,
 } from "../../src/sandbox/plain-data.ts";
 import { createDataWrapper } from "../../src/sandbox/runtime-helpers.ts";
 
-Deno.test("plain-data validation accepts the v1 subset plus non-stateful RegExp", () => {
+Deno.test("plain-data validation accepts the v1 subset plus non-stateful RegExp, Map, and Set", () => {
   const matcher = freezeVerifiedPlainData(/^[a-z]+$/i);
+  const lookup = freezeVerifiedPlainData(new Map([["alpha", 1], ["beta", 2]]));
+  const allowed = freezeVerifiedPlainData(new Set(["email", "sms"]));
   const value = freezeVerifiedPlainData({
     ok: true,
     count: 2,
     big: 3n,
-    nested: ["a", 1, null, undefined, { fine: "yes" }],
+    nested: [
+      "a",
+      1,
+      null,
+      undefined,
+      { fine: "yes", lookup: new Map([["nested", true]]) },
+    ],
   });
 
   assertEquals(Object.isFrozen(matcher), true);
   assertEquals(matcher.test("Alpha"), true);
+  assertEquals(lookup instanceof VerifiedPlainMap, true);
+  assertEquals(lookup.get("alpha"), 1);
+  assertEquals(((lookup as unknown) as Record<string, unknown>).set, undefined);
+  assertEquals(allowed instanceof VerifiedPlainSet, true);
+  assertEquals(allowed.has("sms"), true);
+  assertEquals(
+    ((allowed as unknown) as Record<string, unknown>).add,
+    undefined,
+  );
   assertEquals(Object.isFrozen(value), true);
   assertEquals(Object.isFrozen(value.nested), true);
+  assertEquals(
+    (value.nested[4] as { lookup: unknown }).lookup instanceof VerifiedPlainMap,
+    true,
+  );
 });
 
 Deno.test("plain-data validation rejects accessors without invoking getters", () => {
@@ -37,10 +60,10 @@ Deno.test("plain-data validation rejects accessors without invoking getters", ()
 });
 
 Deno.test("plain-data validation rejects unsupported shapes", () => {
-  assertThrows(() => assertPlainData(new Map()));
-  assertThrows(() => assertPlainData(new Set()));
   assertThrows(() => assertPlainData(new Date()));
   assertThrows(() => assertPlainData(Promise.resolve(1)));
+  assertThrows(() => assertPlainData(new WeakMap()));
+  assertThrows(() => assertPlainData(new WeakSet()));
   assertThrows(() => assertPlainData(/a/g));
   assertThrows(() => assertPlainData(/a/y));
   assertThrows(() => assertPlainData({ [Symbol("bad")]: 1 }));
@@ -64,7 +87,7 @@ Deno.test("plain-data validation rejects array extra own properties and non-enum
 
   const withHidden = {};
   Object.defineProperty(withHidden, "hidden", {
-    value: new Map([["nope", 1]]),
+    value: new WeakMap(),
     enumerable: false,
   });
   assertThrows(() => assertPlainData(withHidden));

@@ -20,6 +20,8 @@ type ComplianceStatus = typeof statusOrder[number];
 
 type ComplianceState = "compliant" | "at_risk" | "non_compliant";
 
+const statusSet = new Set<ComplianceStatus>(statusOrder);
+
 const statusLabels: Record<ComplianceStatus, string> = {
   pending: "Pending",
   in_progress: "In Progress",
@@ -288,7 +290,7 @@ const sanitizeStatus = (
   if (normalized === "inprogress") {
     return "in_progress";
   }
-  if (statusOrder.includes(normalized as ComplianceStatus)) {
+  if (statusSet.has(normalized as ComplianceStatus)) {
     return normalized as ComplianceStatus;
   }
   return fallback;

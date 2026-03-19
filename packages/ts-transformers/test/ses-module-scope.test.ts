@@ -204,10 +204,12 @@ export default { VALUES, CONFIG };
 Deno.test("SES module-scope preserves complex data expressions inside canonical data wrappers", async () => {
   const source = `/// <cts-enable />
 const priorityOrder = { low: 2, medium: 1, high: 0 } as const;
+const knownChannels = new Set(["email", "sms"]);
+const priorityByName = new Map([["low", 2], ["high", 0]]);
 const matcher = /^[a-z]+$/i;
 const criticalRank = (() => priorityOrder["high"] + ["a", "b"].map((value) => value.toUpperCase()).join("."))();
 
-export default { matcher, criticalRank };
+export default { matcher, criticalRank, knownChannels, priorityByName };
 `;
 
   const output = await transformSource(source, {
@@ -216,6 +218,8 @@ export default { matcher, criticalRank };
   });
 
   assertStringIncludes(output, "/^[a-z]+$/i");
+  assertStringIncludes(output, 'new Set(["email", "sms"])');
+  assertStringIncludes(output, 'new Map([["low", 2], ["high", 0]])');
   assertStringIncludes(output, 'priorityOrder["high"]');
   assertStringIncludes(output, '.join(".")');
   assertStringIncludes(output, "__ct_data(");

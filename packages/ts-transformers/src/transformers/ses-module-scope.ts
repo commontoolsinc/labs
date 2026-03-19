@@ -576,8 +576,6 @@ function encodeStructuredDataInitializer(
 }
 
 const DISALLOWED_NEW_CONSTRUCTORS = new Set([
-  "Set",
-  "Map",
   "WeakSet",
   "WeakMap",
   "Date",
@@ -624,7 +622,9 @@ export function isDisallowedModuleScopeDataInitializer(
   }
 
   if (ts.isArrayLiteralExpression(initializer)) {
-    return initializer.elements.some((element) => ts.isOmittedExpression(element));
+    return initializer.elements.some((element) =>
+      ts.isOmittedExpression(element)
+    );
   }
 
   if (ts.isObjectLiteralExpression(initializer)) {

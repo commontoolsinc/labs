@@ -298,10 +298,11 @@ Deno.test("SES module-scope validation", async (t) => {
     "errors on top-level data outside the v1 inert subset",
     async () => {
       const source = `/// <cts-enable />
-      const lookup = new Set(["alpha", "beta"]);
+      const cache = new WeakMap<object, string>();
+      const registry = new WeakSet<object>();
       const stickyMatcher = /[a-z]+/y;
       const globalMatcher = /[a-z]+/g;
-      export default { lookup, stickyMatcher, globalMatcher };
+      export default { cache, registry, stickyMatcher, globalMatcher };
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
@@ -315,13 +316,20 @@ Deno.test("SES module-scope validation", async (t) => {
   );
 
   await t.step(
-    "allows non-stateful RegExp and computed module-scope data wrappers",
+    "allows non-stateful RegExp, Map, Set, and computed module-scope data wrappers",
     async () => {
       const source = `/// <cts-enable />
       const priorityOrder = { low: 2, medium: 1, high: 0 } as const;
+      const knownChannels = new Set(["email", "sms"]);
+      const priorityByName = new Map([["low", 2], ["high", 0]]);
       const matcher = /^[a-z]+$/i;
       const criticalRank = (() => priorityOrder["high"] + ["a", "b"].map((value) => value.toUpperCase()).join("."))();
-      export default { matcher, criticalRank };
+      export default {
+        matcher,
+        criticalRank,
+        knownChannels,
+        priorityByName,
+      };
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,

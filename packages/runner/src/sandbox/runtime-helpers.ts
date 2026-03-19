@@ -1,7 +1,10 @@
 import { createVerifiedHandlerFactory, lift } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
 import type { JSONSchema, Pattern } from "../builder/types.ts";
-import { assertPlainData, freezeVerifiedPlainData } from "./plain-data.ts";
+import {
+  freezeVerifiedPlainData,
+  normalizeVerifiedPlainData,
+} from "./plain-data.ts";
 import {
   CT_CAPTURE_IDS,
   CT_IMPLEMENTATION_REF,
@@ -69,9 +72,9 @@ export function createDataWrapper<T>(
     return freezeVerifiedPlainData(value) as T & VerifiedMetadataCarrier;
   }
 
-  assertPlainData(value);
+  const normalized = normalizeVerifiedPlainData(value);
   const tagged = tagMetadata(
-    value as T & VerifiedMetadataCarrier,
+    normalized as T & VerifiedMetadataCarrier,
     itemId,
     "data",
     captureIds,

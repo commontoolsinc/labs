@@ -51,18 +51,18 @@ const defaultChannels = ["email"] as const;
 const defaultSubscriptionName = "Saved Search";
 const defaultSubscriptionQuery = "all results";
 
-const allowedFrequencies: readonly Frequency[] = [
+const allowedFrequencies: ReadonlySet<Frequency> = new Set([
   "daily",
   "weekly",
   "monthly",
-];
+]);
 
-const channelOrder: Record<string, number> = {
-  email: 0,
-  push: 1,
-  sms: 2,
-  digest: 3,
-};
+const channelOrder = new Map<string, number>([
+  ["email", 0],
+  ["push", 1],
+  ["sms", 2],
+  ["digest", 3],
+]);
 
 const defaultSavedSubscriptions: SavedSearchInput[] = [
   {
@@ -118,7 +118,7 @@ const sanitizeFrequency = (
 ): Frequency => {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
-    if (allowedFrequencies.includes(normalized as Frequency)) {
+    if (allowedFrequencies.has(normalized as Frequency)) {
       return normalized as Frequency;
     }
   }
@@ -136,9 +136,7 @@ const sanitizeChannels = (
     if (typeof raw !== "string") continue;
     const normalized = raw.trim().toLowerCase();
     if (normalized.length === 0) continue;
-    if (!Object.prototype.hasOwnProperty.call(channelOrder, normalized)) {
-      continue;
-    }
+    if (!channelOrder.has(normalized)) continue;
     if (seen.has(normalized)) continue;
     seen.add(normalized);
     sanitized.push(normalized);
@@ -147,8 +145,8 @@ const sanitizeChannels = (
     return fallback.map((channel) => channel.toLowerCase());
   }
   sanitized.sort((left, right) => {
-    const leftRank = channelOrder[left] ?? 99;
-    const rightRank = channelOrder[right] ?? 99;
+    const leftRank = channelOrder.get(left) ?? 99;
+    const rightRank = channelOrder.get(right) ?? 99;
     return leftRank - rightRank;
   });
   return sanitized;

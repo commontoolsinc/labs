@@ -12,6 +12,10 @@ import {
   createPureFunctionWrapper,
 } from "../../src/sandbox/runtime-helpers.ts";
 import { createCompartmentGlobals } from "../../src/sandbox/compartment-globals.ts";
+import {
+  VerifiedPlainMap,
+  VerifiedPlainSet,
+} from "../../src/sandbox/plain-data.ts";
 import { SESRuntime } from "../../src/sandbox/ses-runtime.ts";
 import type { VerifiedCallable } from "../../src/sandbox/types.ts";
 
@@ -62,23 +66,29 @@ Deno.test("builder wrappers preserve factory semantics and primitive data wrappe
   assertEquals(scalar, 2);
 });
 
-Deno.test("runtime data wrappers accept frozen-safe RegExp values and reject unsupported shapes", () => {
+Deno.test("runtime data wrappers accept frozen-safe RegExp, Map, and Set values", () => {
   const matcher = createDataWrapper("main.tsx#003:matcher", [], /^[a-z]+$/i);
+  const lookup = createDataWrapper(
+    "main.tsx#004:lookup",
+    [],
+    new Set(["alpha", "beta"]),
+  );
+  const index = createDataWrapper(
+    "main.tsx#005:index",
+    [],
+    new Map([["alpha", 1], ["beta", 2]]),
+  );
   assertEquals(Object.isFrozen(matcher), true);
   assertEquals(matcher.test("Alpha"), true);
-
-  assertThrows(() =>
-    createDataWrapper("main.tsx#004:lookup", [], new Set(["alpha", "beta"]))
-  );
-  assertThrows(() =>
-    createDataWrapper(
-      "main.tsx#005:index",
-      [],
-      new Map([["alpha", 1], ["beta", 2]]),
-    )
-  );
+  assertEquals(lookup instanceof VerifiedPlainSet, true);
+  assertEquals(lookup.has("beta"), true);
+  assertEquals(index instanceof VerifiedPlainMap, true);
+  assertEquals(index.get("beta"), 2);
   assertThrows(() =>
     createDataWrapper("main.tsx#006:global-matcher", [], /[a-z]+/g)
+  );
+  assertThrows(() =>
+    createDataWrapper("main.tsx#007:weak-lookup", [], new WeakMap())
   );
 });
 

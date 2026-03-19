@@ -616,7 +616,7 @@ Deno.test("bundle preflight accepts compiled SES bundles with regex-bearing help
   }
 });
 
-Deno.test("engine rejects non-inert top-level data initializers before module-load execution", async () => {
+Deno.test("engine surfaces throwing top-level data initializers during module-load evaluation", async () => {
   const signer = await Identity.fromPassphrase(
     "bundle-preflight malicious data",
   );
@@ -641,10 +641,11 @@ Deno.test("engine rejects non-inert top-level data initializers before module-lo
       ],
     };
 
+    const { id, jsScript } = await runtime.harness.compile(program);
     await assertRejects(
-      () => runtime.harness.compile(program),
+      () => runtime.harness.evaluate(id, jsScript, program.files),
       Error,
-      "Top-level non-builder values must stay within the SES v1 inert plain-data subset",
+      "module-load executed",
     );
   } finally {
     await runtime.dispose();

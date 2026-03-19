@@ -65,6 +65,23 @@ Deno.test("SES runtime matches legacy exports for bracket-accessed top-level dat
   });
 });
 
+Deno.test("SES runtime matches legacy exports for top-level Map and Set data", async () => {
+  await compareExports({
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "/// <cts-enable />",
+          "const priorityByName = new Map([['low', 2], ['high', 0]]);",
+          "const enabledChannels = new Set(['email', 'sms']);",
+          "export default { priorityByName, enabledChannels };",
+        ].join("\n"),
+      },
+    ],
+  });
+});
+
 Deno.test("SES runtime preserves mapped authored error locations against legacy eval", async () => {
   await compareMappedError(
     {

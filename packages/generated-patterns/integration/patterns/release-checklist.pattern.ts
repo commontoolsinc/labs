@@ -40,6 +40,8 @@ const statusValues: ReleaseTaskStatus[] = [
   "done",
 ];
 
+const statusSet = new Set<ReleaseTaskStatus>(statusValues);
+
 const defaultTasks: ReleaseTask[] = [
   {
     id: "qa-signoff",
@@ -120,7 +122,7 @@ const toOptionalString = (value: unknown): string | null => {
 const toStatus = (value: unknown): ReleaseTaskStatus | null => {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return statusValues.includes(normalized as ReleaseTaskStatus)
+  return statusSet.has(normalized as ReleaseTaskStatus)
     ? normalized as ReleaseTaskStatus
     : null;
 };
