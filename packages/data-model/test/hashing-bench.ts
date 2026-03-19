@@ -16,7 +16,7 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "../value-hash.ts";
-import { canonicalHash } from "../canonical-hash.ts";
+import { canonicalHash } from "../value-hash-modern.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 
 // ---------------------------------------------------------------------------

@@ -90,7 +90,7 @@ if (nodeCrypto) {
     const chunks: Uint8Array[] = [];
     return {
       update(data: Uint8Array) {
-        // Copy to avoid aliasing shared scratch buffers from canonical-hash.ts.
+        // Copy to avoid aliasing shared scratch buffers from value-hash-modern.ts.
         chunks.push(new Uint8Array(data));
       },
       digest(): Uint8Array {
@@ -108,7 +108,7 @@ if (nodeCrypto) {
     const chunks: Uint8Array[] = [];
     return {
       update(data: Uint8Array) {
-        // Copy to avoid aliasing shared scratch buffers from canonical-hash.ts.
+        // Copy to avoid aliasing shared scratch buffers from value-hash-modern.ts.
         chunks.push(new Uint8Array(data));
       },
       digest(): Uint8Array {

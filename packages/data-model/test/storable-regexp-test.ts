@@ -21,7 +21,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "../type-tags.ts";
-import { canonicalHash } from "../canonical-hash.ts";
+import { canonicalHash } from "../value-hash-modern.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {

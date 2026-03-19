@@ -34,7 +34,7 @@
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
     "./hash-impl": "./hash-impl.ts",
-    "./canonical-hash": "./canonical-hash.ts",
+    "./value-hash-modern": "./value-hash-modern.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts",
     "./json-encoding": "./json-encoding.ts",
@@ -44,6 +44,7 @@
     "./storable-value-legacy": "./storable-value-legacy.ts",
     "./storable-value-modern": "./storable-value-modern.ts",
     "./storable-value-utils": "./storable-value-utils.ts",
-    "./value-hash": "./value-hash.ts"
+    "./value-hash": "./value-hash.ts",
+    "./value-hash-legacy": "./value-hash-legacy.ts"
   }
 }
