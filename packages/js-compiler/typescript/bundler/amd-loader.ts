@@ -112,20 +112,42 @@ export function getAMDLoader(
           if (dep === "module") return { exports: {} };
           return this.resolveModule(dep);
         });
+        const exportsIndex = module.dependencies.indexOf("exports");
+        const moduleIndex = module.dependencies.indexOf("module");
+        const exportsObject = exportsIndex >= 0 &&
+            typeof resolvedDeps[exportsIndex] === "object"
+          ? resolvedDeps[exportsIndex]
+          : undefined;
+        const moduleObject = moduleIndex >= 0 &&
+            resolvedDeps[moduleIndex] &&
+            typeof resolvedDeps[moduleIndex] === "object"
+          ? resolvedDeps[moduleIndex]
+          : undefined;
 
         const result = module.factory(...resolvedDeps);
 
         if (result !== undefined) {
           module.exports = result;
         } else {
-          const exportsIndex = module.dependencies.indexOf("exports");
-          if (
-            exportsIndex >= 0 && typeof resolvedDeps[exportsIndex] === "object"
-          ) {
-            module.exports = resolvedDeps[exportsIndex];
+          if (exportsObject) {
+            module.exports = exportsObject;
+          } else if (moduleObject) {
+            module.exports = moduleObject.exports;
           }
         }
 
+        if (
+          module.exports &&
+          typeof module.exports === "object" &&
+          (
+            (result === undefined && (module.exports === exportsObject ||
+              module.exports === moduleObject?.exports)) ||
+            result === exportsObject ||
+            result === moduleObject?.exports
+          )
+        ) {
+          module.exports = Object.freeze(module.exports);
+        }
         module.resolved = true;
         return module.exports;
       } finally {

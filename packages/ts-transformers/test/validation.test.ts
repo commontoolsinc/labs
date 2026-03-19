@@ -299,8 +299,9 @@ Deno.test("SES module-scope validation", async (t) => {
     async () => {
       const source = `/// <cts-enable />
       const lookup = new Set(["alpha", "beta"]);
-      const matcher = /^[a-z]+$/i;
-      export default { lookup, matcher };
+      const stickyMatcher = /[a-z]+/y;
+      const globalMatcher = /[a-z]+/g;
+      export default { lookup, stickyMatcher, globalMatcher };
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
@@ -310,6 +311,49 @@ Deno.test("SES module-scope validation", async (t) => {
         error.type === "pattern-context:module-scope-data"
       );
       assertGreater(errors.length, 0, "Expected inert-subset diagnostics");
+    },
+  );
+
+  await t.step(
+    "allows non-stateful RegExp and computed module-scope data wrappers",
+    async () => {
+      const source = `/// <cts-enable />
+      const priorityOrder = { low: 2, medium: 1, high: 0 } as const;
+      const matcher = /^[a-z]+$/i;
+      const criticalRank = (() => priorityOrder["high"] + ["a", "b"].map((value) => value.toUpperCase()).join("."))();
+      export default { matcher, criticalRank };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:module-scope-data"
+      );
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows IIFE-computed plain data that uses temporary Map state",
+    async () => {
+      const source = `/// <cts-enable />
+      const defaultClauseRecords = (() => {
+        const dedup = new Map<string, { id: string; title: string }>();
+        dedup.set("notice", { id: "notice", title: "Notice" });
+        dedup.set("payment", { id: "payment", title: "Payment" });
+        return Array.from(dedup.values());
+      })();
+      export default defaultClauseRecords;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:module-scope-data"
+      );
+      assertEquals(errors.length, 0);
     },
   );
 

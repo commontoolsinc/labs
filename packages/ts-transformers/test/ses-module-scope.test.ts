@@ -201,6 +201,26 @@ export default { VALUES, CONFIG };
   assertEquals(output.includes("__ctDataKind"), false);
 });
 
+Deno.test("SES module-scope preserves complex data expressions inside canonical data wrappers", async () => {
+  const source = `/// <cts-enable />
+const priorityOrder = { low: 2, medium: 1, high: 0 } as const;
+const matcher = /^[a-z]+$/i;
+const criticalRank = (() => priorityOrder["high"] + ["a", "b"].map((value) => value.toUpperCase()).join("."))();
+
+export default { matcher, criticalRank };
+`;
+
+  const output = await transformSource(source, {
+    types: COMMONTOOLS_TYPES,
+    sesMode: true,
+  });
+
+  assertStringIncludes(output, "/^[a-z]+$/i");
+  assertStringIncludes(output, 'priorityOrder["high"]');
+  assertStringIncludes(output, '.join(".")');
+  assertStringIncludes(output, "__ct_data(");
+});
+
 Deno.test("SES module-scope does not hoist callbacks that rely on cell methods", async () => {
   const source = `/// <cts-enable />
 import { Cell, computed, pattern } from "commontools";

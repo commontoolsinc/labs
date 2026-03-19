@@ -122,7 +122,7 @@ const stageRank: Record<DraftStage, number> = {
   published: 5,
 };
 
-const isIsoDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const sanitizeIdentifier = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
@@ -190,11 +190,11 @@ const sanitizeStage = (
 const sanitizeDate = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
     const trimmed = value.trim().replace(/\//g, "-");
-    if (isIsoDate(trimmed)) {
+    if (datePattern.test(trimmed)) {
       return trimmed;
     }
   }
-  if (isIsoDate(fallback)) {
+  if (datePattern.test(fallback)) {
     return fallback;
   }
   return "2024-07-31";

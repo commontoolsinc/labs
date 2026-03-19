@@ -162,6 +162,7 @@ export class SESRuntime {
         helpers,
       ),
     ) as SESCompartment;
+    compartment.evaluate("harden(globalThis);");
     this.compartments.set(evaluationId, compartment);
     return compartment;
   }

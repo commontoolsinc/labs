@@ -5,7 +5,8 @@ import {
 } from "../../src/sandbox/plain-data.ts";
 import { createDataWrapper } from "../../src/sandbox/runtime-helpers.ts";
 
-Deno.test("plain-data validation accepts the v1 subset", () => {
+Deno.test("plain-data validation accepts the v1 subset plus non-stateful RegExp", () => {
+  const matcher = freezeVerifiedPlainData(/^[a-z]+$/i);
   const value = freezeVerifiedPlainData({
     ok: true,
     count: 2,
@@ -13,6 +14,8 @@ Deno.test("plain-data validation accepts the v1 subset", () => {
     nested: ["a", 1, null, undefined, { fine: "yes" }],
   });
 
+  assertEquals(Object.isFrozen(matcher), true);
+  assertEquals(matcher.test("Alpha"), true);
   assertEquals(Object.isFrozen(value), true);
   assertEquals(Object.isFrozen(value.nested), true);
 });
@@ -38,6 +41,8 @@ Deno.test("plain-data validation rejects unsupported shapes", () => {
   assertThrows(() => assertPlainData(new Set()));
   assertThrows(() => assertPlainData(new Date()));
   assertThrows(() => assertPlainData(Promise.resolve(1)));
+  assertThrows(() => assertPlainData(/a/g));
+  assertThrows(() => assertPlainData(/a/y));
   assertThrows(() => assertPlainData({ [Symbol("bad")]: 1 }));
 
   const sparse: unknown[] = [];

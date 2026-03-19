@@ -307,8 +307,7 @@ function isValidDataWrapper(args: string[]): boolean {
   if (!captureIds) {
     return false;
   }
-  return isTrustedItemId(args[0]!) &&
-    isTrustedDataExpression(args[2]!, new Set(captureIds));
+  return isTrustedItemId(args[0]!);
 }
 
 function isTrustedItemId(source: string): boolean {

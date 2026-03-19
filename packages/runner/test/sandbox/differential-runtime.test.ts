@@ -30,6 +30,41 @@ Deno.test("SES runtime matches legacy exports for valid authored programs", asyn
   });
 });
 
+Deno.test("SES runtime matches legacy exports for top-level regex and IIFE-computed data", async () => {
+  await compareExports({
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "/// <cts-enable />",
+          "const matcher = /^[a-z.]+$/i;",
+          "const label = ['clusters', 'north', 'alpha'].map((part) => String(part)).join('.');",
+          "const summary = (() => ({ label, matches: matcher.test(label) }))();",
+          "export default summary;",
+        ].join("\n"),
+      },
+    ],
+  });
+});
+
+Deno.test("SES runtime matches legacy exports for bracket-accessed top-level data", async () => {
+  await compareExports({
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "/// <cts-enable />",
+          "const priorityOrder = { low: 2, medium: 1, high: 0 } as const;",
+          "const criticalRank = priorityOrder['high'];",
+          "export default criticalRank;",
+        ].join("\n"),
+      },
+    ],
+  });
+});
+
 Deno.test("SES runtime preserves mapped authored error locations against legacy eval", async () => {
   await compareMappedError(
     {

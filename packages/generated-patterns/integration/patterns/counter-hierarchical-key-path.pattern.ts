@@ -56,7 +56,9 @@ const DEFAULT_PATH: HierarchicalPath = [
   "alpha",
 ];
 
-const DEFAULT_PATH_STRING = "clusters.north.nodes.0.metrics.alpha";
+const DEFAULT_PATH_STRING = DEFAULT_PATH
+  .map((segment) => String(segment))
+  .join(".");
 
 const normalizePath = (
   path: HierarchicalPath | undefined,

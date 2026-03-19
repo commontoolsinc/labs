@@ -10,6 +10,7 @@ import {
   verifyBundlePreflight,
 } from "../../src/sandbox/bundle-preflight.ts";
 import { verifyAMDFactory } from "../../src/sandbox/module-verifier.ts";
+import { createDataWrapper } from "../../src/sandbox/runtime-helpers.ts";
 import { SESRuntime } from "../../src/sandbox/ses-runtime.ts";
 import { Identity } from "@commontools/identity";
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
@@ -82,6 +83,106 @@ Deno.test("SES runtime rejects bundles that redefine trusted runtime modules", (
   );
 });
 
+Deno.test("SES runtime blocks module-load global mutation hidden inside __ct_data expressions", () => {
+  const runtime = new SESRuntime();
+  const runtimeExports = {
+    commontools: {
+      __ct_data: createDataWrapper,
+    },
+  };
+  const attackBundle = createTrustedBundle(
+    `define("main",["exports"],function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { globalThis.__pwned = true; return 1; })());exports.default=value;});const main = require("main");const exportMap = Object.create(null);exportMap["main"] = require("main");return { main, exportMap };`,
+  );
+  const probeBundle = createTrustedBundle(
+    `define("main",["exports"],function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],Object.prototype.hasOwnProperty.call(globalThis,"__pwned"));exports.default=value;});const main = require("main");const exportMap = Object.create(null);exportMap["main"] = require("main");return { main, exportMap };`,
+  );
+
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile-a",
+      "shared-eval",
+      { js: attackBundle, filename: "attack.js" } as never,
+      { console, runtimeExports },
+    )
+  );
+
+  const result = runtime.evaluateBundle(
+    "compile-b",
+    "shared-eval",
+    { js: probeBundle, filename: "probe.js" } as never,
+    { console, runtimeExports },
+  );
+
+  assertEquals((result.main as Record<string, unknown>).default, false);
+});
+
+Deno.test("SES runtime blocks namespace mutation through __ct_data expression evaluation", () => {
+  const runtime = new SESRuntime();
+  const runtimeExports = {
+    commontools: {
+      __ct_data: createDataWrapper,
+    },
+  };
+  const localModuleAttack = createTrustedBundle(
+    [
+      `define("util",["exports"],function(exports){exports.answer=1;});`,
+      `define("main",["exports","util"],function(exports,util){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { util.answer = 2; return util.answer; })());exports.default=value;});`,
+      `const main = require("main");`,
+      `const exportMap = Object.create(null);`,
+      `exportMap["main"] = require("main");`,
+      `return { main, exportMap };`,
+    ].join(""),
+  );
+  const runtimeModuleAttack = createTrustedBundle(
+    `define("main",["exports","commontools"],function(exports,commontools){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { commontools.__pwned = true; return Object.prototype.hasOwnProperty.call(commontools,"__pwned"); })());exports.default=value;});const main = require("main");const exportMap = Object.create(null);exportMap["main"] = require("main");return { main, exportMap };`,
+  );
+
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile-local",
+      "local-eval",
+      { js: localModuleAttack, filename: "local-attack.js" } as never,
+      { console, runtimeExports },
+    )
+  );
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile-runtime",
+      "runtime-eval",
+      { js: runtimeModuleAttack, filename: "runtime-attack.js" } as never,
+      { console, runtimeExports },
+    )
+  );
+});
+
+Deno.test("SES runtime blocks require-mediated namespace mutation inside __ct_data expressions", () => {
+  const runtime = new SESRuntime();
+  const runtimeExports = {
+    commontools: {
+      __ct_data: createDataWrapper,
+    },
+  };
+  const attackBundle = createTrustedBundle(
+    [
+      `define("util",["exports"],function(exports){exports.answer=1;});`,
+      `define("main",["exports","require"],function(exports,require){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { const util = require("util"); util.answer = 2; return util.answer; })());exports.default=value;});`,
+      `const main = require("main");`,
+      `const exportMap = Object.create(null);`,
+      `exportMap["main"] = require("main");`,
+      `return { main, exportMap };`,
+    ].join(""),
+  );
+
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile-require",
+      "require-eval",
+      { js: attackBundle, filename: "require-attack.js" } as never,
+      { console, runtimeExports },
+    )
+  );
+});
+
 Deno.test("AMD factory verifier enforces canonical wrappers and dependency policy", async (t) => {
   await t.step("accepts trusted runtime imports and same-bundle locals", () => {
     verifyAMDFactory({
@@ -134,34 +235,28 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
   );
 
   await t.step(
-    "rejects non-inert __ct_data third arguments before evaluation",
+    "accepts complex __ct_data expressions now that runtime hardening guards module state",
     () => {
-      assertThrows(() =>
-        verifyAMDFactory({
-          moduleId: "main",
-          dependencies: ["exports"],
-          registeredModuleIds: new Set(["main"]),
-          factorySource:
-            `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],(() => { globalThis.__pwned = true; return 1; })());exports.default=value;}`,
-        })
-      );
-      assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:priorityOrder:data*/const priorityOrder=__ctHelpers.__ct_data("main.tsx#000:priorityOrder",[],{low:2,high:0});/*__CT_TOPLEVEL__:main.tsx:001:value:data*/const value=__ctHelpers.__ct_data("main.tsx#001:value",["priorityOrder"],(() => priorityOrder["high"] + [1,2,3].map((n) => n + 1).join("."))());exports.default=value;}`,
+      });
     },
   );
 
   await t.step(
-    "rejects interpolated template literals in __ct_data third arguments",
+    "accepts regex literals and interpolated template literals in __ct_data third arguments",
     () => {
-      assertThrows(() =>
-        verifyAMDFactory({
-          moduleId: "main",
-          dependencies: ["exports"],
-          registeredModuleIds: new Set(["main"]),
-          factorySource:
-            'function(exports){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],`${(() => { globalThis.__pwned = true; return 1; })()}`);exports.default=value;}',
-        })
-      );
-      assertEquals((globalThis as { __pwned?: boolean }).__pwned, undefined);
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          'function(exports){/*__CT_TOPLEVEL__:main.tsx:000:matcher:data*/const matcher=__ctHelpers.__ct_data("main.tsx#000:matcher",[],/^[a-z]+$/i);/*__CT_TOPLEVEL__:main.tsx:001:value:data*/const value=__ctHelpers.__ct_data("main.tsx#001:value",["matcher"],`${matcher.test("alpha")}`);exports.default=value;}',
+      });
     },
   );
 

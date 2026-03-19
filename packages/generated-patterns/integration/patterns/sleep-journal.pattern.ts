@@ -74,10 +74,10 @@ const toFiniteHours = (value: unknown): number => {
   return 0;
 };
 
-const isIsoDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const toIsoDate = (value: unknown): string => {
-  if (typeof value === "string" && isIsoDate(value)) {
+  if (typeof value === "string" && isoDatePattern.test(value)) {
     return value;
   }
   if (typeof value === "string") {

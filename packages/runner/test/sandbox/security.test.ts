@@ -62,19 +62,23 @@ Deno.test("builder wrappers preserve factory semantics and primitive data wrappe
   assertEquals(scalar, 2);
 });
 
-Deno.test("runtime data wrappers reject values outside the v1 inert subset", () => {
+Deno.test("runtime data wrappers accept frozen-safe RegExp values and reject unsupported shapes", () => {
+  const matcher = createDataWrapper("main.tsx#003:matcher", [], /^[a-z]+$/i);
+  assertEquals(Object.isFrozen(matcher), true);
+  assertEquals(matcher.test("Alpha"), true);
+
   assertThrows(() =>
-    createDataWrapper("main.tsx#003:lookup", [], new Set(["alpha", "beta"]))
+    createDataWrapper("main.tsx#004:lookup", [], new Set(["alpha", "beta"]))
   );
   assertThrows(() =>
     createDataWrapper(
-      "main.tsx#004:index",
+      "main.tsx#005:index",
       [],
       new Map([["alpha", 1], ["beta", 2]]),
     )
   );
   assertThrows(() =>
-    createDataWrapper("main.tsx#005:matcher", [], /^[a-z]+$/i)
+    createDataWrapper("main.tsx#006:global-matcher", [], /[a-z]+/g)
   );
 });
 

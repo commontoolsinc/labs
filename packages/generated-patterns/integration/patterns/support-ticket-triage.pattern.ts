@@ -102,8 +102,7 @@ const defaultTickets: TicketRecord[] = [
   },
 ];
 
-const isCriticalPriority = (priority: Priority): boolean =>
-  priorityOrder[priority] <= priorityOrder.high;
+const criticalRank = priorityOrder["high"];
 
 const triageTicket = handler(
   (
@@ -408,7 +407,7 @@ function buildQueueSummaries(records: TicketRecord[]): QueueSummary[] {
     }
     const hours = Math.max(1, Math.round(record.hoursRemaining));
     bucket.countdowns.push(hours);
-    if (isCriticalPriority(record.priority)) {
+    if (priorityOrder[record.priority] <= criticalRank) {
       bucket.criticalCount += 1;
     }
     bucketMap.set(key, bucket);

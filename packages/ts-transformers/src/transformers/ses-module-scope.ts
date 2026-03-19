@@ -580,7 +580,6 @@ const DISALLOWED_NEW_CONSTRUCTORS = new Set([
   "Map",
   "WeakSet",
   "WeakMap",
-  "RegExp",
   "Date",
   "Promise",
   "Error",
@@ -600,87 +599,61 @@ const DISALLOWED_STATIC_METHOD_TARGETS = new Set([
 export function isDisallowedModuleScopeDataInitializer(
   initializer: ts.Expression,
 ): boolean {
-  let disallowed = false;
+  if (
+    ts.isRegularExpressionLiteral(initializer) &&
+    hasStatefulRegExpFlags(initializer.text)
+  ) {
+    return true;
+  }
 
-  const visit = (node: ts.Node): void => {
-    if (disallowed) {
-      return;
-    }
+  if (
+    ts.isNewExpression(initializer) &&
+    ts.isIdentifier(initializer.expression) &&
+    DISALLOWED_NEW_CONSTRUCTORS.has(initializer.expression.text)
+  ) {
+    return true;
+  }
 
-    if (ts.isRegularExpressionLiteral(node)) {
-      disallowed = true;
-      return;
-    }
+  if (
+    ts.isCallExpression(initializer) &&
+    ts.isPropertyAccessExpression(initializer.expression) &&
+    ts.isIdentifier(initializer.expression.expression) &&
+    DISALLOWED_STATIC_METHOD_TARGETS.has(initializer.expression.expression.text)
+  ) {
+    return true;
+  }
 
-    if (
-      ts.isNewExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      DISALLOWED_NEW_CONSTRUCTORS.has(node.expression.text)
-    ) {
-      disallowed = true;
-      return;
-    }
+  if (ts.isArrayLiteralExpression(initializer)) {
+    return initializer.elements.some((element) => ts.isOmittedExpression(element));
+  }
 
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      DISALLOWED_STATIC_METHOD_TARGETS.has(node.expression.expression.text)
-    ) {
-      disallowed = true;
-      return;
-    }
+  if (ts.isObjectLiteralExpression(initializer)) {
+    return initializer.properties.some((property) =>
+      ts.isGetAccessorDeclaration(property) ||
+      ts.isSetAccessorDeclaration(property) ||
+      ts.isMethodDeclaration(property) ||
+      ts.isSpreadAssignment(property) ||
+      (
+        ts.isPropertyAssignment(property) &&
+        ts.isComputedPropertyName(property.name)
+      ) ||
+      (
+        ts.isShorthandPropertyAssignment(property) &&
+        property.objectAssignmentInitializer !== undefined
+      )
+    );
+  }
 
-    if (ts.isArrayLiteralExpression(node)) {
-      if (node.elements.some((element) => ts.isOmittedExpression(element))) {
-        disallowed = true;
-        return;
-      }
-    }
+  return ts.isClassExpression(initializer);
+}
 
-    if (ts.isObjectLiteralExpression(node)) {
-      for (const property of node.properties) {
-        if (
-          ts.isGetAccessorDeclaration(property) ||
-          ts.isSetAccessorDeclaration(property) ||
-          ts.isMethodDeclaration(property) ||
-          ts.isSpreadAssignment(property)
-        ) {
-          disallowed = true;
-          return;
-        }
-        if (
-          ts.isPropertyAssignment(property) &&
-          ts.isComputedPropertyName(property.name)
-        ) {
-          disallowed = true;
-          return;
-        }
-        if (
-          ts.isShorthandPropertyAssignment(property) &&
-          property.objectAssignmentInitializer
-        ) {
-          disallowed = true;
-          return;
-        }
-      }
-    }
-
-    if (
-      node !== initializer &&
-      (ts.isFunctionExpression(node) ||
-        ts.isArrowFunction(node) ||
-        ts.isClassExpression(node))
-    ) {
-      disallowed = true;
-      return;
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  visit(initializer);
-  return disallowed;
+function hasStatefulRegExpFlags(source: string): boolean {
+  const lastSlash = source.lastIndexOf("/");
+  if (lastSlash < 0) {
+    return false;
+  }
+  const flags = source.slice(lastSlash + 1);
+  return flags.includes("g") || flags.includes("y");
 }
 
 function createAssignment(

@@ -144,7 +144,7 @@ const normalizeDateDigits = (value: string): string | null => {
   return null;
 };
 
-const isIsoDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const sanitizePublishDate = (
   value: PublishInput,
@@ -154,14 +154,14 @@ const sanitizePublishDate = (
   if (typeof value === "string") {
     const normalized = value.trim().replace(/\//g, "-");
     const digits = normalizeDateDigits(normalized);
-    if (digits && isIsoDate(digits)) return digits;
-    if (isIsoDate(normalized)) return normalized;
+    if (digits && datePattern.test(digits)) return digits;
+    if (datePattern.test(normalized)) return normalized;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     const day = Math.min(28, Math.max(1, Math.trunc(value)));
     return `2024-07-${day.toString().padStart(2, "0")}`;
   }
-  if (isIsoDate(fallback)) return fallback;
+  if (datePattern.test(fallback)) return fallback;
   return suggestPublishDate(sequence);
 };
 

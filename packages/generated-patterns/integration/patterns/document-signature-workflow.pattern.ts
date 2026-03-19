@@ -85,7 +85,7 @@ const defaultSigners: SignerSeed[] = [
   },
 ];
 
-const isIsoDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const sanitizeIdentifier = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
@@ -162,7 +162,7 @@ const sanitizeOrder = (value: unknown, fallback: number): number => {
 const sanitizeDate = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
     const normalized = value.trim().replace(/\//g, "-");
-    if (isIsoDate(normalized)) return normalized;
+    if (datePattern.test(normalized)) return normalized;
   }
   return fallback;
 };

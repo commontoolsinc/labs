@@ -77,6 +77,12 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
     return;
   }
 
+  if (isVerifiedPlainRegExp(value)) {
+    validatePlainRegExp(value);
+    seen.delete(value);
+    return;
+  }
+
   const prototype = Object.getPrototypeOf(value);
   if (
     prototype !== Object.prototype && prototype !== null
@@ -98,6 +104,33 @@ function walkPlainData(value: unknown, seen: Set<unknown>): void {
   }
 
   seen.delete(value);
+}
+
+function isVerifiedPlainRegExp(value: object): value is RegExp {
+  return Object.getPrototypeOf(value) === RegExp.prototype;
+}
+
+function validatePlainRegExp(value: RegExp): void {
+  if (value.global || value.sticky) {
+    throw new Error(
+      "Stateful RegExp values are not allowed in verified plain data",
+    );
+  }
+
+  const ownKeys = Object.getOwnPropertyNames(value);
+  for (const key of ownKeys) {
+    if (key !== "lastIndex") {
+      throw new Error("RegExp values may not have extra own properties");
+    }
+  }
+
+  const descriptor = getOwnDescriptorOrThrow(value, "lastIndex");
+  if (!("value" in descriptor)) {
+    throw new Error("Accessors are not allowed in verified plain data");
+  }
+  if (descriptor.value !== 0) {
+    throw new Error("RegExp lastIndex must be zero in verified plain data");
+  }
 }
 
 function assertAllowedSymbolKeys(value: object): void {

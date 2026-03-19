@@ -68,13 +68,12 @@ const defaultThresholds = {
   oxygen: { min: 95 },
 } as const satisfies VitalThresholds;
 
-const isIsoMinute = (value: string): boolean =>
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(value);
+const isoMinutePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
 
 const toIsoMinute = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (isIsoMinute(trimmed)) {
+    if (isoMinutePattern.test(trimmed)) {
       return trimmed;
     }
     const parsed = new Date(trimmed);

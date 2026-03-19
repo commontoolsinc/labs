@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-16
+2026-03-18
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -348,34 +348,29 @@ const LOOKUP = __ct_data({
 });
 ```
 
-Within `__ct_data(...)`, the allowed operation set is narrower than normal
-pattern construction. This is a verifier-simplicity rule, not a claim that all
-other Common Tools helpers are intrinsically dangerous at module load. A data
-initializer may use:
+Within `__ct_data(...)`, v1 does not try to prove inertness by parsing a narrow
+expression grammar. The verifier only checks the canonical wrapper shape:
 
-- literals and operators
-- previously verified module-safe-data bindings
+- trusted item-id syntax
+- balanced wrapper arguments
+- a syntactically valid capture manifest whose names resolve to previously
+  verified bindings
 
-A data initializer MUST NOT call:
+The third argument may therefore be any ordinary JavaScript expression,
+including IIFEs, call chains, bracket access, template interpolation, or calls
+through trusted runtime modules. The security boundary is enforced elsewhere:
 
-- trusted builder entrypoints such as `pattern`, `lift`, or `handler`
-- graph-construction built-ins such as `fetchData`, `compileAndRun`,
-  `navigateTo`, or `wish`
-- arbitrary imported runtime-module functions
+- captured bindings must already be verified module-safe data or trusted
+  hardened capabilities
+- the escaping value is validated by `assertPlainData()` and then hardened
+- the authored Compartment global is hardened after creation
+- runtime-module exports and same-bundle module exports are hardened before
+  reuse through the AMD loader
 
-This restriction is intentionally stronger than the general module-load
-authority model. Runtime helpers from trusted Common Tools modules primarily
-construct reactive graph nodes and defer host-visible effects to the scheduler;
-they are excluded from `__ct_data(...)` because v1 data wrappers are defined as
-literal/object/array/identifier expressions whose escaping value can be
-validated directly, not because invoking those helpers would immediately perform
-network or other host effects by itself.
-
-The current implementation baseline is stricter than the abstract model above:
-the verifier accepts only literals, array literals, object literals, and
-identifier/property-path references rooted in previously approved data
-bindings. It does not currently admit helper calls or IIFE-computed values
-inside the third argument to `__ct_data(...)`.
+This is intentionally narrower than "all module-load behavior is okay", but the
+narrowness is now semantic rather than syntactic. Expressions that attempt to
+mutate surviving module state during `__ct_data(...)` evaluation must fail
+because the relevant state surfaces are already hardened.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commontools/memory`'s `StorableValue`:
@@ -386,6 +381,8 @@ Version 1 of the allowed domain is a deliberate subset of
 - `number`
 - `string`
 - `bigint`
+- non-stateful `RegExp` values (no `g` or `y` flags, no extra own properties,
+  `lastIndex === 0`)
 - arrays of allowed values
 - plain object records with allowed values
 
@@ -414,14 +411,16 @@ Externally observable module-load side effects are disallowed except for
 sandboxed `console` output, which is separately controlled and treated as a
 debugging/observability channel rather than a surviving state channel. Trusted
 graph construction during active builder execution is allowed as part of pattern
-assembly and does not by itself constitute immediate host I/O, but
-data-category initializers must remain inert apart from console output. This is
-enforced by giving authored code a narrower module-load authority surface than
-the runtime's later execution environment.
+assembly and does not by itself constitute immediate host I/O. For
+data-category initializers, the relevant security rule is now that no surviving
+mutable state or ambient capability may escape module load except through the
+validated plain-data result and the separately controlled console channel. This
+is enforced by the narrower module-load authority surface plus hardening of the
+Compartment global and module namespace objects.
 
-`__ct_data(...)` still validates the value that survives module load, but in the
-current implementation it also constrains the authored expression to the narrow
-literal/object/array/identifier grammar described above before evaluation.
+`__ct_data(...)` validates the value that survives module load. It no longer
+attempts to classify the authored third argument beyond wrapper shape and
+capture-manifest syntax.
 
 #### 4.2.4 Type-Only Syntax
 
@@ -864,8 +863,10 @@ The important distinction is that these are graph-building or deferred runtime
 constructors. They may be used during module load to build the frozen reactive
 graph, but they do not directly perform host effects merely by being present as
 imports. Host-visible effects happen later, under the runtime's node execution
-model, not during authored module evaluation. These imports are not valid from
-within `__ct_data(...)` initializers.
+model, not during authored module evaluation. When they are referenced from
+within `__ct_data(...)`, the escaping value must still pass module-safe-data
+validation, and any surviving module namespace objects are hardened before they
+can be observed again.
 
 ### 5.4 No Separate Authored String-Evaluation Path
 
