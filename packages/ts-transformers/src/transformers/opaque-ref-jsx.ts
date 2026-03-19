@@ -107,6 +107,7 @@ function transform(context: TransformationContext): ts.SourceFile {
         analyze,
         reactiveContextKind: contextInfo.kind,
         inSafeContext,
+        containerKind: "jsx-expression",
       });
 
       if (result) {

@@ -16,7 +16,7 @@ import {
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
-import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
+import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
 
@@ -61,11 +61,13 @@ export const emitBinaryExpression: Emitter = ({
   rewriteChildren,
   inSafeContext,
   reactiveContextKind,
+  containerKind,
 }) => {
   if (!ts.isBinaryExpression(expression)) return undefined;
   const operator = expression.operatorToken.kind;
-  const shouldLowerByContextPolicy = shouldLowerLogicalInJsx(
+  const shouldLowerByContextPolicy = shouldLowerLogicalExpression(
     reactiveContextKind,
+    containerKind ?? "jsx-expression",
     operator,
   );
 

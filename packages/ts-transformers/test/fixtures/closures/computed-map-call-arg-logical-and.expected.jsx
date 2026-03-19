@@ -1,16 +1,17 @@
 import * as __ctHelpers from "commontools";
 import { computed, pattern, UI } from "commontools";
+const wrap = (x: unknown) => x;
 interface Item {
     done: boolean;
 }
 interface State {
     items: Item[];
 }
-// FIXTURE: computed-map-local-object-conditional
-// Verifies: nested ternary inside a callback-local object initializer within a
-//   computed-array .map() callback is lowered to ifElse().
-//   const view = { status: row.done ? "Done" : "Pending" }
-//   → const view = { status: ifElse(row.done, "Done", "Pending") }
+// FIXTURE: computed-map-call-arg-logical-and
+// Verifies: nested && inside a callback-local call argument within a
+//   computed-array .map() callback is lowered to when().
+//   const label = wrap(row.done && "Done")
+//   → const label = wrap(when(row.done, "Done"))
 export default pattern((state) => {
     const rows = __ctHelpers.derive({
         type: "object",
@@ -63,16 +64,14 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const view = { status: __ctHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        "enum": ["Done", "Pending"]
-                    } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Done", "Pending") };
-                return <span>{view.status}</span>;
+                const label = wrap(__ctHelpers.when({
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Done"));
+                return <span>{label}</span>;
             }, {
                 type: "object",
                 properties: {

@@ -39,6 +39,7 @@ function rewriteChildExpressions(
   context: RewriteParams["context"],
   analyze: AnalyzeFn,
   reactiveContextKind: RewriteParams["reactiveContextKind"],
+  containerKind: RewriteParams["containerKind"],
   inSafeContext?: boolean,
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
@@ -57,6 +58,7 @@ function rewriteChildExpressions(
           context,
           analyze,
           reactiveContextKind,
+          containerKind,
           inSafeContext,
         });
         if (result) {
@@ -86,12 +88,14 @@ export function rewriteExpression(
         params.context,
         params.analyze,
         reactiveContextKind,
+        params.containerKind,
         inSafeContext,
       );
     },
     ...params,
     inSafeContext,
     reactiveContextKind,
+    containerKind: params.containerKind,
     dataFlows: normalizeDataFlows(
       params.analysis.graph,
       params.analysis.dataFlows,

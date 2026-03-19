@@ -2,6 +2,6 @@ export { analyzeFunctionCapabilities } from "./capability-analysis.ts";
 export {
   classifyReactiveReceiverKind,
   type ReactiveReceiverKind,
-  shouldLowerLogicalInJsx,
+  shouldLowerLogicalExpression,
   shouldRewriteCollectionMethod,
 } from "./rewrite-policy.ts";

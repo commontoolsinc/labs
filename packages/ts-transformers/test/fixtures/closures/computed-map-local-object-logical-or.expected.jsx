@@ -6,11 +6,11 @@ interface Item {
 interface State {
     items: Item[];
 }
-// FIXTURE: computed-map-local-object-conditional
-// Verifies: nested ternary inside a callback-local object initializer within a
-//   computed-array .map() callback is lowered to ifElse().
-//   const view = { status: row.done ? "Done" : "Pending" }
-//   → const view = { status: ifElse(row.done, "Done", "Pending") }
+// FIXTURE: computed-map-local-object-logical-or
+// Verifies: nested || inside a callback-local object initializer within a
+//   computed-array .map() callback is lowered to unless().
+//   const view = { status: row.done || "Pending" }
+//   → const view = { status: unless(row.done, "Pending") }
 export default pattern((state) => {
     const rows = __ctHelpers.derive({
         type: "object",
@@ -63,15 +63,13 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const view = { status: __ctHelpers.ifElse({
+                const view = { status: __ctHelpers.unless({
                         type: "boolean"
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        "enum": ["Done", "Pending"]
-                    } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Done", "Pending") };
+                        type: ["boolean", "string"]
+                    } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Pending") };
                 return <span>{view.status}</span>;
             }, {
                 type: "object",

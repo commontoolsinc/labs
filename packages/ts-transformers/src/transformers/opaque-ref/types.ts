@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
 import type { ReactiveContextKind } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
+import type { ExpressionContainerKind } from "../expression-site-types.ts";
 
 export type OpaqueRefHelperName =
   | "derive"
@@ -21,6 +22,7 @@ export interface RewriteParams {
    * Effective reactive context at the rewrite site.
    */
   readonly reactiveContextKind?: ReactiveContextKind;
+  readonly containerKind?: ExpressionContainerKind;
   /**
    * True when inside a safe callback wrapper (action, handler, computed, etc.)
    * where opaque reading is allowed. In safe contexts, we still need to apply
@@ -33,6 +35,7 @@ export interface EmitterContext extends RewriteParams {
   readonly dataFlows: NormalizedDataFlowSet;
   readonly inSafeContext: boolean;
   readonly reactiveContextKind: ReactiveContextKind;
+  readonly containerKind?: ExpressionContainerKind;
   rewriteChildren(node: ts.Expression): ts.Expression;
 }
 
