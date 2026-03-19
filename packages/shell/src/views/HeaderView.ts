@@ -8,7 +8,6 @@ import { Task } from "@lit/task";
 import { NAME, type PageHandle, type CellHandle } from "@commontools/runtime-client";
 import type { FavoriteEntry } from "@commontools/home-schemas";
 import "../components/Flex.ts";
-import "../components/Spinner.ts";
 
 interface PieceItem {
   id: string;
@@ -25,10 +24,13 @@ type ConnectionStatus =
 export class XHeaderView extends BaseView {
   static override styles = css`
     :host {
+      box-sizing: border-box;
       display: block;
       width: 100%;
       height: auto;
     }
+
+    *, *::before, *::after { box-sizing: inherit; }
 
     svg {
       width: 100%;
@@ -88,6 +90,47 @@ export class XHeaderView extends BaseView {
       color: var(--gray-800, #2c3138);
     }
 
+    /* Header breadcrumbs (desktop only) */
+    .header-breadcrumbs {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    @media (min-width: 769px) {
+      .header-breadcrumbs {
+        display: flex;
+      }
+    }
+
+    .header-breadcrumbs .header-space {
+      font-family: "JetBrainsMono", monospace;
+      font-weight: 500;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--gray-300, #8a909b);
+      white-space: nowrap;
+    }
+
+    .header-breadcrumbs .header-separator {
+      color: var(--gray-300, #8a909b);
+      font-size: 12px;
+    }
+
+    .header-breadcrumbs .header-piece-name {
+      font-family: "JetBrainsMono", monospace;
+      font-weight: 500;
+      font-size: 13px;
+      line-height: 16px;
+      color: var(--gray-800, #2c3138);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+
+
     /* Menu overlay - desktop: dropdown, mobile: full-width */
     .menu-container {
       position: fixed;
@@ -115,7 +158,6 @@ export class XHeaderView extends BaseView {
         0px 0px 3px 0px rgba(0, 0, 0, 0.12);
       z-index: 1;
       position: relative;
-      box-sizing: border-box;
     }
 
     /* Desktop: positioned dropdown */
@@ -188,7 +230,13 @@ export class XHeaderView extends BaseView {
       border-radius: 6px;
       padding: 4px;
       align-self: flex-start;
-      margin-bottom: 8px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 769px) {
+      .menu-close {
+        margin-bottom: 8px;
+      }
     }
 
     .menu-close:hover {
@@ -208,6 +256,12 @@ export class XHeaderView extends BaseView {
       padding-bottom: 12px;
     }
 
+    @media (min-width: 769px) {
+      .menu-title {
+        display: none;
+      }
+    }
+
     .breadcrumb {
       display: flex;
       align-items: center;
@@ -225,7 +279,7 @@ export class XHeaderView extends BaseView {
     }
 
     .breadcrumb-text {
-      font-family: "JetBrains Mono", monospace;
+      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 11px;
       line-height: 16px;
@@ -258,7 +312,7 @@ export class XHeaderView extends BaseView {
     }
 
     .piece-title-text {
-      font-family: "JetBrains Mono", monospace;
+      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 16px;
       line-height: 24px;
@@ -300,7 +354,7 @@ export class XHeaderView extends BaseView {
       border-radius: 20px;
       background: none;
       cursor: pointer;
-      font-family: "JetBrains Mono", monospace;
+      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 12px;
       line-height: 16px;
@@ -353,13 +407,16 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-item-label {
-      font-family: "PP Mori", sans-serif;
+      font-family: "JetBrainsMono", monospace;
       font-weight: 600;
       font-size: 13px;
       line-height: 24px;
       color: var(--gray-800, #2c3138);
       letter-spacing: 0.3px;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .divider {
@@ -377,53 +434,8 @@ export class XHeaderView extends BaseView {
       background: var(--layer-2-divider, #e1e3e8);
     }
 
-    /* Loading overlay */
-    .loading-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(255, 255, 255, 0.7);
-      z-index: 9999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
 
-    .loading-overlay x-spinner {
-      width: auto;
-      height: auto;
-      background: transparent;
-    }
 
-    @keyframes spin {
-      from {
-        transform: rotate(0deg);
-      }
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    .reload-icon {
-      cursor: pointer;
-      opacity: 0.5;
-      transition: opacity 0.2s;
-      user-select: none;
-      font-size: 1.1rem;
-      margin-left: 0.35rem;
-    }
-
-    .reload-icon:hover {
-      opacity: 1;
-    }
-
-    .reload-icon.reloading {
-      opacity: 0.7;
-      animation: spin 1s linear infinite;
-      pointer-events: none;
-    }
   `;
 
   @property()
@@ -442,6 +454,9 @@ export class XHeaderView extends BaseView {
   spaceName?: string;
 
   @property({ attribute: false })
+  spaceDid?: string;
+
+  @property({ attribute: false })
   isLoggedIn = false;
 
   @property()
@@ -452,9 +467,6 @@ export class XHeaderView extends BaseView {
 
   @property({ attribute: false })
   isViewingDefaultPattern = false;
-
-  @state()
-  private isReloading = false;
 
   @state()
   private menuOpen = false;
@@ -585,26 +597,6 @@ export class XHeaderView extends BaseView {
     });
   }
 
-  private async handleReloadPatternClick(e: Event) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!this.rt || this.isReloading) return;
-    this.isReloading = true;
-    try {
-      await this.rt.recreateSpaceRootPattern();
-      this.dispatchEvent(
-        new CustomEvent("pattern-recreated", {
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    } catch (err) {
-      console.error("[HeaderView] Failed to recreate pattern:", err);
-    } finally {
-      this.isReloading = false;
-    }
-  }
-
   private handleLogoClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -637,15 +629,48 @@ export class XHeaderView extends BaseView {
       this.pieceListExpanded = false;
       if (this.spaceName) {
         navigate({ spaceName: this.spaceName, pieceId: piece.id });
+      } else if (this.spaceDid) {
+        navigate({ spaceDid: this.spaceDid as any, pieceId: piece.id });
       }
     };
   }
 
-  private handleGoToWorkspace(e: Event) {
+  private handleNavigateUp(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = false;
-    globalThis.location.href = "/";
+    if (this._isViewingPiece) {
+      // Viewing a piece — go back to the space
+      if (this.spaceName) {
+        navigate({ spaceName: this.spaceName });
+      } else if (this.spaceDid) {
+        navigate({ spaceDid: this.spaceDid as any });
+      }
+    } else {
+      // At space root — go home
+      globalThis.location.href = "/";
+    }
+  }
+
+  private get _hasSpace(): boolean {
+    return !!(this.spaceName || this.spaceDid);
+  }
+
+  private get _spaceDisplayName(): string {
+    if (this.spaceName) return this.spaceName;
+    if (this.spaceDid) return this.spaceDid.slice(0, 20) + "...";
+    return "";
+  }
+
+  private get _isViewingPiece(): boolean {
+    return !!(this.pieceId && this._hasSpace && !this.isViewingDefaultPattern);
+  }
+
+  private get _navigateUpLabel(): string {
+    if (this._isViewingPiece) {
+      return `Back to ${this._spaceDisplayName}`;
+    }
+    return "Go Home";
   }
 
   private async handleCopyLink(e: Event) {
@@ -819,20 +844,6 @@ export class XHeaderView extends BaseView {
     const connectionStatus = this.getConnectionStatus();
     const connectionColor = getConnectionColor(connectionStatus);
 
-    const reloadIcon = this.isViewingDefaultPattern && this.isLoggedIn
-      ? html`
-        <span
-          class="reload-icon ${this.isReloading ? "reloading" : ""}"
-          @click="${this.handleReloadPatternClick}"
-          title="Reload default pattern"
-        >↻</span>
-      `
-      : nothing;
-
-    const loadingOverlay = this.isReloading
-      ? html`<div class="loading-overlay"><x-spinner></x-spinner></div>`
-      : nothing;
-
     return html`
       <div class="header">
         <div class="header-start">
@@ -846,7 +857,15 @@ export class XHeaderView extends BaseView {
               <span class="chevron-down">${this.iconChevronDown()}</span>
             </span>
           </button>
-          ${reloadIcon}
+          <div class="header-breadcrumbs">
+            ${this._hasSpace ? html`
+              <span class="header-space">${this._spaceDisplayName}</span>
+              ${this.pieceTitle ? html`
+                <span class="header-separator">/</span>
+                <span class="header-piece-name">${this.pieceTitle}</span>
+              ` : nothing}
+            ` : nothing}
+          </div>
         </div>
       </div>
 
@@ -860,11 +879,11 @@ export class XHeaderView extends BaseView {
             </button>
             <div class="menu-title">
               ${
-      this.spaceName
+      this._hasSpace
         ? html`
                   <div class="breadcrumb">
                     <span class="breadcrumb-icon">${this.iconFolder()}</span>
-                    <span class="breadcrumb-text">${this.spaceName}</span>
+                    <span class="breadcrumb-text">${this._spaceDisplayName}</span>
                     <span class="breadcrumb-chevron">
                       ${this.iconChevronRight()}
                     </span>
@@ -886,9 +905,9 @@ export class XHeaderView extends BaseView {
 
             <div class="menu-rows">
               <button class="menu-item"
-                @click="${this.handleGoToWorkspace}">
+                @click="${this.handleNavigateUp}">
                 <span class="menu-item-icon">${this.iconArrowLeft()}</span>
-                <span class="menu-item-label">Go to Workspace</span>
+                <span class="menu-item-label">${this._navigateUpLabel}</span>
               </button>
 
               <div class="divider"><div class="divider-line"></div></div>
@@ -929,7 +948,6 @@ export class XHeaderView extends BaseView {
         </div>
       </div>
 
-      ${loadingOverlay}
     `;
   }
 }

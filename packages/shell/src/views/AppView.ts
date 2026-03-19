@@ -248,6 +248,9 @@ export class XAppView extends BaseView {
     const pieceId = this.getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
+      : this.rt?.spaceName();
+    const spaceDid = this.app && "spaceDid" in this.app.view
+      ? this.app.view.spaceDid
       : undefined;
     // We're viewing the default pattern if there's no pieceId in the current view
     const isViewingDefaultPattern = !("pieceId" in this.app.view &&
@@ -258,6 +261,7 @@ export class XAppView extends BaseView {
         <x-header-view
           .isLoggedIn="${!!this.app.identity}"
           .spaceName="${spaceName}"
+          .spaceDid="${spaceDid}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .pieceTitle="${this.pieceTitle}"
