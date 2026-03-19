@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -62,7 +62,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: doc1Entity,
           is: { value: doc1Value },
-          cause: refer({ the: type, of: doc1Entity }),
+          cause: hashOf({ the: type, of: doc1Entity }),
           since: 1,
         };
         store.set(
@@ -103,7 +103,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: doc2Entity,
           is: { value: doc2Value },
-          cause: refer({ the: type, of: doc2Entity }),
+          cause: hashOf({ the: type, of: doc2Entity }),
           since: 2,
         };
         store.set(
@@ -172,7 +172,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -215,7 +215,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -262,7 +262,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -313,7 +313,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -362,7 +362,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -406,7 +406,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -451,7 +451,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -498,7 +498,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -546,7 +546,7 @@ for (const canonicalHashing of [false, true]) {
             the: "application/json",
             of: id,
             is: { value: value },
-            cause: refer({ the: "application/json", of: id }),
+            cause: hashOf({ the: "application/json", of: id }),
             since: 1,
           };
         }
@@ -574,7 +574,7 @@ for (const canonicalHashing of [false, true]) {
               the: "application/json",
               of: id,
               is: { value: value },
-              cause: refer({ the: "application/json", of: id }),
+              cause: hashOf({ the: "application/json", of: id }),
               since: 1,
             };
           }
@@ -807,7 +807,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -874,7 +874,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -912,7 +912,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -951,7 +951,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -992,7 +992,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1047,7 +1047,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1110,7 +1110,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         });
         return { store, docUri, type };
@@ -1222,7 +1222,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1267,7 +1267,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1312,14 +1312,14 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         });
         store.set(`${linkedUri}/${type}`, {
           the: type,
           of: linkedUri as Entity,
           is: { value: { label: "should not appear" } },
-          cause: refer({ the: type, of: linkedUri as Entity }),
+          cause: hashOf({ the: type, of: linkedUri as Entity }),
           since: 2,
         });
 
@@ -1355,7 +1355,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         });
 
@@ -1395,7 +1395,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1441,7 +1441,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: targetUri as Entity,
           is: { value: { city: "Paris" } },
-          cause: refer({ the: type, of: targetUri as Entity }),
+          cause: hashOf({ the: type, of: targetUri as Entity }),
           since: 1,
         });
 
@@ -1453,7 +1453,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docUri as Entity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docUri as Entity }),
+          cause: hashOf({ the: type, of: docUri as Entity }),
           since: 1,
         });
 
@@ -1842,7 +1842,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1905,7 +1905,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -1951,7 +1951,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: linkedEntity,
           is: { value: "linked-value" },
-          cause: refer({ the: type, of: linkedEntity }),
+          cause: hashOf({ the: type, of: linkedEntity }),
           since: 1,
         };
         store.set(`${linkedRevision.of}/${linkedRevision.the}`, linkedRevision);
@@ -1972,7 +1972,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2026,7 +2026,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2068,7 +2068,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: docValue },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2133,7 +2133,7 @@ for (const canonicalHashing of [false, true]) {
           the: TYPE,
           of: entity,
           is: { value },
-          cause: refer({ the: TYPE, of: entity }),
+          cause: hashOf({ the: TYPE, of: entity }),
           since: 1,
         } as Revision<State>);
       }
@@ -2470,7 +2470,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: sparseArray },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2509,7 +2509,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: denseArray },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2553,7 +2553,7 @@ for (const canonicalHashing of [false, true]) {
           the: type,
           of: docEntity,
           is: { value: sparseArray },
-          cause: refer({ the: type, of: docEntity }),
+          cause: hashOf({ the: type, of: docEntity }),
           since: 1,
         };
         store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2597,7 +2597,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: refer({ the: type, of: docEntity }),
+      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
@@ -2633,14 +2633,14 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: refer({ the: type, of: docEntity }),
+      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
     store.set(`${linkedUri}/${type}`, {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: refer({ the: type, of: linkedUri as Entity }),
+      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -2669,7 +2669,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc1Uri as Entity,
       is: { value: { name: "Alice", secret: "hidden" } },
-      cause: refer({ the: type, of: doc1Uri as Entity }),
+      cause: hashOf({ the: type, of: doc1Uri as Entity }),
       since: 1,
     });
 
@@ -2681,7 +2681,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: doc2Uri as Entity,
       is: { value: doc2Value },
-      cause: refer({ the: type, of: doc2Uri as Entity }),
+      cause: hashOf({ the: type, of: doc2Uri as Entity }),
       since: 2,
     });
 
@@ -2726,7 +2726,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: refer({ the: type, of: redirectTestDataUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -2738,7 +2738,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: refer({ the: type, of: redirectTestSecondUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -2750,7 +2750,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: refer({ the: type, of: redirectTestFirstUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -2765,7 +2765,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: refer({ the: type, of: redirectTestRedirUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -2779,7 +2779,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: refer({ the: type, of: redirectTestInnerUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -2795,7 +2795,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: refer({ the: type, of: redirectTestOuterUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -2863,7 +2863,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: refer({ the: type, of: redirectTestDataUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
@@ -2875,7 +2875,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestSecondUri as Entity,
       is: { value: secondValue },
-      cause: refer({ the: type, of: redirectTestSecondUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
@@ -2887,7 +2887,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestFirstUri as Entity,
       is: { value: firstValue },
-      cause: refer({ the: type, of: redirectTestFirstUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestFirstUri as Entity }),
       since: 3,
     });
 
@@ -2902,7 +2902,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestRedirUri as Entity,
       is: { value: redirValue },
-      cause: refer({ the: type, of: redirectTestRedirUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestRedirUri as Entity }),
       since: 4,
     });
 
@@ -2916,7 +2916,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestInnerUri as Entity,
       is: { value: innerValue },
-      cause: refer({ the: type, of: redirectTestInnerUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestInnerUri as Entity }),
       since: 5,
     });
 
@@ -2932,7 +2932,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: redirectTestOuterUri as Entity,
       is: { value: outerValue },
-      cause: refer({ the: type, of: redirectTestOuterUri as Entity }),
+      cause: hashOf({ the: type, of: redirectTestOuterUri as Entity }),
       since: 6,
     });
 
@@ -2986,7 +2986,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: targetUri as Entity,
       is: { value: { shouldNotLoad: true } },
-      cause: refer({ the: type, of: targetUri as Entity }),
+      cause: hashOf({ the: type, of: targetUri as Entity }),
       since: 1,
     });
 
@@ -3000,7 +3000,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: outerUri as Entity,
       is: { value: outerValue },
-      cause: refer({ the: type, of: outerUri as Entity }),
+      cause: hashOf({ the: type, of: outerUri as Entity }),
       since: 2,
     });
 
@@ -3049,7 +3049,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: linkedUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: refer({ the: type, of: linkedUri as Entity }),
+      cause: hashOf({ the: type, of: linkedUri as Entity }),
       since: 1,
     });
 
@@ -3060,7 +3060,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
-      cause: refer({ the: type, of: docUri as Entity }),
+      cause: hashOf({ the: type, of: docUri as Entity }),
       since: 2,
     });
 
@@ -3089,7 +3089,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
       the: type,
       of: docEntity,
       is: { value: docValue },
-      cause: refer({ the: type, of: docEntity }),
+      cause: hashOf({ the: type, of: docEntity }),
       since: 1,
     });
 

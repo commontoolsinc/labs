@@ -5,12 +5,12 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as Reference from "merkle-reference";
-import { FabricContentId } from "../storable-content-id.ts";
+import { FabricHash } from "../storable-content-id.ts";
 import {
   contentIdFromJSON,
   fromString,
+  hashOf,
   isContentId,
-  refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "../value-hash.ts";
@@ -19,19 +19,19 @@ import {
 const SAMPLE_HASH = new Uint8Array(32);
 for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
-Deno.test("FabricContentId", async (t) => {
+Deno.test("FabricHash", async (t) => {
   // -----------------------------------------------------------------
-  // FabricContentId extensions
+  // FabricHash extensions
   // -----------------------------------------------------------------
 
   await t.step("toString() produces fid1:<base64> format", () => {
-    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
     const str = cid.toString();
     assert(str.startsWith("fid1:"), `Expected fid1: prefix, got: ${str}`);
   });
 
   await t.step("toJSON() produces { '/': 'fid1:<base64>' }", () => {
-    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
     const json = cid.toJSON();
     assertEquals(typeof json["/"], "string");
     assert(
@@ -42,7 +42,7 @@ Deno.test("FabricContentId", async (t) => {
   });
 
   await t.step(".bytes returns a defensive copy of .hash", () => {
-    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
     const bytes = cid.bytes;
     // Contents match.
     assertEquals(bytes, cid.hash);
@@ -57,7 +57,7 @@ Deno.test("FabricContentId", async (t) => {
   });
 
   await t.step("copyHashInto copies hash bytes into target buffer", () => {
-    const cid = new FabricContentId(SAMPLE_HASH, "sha3");
+    const cid = new FabricHash(SAMPLE_HASH, "sha3");
     const target = new Uint8Array(32);
     const returned = cid.copyHashInto(target);
     // Returns the same target buffer.
@@ -69,7 +69,7 @@ Deno.test("FabricContentId", async (t) => {
   await t.step(
     '["/"] getter returns the raw hash bytes (not a copy)',
     () => {
-      const cid = new FabricContentId(SAMPLE_HASH, "test2");
+      const cid = new FabricHash(SAMPLE_HASH, "test2");
       const slash = cid["/"];
       // Should be the exact same array reference as .hash (not a defensive copy).
       assert(
@@ -86,17 +86,17 @@ Deno.test("FabricContentId", async (t) => {
   // -----------------------------------------------------------------
 
   await t.step(
-    "contentIdFromJSON round-trips through FabricContentId when canonical hashing is on",
+    "contentIdFromJSON round-trips through FabricHash when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
-        const original = new FabricContentId(SAMPLE_HASH, "fid1");
+        const original = new FabricHash(SAMPLE_HASH, "fid1");
         const json = original.toJSON();
         const reconstructed = contentIdFromJSON(json);
 
-        // The reconstructed value should be a FabricContentId.
-        assertInstanceOf(reconstructed, FabricContentId);
-        const cid = reconstructed as unknown as FabricContentId;
+        // The reconstructed value should be a FabricHash.
+        assertInstanceOf(reconstructed, FabricHash);
+        const cid = reconstructed as unknown as FabricHash;
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
       } finally {
@@ -106,17 +106,17 @@ Deno.test("FabricContentId", async (t) => {
   );
 
   await t.step(
-    "fromString round-trips through FabricContentId when canonical hashing is on",
+    "fromString round-trips through FabricHash when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
-        const original = new FabricContentId(SAMPLE_HASH, "sha3");
+        const original = new FabricHash(SAMPLE_HASH, "sha3");
         const str = original.toString();
         const reconstructed = fromString(str);
 
-        assertInstanceOf(reconstructed, FabricContentId);
-        const cid = reconstructed as unknown as FabricContentId;
+        assertInstanceOf(reconstructed, FabricHash);
+        const cid = reconstructed as unknown as FabricHash;
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
         assertEquals(cid.algorithmTag, "sha3");
@@ -143,9 +143,9 @@ Deno.test("FabricContentId", async (t) => {
   );
 
   await t.step(
-    "isContentId returns true for FabricContentId instances",
+    "isContentId returns true for FabricHash instances",
     () => {
-      const cid = new FabricContentId(SAMPLE_HASH, "fid1");
+      const cid = new FabricHash(SAMPLE_HASH, "fid1");
       assert(isContentId(cid));
     },
   );
@@ -153,20 +153,20 @@ Deno.test("FabricContentId", async (t) => {
   await t.step(
     "isContentId returns true for Reference.View instances",
     () => {
-      const ref = refer({ hello: "world" });
-      // With canonical hashing off (default), refer() returns a Reference.View.
+      const ref = hashOf({ hello: "world" });
+      // With canonical hashing off (default), hashOf() returns a Reference.View.
       assert(Reference.is(ref));
       assert(isContentId(ref));
     },
   );
 
   await t.step(
-    "refer() returns FabricContentId when canonical hashing is on",
+    "hashOf() returns FabricHash when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
-        const result = refer({ hello: "world" });
-        assertInstanceOf(result, FabricContentId);
+        const result = hashOf({ hello: "world" });
+        assertInstanceOf(result, FabricHash);
       } finally {
         resetCanonicalHashConfig();
       }
@@ -174,24 +174,24 @@ Deno.test("FabricContentId", async (t) => {
   );
 
   await t.step(
-    "nested refer() works when canonical hashing is on (no throw on FabricContentId in value tree)",
+    "nested hashOf() works when canonical hashing is on (no throw on FabricHash in value tree)",
     () => {
       setCanonicalHashConfig(true);
       try {
-        // First refer produces a FabricContentId.
-        const innerRef = refer({ the: "text/plain", of: "entity:123" });
-        assertInstanceOf(innerRef, FabricContentId);
+        // First hashOf produces a FabricHash.
+        const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
+        assertInstanceOf(innerRef, FabricHash);
 
-        // Wrap it in a fact-like structure and refer again. canonicalHash
-        // handles FabricContentId via TAG_CONTENT_ID, so this must not throw.
+        // Wrap it in a fact-like structure and hashOf again. canonicalHash
+        // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
         const outerSource = {
           cause: innerRef,
           the: "text/plain",
           of: "entity:456",
           is: { value: 42 },
         };
-        const outerRef = refer(outerSource);
-        assertInstanceOf(outerRef, FabricContentId);
+        const outerRef = hashOf(outerSource);
+        assertInstanceOf(outerRef, FabricHash);
       } finally {
         resetCanonicalHashConfig();
       }
@@ -199,18 +199,18 @@ Deno.test("FabricContentId", async (t) => {
   );
 
   await t.step(
-    "refer() returns Reference.View when canonical hashing is off",
+    "hashOf() returns Reference.View when canonical hashing is off",
     () => {
       // Explicitly pin canonical hashing off rather than relying on ambient
       // default, so this step exercises the legacy path even if the default
       // changes.
       setCanonicalHashConfig(false);
       try {
-        const result = refer({ test: true });
+        const result = hashOf({ test: true });
         assert(Reference.is(result), "Expected a Reference.View instance");
         assert(
-          !(result instanceof FabricContentId),
-          "Should not be FabricContentId when flag is off",
+          !(result instanceof FabricHash),
+          "Should not be FabricHash when flag is off",
         );
       } finally {
         resetCanonicalHashConfig();

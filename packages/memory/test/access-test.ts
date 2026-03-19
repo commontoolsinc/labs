@@ -4,7 +4,7 @@ import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { type DID } from "@commontools/identity";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -15,7 +15,7 @@ const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("access", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
+  // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
     setCanonicalHashConfig(false);
   });
@@ -58,7 +58,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], alice);
+    const result = await Access.authorize([hashOf(invocation)], alice);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -89,7 +89,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -119,7 +119,7 @@ describe("access", () => {
     };
 
     const result = await Access.authorize(
-      [refer(invocation1), refer(invocation2)],
+      [hashOf(invocation1), hashOf(invocation2)],
       alice,
     );
     assert(result.ok, "batch authorization was issued");
@@ -158,7 +158,7 @@ describe("access", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 

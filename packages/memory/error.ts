@@ -13,7 +13,7 @@ import type {
   TransactionError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 
 export const unauthorized = (
   message: string,
@@ -71,7 +71,7 @@ export class TheConflictError extends Error implements ConflictError {
     super(
       conflict.expected == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${
-          refer(
+          hashOf(
             actual,
           )
         }`
@@ -79,10 +79,10 @@ export class TheConflictError extends Error implements ConflictError {
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exist`
         : conflict.existsInHistory
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but now it is ${
-          refer(actual)
+          hashOf(actual)
         }`
         : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it is ${
-          refer(actual)
+          hashOf(actual)
         }`,
     );
 

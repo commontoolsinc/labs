@@ -39,7 +39,7 @@ import * as Memory from "./memory.ts";
 import {
   type ContentId,
   fromString as causeFromString,
-  refer,
+  hashOf,
 } from "@commontools/data-model/value-hash";
 import {
   redactCommitData,
@@ -489,14 +489,14 @@ class MemoryProviderSession<
       );
       return this.perform({
         the: "task/return",
-        of: `job:${refer(invocation)}` as InvocationURL<
+        of: `job:${hashOf(invocation)}` as InvocationURL<
           ContentId<ConsumerCommandInvocation<MemoryProtocol>>
         >,
         is: { error },
       });
     }
 
-    const of = `job:${refer(invocation)}` as InvocationURL<
+    const of = `job:${hashOf(invocation)}` as InvocationURL<
       ContentId<ConsumerCommandInvocation<Protocol>>
     >;
 

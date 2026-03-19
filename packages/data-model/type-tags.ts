@@ -1,5 +1,5 @@
 import { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
-import { FabricContentId } from "./storable-content-id.ts";
+import { FabricHash } from "./storable-content-id.ts";
 import { isFabricInstance } from "./storable-protocol.ts";
 
 /**
@@ -47,7 +47,7 @@ export const TAGS = Object.freeze(
  * Covers two categories:
  * - **Native JS builtins**: Array, Object, Error, Map, Set, Date, Uint8Array.
  * - **System-defined value types**: FabricEpochNsec, FabricEpochDays,
- *   FabricContentId -- classes defined by this system that behave like
+ *   FabricHash -- classes defined by this system that behave like
  *   primitives (always frozen, pass through conversion unchanged) but aren't
  *   under the open-ended `FabricInstance` umbrella.
  *
@@ -120,7 +120,7 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.EpochNsec;
     case FabricEpochDays:
       return NATIVE_TAGS.EpochDays;
-    case FabricContentId:
+    case FabricHash:
       return NATIVE_TAGS.ContentId;
 
     default:

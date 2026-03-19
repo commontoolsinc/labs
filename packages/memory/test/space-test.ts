@@ -7,7 +7,7 @@ import {
   it,
 } from "@std/testing/bdd";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -58,10 +58,10 @@ for (const canonicalHashing of [false, true]) {
 
     beforeAll(() => {
       setCanonicalHashConfig(canonicalHashing);
-      doc = `of:${refer({ hello: "world" })}` as const;
+      doc = `of:${hashOf({ hello: "world" })}` as const;
       doc1 = doc;
-      doc2 = `of:${refer({ goodbye: "world" })}` as const;
-      doc3 = `of:${refer({ goodbye: "cruel world" })}` as const;
+      doc2 = `of:${hashOf({ goodbye: "world" })}` as const;
+      doc3 = `of:${hashOf({ goodbye: "cruel world" })}` as const;
       resetCanonicalHashConfig();
     });
 
@@ -336,14 +336,14 @@ for (const canonicalHashing of [false, true]) {
         space: space.did(),
         the,
         of: doc,
-        expected: refer(v1),
+        expected: hashOf(v1),
         existsInHistory: false,
         actual: null,
       });
     });
 
     it("create memory fails if already exists", async () => {
-      const _base = refer(Fact.unclaimed({ the, of: doc }));
+      const _base = hashOf(Fact.unclaimed({ the, of: doc }));
       const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
       const create = Transaction.create({
@@ -392,9 +392,9 @@ for (const canonicalHashing of [false, true]) {
 
       const malformed = Fact.assert({
         the,
-        of: `of:${refer({ doc: 2 })}`,
+        of: `of:${hashOf({ doc: 2 })}`,
         is: { a: true },
-        cause: refer(initial),
+        cause: hashOf(initial),
       });
 
       const change = Transaction.create({
@@ -410,7 +410,7 @@ for (const canonicalHashing of [false, true]) {
         space: space.did(),
         the,
         of: malformed.of,
-        expected: refer(initial),
+        expected: hashOf(initial),
         existsInHistory: false,
         actual: null,
       });
@@ -469,7 +469,7 @@ for (const canonicalHashing of [false, true]) {
         space: space.did(),
         the,
         of: doc,
-        expected: refer(v1),
+        expected: hashOf(v1),
         existsInHistory: false,
         actual: { ...v2, since: 1 },
       });
@@ -566,7 +566,7 @@ for (const canonicalHashing of [false, true]) {
         changes: {
           [doc]: {
             [the]: {
-              [refer(v0).toString()]: {},
+              [hashOf(v0).toString()]: {},
             },
           },
         },
@@ -601,7 +601,7 @@ for (const canonicalHashing of [false, true]) {
           [space.did()]: {
             [doc]: {
               [the]: {
-                [refer(v0).toString()]: {
+                [hashOf(v0).toString()]: {
                   since: commit.is.since,
                 },
               },
@@ -753,7 +753,7 @@ for (const canonicalHashing of [false, true]) {
         space: space.did(),
         the,
         of: doc,
-        expected: refer(v2),
+        expected: hashOf(v2),
         existsInHistory: false,
         actual: { ...v3, since: 2 },
       });
@@ -763,10 +763,10 @@ for (const canonicalHashing of [false, true]) {
       assertEquals(
         result.error.message,
         `The ${the} of ${doc} in ${space.did()} was expected to be ${
-          refer(
+          hashOf(
             v2,
           )
-        }, but it is ${refer(v3)}`,
+        }, but it is ${hashOf(v3)}`,
       );
     });
 
@@ -837,9 +837,9 @@ for (const canonicalHashing of [false, true]) {
     });
 
     it("batch updates", async () => {
-      const hi = `of:${refer({ hi: "world" })}` as const;
-      const hola = `of:${refer({ hola: "mundo" })}` as const;
-      const ciao = `of:${refer({ ciao: "mondo" })}` as const;
+      const hi = `of:${hashOf({ hi: "world" })}` as const;
+      const hola = `of:${hashOf({ hola: "mundo" })}` as const;
+      const ciao = `of:${hashOf({ ciao: "mondo" })}` as const;
 
       const hi1 = Fact.assert({ the, of: hi, is: { hi: 1 } });
       const hola1 = Fact.assert({ the, of: hola, is: { hola: 1 } });
@@ -1010,7 +1010,7 @@ for (const canonicalHashing of [false, true]) {
         space: space.did(),
         the,
         of: hi,
-        expected: refer(hi1),
+        expected: hashOf(hi1),
         existsInHistory: true,
         actual: { ...hi2, since: 1 },
       });
@@ -1238,7 +1238,7 @@ for (const canonicalHashing of [false, true]) {
         prf: [],
       });
 
-      const cause = refer(Fact.unclaimed({ the, of: doc }));
+      const cause = hashOf(Fact.unclaimed({ the, of: doc }));
       const filteredFact = {
         [the]: {
           [cause.toString()]: {
@@ -2207,7 +2207,7 @@ for (const canonicalHashing of [false, true]) {
   });
 }
 
-// This test is flag-independent; it doesn't use `refer()` or hashing.
+// This test is flag-independent; it doesn't use `hashOf()` or hashing.
 describe("fail to connect to non-existing replica", () => {
   it("returns ConnectionError", async () => {
     const url = new URL(

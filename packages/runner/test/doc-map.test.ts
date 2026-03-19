@@ -10,7 +10,7 @@ import { expect } from "@std/expect";
 import { createRef, getEntityId } from "../src/create-ref.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -22,9 +22,9 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("refer", () => {
+describe("hashOf", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
+  // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
     setCanonicalHashConfig(false);
   });
@@ -33,8 +33,8 @@ describe("refer", () => {
   });
 
   it("should create a reference that is equal to another reference with the same source", () => {
-    const ref = refer({ hello: "world" });
-    const ref2 = refer({ hello: "world" });
+    const ref = hashOf({ hello: "world" });
+    const ref2 = hashOf({ hello: "world" });
     expect(ref).toEqual(ref2);
   });
 });

@@ -7,7 +7,7 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type ContentId, refer } from "@commontools/data-model/value-hash";
+import { type ContentId, hashOf } from "@commontools/data-model/value-hash";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
@@ -28,7 +28,7 @@ export const claim = async <Access extends Invocation>(
   serviceDid: DID,
   acl?: ACL,
 ): AsyncResult<Access, AuthorizationError> => {
-  const claim = refer(access).toString();
+  const claim = hashOf(access).toString();
   if (authorization.access[claim]) {
     const { ok: issuer, error } = await fromDID(access.iss);
     if (error) {
@@ -37,7 +37,7 @@ export const claim = async <Access extends Invocation>(
       };
     }
     const result = await issuer.verify({
-      payload: refer(authorization.access).bytes,
+      payload: hashOf(authorization.access).bytes,
       signature: authorization.signature,
     });
 
@@ -118,7 +118,7 @@ export const authorize = async <Access extends ContentId[]>(
   }
 
   const { ok: signature, error } = await as.sign<Access[number]>(
-    refer(proof).bytes,
+    hashOf(proof).bytes,
   );
   if (error) {
     return { error };

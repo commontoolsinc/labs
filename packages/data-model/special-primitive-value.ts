@@ -3,7 +3,7 @@
  * behave like primitives in the storable type system but are represented as
  * class instances for type safety and dispatch. Currently covers temporal
  * types (`FabricEpochNsec`, `FabricEpochDays`) and content IDs
- * (`FabricContentId`).
+ * (`FabricHash`).
  *
  * Analogous to `ExplicitTagStorable` (which unifies `UnknownStorable` and
  * `ProblematicStorable`), this class enables a single `instanceof` check

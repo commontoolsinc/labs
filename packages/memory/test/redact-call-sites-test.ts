@@ -14,7 +14,7 @@ import {
 } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -28,7 +28,7 @@ import { LABEL_TYPE } from "../space.ts";
 import { alice } from "./principal.ts";
 
 // Explicitly pin canonical hashing off so these tests exercise the legacy
-// refer() path regardless of what the ambient default is.
+// hashOf() path regardless of what the ambient default is.
 setCanonicalHashConfig(false);
 
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
@@ -43,7 +43,7 @@ class Clock {
   }
 }
 
-const doc = `of:${refer({ test: "redact-call-sites" })}` as const;
+const doc = `of:${hashOf({ test: "redact-call-sites" })}` as const;
 const the = "application/json";
 const store = new URL(`memory://`);
 

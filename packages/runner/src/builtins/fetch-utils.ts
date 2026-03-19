@@ -1,4 +1,4 @@
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { storableFromNativeValue } from "@commontools/data-model/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
@@ -34,11 +34,11 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   // Exclude 'result' type hint from the hash - only hash actual fetch parameters
   const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
   delete (inputsOnly as Record<string, unknown>).result;
-  // refer() cannot hash undefined values; normalize to a deep storable shape
+  // hashOf() cannot hash undefined values; normalize to a deep storable shape
   // (omits undefined object props, converts undefined array elements to null).
   const storableInputs = storableFromNativeValue(inputsOnly);
   const normalized = storableInputs === undefined ? {} : storableInputs;
-  return refer(normalized as Record<string, unknown>).toString();
+  return hashOf(normalized as Record<string, unknown>).toString();
 }
 
 export function computeInputHash<T extends Record<string, any>>(

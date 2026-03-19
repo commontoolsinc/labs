@@ -27,7 +27,7 @@ import {
 } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 
@@ -294,5 +294,5 @@ function computeId(program: Program): string {
     program.main,
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
-  return refer(source).toString();
+  return hashOf(source).toString();
 }

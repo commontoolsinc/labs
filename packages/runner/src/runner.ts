@@ -1,4 +1,4 @@
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord, type Mutable } from "@commontools/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -1954,7 +1954,7 @@ export class Runner {
 
 // This takes a pattern id and returns a sigil link with the corresponding entity.
 function getSpellLink(patternId: string): SigilLink {
-  const id = refer({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
+  const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
 

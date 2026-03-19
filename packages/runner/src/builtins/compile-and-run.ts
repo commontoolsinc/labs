@@ -1,5 +1,5 @@
 import { type BuiltInCompileAndRunParams } from "commontools";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -133,7 +133,7 @@ export function compileAndRun(
     }).withTx(tx).get();
     const input = inputsCell.withTx(tx).key("input");
 
-    const hash = refer(program ?? { files: [], main: "" }).toString();
+    const hash = hashOf(program ?? { files: [], main: "" }).toString();
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -146,7 +146,7 @@ export function compileAndRun(
 
     // Special case: if inputs are invalid AND this is the hash for empty inputs,
     // the user intentionally cleared them - proceed to clear outputs
-    const emptyInputsHash = refer({ files: [], main: "" }).toString();
+    const emptyInputsHash = hashOf({ files: [], main: "" }).toString();
     const isIntentionallyEmpty = !hasValidInputs && hash === emptyInputsHash;
 
     // If we have a previous valid result and inputs are currently invalid (likely rehydrating),

@@ -15,7 +15,7 @@ import {
   BuiltInLLMParams,
 } from "@commontools/api";
 import type { Schema } from "@commontools/api/schema";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -360,7 +360,7 @@ export function llm(
       // tools will be added below if present
     };
 
-    const hash = refer(llmParams).toString();
+    const hash = hashOf(llmParams).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
       | undefined;
@@ -560,7 +560,7 @@ export function generateText(
       // tools will be added below if present
     };
 
-    const hash = refer(llmParams).toString();
+    const hash = hashOf(llmParams).toString();
     const queueName = inputs.key("queue").withTx(tx).get() as unknown as
       | string
       | undefined;
@@ -785,7 +785,7 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cache ?? true,
       };
 
-      const hash = refer({ ...llmParams, schema }).toString();
+      const hash = hashOf({ ...llmParams, schema }).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1005,7 +1005,7 @@ export function generateObject<T extends Record<string, unknown>>(
       generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
         "You are a helpful assistant.";
 
-      const hash = refer(generateObjectParams).toString();
+      const hash = hashOf(generateObjectParams).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;

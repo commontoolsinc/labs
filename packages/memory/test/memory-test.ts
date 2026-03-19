@@ -14,7 +14,7 @@ import * as Selection from "../selection.ts";
 import * as Commit from "../commit.ts";
 import * as Query from "../query.ts";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -36,7 +36,7 @@ for (const canonicalHashing of [false, true]) {
 
     beforeAll(() => {
       setCanonicalHashConfig(canonicalHashing);
-      doc = `of:${refer({ hello: "world" })}` as const;
+      doc = `of:${hashOf({ hello: "world" })}` as const;
       resetCanonicalHashConfig();
     });
 
@@ -210,7 +210,7 @@ for (const canonicalHashing of [false, true]) {
     });
 
     it("list multiple facts", async () => {
-      const doc2 = `of:${refer({ doc: 2 })}` as const;
+      const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
       const facts = [
         Fact.assert({ the, of: doc, is: { v: 1 } }),

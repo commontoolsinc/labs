@@ -1,4 +1,4 @@
-import { fromString, refer } from "@commontools/data-model/value-hash";
+import { fromString, hashOf } from "@commontools/data-model/value-hash";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type {
   CauseString,
@@ -360,7 +360,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selector === undefined || selector.schema === undefined) {
       return;
     }
-    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const selectorRef = hashOf(JSON.stringify(selector)).toString();
     this.refTracker.add(toKey(address), selectorRef);
     this.selectors.set(selectorRef, selector);
     this.standardizedSelector.set(selectorRef, {
@@ -381,7 +381,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   ): boolean {
     const selectorRefs = this.refTracker.get(toKey(address));
     if (selectorRefs !== undefined) {
-      const selectorRef = refer(JSON.stringify(selector)).toString();
+      const selectorRef = hashOf(JSON.stringify(selector)).toString();
       return selectorRefs.has(selectorRef);
     }
     return false;
@@ -397,7 +397,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selectorRefs === undefined) {
       return noMatch;
     }
-    const newSelectorRef = refer(JSON.stringify(selector)).toString();
+    const newSelectorRef = hashOf(JSON.stringify(selector)).toString();
     // A selector is its own superset
     if (selectorRefs.has(newSelectorRef)) {
       const promiseKey = `${toKey(address)}?${newSelectorRef}`;
@@ -480,7 +480,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
-    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const selectorRef = hashOf(JSON.stringify(selector)).toString();
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
   }

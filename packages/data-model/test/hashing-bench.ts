@@ -1,7 +1,7 @@
 /**
  * Hashing Performance Benchmarks: Legacy (merkle-reference) vs. Canonical
  *
- * Compares the two hashing paths used by `refer()`:
+ * Compares the two hashing paths used by `hashOf()`:
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
  * - Canonical: `canonicalHash()` single-pass incremental SHA-256
  *
@@ -12,7 +12,7 @@
  */
 
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "../value-hash.ts";
@@ -95,9 +95,9 @@ const assertion16KB = {
 // Warm up both paths to avoid measuring JIT compilation
 for (let i = 0; i < 20; i++) {
   setCanonicalHashConfig(false);
-  refer(smallObject);
+  hashOf(smallObject);
   setCanonicalHashConfig(true);
-  refer(smallObject);
+  hashOf(smallObject);
 }
 resetCanonicalHashConfig();
 
@@ -106,200 +106,200 @@ resetCanonicalHashConfig();
 // ==========================================================================
 
 Deno.bench({
-  name: "legacy refer() - small object (5 keys, cached)",
+  name: "legacy hashOf() - small object (5 keys, cached)",
   group: "small-object",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(smallObject);
+    hashOf(smallObject);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - small object (5 keys)",
+  name: "canonical hashOf() - small object (5 keys)",
   group: "small-object",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(smallObject);
+    hashOf(smallObject);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - medium object (15 keys, 2-level, cached)",
+  name: "legacy hashOf() - medium object (15 keys, 2-level, cached)",
   group: "medium-object",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(mediumObject);
+    hashOf(mediumObject);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - medium object (15 keys, 2-level)",
+  name: "canonical hashOf() - medium object (15 keys, 2-level)",
   group: "medium-object",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(mediumObject);
+    hashOf(mediumObject);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - large tree (~364 nodes, cached)",
+  name: "legacy hashOf() - large tree (~364 nodes, cached)",
   group: "large-tree",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(largeNestedTree);
+    hashOf(largeNestedTree);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - large tree (~364 nodes)",
+  name: "canonical hashOf() - large tree (~364 nodes)",
   group: "large-tree",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(largeNestedTree);
+    hashOf(largeNestedTree);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - small array (5 elements, cached)",
+  name: "legacy hashOf() - small array (5 elements, cached)",
   group: "small-array",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(smallArray);
+    hashOf(smallArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - small array (5 elements)",
+  name: "canonical hashOf() - small array (5 elements)",
   group: "small-array",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(smallArray);
+    hashOf(smallArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - large array (200 objects, cached)",
+  name: "legacy hashOf() - large array (200 objects, cached)",
   group: "large-array",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(largeArray);
+    hashOf(largeArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - large array (200 objects)",
+  name: "canonical hashOf() - large array (200 objects)",
   group: "large-array",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(largeArray);
+    hashOf(largeArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - repeated subtrees (50 items, 1 shared, cached)",
+  name: "legacy hashOf() - repeated subtrees (50 items, 1 shared, cached)",
   group: "repeated-subtrees",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(repeatedSubtrees);
+    hashOf(repeatedSubtrees);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - repeated subtrees (50 items, 1 shared)",
+  name: "canonical hashOf() - repeated subtrees (50 items, 1 shared)",
   group: "repeated-subtrees",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(repeatedSubtrees);
+    hashOf(repeatedSubtrees);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - unclaimed {the, of} (cached)",
+  name: "legacy hashOf() - unclaimed {the, of} (cached)",
   group: "unclaimed",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(unclaimedFact);
+    hashOf(unclaimedFact);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - unclaimed {the, of}",
+  name: "canonical hashOf() - unclaimed {the, of}",
   group: "unclaimed",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(unclaimedFact);
+    hashOf(unclaimedFact);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - 16KB assertion (cached)",
+  name: "legacy hashOf() - 16KB assertion (cached)",
   group: "assertion-16kb",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(assertion16KB);
+    hashOf(assertion16KB);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - 16KB assertion",
+  name: "canonical hashOf() - 16KB assertion",
   group: "assertion-16kb",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(assertion16KB);
+    hashOf(assertion16KB);
     b.end();
     resetCanonicalHashConfig();
   },
@@ -339,108 +339,108 @@ function freshAssertion16KB() {
 }
 
 Deno.bench({
-  name: "legacy refer() - small object (5 keys, fresh)",
+  name: "legacy hashOf() - small object (5 keys, fresh)",
   group: "small-object-fresh",
   baseline: true,
   fn(b) {
     const data = freshSmallObject();
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - small object (5 keys, fresh)",
+  name: "canonical hashOf() - small object (5 keys, fresh)",
   group: "small-object-fresh",
   fn(b) {
     const data = freshSmallObject();
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - medium object (15 keys, fresh)",
+  name: "legacy hashOf() - medium object (15 keys, fresh)",
   group: "medium-object-fresh",
   baseline: true,
   fn(b) {
     const data = freshMediumObject();
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - medium object (15 keys, fresh)",
+  name: "canonical hashOf() - medium object (15 keys, fresh)",
   group: "medium-object-fresh",
   fn(b) {
     const data = freshMediumObject();
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - unclaimed {the, of} (fresh)",
+  name: "legacy hashOf() - unclaimed {the, of} (fresh)",
   group: "unclaimed-fresh",
   baseline: true,
   fn(b) {
     const data = freshUnclaimedFact();
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - unclaimed {the, of} (fresh)",
+  name: "canonical hashOf() - unclaimed {the, of} (fresh)",
   group: "unclaimed-fresh",
   fn(b) {
     const data = freshUnclaimedFact();
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - 16KB assertion (fresh)",
+  name: "legacy hashOf() - 16KB assertion (fresh)",
   group: "assertion-16kb-fresh",
   baseline: true,
   fn(b) {
     const data = freshAssertion16KB();
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - 16KB assertion (fresh)",
+  name: "canonical hashOf() - 16KB assertion (fresh)",
   group: "assertion-16kb-fresh",
   fn(b) {
     const data = freshAssertion16KB();
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
@@ -497,131 +497,131 @@ const frozenLargeTree = deepFreeze(makeLargeNestedTree(6, 3));
 // Warm up frozen-object path
 for (let i = 0; i < 20; i++) {
   setCanonicalHashConfig(true);
-  refer(frozenSmallFlat);
-  refer(frozenLargeTree);
+  hashOf(frozenSmallFlat);
+  hashOf(frozenLargeTree);
   resetCanonicalHashConfig();
 }
 
 Deno.bench({
-  name: "legacy refer() - frozen small flat (5 keys, cached)",
+  name: "legacy hashOf() - frozen small flat (5 keys, cached)",
   group: "frozen-small-flat",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenSmallFlat);
+    hashOf(frozenSmallFlat);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen small flat (5 keys, WeakMap cached)",
+  name: "canonical hashOf() - frozen small flat (5 keys, WeakMap cached)",
   group: "frozen-small-flat",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenSmallFlat);
+    hashOf(frozenSmallFlat);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen nested (3-level, cached)",
+  name: "legacy hashOf() - frozen nested (3-level, cached)",
   group: "frozen-nested",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenNested);
+    hashOf(frozenNested);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen nested (3-level, WeakMap cached)",
+  name: "canonical hashOf() - frozen nested (3-level, WeakMap cached)",
   group: "frozen-nested",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenNested);
+    hashOf(frozenNested);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen array (6 elements, cached)",
+  name: "legacy hashOf() - frozen array (6 elements, cached)",
   group: "frozen-array",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenArray);
+    hashOf(frozenArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen array (6 elements, WeakMap cached)",
+  name: "canonical hashOf() - frozen array (6 elements, WeakMap cached)",
   group: "frozen-array",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenArray);
+    hashOf(frozenArray);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen object+arrays (cached)",
+  name: "legacy hashOf() - frozen object+arrays (cached)",
   group: "frozen-obj-arrays",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenObjectWithArrays);
+    hashOf(frozenObjectWithArrays);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen object+arrays (WeakMap cached)",
+  name: "canonical hashOf() - frozen object+arrays (WeakMap cached)",
   group: "frozen-obj-arrays",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenObjectWithArrays);
+    hashOf(frozenObjectWithArrays);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen large tree (~364 nodes, cached)",
+  name: "legacy hashOf() - frozen large tree (~364 nodes, cached)",
   group: "frozen-large-tree",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenLargeTree);
+    hashOf(frozenLargeTree);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen large tree (~364 nodes, WeakMap cached)",
+  name: "canonical hashOf() - frozen large tree (~364 nodes, WeakMap cached)",
   group: "frozen-large-tree",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenLargeTree);
+    hashOf(frozenLargeTree);
     b.end();
     resetCanonicalHashConfig();
   },
@@ -632,7 +632,7 @@ Deno.bench({
 // ==========================================================================
 
 Deno.bench({
-  name: "legacy refer() - frozen small flat (fresh)",
+  name: "legacy hashOf() - frozen small flat (fresh)",
   group: "frozen-small-flat-fresh",
   baseline: true,
   fn(b) {
@@ -645,14 +645,14 @@ Deno.bench({
     });
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen small flat (fresh)",
+  name: "canonical hashOf() - frozen small flat (fresh)",
   group: "frozen-small-flat-fresh",
   fn(b) {
     const data = deepFreeze({
@@ -664,14 +664,14 @@ Deno.bench({
     });
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen nested (fresh)",
+  name: "legacy hashOf() - frozen nested (fresh)",
   group: "frozen-nested-fresh",
   baseline: true,
   fn(b) {
@@ -682,14 +682,14 @@ Deno.bench({
     });
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen nested (fresh)",
+  name: "canonical hashOf() - frozen nested (fresh)",
   group: "frozen-nested-fresh",
   fn(b) {
     const data = deepFreeze({
@@ -699,34 +699,34 @@ Deno.bench({
     });
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen large tree (fresh)",
+  name: "legacy hashOf() - frozen large tree (fresh)",
   group: "frozen-large-tree-fresh",
   baseline: true,
   fn(b) {
     const data = deepFreeze(makeLargeNestedTree(6, 3));
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen large tree (fresh)",
+  name: "canonical hashOf() - frozen large tree (fresh)",
   group: "frozen-large-tree-fresh",
   fn(b) {
     const data = deepFreeze(makeLargeNestedTree(6, 3));
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
@@ -744,39 +744,39 @@ const frozenTheOf = Object.freeze({
 // Warm up
 for (let i = 0; i < 20; i++) {
   setCanonicalHashConfig(true);
-  refer(frozenTheOf);
+  hashOf(frozenTheOf);
   setCanonicalHashConfig(false);
-  refer(frozenTheOf);
+  hashOf(frozenTheOf);
 }
 resetCanonicalHashConfig();
 
 Deno.bench({
-  name: "legacy refer() - frozen {the, of} (cached)",
+  name: "legacy hashOf() - frozen {the, of} (cached)",
   group: "frozen-the-of",
   baseline: true,
   fn(b) {
     setCanonicalHashConfig(false);
     b.start();
-    refer(frozenTheOf);
+    hashOf(frozenTheOf);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen {the, of} (WeakMap cached)",
+  name: "canonical hashOf() - frozen {the, of} (WeakMap cached)",
   group: "frozen-the-of",
   fn(b) {
     setCanonicalHashConfig(true);
     b.start();
-    refer(frozenTheOf);
+    hashOf(frozenTheOf);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "legacy refer() - frozen {the, of} (fresh)",
+  name: "legacy hashOf() - frozen {the, of} (fresh)",
   group: "frozen-the-of-fresh",
   baseline: true,
   fn(b) {
@@ -786,14 +786,14 @@ Deno.bench({
     });
     setCanonicalHashConfig(false);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },
 });
 
 Deno.bench({
-  name: "canonical refer() - frozen {the, of} (fresh)",
+  name: "canonical hashOf() - frozen {the, of} (fresh)",
   group: "frozen-the-of-fresh",
   fn(b) {
     const data = Object.freeze({
@@ -802,7 +802,7 @@ Deno.bench({
     });
     setCanonicalHashConfig(true);
     b.start();
-    refer(data);
+    hashOf(data);
     b.end();
     resetCanonicalHashConfig();
   },

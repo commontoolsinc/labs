@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../value-hash-modern.ts";
-import { FabricContentId } from "../storable-content-id.ts";
+import { FabricHash } from "../storable-content-id.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
 import {
   StorableError,
@@ -903,15 +903,15 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // FabricContentId hashing (TAG_CONTENT_ID = 0x29)
+  // FabricHash hashing (TAG_CONTENT_ID = 0x29)
   // =========================================================================
 
   await t.step(
-    "FabricContentId matches hand-computed byte stream",
+    "FabricHash matches hand-computed byte stream",
     () => {
       // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
       // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
-      const cid = new FabricContentId(
+      const cid = new FabricHash(
         new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
         "fid1",
       );
@@ -934,23 +934,23 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step(
-    "FabricContentId with different algorithm tags produce different hashes",
+    "FabricHash with different algorithm tags produce different hashes",
     () => {
       const bytes = new Uint8Array([0x01, 0x02, 0x03]);
-      const cid1 = new FabricContentId(bytes, "fid1");
-      const cid2 = new FabricContentId(bytes, "fid2");
+      const cid1 = new FabricHash(bytes, "fid1");
+      const cid2 = new FabricHash(bytes, "fid2");
       assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
     },
   );
 
   await t.step(
-    "FabricContentId with different hash bytes produce different hashes",
+    "FabricHash with different hash bytes produce different hashes",
     () => {
-      const cid1 = new FabricContentId(
+      const cid1 = new FabricHash(
         new Uint8Array([0x01, 0x02]),
         "fid1",
       );
-      const cid2 = new FabricContentId(
+      const cid2 = new FabricHash(
         new Uint8Array([0x03, 0x04]),
         "fid1",
       );
@@ -959,17 +959,17 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // canonicalHash returns FabricContentId
+  // canonicalHash returns FabricHash
   // =========================================================================
 
-  await t.step("canonicalHash returns FabricContentId with fid1 tag", () => {
+  await t.step("canonicalHash returns FabricHash with fid1 tag", () => {
     const result = canonicalHashRaw(42);
-    assertEquals(result instanceof FabricContentId, true);
+    assertEquals(result instanceof FabricHash, true);
     assertEquals(result.algorithmTag, "fid1");
     assertEquals(result.hash.length, 32);
   });
 
-  await t.step("FabricContentId.toString() produces fid1:<base64>", () => {
+  await t.step("FabricHash.toString() produces fid1:<base64>", () => {
     const result = canonicalHashRaw(42);
     const str = result.toString();
     assertEquals(str.startsWith("fid1:"), true);
@@ -977,7 +977,7 @@ Deno.test("canonicalHash", async (t) => {
     assertEquals(str.includes("="), false);
   });
 
-  await t.step("FabricContentId is frozen (SpecialPrimitiveValue)", () => {
+  await t.step("FabricHash is frozen (SpecialPrimitiveValue)", () => {
     const result = canonicalHashRaw(42);
     assertEquals(Object.isFrozen(result), true);
   });

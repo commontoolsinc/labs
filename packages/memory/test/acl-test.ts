@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { alice, bob, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -15,7 +15,7 @@ const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("acl", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // refer() path regardless of what the ambient default is.
+  // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
     setCanonicalHashConfig(false);
   });
@@ -82,7 +82,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], alice);
+    const result = await Access.authorize([hashOf(invocation)], alice);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -101,7 +101,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], space);
+    const result = await Access.authorize([hashOf(invocation)], space);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -119,7 +119,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -144,7 +144,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 
@@ -170,7 +170,7 @@ describe("acl", () => {
       prf: [],
     };
 
-    const result = await Access.authorize([refer(invocation)], bob);
+    const result = await Access.authorize([hashOf(invocation)], bob);
     assert(result.ok, "authorization was issued");
     const authorization = result.ok;
 

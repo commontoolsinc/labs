@@ -11,7 +11,7 @@
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricContentId } from "./storable-content-id.ts";
+import { FabricHash } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
@@ -192,7 +192,7 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.ContentId: {
-      const cid = value as FabricContentId;
+      const cid = value as FabricHash;
       hasher.update(TAG_CONTENT_ID_BYTES);
       const algTagUtf8 = encoder.encode(cid.algorithmTag);
       feedLength(hasher, algTagUtf8.length);
@@ -301,10 +301,10 @@ function feedPlainObject(
 // ---------------------------------------------------------------------------
 
 /** Compute the hash of a value without consulting or populating any cache. */
-function computeHash(value: unknown): FabricContentId {
+function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return new FabricContentId(hasher.digest(), "fid1");
+  return new FabricHash(hasher.digest(), "fid1");
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ const FALSE_HASH = computeHash(false);
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint,
-  FabricContentId
+  FabricHash
 >({
   capacity: 50_000,
 });
@@ -335,7 +335,7 @@ const primitiveHashCache = new LRUCache<
  * immutable, so their hash is stable and safe to cache by identity.
  * Mutable objects are always recomputed.
  */
-const frozenObjectHashCache = new WeakMap<object, FabricContentId>();
+const frozenObjectHashCache = new WeakMap<object, FabricHash>();
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -343,13 +343,13 @@ const frozenObjectHashCache = new WeakMap<object, FabricContentId>();
 
 /**
  * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
- * `FabricContentId` with algorithm tag `fid1` (fabric ID, v1).
- * The caller (`refer()`) extracts the raw digest via `.hash` for
+ * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
+ * The caller (`hashOf()`) extracts the raw digest via `.hash` for
  * `Reference.fromDigest()`.
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
-export function canonicalHash(value: unknown): FabricContentId {
+export function canonicalHash(value: unknown): FabricHash {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;

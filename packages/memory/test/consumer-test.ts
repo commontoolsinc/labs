@@ -13,7 +13,7 @@ import {
   it,
 } from "@std/testing/bdd";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -62,7 +62,7 @@ for (const canonicalHashing of [false, true]) {
 
     beforeAll(() => {
       setCanonicalHashConfig(canonicalHashing);
-      doc = `of:${refer({ hello: "world" })}` as const;
+      doc = `of:${hashOf({ hello: "world" })}` as const;
       resetCanonicalHashConfig();
     });
 
@@ -228,7 +228,7 @@ for (const canonicalHashing of [false, true]) {
       const clock = new Clock();
       const memory = Consumer.open({ as: subject, session, clock })
         .mount(subject.did());
-      const doc2 = `of:${refer({ doc: 2 })}` as const;
+      const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
       const facts = [
         Fact.assert({ the, of: doc, is: { v: 1 } }),
@@ -344,7 +344,7 @@ for (const canonicalHashing of [false, true]) {
       const clock = new Clock();
       const memory = Consumer.open({ as: subject, session, clock })
         .mount(subject.did());
-      const doc2 = `of:${refer({ doc: 2 })}` as const;
+      const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
       const facts = [
         Fact.assert({ the, of: doc, is: { value: { v: 1 } } }),
@@ -501,7 +501,7 @@ for (const canonicalHashing of [false, true]) {
       const clock = new Clock();
       const memory = Consumer.open({ as: subject, session, clock })
         .mount(subject.did());
-      const doc2 = `of:${refer({ doc: 2 })}` as const;
+      const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
       const selector = { [doc]: { [the]: {} } };
       const { ok: query } = await memory.query({ select: selector });
@@ -591,8 +591,8 @@ for (const canonicalHashing of [false, true]) {
       const clock = new Clock();
       const memory = Consumer.open({ as: subject, session, clock })
         .mount(subject.did());
-      const doc1 = `of:${refer({ doc: 1 })}` as const;
-      const doc2 = `of:${refer({ doc: 2 })}` as const;
+      const doc1 = `of:${hashOf({ doc: 1 })}` as const;
+      const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
       const { ok: query1 } = await memory.query({
         select: {
@@ -822,7 +822,7 @@ for (const canonicalHashing of [false, true]) {
           .mount(alice.did());
 
         const doc1 = doc; // convenient name
-        const doc2 = `of:${refer({ goodbye: "world" })}` as const;
+        const doc2 = `of:${hashOf({ goodbye: "world" })}` as const;
 
         const v1 = Fact.assert({
           the,
@@ -933,7 +933,7 @@ for (const canonicalHashing of [false, true]) {
           .mount(alice.did());
 
         const doc1 = doc; // convenient name
-        const doc2 = `of:${refer({ goodbye: "world" })}` as const;
+        const doc2 = `of:${hashOf({ goodbye: "world" })}` as const;
 
         const v1 = Fact.assert({
           the,
@@ -1242,9 +1242,9 @@ for (const canonicalHashing of [false, true]) {
       const memory = Consumer.open({ as: subject, session, clock })
         .mount(subject.did());
 
-      const doc1 = `of:${refer({ batch: 1 })}` as const;
-      const doc2 = `of:${refer({ batch: 2 })}` as const;
-      const doc3 = `of:${refer({ batch: 3 })}` as const;
+      const doc1 = `of:${hashOf({ batch: 1 })}` as const;
+      const doc2 = `of:${hashOf({ batch: 2 })}` as const;
+      const doc3 = `of:${hashOf({ batch: 3 })}` as const;
 
       const v1 = Fact.assert({ the, of: doc1, is: { n: 1 } });
       const v2 = Fact.assert({ the, of: doc2, is: { n: 2 } });
@@ -1347,7 +1347,7 @@ for (const canonicalHashing of [false, true]) {
         const clock = new Clock();
         const memory = Consumer.open({ as: subject, session, clock })
           .mount(subject.did());
-        const doc2 = `of:${refer({ doc: 2 })}` as const;
+        const doc2 = `of:${hashOf({ doc: 2 })}` as const;
 
         const facts = [
           Fact.assert({ the, of: doc, is: { value: { v: 1 } } }),

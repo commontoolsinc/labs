@@ -1,4 +1,4 @@
-import { contentIdFromJSON, refer } from "@commontools/data-model/value-hash";
+import { contentIdFromJSON, hashOf } from "@commontools/data-model/value-hash";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;
@@ -12,7 +12,7 @@ export type ToString<T> = string & { toString(): ToString<T> };
 export const entity = <T extends null | NonNullable<unknown>>(
   description: NonNullable<unknown> | null,
 ): Entity<T> => {
-  return { "@": refer(description).toJSON()["/"] };
+  return { "@": hashOf(description).toJSON()["/"] };
 };
 
 export const toString = <T extends null | NonNullable<unknown>>(

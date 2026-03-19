@@ -1,4 +1,4 @@
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { isRecord } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {
@@ -99,7 +99,7 @@ export function createRef(
     else return obj;
   }
 
-  return refer(traverse({ ...source, causal: cause }));
+  return hashOf(traverse({ ...source, causal: cause }));
 }
 
 /**

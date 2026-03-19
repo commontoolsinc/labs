@@ -1,4 +1,4 @@
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -1621,7 +1621,7 @@ function loadLinkedPattern(
     };
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
     const patternId = value["$TYPE"];
-    const entityId = refer({ causal: { patternId, type: "pattern" } });
+    const entityId = hashOf({ causal: { patternId, type: "pattern" } });
     const shortId = entityId.toJSON()["/"];
     address = {
       space: valueEntry.address.space,
@@ -1645,7 +1645,7 @@ function loadLinkedPattern(
     "$TYPE" in value && isString(value["$TYPE"])
   ) {
     const patternId = value["$TYPE"];
-    const legacyEntityId = refer({
+    const legacyEntityId = hashOf({
       causal: { recipeId: patternId, type: "recipe" },
     });
     const legacyShortId = legacyEntityId.toJSON()["/"];

@@ -51,7 +51,7 @@ import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
   type ContentId,
   contentIdFromJSON,
-  refer,
+  hashOf,
 } from "@commontools/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
@@ -619,7 +619,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
     this.source = storableFromNativeValue(
       source,
     ) as ConsumerInvocationFor<Ability, Protocol>;
-    this.#reference = refer(this.source);
+    this.#reference = hashOf(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),

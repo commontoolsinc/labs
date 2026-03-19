@@ -109,7 +109,7 @@ const isUnclaimed = (
 };
 
 /**
- * Legacy `refer` implementation using merkle-reference, with caching for
+ * Legacy `hashOf` implementation using merkle-reference, with caching for
  * unclaimed {the, of} patterns.
  */
 export const referLegacyCached = <T extends DefinedReferent>(

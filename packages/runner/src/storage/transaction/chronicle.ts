@@ -33,7 +33,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
@@ -281,7 +281,7 @@ export class Chronicle {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = refer(factToRefer);
+          const causeRef = hashOf(factToRefer);
 
           edit.assert({
             ...loaded,

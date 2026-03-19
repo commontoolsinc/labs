@@ -13,7 +13,7 @@ import {
 } from "@commontools/data-model/storable-value";
 import { StorableError } from "@commontools/data-model/storable-native-instances";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -317,17 +317,17 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("refer() with canonicalHashing flag", () => {
+  describe("hashOf() with canonicalHashing flag", () => {
     it("works normally when canonicalHashing is false", () => {
       setCanonicalHashConfig(false);
-      const ref = refer("hello");
+      const ref = hashOf("hello");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
     });
 
     it("produces a valid reference when canonicalHashing is true", () => {
       setCanonicalHashConfig(true);
-      const ref = refer("hello");
+      const ref = hashOf("hello");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
     });
@@ -335,13 +335,13 @@ describe("ExperimentalOptions", () => {
     it("works again after reset", () => {
       setCanonicalHashConfig(true);
       resetCanonicalHashConfig();
-      const ref = refer("hello");
+      const ref = hashOf("hello");
       expect(ref).toBeDefined();
     });
   });
 
   describe("Runtime sets and resets canonicalHashing config", () => {
-    it("constructing Runtime with canonicalHashing enables canonical refer()", async () => {
+    it("constructing Runtime with canonicalHashing enables canonical hashOf()", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -349,7 +349,7 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      const ref = refer("test");
+      const ref = hashOf("test");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
 
@@ -357,7 +357,7 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
-    it("disposing Runtime resets canonicalHashing so refer() uses default path", async () => {
+    it("disposing Runtime resets canonicalHashing so hashOf() uses default path", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -365,13 +365,13 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      const canonicalRef = refer("test");
+      const canonicalRef = hashOf("test");
       expect(canonicalRef).toBeDefined();
 
       await runtime.dispose();
       await sm.close();
 
-      const defaultRef = refer("test");
+      const defaultRef = hashOf("test");
       expect(defaultRef).toBeDefined();
     });
   });

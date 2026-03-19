@@ -1,7 +1,7 @@
 /**
  * Content identifier dispatch layer.
  *
- * Provides the public API for content identification (hashing): `refer`,
+ * Provides the public API for content identification (hashing): `hashOf`,
  * `isContentId`, `contentIdFromJSON`, `fromString`. Dispatches between
  * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
@@ -10,7 +10,7 @@
  * `storable-value.ts` / `storable-value-modern.ts` / `storable-value-legacy.ts`.
  */
 import { canonicalHash } from "./value-hash-modern.ts";
-import { FabricContentId } from "./storable-content-id.ts";
+import { FabricHash } from "./storable-content-id.ts";
 import { fromBase64url } from "./bigint-encoding.ts";
 import {
   contentIdFromJSONLegacy,
@@ -34,15 +34,15 @@ export type DefinedReferent = NonNullable<unknown> | null;
  * Content identifier -- a hash-based reference to a value.
  *
  * Union of `Reference.View` (legacy merkle-reference) and
- * `FabricContentId` (canonical hashing). Both branches provide `.bytes`,
+ * `FabricHash` (canonical hashing). Both branches provide `.bytes`,
  * `.toString()`, `.toJSON()`, and `"/"`.
  *
  * The phantom type parameter `T` is kept for compatibility with generic call
- * sites; `FabricContentId` ignores it (no phantom member).
+ * sites; `FabricHash` ignores it (no phantom member).
  */
 export type ContentId<
   T extends DefinedReferent = DefinedReferent,
-> = Reference.View<T> | FabricContentId;
+> = Reference.View<T> | FabricHash;
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
@@ -56,7 +56,7 @@ export type ContentId<
 
 /**
  * Type guard: returns true if the value is a content identifier
- * (`Reference.View` or `FabricContentId`).
+ * (`Reference.View` or `FabricHash`).
  */
 export let isContentId: <T extends DefinedReferent>(
   value: unknown | ContentId<T>,
@@ -77,7 +77,7 @@ export let fromString: (source: string) => ContentId;
  * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
  * Falls back to @noble/hashes if neither is available.
  */
-export let refer: <T extends DefinedReferent>(
+export let hashOf: <T extends DefinedReferent>(
   source: T,
 ) => ContentId<T>;
 
@@ -94,24 +94,24 @@ export let refer: <T extends DefinedReferent>(
 let canonicalHashingEnabled = false;
 
 /**
- * Parse a `FabricContentId` from its string representation
+ * Parse a `FabricHash` from its string representation
  * (`<algorithmTag>:<base64urlHash>`).
  */
-function contentIdFromString(source: string): FabricContentId {
+function contentIdFromString(source: string): FabricHash {
   const colonIndex = source.indexOf(":");
   if (colonIndex === -1) {
     throw new ReferenceError(`Invalid content ID string: ${source}`);
   }
   const algorithmTag = source.substring(0, colonIndex);
   const hashBase64url = source.substring(colonIndex + 1);
-  return new FabricContentId(fromBase64url(hashBase64url), algorithmTag);
+  return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
 }
 
 /** Shared `isContentId` implementation (same for both modes). */
 const isContentIdImpl = (<T extends DefinedReferent>(
   value: unknown | ContentId<T>,
 ): value is ContentId<T> => {
-  if (value instanceof FabricContentId) return true;
+  if (value instanceof FabricHash) return true;
   return Reference.is(value);
 }) as typeof isContentId;
 
@@ -134,7 +134,7 @@ function configureDispatch(): void {
       return contentIdFromString(source);
     };
 
-    refer = (source) => {
+    hashOf = (source) => {
       return canonicalHash(source);
     };
   } else {
@@ -142,7 +142,7 @@ function configureDispatch(): void {
 
     contentIdFromJSON = contentIdFromJSONLegacy;
     fromString = fromStringLegacy;
-    refer = referLegacyCached;
+    hashOf = referLegacyCached;
   }
 }
 

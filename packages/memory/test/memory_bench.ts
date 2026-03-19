@@ -992,7 +992,7 @@ Deno.bench({
 });
 
 // Test memoization benefit: same content referenced multiple times
-import { refer as memoizedRefer } from "@commontools/data-model/value-hash";
+import { hashOf as memoizedRefer } from "@commontools/data-model/value-hash";
 import { unclaimedRef } from "../fact.ts";
 
 Deno.bench({

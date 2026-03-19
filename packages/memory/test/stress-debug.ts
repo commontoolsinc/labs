@@ -2,7 +2,7 @@ import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import * as Changes from "../changes.ts";
 import * as Fact from "../fact.ts";
-import { refer } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 
 import { alice, space } from "./principal.ts";
 
@@ -50,7 +50,7 @@ const generateChanges = (count: number) => {
   const assertions = events.map((event) =>
     Fact.assert({
       the: "application/json",
-      of: `of:${refer(event)}`,
+      of: `of:${hashOf(event)}`,
       is: {
         value: event,
         source: {
@@ -63,7 +63,7 @@ const generateChanges = (count: number) => {
   const facts = [
     Fact.assert({
       the: "application/json",
-      of: `of:${refer([])}`,
+      of: `of:${hashOf([])}`,
       is: {
         value: {
           $TYPE: "ba4jcbly2nqee4u4o76t4sp7p3phtnblzcjjf3dulyzcrav7ios2w3swv",
@@ -71,7 +71,7 @@ const generateChanges = (count: number) => {
             count: 200,
             events: assertions.map((fact) => {
               return {
-                cell: refer(fact).toJSON(),
+                cell: hashOf(fact).toJSON(),
                 path: [],
               };
             }),

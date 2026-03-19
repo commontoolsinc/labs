@@ -8,7 +8,7 @@ import {
 } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  refer,
+  hashOf,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
@@ -96,7 +96,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId1["/"]}`,
           is: { value: testCell1.get() },
-          cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId1["/"]}`,
+          }),
           since: 1,
         };
         const docValue2 = {
@@ -123,7 +126,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId2["/"]}`,
           is: { value: docValue2 },
-          cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId2["/"]}`,
+          }),
           since: 2,
         };
 
@@ -189,7 +195,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId1["/"]}`,
           is: { value: testCell1.get() },
-          cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId1["/"]}`,
+          }),
           since: 1,
         };
         const testCell2 = runtime.getCell<
@@ -216,7 +225,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId2["/"]}`,
           is: { value: docValue2 },
-          cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId2["/"]}`,
+          }),
           since: 2,
         };
 
@@ -309,7 +321,10 @@ for (const canonicalHashing of [false, true]) {
               },
             },
           },
-          cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId1["/"]}`,
+          }),
           since: 1,
         };
         store.set(`${assert1.of}/${assert1.the}`, assert1);
@@ -384,7 +399,7 @@ for (const canonicalHashing of [false, true]) {
               },
             },
           },
-          cause: refer({ the: "application/json", of: testCell1.sourceURI }),
+          cause: hashOf({ the: "application/json", of: testCell1.sourceURI }),
           since: 1,
         };
 
@@ -405,7 +420,7 @@ for (const canonicalHashing of [false, true]) {
               },
             },
           },
-          cause: refer({ the: "application/json", of: testCell2.sourceURI }),
+          cause: hashOf({ the: "application/json", of: testCell2.sourceURI }),
           since: 2,
         };
 
@@ -487,7 +502,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId1["/"]}`,
           is: { value: testCell1.get() },
-          cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId1["/"]}`,
+          }),
           since: 1,
         };
 
@@ -522,7 +540,10 @@ for (const canonicalHashing of [false, true]) {
           the: "application/json",
           of: `of:${entityId2["/"]}`,
           is: { value: testCell2.getRaw() },
-          cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
+          cause: hashOf({
+            the: "application/json",
+            of: `of:${entityId2["/"]}`,
+          }),
           since: 2,
         };
 

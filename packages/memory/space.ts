@@ -11,7 +11,7 @@ import { unclaimedRef } from "./fact.ts";
 import {
   type ContentId,
   fromString,
-  refer,
+  hashOf,
 } from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
@@ -567,7 +567,7 @@ const recall = <Space extends MemorySpace>(
         ? fromString(row.cause)
         : unclaimedRef({ the, of })) as ContentId<Assertion>,
       since: row.since,
-      fact: row.fact, // Include stored hash to avoid recomputing with refer()
+      fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
     };
 
     if (row.is) {
@@ -787,7 +787,7 @@ const importDatum = <Space extends MemorySpace>(
   if (datum === undefined) {
     return "undefined";
   } else {
-    const is = refer(datum).toString();
+    const is = hashOf(datum).toString();
     const stmt = getPreparedStatement(
       session.store,
       "importDatum",
@@ -848,15 +848,15 @@ const swap = <Space extends MemorySpace>(
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
   //
-  // IMPORTANT: Compute fact hash BEFORE importing datum. When refer() traverses
+  // IMPORTANT: Compute fact hash BEFORE importing datum. When hashOf() traverses
   // the assertion/retraction, it computes and caches the hash of all sub-objects
   // including the datum (payload). By hashing the fact first, the subsequent
-  // refer(datum) call in importDatum() becomes a ~300ns cache hit instead of a
-  // ~50-100µs full hash computation. This saves ~25% on refer() time.
+  // hashOf(datum) call in importDatum() becomes a ~300ns cache hit instead of a
+  // ~50-100µs full hash computation. This saves ~25% on hashOf() time.
   const fact = source.assert
-    ? refer(source.assert).toString()
+    ? hashOf(source.assert).toString()
     : source.retract
-    ? refer(source.retract).toString()
+    ? hashOf(source.retract).toString()
     : source.claim.fact.toString();
 
   // Import datum AFTER computing fact reference - the datum hash is now cached
@@ -923,7 +923,7 @@ const swap = <Space extends MemorySpace>(
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    // Use stored fact hash directly instead of recomputing with refer().
+    // Use stored fact hash directly instead of recomputing with hashOf().
     if (revision?.fact !== fact) {
       // Disable including history tracking for performance.
       // Re-enable this if you need to debug cause chains.

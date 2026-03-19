@@ -756,7 +756,7 @@ export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
 // TODO(danfuzz): Clean up after canonical hashing flag graduates. The `fid1:`
-// branch was added for FabricContentId; once the experiment is permanent,
+// branch was added for FabricHash; once the experiment is permanent,
 // the `b`-prefixed format can be removed.
 export type CauseString = `b${string}` | `fid1:${string}`;
 
