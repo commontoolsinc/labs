@@ -611,9 +611,12 @@ class Provider implements IStorageProviderWithReplica {
 
   sink<T extends StorableValue = StorableValue>(
     uri: URI,
-    callback: (value: StorageValue<T>) => void,
+    callback: (value: StorageValue<T> | undefined) => void,
   ): Cancel {
-    return this.replica.sink(uri, callback as (value: StorageValue) => void);
+    return this.replica.sink(
+      uri,
+      callback as (value: StorageValue | undefined) => void,
+    );
   }
 
   async destroy(): Promise<void> {
@@ -670,7 +673,10 @@ class SpaceReplica implements ISpaceReplica {
   >();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
-  readonly #sinks = new Map<URI, Set<(value: StorageValue) => void>>();
+  readonly #sinks = new Map<
+    URI,
+    Set<(value: StorageValue | undefined) => void>
+  >();
   #nextLocalSeq = 1;
 
   constructor(options: ProviderOptions) {
@@ -697,7 +703,7 @@ class SpaceReplica implements ISpaceReplica {
     ]]);
   }
 
-  sink(uri: URI, callback: (value: StorageValue) => void): Cancel {
+  sink(uri: URI, callback: (value: StorageValue | undefined) => void): Cancel {
     let subscribers = this.#sinks.get(uri);
     if (!subscribers) {
       subscribers = new Set();
@@ -1178,7 +1184,7 @@ class SpaceReplica implements ISpaceReplica {
       ids.add(change.address.id as URI);
     }
     for (const id of ids) {
-      const current = this.getStorageValue(id) ?? {} as StorageValue;
+      const current = this.getStorageValue(id);
       for (const callback of this.#sinks.get(id) ?? []) {
         try {
           callback(current);

@@ -278,6 +278,32 @@ export const isEntityDocument = (
     ENTITY_DOCUMENT_MARKER_VALUE;
 };
 
+const isLegacyEntityDocument = (
+  value: unknown,
+): value is {
+  value?: JSONValue;
+  source?: SourceLink;
+} => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (
+    keys.length === 0 ||
+    !keys.every((key) => key === "value" || key === "source")
+  ) {
+    return false;
+  }
+
+  return Object.hasOwn(candidate, "value") ||
+    (
+      Object.hasOwn(candidate, "source") &&
+      isSourceLink(candidate.source)
+    );
+};
+
 export const getEntityDocumentMetadata = (
   document: EntityDocument,
 ): Record<string, EntityDocumentField> => {
@@ -291,6 +317,16 @@ export const getEntityDocumentMetadata = (
 
 export const normalizeEntityDocument = (
   value: JSONValue | EntityDocument,
-): EntityDocument => isEntityDocument(value) ? value : toEntityDocument(value);
+): EntityDocument => {
+  if (isEntityDocument(value)) {
+    return value;
+  }
+
+  if (isLegacyEntityDocument(value)) {
+    return toEntityDocument(value.value, value.source);
+  }
+
+  return toEntityDocument(value);
+};
 
 export const toDocumentPath = (path: ReadPath): string[] => ["value", ...path];

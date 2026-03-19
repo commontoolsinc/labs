@@ -2577,6 +2577,16 @@ export class SchemaObjectTraverser<V extends FabricValue>
         path: curDoc.address.path,
         schema: itemSchema,
       };
+      // Sparse array holes are densified to `null` at the storage boundary in
+      // legacy JSON mode. When the item schema expects cells/streams, or the
+      // schema rejects both `null` and `undefined`, treat that committed `null`
+      // as a missing slot so array consumers still see hole semantics.
+      if (
+        item === null &&
+        this.shouldTreatNullArrayEntryAsHole(curSelector.schema)
+      ) {
+        return true;
+      }
       // We follow the first link in array elements so we don't have
       // strangeness with setting item at 0 to item at 1. If the element on
       // the array is a link, we follow that link so the returned object is
@@ -2714,6 +2724,25 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return true;
     });
     return valid ? arrayObj : undefined;
+  }
+
+  private shouldTreatNullArrayEntryAsHole(
+    schema: JSONSchema | undefined,
+  ): boolean {
+    if (
+      schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema) ||
+      ContextualFlowControl.isFalseSchema(schema)
+    ) {
+      return false;
+    }
+
+    if (SchemaObjectTraverser.asCellOrStream(schema)) {
+      return true;
+    }
+
+    return this.isValidType(schema, "null") === TypeValidity.False &&
+      this.isValidType(schema, "undefined") === TypeValidity.False;
   }
 
   /**

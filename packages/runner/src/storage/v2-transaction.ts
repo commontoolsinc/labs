@@ -199,6 +199,22 @@ const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
   return deepFreeze(isolateTransactionValue(value)) as T;
 };
 
+const collapseEmptyJsonDocumentEnvelope = (
+  type: MediaType,
+  value: StorableDatum | undefined,
+): StorableDatum | undefined => {
+  if (
+    type !== "application/json" ||
+    value === undefined ||
+    !isRecord(value) ||
+    Array.isArray(value) ||
+    Object.keys(value).length > 0
+  ) {
+    return value;
+  }
+  return undefined;
+};
+
 const EMPTY_META = Object.freeze({});
 
 const isPrefixPath = (
@@ -1009,11 +1025,18 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const next = result.ok as RootAttestation;
-    if (next === current) {
-      return { ok: next };
+    const collapsedNext = {
+      ...next,
+      value: collapseEmptyJsonDocumentEnvelope(address.type, next.value),
+    } as RootAttestation;
+    if (
+      collapsedNext.value === current.value &&
+      collapsedNext.address === current.address
+    ) {
+      return { ok: collapsedNext };
     }
 
-    doc.current = next;
+    doc.current = collapsedNext;
     doc.frozenReads.clear();
     const writeActivity = {
       space,
@@ -1042,7 +1065,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       });
     }
 
-    return { ok: next };
+    return { ok: collapsedNext };
   }
 
   private writeWithinSpaceCreatingParents(
@@ -1117,11 +1140,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const next = rootWrite.ok as RootAttestation;
-    if (next === doc.current) {
-      return { ok: next };
+    const collapsedNext = {
+      ...next,
+      value: collapseEmptyJsonDocumentEnvelope(address.type, next.value),
+    } as RootAttestation;
+    if (collapsedNext === doc.current) {
+      return { ok: collapsedNext };
     }
 
-    doc.current = next;
+    doc.current = collapsedNext;
     doc.frozenReads.clear();
     const writeActivity = {
       space,
@@ -1150,7 +1177,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       });
     }
 
-    return { ok: next };
+    return { ok: collapsedNext };
   }
 
   private writeBatchRun(
@@ -1200,7 +1227,10 @@ export class V2StorageTransaction implements IStorageTransaction {
         if (changed) {
           doc.current = {
             ...doc.current,
-            value: nextRoot,
+            value: collapseEmptyJsonDocumentEnvelope(
+              writes[0]!.address.type,
+              nextRoot,
+            ),
           };
           doc.frozenReads.clear();
         }
@@ -1229,7 +1259,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = {
       ...doc.current,
-      value: nextRoot,
+      value: collapseEmptyJsonDocumentEnvelope(
+        writes[0]!.address.type,
+        nextRoot,
+      ),
     };
     doc.frozenReads.clear();
     return { ok: {} };
