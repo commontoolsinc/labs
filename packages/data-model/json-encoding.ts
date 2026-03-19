@@ -22,7 +22,7 @@ import {
   FabricSet,
   FabricUint8Array,
 } from "./fabric-native-instances.ts";
-import { TAGS } from "./type-tags.ts";
+import { TAGS } from "./fabric-type-tags.ts";
 
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();

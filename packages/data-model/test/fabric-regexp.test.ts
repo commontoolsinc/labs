@@ -20,7 +20,7 @@ import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../type-tags.ts";
+} from "../native-type-tags.ts";
 import { modernHash } from "../value-hash-modern.ts";
 
 /** Dummy reconstruction context for tests. */

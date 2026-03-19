@@ -6,7 +6,8 @@ import {
 } from "./fabric-protocol.ts";
 import { FabricPrimitive } from "./fabric-primitive.ts";
 
-import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------

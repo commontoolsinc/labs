@@ -14,7 +14,7 @@ import {
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /** Reject native objects with extra enumerable properties. */

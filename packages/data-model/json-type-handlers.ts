@@ -20,7 +20,7 @@ export type JsonWireValue =
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
-import { TAGS } from "./type-tags.ts";
+import { TAGS } from "./fabric-type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
