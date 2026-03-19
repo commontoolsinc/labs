@@ -248,6 +248,19 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
   );
 
   await t.step(
+    "accepts TypeScript import interop normalization scaffolding",
+    () => {
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports", "commontools", "turndown"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports, __ctHelpers, turndown_1){"use strict";__ctHelpers = __importStar(__ctHelpers);turndown_1 = __importDefault(turndown_1);/*__CT_TOPLEVEL__:main.tsx:000:data:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],1);exports.default=value;}`,
+      });
+    },
+  );
+
+  await t.step(
     "accepts regex literals and interpolated template literals in __ct_data third arguments",
     () => {
       verifyAMDFactory({

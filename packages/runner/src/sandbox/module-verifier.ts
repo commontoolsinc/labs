@@ -23,6 +23,8 @@ const EXPORTS_OBJECT_PATTERN =
 const EXPORT_STAR_PATTERN = /^__exportStar\([^)]+\)$/;
 const IMPORT_STAR_NORMALIZATION_PATTERN =
   /^([A-Za-z_$][\w$]*)\s*=\s*__importStar\(\1\)$/;
+const IMPORT_DEFAULT_NORMALIZATION_PATTERN =
+  /^([A-Za-z_$][\w$]*)\s*=\s*__importDefault\(\1\)$/;
 const HELPERS_KEEPALIVE_PATTERN = /^void __ctHelpers$/;
 const SIMPLE_OBJECT_LITERAL_PATTERN =
   /^\{\s*(?:[A-Za-z_$][\w$]*(?:\s*:\s*[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*|\s*:\s*(?:null|undefined|true|false|void 0)|\s*:\s*-?\d+(?:\.\d+)?n?|\s*:\s*["'`][\s\S]*["'`])?)(?:\s*,\s*[A-Za-z_$][\w$]*(?:\s*:\s*[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*|\s*:\s*(?:null|undefined|true|false|void 0)|\s*:\s*-?\d+(?:\.\d+)?n?|\s*:\s*["'`][\s\S]*["'`])?)*\s*\}$/;
@@ -115,6 +117,7 @@ function isAllowedStatement(statement: string): boolean {
     CHAINED_EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
     EXPORT_STAR_PATTERN.test(compactWithoutComments) ||
     IMPORT_STAR_NORMALIZATION_PATTERN.test(compactWithoutComments) ||
+    IMPORT_DEFAULT_NORMALIZATION_PATTERN.test(compactWithoutComments) ||
     HELPERS_KEEPALIVE_PATTERN.test(compactWithoutComments) ||
     isSafeExportAssignment(compactWithoutComments)
   ) {

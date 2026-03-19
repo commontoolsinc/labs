@@ -10,6 +10,7 @@ export function ensureSESLockdown(): void {
   lockdown({
     errorTaming: "unsafe",
     consoleTaming: "unsafe",
+    reporting: "none",
     stackFiltering: "concise",
   });
   lockdownApplied = true;
