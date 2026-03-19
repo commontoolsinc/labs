@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
+  computed,
   handler,
   NAME,
   pattern,
   patternTool,
   type PatternToolResult,
   schema,
-  str,
   type Stream,
 } from "commontools";
 import "commontools/schema";
@@ -26,7 +26,7 @@ interface Output {
   messages: string[];
   recordMessage: Stream<{ message: string }>;
   legacyWrite: Stream<Record<string, never>>;
-  search: PatternToolResult<{ source: string }>;
+  search: PatternToolResult<{ messages: string[] }>;
 }
 
 const model = schema({
@@ -79,34 +79,34 @@ const legacyWrite = handler(
 
 const searchTool = pattern(
   (
-    { query, help, source }: { query: string; help?: string; source: string },
+    { query, messages }: { query: string; messages: string[] },
   ) => {
-    const helpValue = help ?? "";
+    const results = computed(() => {
+      const q = query.toLowerCase();
+      return messages.filter((m) => m.toLowerCase().includes(q));
+    });
     return {
       query,
-      help: helpValue,
-      source,
-      summary: str`${source}:${query}:${helpValue}`,
+      results,
+      count: computed(() => results.length),
     };
   },
   {
     type: "object",
     properties: {
       query: { type: "string" },
-      help: { type: "string" },
-      source: { type: "string" },
+      messages: { type: "array", items: { type: "string" } },
     },
-    required: ["query", "source"],
+    required: ["query", "messages"],
   },
   {
     type: "object",
     properties: {
       query: { type: "string" },
-      help: { type: "string" },
-      source: { type: "string" },
-      summary: { type: "string" },
+      results: { type: "array", items: { type: "string" } },
+      count: { type: "number" },
     },
-    required: ["query", "help", "source", "summary"],
+    required: ["query", "results", "count"],
   },
 );
 
@@ -121,7 +121,7 @@ export const customPatternExport = pattern<Input, Output>(
       recordMessage: recordMessage(cell),
       legacyWrite: legacyWrite(cell),
       search: patternTool(searchTool, {
-        source: "bound-source",
+        messages: cell.messages,
       }),
     };
   },
