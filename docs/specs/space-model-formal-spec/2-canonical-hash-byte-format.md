@@ -115,12 +115,12 @@ big-endian byte order.
   and `+0` produce identical hashes, matching JavaScript semantics where
   `-0 === 0` is `true`.
 
-- **`NaN`** must not appear. `toStorableValue()` rejects `NaN` values; a
+- **`NaN`** must not appear. `fabricFromNativeValue()` rejects `NaN` values; a
   conforming hasher may assume `NaN` is never encountered. If a hasher does
   encounter `NaN`, it should throw rather than produce a hash.
 
 - **`Infinity` / `-Infinity`** must not appear. Like `NaN`, these are rejected
-  by `toStorableValue()`. A conforming hasher should throw if encountered.
+  by `fabricFromNativeValue()`. A conforming hasher should throw if encountered.
 
 ### 4.4 `string`
 
@@ -197,7 +197,7 @@ Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `StorableEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
-is a direct `StorableDatum` member (not a `StorableInstance`) and has a dedicated
+is a direct `StorableDatum` member (not a `FabricInstance`) and has a dedicated
 type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -219,7 +219,7 @@ Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `StorableEpochDays` represents a day-precision Unix epoch timestamp. It is a
-direct `StorableDatum` member (not a `StorableInstance`) and has a dedicated type
+direct `StorableDatum` member (not a `FabricInstance`) and has a dedicated type
 tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -243,7 +243,7 @@ Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
 of the algorithm tag in UTF-8 and H is the number of hash bytes.
 
 `StorableContentId` represents a content identifier — a hash with an algorithm
-tag. It is a direct `StorableDatum` member (not a `StorableInstance`) and has a
+tag. It is a direct `StorableDatum` member (not a `FabricInstance`) and has a
 dedicated type tag.
 
 - **Algorithm tag length**: The byte length of the algorithm tag string in
@@ -292,7 +292,7 @@ Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
 Empty object (`{}`) is encoded as `0x11 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.13 `StorableInstance`
+### 4.13 `FabricInstance`
 
 ```
 Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
@@ -301,7 +301,7 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 
 - **Type tag length**: The byte length of the type tag string in UTF-8,
   encoded as unsigned LEB128.
-- **Type tag**: The `StorableInstance`'s type tag string (e.g., `"Error@1"`,
+- **Type tag**: The `FabricInstance`'s type tag string (e.g., `"Error@1"`,
   `"Map@1"`, `"Set@1"`, `"RegExp@1"`), encoded as raw UTF-8 bytes.
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
@@ -489,7 +489,7 @@ Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 
 ### 7.12 `StorableRegExp(/abc/gi)`
 
-`StorableRegExp` is a `StorableInstance` and is hashed via `TAG_INSTANCE`.
+`StorableRegExp` is a `FabricInstance` and is hashed via `TAG_INSTANCE`.
 
 Type tag `"RegExp@1"` is 8 bytes in UTF-8: `0x52`, `0x65`, `0x67`, `0x45`,
 `0x78`, `0x70`, `0x40`, `0x31`.
@@ -589,7 +589,7 @@ These three arrays produce different byte streams at the middle element:
 
 ## 8. Rejected Values
 
-The following JavaScript values are rejected by `toStorableValue()` and must
+The following JavaScript values are rejected by `fabricFromNativeValue()` and must
 never be passed to the canonical hasher:
 
 - `NaN`
@@ -614,7 +614,7 @@ rather than producing a hash.
 | `StorableEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
 | `StorableContentId` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
 | `StorableContentId` hash bytes    | unsigned LEB128 | Byte count of raw hash payload   |
-| `StorableInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
+| `FabricInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |
 | Object key-value pairs            | `TAG_END`       | Sentinel after last pair         |

@@ -302,7 +302,7 @@ export interface BuilderFunctionsAndConstants {
   // Render utils
   h: HFunction;
 
-  // Storable value classes
+  // Fabric value classes
   FabricInstance:
     typeof import("@commontools/data-model/fabric-instance").FabricInstance;
   SpecialPrimitiveValue:

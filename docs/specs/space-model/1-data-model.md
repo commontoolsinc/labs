@@ -13,13 +13,13 @@ Draft — based on codebase investigation.
 
 ### Overview
 
-The system stores **storable values** — data that can be serialized to JSON with
+The system stores **fabric values** — data that can be serialized to JSON with
 some extensions. All persistent data and in-flight messages use this
 representation.
 
 ### Base Types
 
-Storable values are JSON-compatible with specific constraints:
+Fabric values are JSON-compatible with specific constraints:
 
 | Type | Notes |
 |------|-------|
@@ -27,12 +27,12 @@ Storable values are JSON-compatible with specific constraints:
 | `boolean` | `true` or `false` |
 | `number` | Finite only; `NaN` and `Infinity` rejected |
 | `string` | Unicode text |
-| `array` | Ordered sequence of storable values |
-| `object` | String-keyed map of storable values |
+| `array` | Ordered sequence of fabric values |
+| `object` | String-keyed map of fabric values |
 
 #### Numbers
 
-- Only finite numbers are storable
+- Only finite numbers are fabric-compatible
 - `-0` is normalized to `0` during conversion
 - `NaN` and `Infinity` throw errors
 
@@ -41,12 +41,12 @@ Storable values are JSON-compatible with specific constraints:
 - Must be dense (no holes)
 - Must not contain `undefined` elements
 - Sparse arrays are densified during conversion (`undefined` → `null`)
-- Non-index keys (named properties) cause rejection as not-storable
+- Non-index keys (named properties) cause rejection as non-fabric
 
 #### Objects
 
 - Plain objects only (no class instances)
-- Keys must be strings; symbol keys cause rejection as not-storable
+- Keys must be strings; symbol keys cause rejection as non-fabric
 - Values must be storable
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
@@ -61,7 +61,7 @@ Storable values are JSON-compatible with specific constraints:
 - **Object property**: Treated as absent (property is omitted)
 - **Array element**: Converted to `null` during storage
 
-#### Non-Storable Types
+#### Non-Fabric Types
 
 These types cannot be stored directly:
 
@@ -102,7 +102,7 @@ See [Cells](./4-cells.md) for stream semantics.
 
 #### Error Wrapper: `{ "@Error": {...} }`
 
-Error instances are converted to a storable form using the `@` prefix convention:
+Error instances are converted to a fabric form using the `@` prefix convention:
 
 ```json
 {
@@ -207,7 +207,7 @@ intermediate representation.
 
 This proposal pairs with [Late Serialization](#late-serialization-rich-types-within-the-runtime):
 if rich types flow through the runtime, canonical hashing should operate on
-those types directly (via their deconstructed state for `StorableInstance`s),
+those types directly (via their deconstructed state for `FabricInstance`s),
 not on JSON-encoded forms. The hash becomes encoding-independent — the same
 identity whether later serialized to JSON, CBOR, or Automerge.
 
@@ -246,7 +246,7 @@ Today, special JSON forms are created early and travel through the system:
 
 - `normalizeAndDiff()` converts Cells to SigilLinks (`{ "/": {...} }`) immediately
 - `convertCellsToLinks()` explicitly replaces Cell references with JSON forms
-- `toStorableValue()` wraps Errors as `{ "@Error": {...} }` during data updates
+- `fabricFromNativeValue()` wraps Errors as `{ "@Error": {...} }` during data updates
 - Stream markers (`{ $stream: true }`) are stored and compared as JSON objects
 
 The JSON forms then propagate through transactions, the reactive system, and
@@ -279,7 +279,7 @@ type StorableValue =
   | Date                                 // or Temporal type
 
   // (c) Branded storables (our types implementing the protocol)
-  | StorableInstance
+  | FabricInstance
 
   // Recursive containers
   | StorableValue[]
@@ -290,7 +290,7 @@ Built-in JS types require explicit serialization handling — we cannot (and
 should not) patch `Error.prototype` with symbol-keyed methods. The
 serialization context must recognize these types directly.
 
-#### The Storable Protocol
+#### The Fabric Protocol
 
 Types *we control* opt into storability by implementing methods keyed by
 well-known symbols:
@@ -301,12 +301,12 @@ const RECONSTRUCT = Symbol.for('common.reconstruct');
 // If protocol evolution is needed: Symbol.for('common.deconstruct@2')
 
 // Instance protocol: "here's my essential state"
-interface StorableInstance {
+interface FabricInstance {
   [DECONSTRUCT](): unknown;
 }
 
 // Class protocol: "here's how to bring one back"
-interface StorableClass<T extends StorableInstance> {
+interface StorableClass<T extends FabricInstance> {
   [RECONSTRUCT](state: unknown, runtime: Runtime): T;
 }
 ```
@@ -323,7 +323,7 @@ constructor for two reasons:
 The presence of `[DECONSTRUCT]` doubles as the brand — no separate marker needed:
 
 ```typescript
-function isStorable(value: unknown): value is StorableInstance {
+function isStorable(value: unknown): value is FabricInstance {
   return value != null &&
          typeof value === 'object' &&
          DECONSTRUCT in value;
@@ -333,7 +333,7 @@ function isStorable(value: unknown): value is StorableInstance {
 Example implementation:
 
 ```typescript
-class Cell<T> implements StorableInstance {
+class Cell<T> implements FabricInstance {
   [DECONSTRUCT]() {
     return { id: this.entityId, path: this.path, space: this.space };
   }
@@ -345,7 +345,7 @@ class Cell<T> implements StorableInstance {
 ```
 
 This approach:
-- **Open for extension**: New storable types don't require modifying a central
+- **Open for extension**: New fabric types don't require modifying a central
   type definition
 - **Co-located logic**: Each type knows how to deconstruct/reconstruct itself
 - **Symbol-based brands**: Unique symbols prevent collision with user data keys
@@ -354,7 +354,7 @@ This approach:
 #### Deconstructed State and Recursion
 
 The value returned by `[DECONSTRUCT]()` can contain any value that is itself
-deconstructable — including other `StorableInstance`s, built-in types like
+deconstructable — including other `FabricInstance`s, built-in types like
 `Error` or `Map`, and of course primitives and plain objects/arrays.
 
 The **serialization system handles recursion**, not the individual deconstructor
@@ -371,7 +371,7 @@ reconstructed by the serialization system.
 The system aims for an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
-- **`StorableInstance`s** should ideally be frozen as well — this is the north
+- **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
 - **No distinction** is made between regular and null-prototype plain objects;
   reconstruction always produces regular plain objects
@@ -385,10 +385,10 @@ When deserializing, a context may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types should
 be **passed through** rather than rejected, preserving forward compatibility.
 
-This requires a generic `StorableInstance` to hold unrecognized types:
+This requires a generic `FabricInstance` to hold unrecognized types:
 
 ```typescript
-class UnknownStorable implements StorableInstance {
+class UnknownValue implements FabricInstance {
   constructor(
     readonly typeTag: string,   // e.g., "FutureType@2"
     readonly state: unknown,    // the raw state, already recursively processed
@@ -401,13 +401,13 @@ class UnknownStorable implements StorableInstance {
   static [RECONSTRUCT](
     state: { type: string; state: unknown },
     _runtime: Runtime,
-  ): UnknownStorable {
-    return new UnknownStorable(state.type, state.state);
+  ): UnknownValue {
+    return new UnknownValue(state.type, state.state);
   }
 }
 ```
 
-The serialization system has special knowledge of `UnknownStorable`: when it
+The serialization system has special knowledge of `UnknownValue`: when it
 encounters an unknown type tag during deserialization, it wraps the original
 tag and state into `{ type, state }` and passes that to `[RECONSTRUCT]`. When
 re-serializing, it uses the preserved `typeTag` to produce the original wire
@@ -420,9 +420,9 @@ A **serialization context** owns the mapping between classes and tags:
 
 ```typescript
 interface SerializationContext {
-  // Maps storable types to wire format tags
-  getTagFor(value: StorableInstance): string;
-  getClassFor(tag: string): StorableClass<StorableInstance>;
+  // Maps fabric types to wire format tags
+  getTagFor(value: FabricInstance): string;
+  getClassFor(tag: string): StorableClass<FabricInstance>;
 
   // Format-specific wrapping
   wrap(tag: string, state: unknown): SerializedForm;
@@ -489,13 +489,13 @@ The `deserialize` function needs runtime context to reconstitute rich types
 - **Single conversion point**: Easier to maintain, audit, and change
 - **Format flexibility**: Different boundaries can use different contexts
 - **Better tooling**: Debuggers show actual Cells, not JSON blobs
-- **Extensible**: New storable types only need to implement the protocol
+- **Extensible**: New fabric types only need to implement the protocol
 
 #### Relationship to Canonical Hashing
 
 This proposal pairs with [Simplified Canonical Hashing](#simplified-canonical-hashing):
 canonical hashes can be computed over rich types directly, using deconstructed
-state for `StorableInstance`s and type-specific handling for built-in JS types.
+state for `FabricInstance`s and type-specific handling for built-in JS types.
 This makes identity hashing independent of any particular wire encoding.
 
 #### Trade-offs
@@ -523,9 +523,9 @@ This makes identity hashing independent of any particular wire encoding.
   Dynamic discovery? Who owns the registry?)
 - What happens when `[DECONSTRUCT]` or `[RECONSTRUCT]` fails partway through?
   (Might want a `ProblematicStorable` with similar structure/use to
-  `UnknownStorable`.)
-- How do schemas integrate with the storable protocol? Each `StorableInstance`
-  type implies a schema for its deconstructed state. The storable layer should
+  `UnknownValue`.)
+- How do schemas integrate with the fabric protocol? Each `FabricInstance`
+  type implies a schema for its deconstructed state. The fabric layer should
   provide serialization contexts access to these schemas. What changes to the
   schema language are required? (See [Schemas](./7-schemas.md).)
 - Which built-in JS types should be included?
@@ -660,7 +660,7 @@ Use cases for `/quote`:
 #### Unknown Type Handling
 
 When a JSON context encounters a `/<type>@<version>` key it doesn't recognize,
-it uses `UnknownStorable` (see [Unknown Types](#unknown-types) in the Storable
+it uses `UnknownValue` (see [Unknown Types](#unknown-types) in the Storable
 Protocol section) to preserve the data for round-tripping.
 
 #### Relationship to Serialization Contexts
@@ -671,7 +671,7 @@ mapping between rich runtime types and their serialized form. The context is
 also responsible for:
 - Applying `/object` or `/quote` escaping when serializing plain objects that
   happen to have slash-prefixed keys
-- Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`
+- Wrapping unknown types using the `typeTag` preserved in `UnknownValue`
 
 #### Open Questions
 

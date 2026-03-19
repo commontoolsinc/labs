@@ -9,10 +9,10 @@ self-contained, implementable specification.
 
 This spec covers:
 
-- **Storable values** (Sections 1-2) -- the type universe for all persistent and
-  in-flight data, and the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`)
+- **Fabric values** (Sections 1-2) -- the type universe for all persistent and
+  in-flight data, and the fabric protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`)
   for custom type participation in serialization
-- **Unknown types** (Section 3) -- forward-compatibility via `UnknownStorable`
+- **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
 - **Serialization contexts** (Section 4) -- boundary-crossing serialization
   strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
 - **JSON encoding** (Section 5) -- the `/<Type>@<Version>` wire format for

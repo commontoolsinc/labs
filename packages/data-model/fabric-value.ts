@@ -47,7 +47,7 @@ export type FabricValue = FabricDatum | undefined;
  *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
  *
  * Most native JS object types (`Error`, `Map`, `Set`, `Uint8Array`) enter the
- * storable layer via wrapper classes that implement `FabricInstance`. However,
+ * fabric layer via wrapper classes that implement `FabricInstance`. However,
  * temporal types (`FabricEpochNsec`, `FabricEpochDays`) and `bigint` are
  * direct members of `FabricDatum` without implementing `FabricInstance`.
  * Native `Date` is converted to `FabricEpochNsec` during conversion.
@@ -75,21 +75,21 @@ export type FabricDatum =
   // -- Extended primitives (experimental: modernDataModel) --
   | undefined;
 
-/** An array of storable data. */
+/** An array of fabric data. */
 export interface FabricArray extends ArrayLike<FabricDatum> {}
 
 /**
- * An object/record of storable data.
+ * An object/record of fabric data.
  *
  * Note: `__proto__` and `constructor` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
- * values enter the storable system (e.g., `fabricFromNativeValue`).
+ * values enter the fabric system (e.g., `fabricFromNativeValue`).
  */
 export interface FabricObject extends Record<string, FabricDatum> {}
 
 /**
- * A single "layer" of storable conversion -- the result of shallow conversion
+ * A single "layer" of fabric conversion -- the result of shallow conversion
  * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
  * conversion (e.g., Error instances in a `cause` chain).
@@ -100,11 +100,11 @@ export type FabricValueLayer =
   | Record<string, unknown>;
 
 /**
- * Union of raw native JS **object** types that the storable type system can
+ * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers. These are the inputs to the
  * "sausage grinder" -- `shallowFabricFromNativeValue()` accepts
  * `FabricValue | FabricNativeObject`, meaning callers can pass in either
- * already-storable data or raw native JS objects. The conversion produces
+ * already-fabric data or raw native JS objects. The conversion produces
  * `FabricInstance` wrappers (FabricError, FabricMap, etc.) that live
  * inside `FabricValue` via the `FabricInstance` arm of `FabricDatum`.
  *
@@ -113,7 +113,7 @@ export type FabricValueLayer =
  * serialization path throws on `Blob` since its data access methods are async.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to storable form via their `toJSON()` method. This is a legacy
+ * convertible to fabric form via their `toJSON()` method. This is a legacy
  * conversion path but is included here so the `canBeStored()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
@@ -142,7 +142,7 @@ export type FabricNativeObject =
  * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
  */
 export interface ExperimentalDataModelConfig {
-  /** When `true`, storable value functions use the extended type system
+  /** When `true`, fabric value functions use the extended type system
    *  (bigint, Map, Set, Uint8Array, Date, etc.). */
   modernDataModel: boolean;
 }
@@ -183,11 +183,11 @@ export function resetDataModelConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a native JS value to storable form (deep, recursive).
+ * Convert a native JS value to fabric form (deep, recursive).
  *
  * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy`.
  * Flag ON (rich): wraps native types (Error, Date, RegExp, etc.) into
- * storable wrappers and deep-freezes via `fabricFromNativeValueModern`.
+ * fabric wrappers and deep-freezes via `fabricFromNativeValueModern`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
  *   applies when `modernDataModel` is ON; the legacy path does not
@@ -203,9 +203,9 @@ export function fabricFromNativeValue(
 }
 
 /**
- * Convert a storable value back to native form.
+ * Convert a fabric value back to native form.
  *
- * Flag OFF (legacy): identity passthrough. Flag ON (rich): unwraps storable
+ * Flag OFF (legacy): identity passthrough. Flag ON (rich): unwraps fabric
  * wrappers (FabricError, FabricMap, etc.) back to native JS types via
  * `nativeFromFabricValueModern`.
  *
@@ -227,7 +227,7 @@ export function nativeFromFabricValue(
  * with control over depth and copy semantics.
  *
  * Unlike `fabricFromNativeValue` (which converts native JS values into
- * storable wrappers), this function assumes the input is already a valid
+ * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
@@ -280,16 +280,16 @@ export function cloneIfNecessary<T extends FabricValue>(
 // ---------------------------------------------------------------------------
 
 /**
- * Determines if the given value is considered "storable" by the system per se
+ * Determines if the given value is considered "fabric-compatible" by the system per se
  * (without invoking any conversions such as `.toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
  *
- * Flag OFF (legacy): storable values are JSON-encodable values plus
+ * Flag OFF (legacy): fabric values are JSON-encodable values plus
  * `undefined`. Flag ON (rich): delegates to `isFabricValueModern` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
- * @returns `true` if the value is storable per se, `false` otherwise.
+ * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
  */
 export function isFabricValue(
   value: unknown,
@@ -324,7 +324,7 @@ export function canBeStored(
 // ---------------------------------------------------------------------------
 
 /**
- * Converts a value to storable form without recursing into nested values.
+ * Converts a value to fabric form without recursing into nested values.
  * JSON-encodable values pass through as-is. Functions and instances are
  * converted via `toJSON()` if available.
  *
@@ -334,8 +334,8 @@ export function canBeStored(
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
  *   object or array. Only applies when `modernDataModel` is ON.
- * @returns The storable value (original or converted).
- * @throws Error if the value can't be converted to storable form.
+ * @returns The fabric value (original or converted).
+ * @throws Error if the value can't be converted to fabric form.
  */
 export function shallowFabricFromNativeValue(
   value: unknown,
@@ -351,7 +351,7 @@ export function shallowFabricFromNativeValue(
 // ---------------------------------------------------------------------------
 
 /**
- * Compares two storable values for equality.
+ * Compares two fabric values for equality.
  *
  * Flag OFF (legacy): uses JSON.stringify comparison, matching the behavior of
  * the original `JSON.parse(JSON.stringify(...))` round-trip (strips undefined,

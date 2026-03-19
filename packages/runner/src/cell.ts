@@ -186,7 +186,7 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw storable value as `FabricValue`, bypassing the
+     * Reads the cell's raw fabric value as `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
@@ -206,7 +206,7 @@ declare module "@commontools/api" {
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
      * Sets the raw cell value to any `FabricValue`, bypassing the cell's
-     * type parameter `T`. Use this when writing pre-formed storable data
+     * type parameter `T`. Use this when writing pre-formed fabric data
      * (e.g., `SigilLink` references, stream markers) that is valid at the
      * storage layer but does not conform to the cell's schema type.
      *
@@ -1228,7 +1228,7 @@ export class CellImpl<T extends FabricValue>
       options,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
-    // and getRawUntyped() return storable-layer values, not native ("wild
+    // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
     return cloneIfNecessary(value, { frozen });
   }
@@ -1987,7 +1987,7 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // Convert value to storable form. This handles:
+  // Convert value to fabric form. This handles:
   // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods

@@ -1,6 +1,6 @@
 /**
- * Abstract base class for "special primitive" storable types -- values that
- * behave like primitives in the storable type system but are represented as
+ * Abstract base class for "special primitive" fabric types -- values that
+ * behave like primitives in the fabric type system but are represented as
  * class instances for type safety and dispatch. Currently covers temporal
  * types (`FabricEpochNsec`, `FabricEpochDays`) and content IDs
  * (`FabricHash`).

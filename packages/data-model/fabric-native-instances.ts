@@ -14,7 +14,7 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Returns `true` if the value is a native JS object type that the storable
+ * Returns `true` if the value is a native JS object type that the fabric
  * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
  * the "wild-west" instances that get converted into `FabricNativeWrapper`
  * subclasses or `FabricInstance` types by the conversion layer.
@@ -142,7 +142,7 @@ export abstract class FabricNativeWrapper<T extends object>
 // ---------------------------------------------------------------------------
 
 /**
- * Wrapper for `Error` instances in the storable type system. Bridges native
+ * Wrapper for `Error` instances in the fabric type system. Bridges native
  * `Error` (JS wild west) into the strongly-typed `FabricValue` layer by
  * implementing `FabricInstance`. The serialization layer handles
  * `FabricError` via the generic `StorableInstanceHandler` path.
@@ -170,7 +170,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
    *
    * **Invariant**: By the time this method runs, `this.error.cause` and any
    * custom enumerable properties are already `FabricValue`. The conversion
-   * layer (`convertErrorInternals()` in `storable-value-modern.ts`) ensures
+   * layer (`convertErrorInternals()` in `fabric-value-modern.ts`) ensures
    * this by recursively converting Error internals before wrapping in
    * `FabricError`. The `as FabricValue` casts below are therefore safe.
    */
@@ -340,7 +340,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 }
 
 /**
- * Wrapper for `RegExp` instances in the storable type system. Bridges native
+ * Wrapper for `RegExp` instances in the fabric type system. Bridges native
  * `RegExp` (JS wild west) into the strongly-typed `FabricValue` layer by
  * implementing `FabricInstance`. The essential state is
  * `{ source, flags, flavor }`.
@@ -579,8 +579,8 @@ export function nativeFromFabricValueModern(
   // Other FabricInstance (Cell, Stream, UnknownValue, etc.) -- pass through.
   if (isFabricInstance(value)) return value;
 
-  // Storable primitives (null, undefined, boolean, number, string, bigint)
-  // pass through. Note: `symbol` and `function` are NOT storable and cannot
+  // Fabric primitives (null, undefined, boolean, number, string, bigint)
+  // pass through. Note: `symbol` and `function` are NOT fabric-compatible and cannot
   // reach here because the `FabricValue` type excludes them.
   if (value === null || value === undefined || typeof value !== "object") {
     return value;

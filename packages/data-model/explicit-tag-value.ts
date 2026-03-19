@@ -2,7 +2,7 @@ import type { FabricValue } from "./fabric-value.ts";
 import { FabricInstance } from "./fabric-instance.ts";
 
 /**
- * Base class for storable types that carry an explicit wire-format tag.
+ * Base class for fabric types that carry an explicit wire-format tag.
  * Used by `UnknownValue` (unrecognized types) and `ProblematicValue`
  * (failed deconstruction/reconstruction). Enables a single `instanceof`
  * check where code needs to handle both.

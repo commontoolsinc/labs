@@ -1231,7 +1231,7 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // storable-protocol: isFabricInstance type guard
+  // data-model-protocol: isFabricInstance type guard
   // --------------------------------------------------------------------------
 
   describe("isFabricInstance type guard", () => {
@@ -1771,7 +1771,7 @@ describe("json encoding", () => {
       resetDataModelConfig();
     });
 
-    // -- Primitives that ARE storable --
+    // -- Primitives that ARE fabric-compatible --
     it("accepts null", () => {
       expect(canBeStored(null)).toBe(true);
     });
@@ -1801,7 +1801,7 @@ describe("json encoding", () => {
       expect(canBeStored(0n)).toBe(true);
     });
 
-    // -- Primitives that are NOT storable --
+    // -- Primitives that are NOT fabric-compatible --
     it("rejects NaN", () => {
       expect(canBeStored(NaN)).toBe(false);
     });
@@ -1847,11 +1847,11 @@ describe("json encoding", () => {
     });
 
     // -- Containers --
-    it("accepts plain objects with storable values", () => {
+    it("accepts plain objects with fabric values", () => {
       expect(canBeStored({ a: 1, b: "hello", c: null })).toBe(true);
     });
 
-    it("accepts arrays with storable values", () => {
+    it("accepts arrays with fabric values", () => {
       expect(canBeStored([1, "hello", null, true])).toBe(true);
     });
 
@@ -1879,15 +1879,15 @@ describe("json encoding", () => {
       expect(canBeStored(new Foo())).toBe(false);
     });
 
-    it("rejects objects with non-storable nested values", () => {
+    it("rejects objects with non-fabric nested values", () => {
       expect(canBeStored({ a: 1, b: Symbol("bad") })).toBe(false);
     });
 
-    it("rejects arrays with non-storable elements", () => {
+    it("rejects arrays with non-fabric elements", () => {
       expect(canBeStored([1, Symbol("bad")])).toBe(false);
     });
 
-    it("rejects deeply nested non-storable values", () => {
+    it("rejects deeply nested non-fabric values", () => {
       expect(canBeStored({
         a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
       })).toBe(false);
@@ -1901,12 +1901,12 @@ describe("json encoding", () => {
     });
 
     // -- toJSON support --
-    it("accepts objects with toJSON returning storable values", () => {
+    it("accepts objects with toJSON returning fabric values", () => {
       const obj = { toJSON: () => ({ x: 1 }) };
       expect(canBeStored(obj)).toBe(true);
     });
 
-    it("rejects objects with toJSON returning non-storable values", () => {
+    it("rejects objects with toJSON returning non-fabric values", () => {
       const obj = { toJSON: () => Symbol("bad") };
       expect(canBeStored(obj)).toBe(false);
     });

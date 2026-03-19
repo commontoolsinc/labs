@@ -1,7 +1,7 @@
 import type { FabricValue } from "./fabric-value.ts";
 
 /**
- * Well-known symbol for deconstructing a storable instance into its essential
+ * Well-known symbol for deconstructing a fabric instance into its essential
  * state. The returned value may contain nested `FabricValue`s (including
  * other `FabricInstance`s); the serialization system handles recursion.
  * See Section 2.2 of the formal spec.
@@ -9,14 +9,14 @@ import type { FabricValue } from "./fabric-value.ts";
 export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
 
 /**
- * Well-known symbol for reconstructing a storable instance from its essential
+ * Well-known symbol for reconstructing a fabric instance from its essential
  * state. Static method on the class.
  * See Section 2.2 of the formal spec.
  */
 export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
- * Abstract base class for values that participate in the storable protocol.
+ * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
  * Subclasses must implement:

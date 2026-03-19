@@ -18,7 +18,7 @@ const jsonEncodingContext = new JsonEncodingContext();
 // ---------------------------------------------------------------------------
 
 /**
- * Encode a storable value to a JSON string. When unified JSON encoding is
+ * Encode a fabric value to a JSON string. When unified JSON encoding is
  * ON, serializes rich types (bigint, undefined, Map, etc.) into the
  * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
  * equivalent to `JSON.stringify(value)`.
@@ -26,7 +26,7 @@ const jsonEncodingContext = new JsonEncodingContext();
 export let jsonFromValue: (value: FabricValue) => string;
 
 /**
- * Decode a JSON string back into a storable value. When unified JSON
+ * Decode a JSON string back into a fabric value. When unified JSON
  * encoding is ON, parses the string and deserializes tagged forms back
  * into rich runtime types. When OFF,
  * equivalent to `JSON.parse(json)`.

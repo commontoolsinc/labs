@@ -104,7 +104,7 @@ export function shallowFabricFromNativeValueModern(
       const converted = (value as { toJSON: () => unknown }).toJSON();
       if (!isFabricValueModern(converted)) {
         throw new Error(
-          `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+          `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
         );
       }
       return cloneHelper(
@@ -155,7 +155,7 @@ export function shallowFabricFromNativeValueModern(
             const converted = value.toJSON();
             if (!isFabricValueModern(converted)) {
               throw new Error(
-                `\`toJSON()\` on function returned something other than a storable value`,
+                `\`toJSON()\` on function returned something other than a fabric value`,
               );
             }
             return converted;
@@ -179,7 +179,7 @@ export function shallowFabricFromNativeValueModern(
       throw new Error(
         `Cannot store ${
           (value as object).constructor?.name ?? typeof value
-        } (not a recognized storable type)`,
+        } (not a recognized fabric type)`,
       );
   }
 }
@@ -456,7 +456,7 @@ function convertErrorInternals(
 
 /**
  * Type guard that accepts `FabricInstance` values, `undefined`, and arrays
- * with `undefined` elements or sparse holes -- in addition to the base storable
+ * with `undefined` elements or sparse holes -- in addition to the base fabric
  * types (null, boolean, number, string, plain objects, dense arrays).
  *
  * MUST be self-contained (inline base-type checks, does NOT delegate back to
@@ -532,8 +532,8 @@ export function isFabricValueModern(
  *
  * `canBeStored` additionally accepts `FabricNativeObject` types (Error, Map,
  * Set, Date, Uint8Array, Blob) and objects/functions with `toJSON()` methods
- * that return storable values. It checks recursively, so all nested values in
- * arrays and objects must also be storable or convertible.
+ * that return fabric values. It checks recursively, so all nested values in
+ * arrays and objects must also be fabric-compatible or convertible.
  */
 export function canBeStoredRich(
   value: unknown,
@@ -576,11 +576,11 @@ export interface CloneOptions {
  * with control over depth and copy semantics.
  *
  * Unlike `fabricFromNativeValue` (which converts native JS values into
- * storable wrappers), this function assumes the input is already a valid
+ * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Callers must resolve `CloneOptions` defaults and validate before calling;
- * the dispatcher in `storable-value.ts` handles that.
+ * the dispatcher in `fabric-value.ts` handles that.
  *
  * @param value - An already-valid `FabricValue`.
  * @param frozen - Whether the result should be frozen.
@@ -730,7 +730,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
 
     case "symbol":
     case "function": {
-      // Functions are only storable if they have toJSON().
+      // Functions are only fabric-compatible if they have toJSON().
       if (typeof value === "function" && hasToJSONMethod(value)) {
         const converted = value.toJSON();
         return canBeStoredInternal(converted, seen);
@@ -777,7 +777,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
         return result;
       }
 
-      // Class instances without toJSON() are not storable.
+      // Class instances without toJSON() are not fabric-compatible.
       if (isInstance(value)) {
         seen.delete(value);
         return false;

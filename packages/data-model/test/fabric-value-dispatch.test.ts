@@ -18,7 +18,7 @@ function roundTrip(value: FabricValue): FabricValue {
 // Tests
 // ============================================================================
 
-describe("storable-value-dispatch", () => {
+describe("fabric-value-dispatch", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
     resetDataModelConfig();
@@ -63,10 +63,10 @@ describe("storable-value-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Flag ON: rich storable value conversion
+  // Flag ON: rich fabric value conversion
   // --------------------------------------------------------------------------
 
-  describe("flag ON: rich storable value conversion", () => {
+  describe("flag ON: rich fabric value conversion", () => {
     it("round-trip preserves primitives", () => {
       setDataModelConfig({ modernDataModel: true });
       expect(roundTrip(42 as FabricValue)).toBe(42);

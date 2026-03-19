@@ -6,11 +6,11 @@
  */
 
 // ============================================================================
-// Storable Value Types
+// Fabric Value Types
 // ============================================================================
 //
-// Pattern-visible declarations for the storable value type system. Canonical
-// implementations live in submodule files (fabric-value.ts, storable-instance.ts,
+// Pattern-visible declarations for the fabric value type system. Canonical
+// implementations live in submodule files (fabric-value.ts, fabric-instance.ts,
 // etc.) — these inline declarations mirror the public surface so the pattern
 // compiler can resolve them without relative imports.
 //
@@ -19,7 +19,7 @@
 // will diverge from runtime behavior.
 
 /**
- * Abstract base class for values that participate in the storable protocol.
+ * Abstract base class for values that participate in the fabric protocol.
  * Subclasses include Cell, Stream, and native-object wrappers (FabricError,
  * FabricMap, etc.).
  */
@@ -33,7 +33,7 @@ export interface FabricInstanceConstructor {
 
 export declare const FabricInstance: FabricInstanceConstructor;
 
-/** Abstract base class for "special primitive" storable types. */
+/** Abstract base class for "special primitive" fabric types. */
 // deno-lint-ignore no-empty-interface
 export interface SpecialPrimitiveValue {}
 
@@ -95,10 +95,10 @@ export type FabricDatum =
   | FabricInstance
   | undefined;
 
-/** An array of storable data. */
+/** An array of fabric data. */
 export interface FabricArray extends ArrayLike<FabricDatum> {}
 
-/** An object/record of storable data. */
+/** An object/record of fabric data. */
 export interface FabricObject extends Record<string, FabricDatum> {}
 
 // ============================================================================

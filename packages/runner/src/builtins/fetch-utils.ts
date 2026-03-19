@@ -34,7 +34,7 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   // Exclude 'result' type hint from the hash - only hash actual fetch parameters
   const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
   delete (inputsOnly as Record<string, unknown>).result;
-  // hashOf() cannot hash undefined values; normalize to a deep storable shape
+  // hashOf() cannot hash undefined values; normalize to a deep fabric shape
   // (omits undefined object props, converts undefined array elements to null).
   const storableInputs = fabricFromNativeValue(inputsOnly);
   const normalized = storableInputs === undefined ? {} : storableInputs;

@@ -10,7 +10,7 @@ import {
 } from "../fabric-value.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 
-describe("storable-value", () => {
+describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
   // rich-path section) exercise flag-off behavior regardless of the ambient
   // default. The rich-path describe blocks override this in their own
@@ -151,7 +151,7 @@ describe("storable-value", () => {
       });
     });
 
-    describe("returns false for non-storable arrays", () => {
+    describe("returns false for non-fabric arrays", () => {
       it("rejects arrays with undefined elements", () => {
         expect(isFabricValue([1, undefined, 3])).toBe(false);
         expect(isFabricValue([undefined])).toBe(false);
@@ -182,13 +182,13 @@ describe("storable-value", () => {
       });
     });
 
-    describe("returns true for storable-but-not-JSON-encodable values", () => {
+    describe("returns true for fabric-compatible-but-not-JSON-encodable values", () => {
       it("accepts undefined", () => {
         expect(isFabricValue(undefined)).toBe(true);
       });
     });
 
-    describe("returns false for non-storable values", () => {
+    describe("returns false for non-fabric values", () => {
       it("rejects NaN", () => {
         expect(isFabricValue(NaN)).toBe(false);
       });
@@ -474,14 +474,14 @@ describe("storable-value", () => {
         expect(shallowFabricFromNativeValue(arr)).toBe("custom array");
       });
 
-      it("throws if toJSON returns a non-storable value", () => {
+      it("throws if toJSON returns a non-fabric value", () => {
         class BadToJSON {
           toJSON() {
             return Symbol("bad");
           }
         }
         expect(() => shallowFabricFromNativeValue(new BadToJSON())).toThrow(
-          "`toJSON()` on object returned something other than a storable value",
+          "`toJSON()` on object returned something other than a fabric value",
         );
       });
 
@@ -493,7 +493,7 @@ describe("storable-value", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsFunction()))
           .toThrow(
-            "`toJSON()` on object returned something other than a storable value",
+            "`toJSON()` on object returned something other than a fabric value",
           );
       });
 
@@ -505,7 +505,7 @@ describe("storable-value", () => {
         }
         expect(() => shallowFabricFromNativeValue(new ReturnsInstance()))
           .toThrow(
-            "`toJSON()` on object returned something other than a storable value",
+            "`toJSON()` on object returned something other than a fabric value",
           );
       });
     });
@@ -686,7 +686,7 @@ describe("storable-value", () => {
       });
     });
 
-    describe("throws for non-storable nested values", () => {
+    describe("throws for non-fabric nested values", () => {
       it("throws for nested symbol", () => {
         expect(() => fabricFromNativeValue({ val: Symbol("test") })).toThrow(
           "Cannot store symbol",
@@ -699,7 +699,7 @@ describe("storable-value", () => {
         );
       });
 
-      it("throws for deeply nested non-storable value", () => {
+      it("throws for deeply nested non-fabric value", () => {
         expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
           .toThrow("Cannot store symbol");
       });

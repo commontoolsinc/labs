@@ -7,14 +7,14 @@ import type {
 import { isArrayWithOnlyIndexProperties } from "./fabric-value-utils.ts";
 
 /**
- * Converts specially-recognized class instances to their designated storable
+ * Converts specially-recognized class instances to their designated fabric
  * form. Returns `null` if the value is not one of the recognized types.
  *
  * Currently recognized types:
  * - `Error` (and subclasses) → `{"@Error": {name, message, stack, ...}}`
  *
  * @param value - The value to check and potentially convert.
- * @returns The storable form of the instance, or `null` if not recognized.
+ * @returns The fabric form of the instance, or `null` if not recognized.
  */
 function specialInstanceToStorableValue(
   value: unknown,
@@ -60,11 +60,11 @@ function hasToJSONMethod(
 
 /**
  * Legacy implementation of `isFabricValue()` for the JSON-only type system.
- * Determines if the given value is considered "storable" per se (without
+ * Determines if the given value is considered "fabric-compatible" per se (without
  * invoking any conversions such as `.toJSON()`).
  *
  * @param value - The value to check.
- * @returns `true` if the value is storable per se, `false` otherwise.
+ * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
  */
 export function isFabricValueLegacy(
   value: unknown,
@@ -77,9 +77,9 @@ export function isFabricValueLegacy(
     }
 
     case "number": {
-      // Finite numbers are storable. Note: `-0` is accepted because it gets
+      // Finite numbers are fabric-compatible. Note: `-0` is accepted because it gets
       // normalized to `0` during conversion (see `shallowFabricFromNativeValue()`).
-      // `NaN` and `Infinity` are not JSON-encodable and thus not storable.
+      // `NaN` and `Infinity` are not JSON-encodable and thus not fabric-compatible.
       return Number.isFinite(value);
     }
 
@@ -134,7 +134,7 @@ export function canBeStoredLegacy(
  *   rich-data values).
  *
  * Callers must resolve `CloneOptions` defaults and validate before calling;
- * the dispatcher in `storable-value.ts` handles that.
+ * the dispatcher in `fabric-value.ts` handles that.
  *
  * @param value - An already-valid `FabricValue`.
  * @param frozen - Whether the result should be frozen.
@@ -168,11 +168,11 @@ export function cloneIfNecessaryLegacy(
 
 /**
  * Legacy implementation of `shallowFabricFromNativeValue()` for the
- * JSON-only type system. Converts a value to storable form without recursing
+ * JSON-only type system. Converts a value to fabric form without recursing
  * into nested values.
  *
  * @param value - The value to convert.
- * @returns The storable value (original or converted).
+ * @returns The fabric value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
 export function shallowFabricFromNativeValueLegacy(
@@ -205,7 +205,7 @@ export function shallowFabricFromNativeValueLegacy(
 
         if (!isFabricValueLegacy(converted)) {
           throw new Error(
-            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+            `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
           );
         }
 
@@ -271,11 +271,11 @@ const OMIT = Symbol("OMIT");
 const PROCESSING = Symbol("PROCESSING");
 
 /**
- * Legacy implementation of deep storable value conversion for the JSON-only
- * type system. Recursively converts a value to storable (JSON-encodable) form.
+ * Legacy implementation of deep fabric value conversion for the JSON-only
+ * type system. Recursively converts a value to fabric (JSON-encodable) form.
  *
  * @param value - The value to convert.
- * @returns The storable value (original or converted).
+ * @returns The fabric value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
 export function fabricFromNativeValueLegacy(value: unknown): FabricValue {
@@ -334,7 +334,7 @@ function storableFromNativeValueLegacyInternal(
     );
   }
 
-  // Try to convert the top level to storable form. Calls the legacy function
+  // Try to convert the top level to fabric form. Calls the legacy function
   // directly since storableFromNativeValueLegacyInternal is part of the legacy path.
   let value: FabricValueLayer;
   try {
@@ -398,13 +398,13 @@ function storableFromNativeValueLegacyInternal(
 
 /**
  * Helper for other functions in this file, which accepts an array and checks to
- * see whether or not it in storable form. To be in storable form, an array must
+ * see whether or not it in fabric form. To be in fabric form, an array must
  * have only numeric index properties (no extra named properties) and must not
  * contain any explicit `undefined` values at populated indices. Sparse holes
  * are allowed.
  *
  * @param array The array to check.
- * @returns `true` if the array is in storable form, `false` otherwise.
+ * @returns `true` if the array is in fabric form, `false` otherwise.
  */
 function isStorableArray(array: unknown[]): boolean {
   // Reject extra non-numeric properties by checking that all keys are valid

@@ -1,7 +1,7 @@
 /**
  * Effectively-immutable wrappers for built-in collection types (`Map`, `Set`).
  * Each extends the native class so `instanceof` checks still pass,
- * but all mutation methods throw. Used by the storable-value unwrap layer to
+ * but all mutation methods throw. Used by the fabric-value unwrap layer to
  * preserve immutability guarantees across the FabricValue -> native
  * round-trip.
  *

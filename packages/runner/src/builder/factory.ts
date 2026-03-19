@@ -152,7 +152,7 @@ export const createBuilder = (): {
       // Render utils
       h,
 
-      // Storable value classes -- runtime values backing the type declarations
+      // Fabric value classes -- runtime values backing the type declarations
       // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
       // checks in patterns.
       FabricInstance,

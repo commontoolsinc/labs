@@ -39,7 +39,7 @@ import {
 export interface TypeHandlerCodec {
   /** Wrap a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
-  /** Get the wire format tag for a storable instance's type. */
+  /** Get the wire format tag for a fabric instance's type. */
   getTagFor(value: FabricInstance): string;
 }
 

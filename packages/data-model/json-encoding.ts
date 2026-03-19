@@ -77,7 +77,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Encode a storable value to a JSON string. Serializes rich types into
+   * Encode a fabric value to a JSON string. Serializes rich types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
@@ -85,7 +85,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   /**
-   * Decode a JSON string back into a storable value. Parses the string,
+   * Decode a JSON string back into a fabric value. Parses the string,
    * then deserializes tagged forms back into rich runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
@@ -98,14 +98,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Serialize a storable value to UTF-8 JSON bytes.
+   * Serialize a fabric value to UTF-8 JSON bytes.
    */
   encodeToBytes(value: FabricValue): Uint8Array {
     return this.toBytes(this.serialize(value));
   }
 
   /**
-   * Deserialize UTF-8 JSON bytes back into a storable value.
+   * Deserialize UTF-8 JSON bytes back into a fabric value.
    */
   decodeFromBytes(
     bytes: Uint8Array,
@@ -119,7 +119,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // Tag wrapping/unwrapping (private)
   // -------------------------------------------------------------------------
 
-  /** Get the wire format tag for a storable instance's type. */
+  /** Get the wire format tag for a fabric instance's type. */
   private getTagFor(value: FabricInstance): string {
     if (value instanceof ExplicitTagValue) {
       return value.typeTag;
@@ -199,7 +199,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Serialize a storable value into wire format. Recursively processes nested
+   * Serialize a fabric value into wire format. Recursively processes nested
    * values. See Section 4.5 of the formal spec.
    */
   private serialize(

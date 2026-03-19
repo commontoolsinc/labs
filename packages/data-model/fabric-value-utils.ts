@@ -1,6 +1,6 @@
 /**
- * Pure utility functions for storable value array index checking. These are
- * used by both the legacy and modern storable value modules, so they live
+ * Pure utility functions for fabric value array index checking. These are
+ * used by both the legacy and modern fabric value modules, so they live
  * here to avoid circular imports between those modules and the dispatch
  * module.
  */

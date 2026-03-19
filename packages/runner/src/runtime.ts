@@ -87,16 +87,16 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
- * independent piece of the new storable-value pipeline so that the features
+ * independent piece of the new fabric-value pipeline so that the features
  * can be enabled incrementally. Passed via `RuntimeOptions.experimental` and
  * propagated to the memory layer as ambient config.
  *
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
  */
 export interface ExperimentalOptions {
-  /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
+  /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean;
-  /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
+  /** Enable the fabric protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
   dataModelProtocol?: boolean;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
@@ -401,7 +401,7 @@ export class Runtime {
     // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
     this.harness.dispose();
 
-    // Reset experimental storable config to defaults
+    // Reset experimental fabric config to defaults
     resetDataModelConfig();
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();

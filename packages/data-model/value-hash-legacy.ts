@@ -2,7 +2,7 @@
  * Legacy merkle-reference tree builder, used by `value-hash.ts` when
  * canonical hashing mode is disabled. Extracted from `value-hash.ts`
  * following the same dispatch + modern/legacy split pattern used by
- * `storable-value.ts`.
+ * `fabric-value.ts`.
  */
 import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";

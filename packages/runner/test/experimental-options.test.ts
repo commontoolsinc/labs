@@ -23,7 +23,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
  * Runtime construction/disposal correctly propagates flags to the ambient
- * storable-value config, and that `shallowFabricFromNativeValue`/`fabricFromNativeValue`
+ * fabric-value config, and that `shallowFabricFromNativeValue`/`fabricFromNativeValue`
  * respect the `modernDataModel` gate.
  */
 describe("ExperimentalOptions", () => {

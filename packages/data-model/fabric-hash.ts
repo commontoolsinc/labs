@@ -1,6 +1,6 @@
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `SpecialPrimitiveValue` -- treated like a primitive in the storable
+ * Extends `SpecialPrimitiveValue` -- treated like a primitive in the fabric
  * type system (always frozen, passes through conversion unchanged).
  *
  * Stringification produces `<algorithmTag>:<base64urlHash>` where

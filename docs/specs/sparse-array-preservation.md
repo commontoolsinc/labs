@@ -93,7 +93,7 @@ Data flows through the reactive pipeline in this order. Every layer preserves
 sparseness:
 
 ```
-Write path:  value → toStorableValue → recursivelyAddIDIfNeeded → storage
+Write path:  value → fabricFromNativeValue → recursivelyAddIDIfNeeded → storage
 Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc.)
 ```
 
@@ -102,15 +102,15 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/memory/storable-value-modern.ts`** — `shallowStorableFromNativeValueRich` and
+- **`packages/memory/fabric-value-modern.ts`** — `shallowStorableFromNativeValueRich` and
   `storableFromNativeValueRich` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
 - **`packages/memory/canonical-hash.ts`** — Handles holes in hash computation.
 
-### Value validation (`packages/memory/storable-value.ts`)
+### Value validation (`packages/memory/fabric-value.ts`)
 
-`isStorableArray` accepts sparse arrays — holes are valid storable structure. It
+`isFabricArray` accepts sparse arrays — holes are valid fabric structure. It
 uses `for` + `i in` because it needs early return.  `toStorableValueLegacy` and
 `toDeepStorableValueInternal` both use `forEach` to preserve holes during
 conversion.
@@ -209,8 +209,8 @@ If you're writing a plain array copy, use or follow `sparseArrayCopy` from
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/memory/test/storable-value-test.ts`** — `isStorableValue` accepts
-  sparse arrays; `toStorableValue` and `toDeepStorableValue` preserve holes.
+- **`packages/memory/test/storable-value-test.ts`** — `isFabricValue` accepts
+  sparse arrays; `fabricFromNativeValue` and `toDeepStorableValue` preserve holes.
 - **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
   through array copies (extension, element set, nested modification).
 - **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
@@ -222,7 +222,7 @@ Test coverage verifies sparse preservation at each layer:
 - **`packages/runner/test/data-updating.test.ts`** — All four hole transition
   cases (hole-to-hole, value-to-hole, hole-to-value, value-to-value); `hasPath`
   returns false through holes.
-- **`packages/runner/test/experimental-options.test.ts`** — `isStorableValue`
+- **`packages/runner/test/experimental-options.test.ts`** — `isFabricValue`
   accepts sparse arrays regardless of the `modernDataModel` flag.
 - **`packages/runner/test/patterns-core.test.ts`** — End-to-end test: maps over
   `[10, <hole>, 30]` and verifies output is `[20, <hole>, 60]` with holes
@@ -234,6 +234,6 @@ will fail these assertions.
 
 ## Known limitations
 
-- **`rich-storable-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
+- **`rich-fabric-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
   in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
   This is an edge case — `toJSON()` rarely returns sparse arrays.

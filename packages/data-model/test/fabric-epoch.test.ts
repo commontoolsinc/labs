@@ -93,7 +93,7 @@ describe("FabricEpochDays (protocol)", () => {
   });
 });
 
-describe("SpecialPrimitiveValue (storable-value integration)", () => {
+describe("SpecialPrimitiveValue (fabric-value integration)", () => {
   it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
     setDataModelConfig({ modernDataModel: true });
     try {
