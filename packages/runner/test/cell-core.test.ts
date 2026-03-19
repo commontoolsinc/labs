@@ -765,7 +765,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
       storageManager,
       experimental: {
         modernDataModel: true,
-        canonicalHashing: true,
+        modernHash: true,
       },
     });
     tx = runtime.edit();

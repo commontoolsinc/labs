@@ -48,8 +48,8 @@ function getResultForDoc(
 
 const DB = new URL(`memory:${space.did()}`);
 
-for (const canonicalHashing of [false, true]) {
-  describe(`canonicalHashing=${canonicalHashing}`, () => {
+for (const modernHash of [false, true]) {
+  describe(`modernHash=${modernHash}`, () => {
     let doc: `of:${string}`;
     let doc1: `of:${string}`;
     let doc2: `of:${string}`;
@@ -57,7 +57,7 @@ for (const canonicalHashing of [false, true]) {
     let session: Space.View;
 
     beforeAll(() => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
       doc1 = doc;
       doc2 = `of:${hashOf({ goodbye: "world" })}` as const;
@@ -66,7 +66,7 @@ for (const canonicalHashing of [false, true]) {
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       const result = await Space.open({ url: DB });
       assert(result.ok, "Open create repository if it does not exist");
       session = result.ok;

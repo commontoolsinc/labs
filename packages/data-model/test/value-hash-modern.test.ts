@@ -4,7 +4,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { canonicalHash as canonicalHashRaw } from "../value-hash-modern.ts";
+import { modernHash as canonicalHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";
@@ -29,8 +29,8 @@ function hex(hash: Uint8Array): string {
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Extract the raw hash bytes from canonicalHash for comparison. */
-function canonicalHash(value: unknown): Uint8Array {
+/** Extract the raw hash bytes from modernHash for comparison. */
+function modernHash(value: unknown): Uint8Array {
   return canonicalHashRaw(value).hash;
 }
 
@@ -38,13 +38,13 @@ function canonicalHash(value: unknown): Uint8Array {
 // Primitive types
 // =========================================================================
 
-Deno.test("canonicalHash", async (t) => {
+Deno.test("modernHash", async (t) => {
   // --- null ---
 
   await t.step("null produces TAG_NULL byte stream", () => {
     // Byte stream: [0x20]
     const expected = sha256([0x20]);
-    assertEquals(canonicalHash(null), expected);
+    assertEquals(modernHash(null), expected);
   });
 
   // --- boolean ---
@@ -52,17 +52,17 @@ Deno.test("canonicalHash", async (t) => {
   await t.step("true produces TAG_BOOLEAN + 0x01", () => {
     // [0x22, 0x01]
     const expected = sha256([0x22, 0x01]);
-    assertEquals(canonicalHash(true), expected);
+    assertEquals(modernHash(true), expected);
   });
 
   await t.step("false produces TAG_BOOLEAN + 0x00", () => {
     // [0x22, 0x00]
     const expected = sha256([0x22, 0x00]);
-    assertEquals(canonicalHash(false), expected);
+    assertEquals(modernHash(false), expected);
   });
 
   await t.step("true and false produce different hashes", () => {
-    assertNotEquals(hex(canonicalHash(true)), hex(canonicalHash(false)));
+    assertNotEquals(hex(modernHash(true)), hex(modernHash(false)));
   });
 
   // --- number ---
@@ -79,7 +79,7 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
     ]);
-    assertEquals(canonicalHash(42), expected);
+    assertEquals(modernHash(42), expected);
   });
 
   await t.step("0 produces TAG_NUMBER + all zeros", () => {
@@ -94,16 +94,16 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
     ]);
-    assertEquals(canonicalHash(0), expected);
+    assertEquals(modernHash(0), expected);
   });
 
   await t.step("-0 normalizes to +0 (same hash)", () => {
-    assertEquals(canonicalHash(-0), canonicalHash(0));
+    assertEquals(modernHash(-0), modernHash(0));
   });
 
   await t.step("NaN throws", () => {
     assertThrows(
-      () => canonicalHash(NaN),
+      () => modernHash(NaN),
       Error,
       "non-finite",
     );
@@ -111,7 +111,7 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("Infinity throws", () => {
     assertThrows(
-      () => canonicalHash(Infinity),
+      () => modernHash(Infinity),
       Error,
       "non-finite",
     );
@@ -119,16 +119,16 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("-Infinity throws", () => {
     assertThrows(
-      () => canonicalHash(-Infinity),
+      () => modernHash(-Infinity),
       Error,
       "non-finite",
     );
   });
 
   await t.step("different numbers produce different hashes", () => {
-    assertNotEquals(hex(canonicalHash(1)), hex(canonicalHash(2)));
-    assertNotEquals(hex(canonicalHash(0)), hex(canonicalHash(1)));
-    assertNotEquals(hex(canonicalHash(-1)), hex(canonicalHash(1)));
+    assertNotEquals(hex(modernHash(1)), hex(modernHash(2)));
+    assertNotEquals(hex(modernHash(0)), hex(modernHash(1)));
+    assertNotEquals(hex(modernHash(-1)), hex(modernHash(1)));
   });
 
   await t.step(
@@ -147,7 +147,7 @@ Deno.test("canonicalHash", async (t) => {
         0xff,
         0xff,
       ]);
-      assertEquals(hex(canonicalHash(Number.MAX_VALUE)), hex(expected));
+      assertEquals(hex(modernHash(Number.MAX_VALUE)), hex(expected));
     },
   );
 
@@ -167,26 +167,26 @@ Deno.test("canonicalHash", async (t) => {
         0x6c,
         0x6f,
       ]);
-      assertEquals(canonicalHash("hello"), expected);
+      assertEquals(modernHash("hello"), expected);
     },
   );
 
   await t.step("empty string produces TAG_STRING + zero length", () => {
     // LEB128(0) = [0x00]
     const expected = sha256([0x24, 0x00]);
-    assertEquals(canonicalHash(""), expected);
+    assertEquals(modernHash(""), expected);
   });
 
   await t.step("different strings produce different hashes", () => {
-    assertNotEquals(hex(canonicalHash("a")), hex(canonicalHash("b")));
-    assertNotEquals(hex(canonicalHash("")), hex(canonicalHash("a")));
+    assertNotEquals(hex(modernHash("a")), hex(modernHash("b")));
+    assertNotEquals(hex(modernHash("")), hex(modernHash("a")));
   });
 
   await t.step("multi-byte UTF-8 characters encode correctly", () => {
     // Verify consistency (same value -> same hash)
-    assertEquals(canonicalHash("\u00e9"), canonicalHash("\u00e9"));
+    assertEquals(modernHash("\u00e9"), modernHash("\u00e9"));
     // e-acute is 2 bytes in UTF-8
-    assertNotEquals(hex(canonicalHash("e")), hex(canonicalHash("\u00e9")));
+    assertNotEquals(hex(modernHash("e")), hex(modernHash("\u00e9")));
   });
 
   await t.step("surrogate pairs (emoji) encode correctly", () => {
@@ -201,7 +201,7 @@ Deno.test("canonicalHash", async (t) => {
       0x04,
       ...utf8,
     ]);
-    assertEquals(canonicalHash(emoji), expected);
+    assertEquals(modernHash(emoji), expected);
   });
 
   // --- bigint ---
@@ -209,45 +209,45 @@ Deno.test("canonicalHash", async (t) => {
   await t.step("0n encodes as TAG_BIGINT + LEB128 length 1 + [0x00]", () => {
     // LEB128(1) = [0x01]
     const expected = sha256([0x26, 0x01, 0x00]);
-    assertEquals(canonicalHash(0n), expected);
+    assertEquals(modernHash(0n), expected);
   });
 
   await t.step("127n encodes as 1 byte: 0x7F", () => {
     const expected = sha256([0x26, 0x01, 0x7f]);
-    assertEquals(canonicalHash(127n), expected);
+    assertEquals(modernHash(127n), expected);
   });
 
   await t.step("128n encodes as 2 bytes: 0x00, 0x80", () => {
     // 128 = 0x80, but high bit set means negative in two's complement,
     // so we need a leading 0x00. LEB128(2) = [0x02].
     const expected = sha256([0x26, 0x02, 0x00, 0x80]);
-    assertEquals(canonicalHash(128n), expected);
+    assertEquals(modernHash(128n), expected);
   });
 
   await t.step("-1n encodes as 1 byte: 0xFF", () => {
     const expected = sha256([0x26, 0x01, 0xff]);
-    assertEquals(canonicalHash(-1n), expected);
+    assertEquals(modernHash(-1n), expected);
   });
 
   await t.step("-128n encodes as 1 byte: 0x80", () => {
     const expected = sha256([0x26, 0x01, 0x80]);
-    assertEquals(canonicalHash(-128n), expected);
+    assertEquals(modernHash(-128n), expected);
   });
 
   await t.step("-129n encodes as 2 bytes: 0xFF, 0x7F", () => {
     const expected = sha256([0x26, 0x02, 0xff, 0x7f]);
-    assertEquals(canonicalHash(-129n), expected);
+    assertEquals(modernHash(-129n), expected);
   });
 
   await t.step("large bigint encodes correctly", () => {
     // 2^64 = 18446744073709551616n
     // hex: 10000000000000000 -> 9 bytes: 01 00 00 00 00 00 00 00 00
     const big = 2n ** 64n;
-    const hash = canonicalHash(big);
+    const hash = modernHash(big);
     assertEquals(hash.length, 32); // SHA-256 produces 32 bytes
 
     // Verify it's consistent
-    assertEquals(canonicalHash(big), hash);
+    assertEquals(modernHash(big), hash);
   });
 
   await t.step(
@@ -272,7 +272,7 @@ Deno.test("canonicalHash", async (t) => {
         0xef,
       ]);
       assertEquals(
-        hex(canonicalHash(0x112233445566778899abcdefn)),
+        hex(modernHash(0x112233445566778899abcdefn)),
         hex(expected),
       );
     },
@@ -303,7 +303,7 @@ Deno.test("canonicalHash", async (t) => {
         0x11,
       ]);
       assertEquals(
-        hex(canonicalHash(-0x112233445566778899abcdefn)),
+        hex(modernHash(-0x112233445566778899abcdefn)),
         hex(expected),
       );
     },
@@ -314,24 +314,24 @@ Deno.test("canonicalHash", async (t) => {
   await t.step("undefined produces TAG_UNDEFINED", () => {
     // [0x21]
     const expected = sha256([0x21]);
-    assertEquals(canonicalHash(undefined), expected);
+    assertEquals(modernHash(undefined), expected);
   });
 
   // --- cross-type distinctness ---
 
   await t.step("null vs undefined vs false produce different hashes", () => {
-    const nullH = hex(canonicalHash(null));
-    const undefH = hex(canonicalHash(undefined));
-    const falseH = hex(canonicalHash(false));
+    const nullH = hex(modernHash(null));
+    const undefH = hex(modernHash(undefined));
+    const falseH = hex(modernHash(false));
     assertNotEquals(nullH, undefH);
     assertNotEquals(nullH, falseH);
     assertNotEquals(undefH, falseH);
   });
 
   await t.step("number 0 vs bigint 0n vs string '0' are distinct", () => {
-    const numH = hex(canonicalHash(0));
-    const bigH = hex(canonicalHash(0n));
-    const strH = hex(canonicalHash("0"));
+    const numH = hex(modernHash(0));
+    const bigH = hex(modernHash(0n));
+    const strH = hex(modernHash("0"));
     assertNotEquals(numH, bigH);
     assertNotEquals(numH, strH);
     assertNotEquals(bigH, strH);
@@ -353,7 +353,7 @@ Deno.test("canonicalHash", async (t) => {
         0x02,
         0x03,
       ]);
-      assertEquals(canonicalHash(bytes), expected);
+      assertEquals(modernHash(bytes), expected);
     },
   );
 
@@ -362,7 +362,7 @@ Deno.test("canonicalHash", async (t) => {
     () => {
       const bytes = new FabricUint8Array(new Uint8Array([]));
       const expected = sha256([0x25, 0x00]);
-      assertEquals(canonicalHash(bytes), expected);
+      assertEquals(modernHash(bytes), expected);
     },
   );
 
@@ -379,19 +379,19 @@ Deno.test("canonicalHash", async (t) => {
         0x01,
         0x00,
       ]);
-      assertEquals(canonicalHash(new FabricEpochNsec(0n)), expected);
+      assertEquals(modernHash(new FabricEpochNsec(0n)), expected);
     },
   );
 
   await t.step("FabricEpochNsec with different values differ", () => {
     const d1 = new FabricEpochNsec(0n);
     const d2 = new FabricEpochNsec(1704067200000000000n);
-    assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
+    assertNotEquals(hex(modernHash(d1)), hex(modernHash(d2)));
   });
 
   await t.step("FabricEpochNsec with negative value (pre-epoch)", () => {
     const nsec = new FabricEpochNsec(-1000000000n);
-    const hash = canonicalHash(nsec);
+    const hash = modernHash(nsec);
     assertEquals(hash.length, 32);
   });
 
@@ -408,19 +408,19 @@ Deno.test("canonicalHash", async (t) => {
         0x01,
         0x00,
       ]);
-      assertEquals(canonicalHash(new FabricEpochDays(0n)), expected);
+      assertEquals(modernHash(new FabricEpochDays(0n)), expected);
     },
   );
 
   await t.step("FabricEpochDays with different values differ", () => {
     const d1 = new FabricEpochDays(0n);
     const d2 = new FabricEpochDays(19723n);
-    assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
+    assertNotEquals(hex(modernHash(d1)), hex(modernHash(d2)));
   });
 
   await t.step("FabricEpochDays with negative value (pre-epoch)", () => {
     const days = new FabricEpochDays(-365n);
-    const hash = canonicalHash(days);
+    const hash = modernHash(days);
     assertEquals(hash.length, 32);
   });
 
@@ -430,7 +430,7 @@ Deno.test("canonicalHash", async (t) => {
       // Same underlying value, different tag -> different hash
       const nsec = new FabricEpochNsec(100n);
       const days = new FabricEpochDays(100n);
-      assertNotEquals(hex(canonicalHash(nsec)), hex(canonicalHash(days)));
+      assertNotEquals(hex(modernHash(nsec)), hex(modernHash(days)));
     },
   );
 
@@ -443,7 +443,7 @@ Deno.test("canonicalHash", async (t) => {
     () => {
       // Build the expected byte stream programmatically because the
       // deconstructed state includes `stack` which is environment-dependent.
-      // We construct the stream the same way canonicalHash does, then SHA-256 it.
+      // We construct the stream the same way modernHash does, then SHA-256 it.
       const error = new FabricError(new Error("test"));
       const enc = new TextEncoder();
 
@@ -497,20 +497,20 @@ Deno.test("canonicalHash", async (t) => {
       stream.push(0x00);
 
       const expected = sha256(stream);
-      assertEquals(canonicalHash(error), expected);
+      assertEquals(modernHash(error), expected);
     },
   );
 
   await t.step("different errors produce different hashes", () => {
     const e1 = new FabricError(new Error("hello"));
     const e2 = new FabricError(new Error("world"));
-    assertNotEquals(hex(canonicalHash(e1)), hex(canonicalHash(e2)));
+    assertNotEquals(hex(modernHash(e1)), hex(modernHash(e2)));
   });
 
   await t.step("TypeError vs Error produce different hashes", () => {
     const e1 = new FabricError(new Error("msg"));
     const e2 = new FabricError(new TypeError("msg"));
-    assertNotEquals(hex(canonicalHash(e1)), hex(canonicalHash(e2)));
+    assertNotEquals(hex(modernHash(e1)), hex(modernHash(e2)));
   });
 
   // =========================================================================
@@ -519,7 +519,7 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("empty array produces TAG_ARRAY + TAG_END", () => {
     const expected = sha256([0x10, 0x00]);
-    assertEquals(canonicalHash([]), expected);
+    assertEquals(modernHash([]), expected);
   });
 
   await t.step("sparse array [1, , 3] uses hole run-length encoding", () => {
@@ -558,7 +558,7 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
     ]);
     // deno-lint-ignore no-sparse-arrays
-    assertEquals(canonicalHash([1, , 3]), expected);
+    assertEquals(modernHash([1, , 3]), expected);
   });
 
   await t.step("multiple consecutive holes are coalesced into one run", () => {
@@ -566,7 +566,7 @@ Deno.test("canonicalHash", async (t) => {
     const arr = new Array(5);
     arr[0] = 1;
     arr[4] = 5;
-    const hash = canonicalHash(arr);
+    const hash = modernHash(arr);
 
     // Verify by building the expected byte stream manually
     const expected = sha256([
@@ -605,9 +605,9 @@ Deno.test("canonicalHash", async (t) => {
     "[1, undefined, 3] vs [1, , 3] vs [1, null, 3] are all distinct",
     () => {
       // deno-lint-ignore no-sparse-arrays
-      const sparseH = hex(canonicalHash([1, , 3]));
-      const undefH = hex(canonicalHash([1, undefined, 3]));
-      const nullH = hex(canonicalHash([1, null, 3]));
+      const sparseH = hex(modernHash([1, , 3]));
+      const undefH = hex(modernHash([1, undefined, 3]));
+      const nullH = hex(modernHash([1, null, 3]));
 
       assertNotEquals(sparseH, undefH);
       assertNotEquals(sparseH, nullH);
@@ -616,10 +616,10 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step("nested arrays are recursively hashed", () => {
-    const hash = canonicalHash([[1, 2], [3]]);
+    const hash = modernHash([[1, 2], [3]]);
     assertEquals(hash.length, 32);
     // Different from flat array
-    assertNotEquals(hex(hash), hex(canonicalHash([1, 2, 3])));
+    assertNotEquals(hex(hash), hex(modernHash([1, 2, 3])));
   });
 
   // =========================================================================
@@ -628,13 +628,13 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("empty object produces TAG_OBJECT + TAG_END", () => {
     const expected = sha256([0x11, 0x00]);
-    assertEquals(canonicalHash({}), expected);
+    assertEquals(modernHash({}), expected);
   });
 
   await t.step("object key order is deterministic (sorted by UTF-8)", () => {
     // Keys inserted in different orders produce the same hash.
-    const h1 = canonicalHash({ a: 1, b: 2 });
-    const h2 = canonicalHash({ b: 2, a: 1 });
+    const h1 = modernHash({ a: 1, b: 2 });
+    const h2 = modernHash({ b: 2, a: 1 });
     assertEquals(h1, h2);
   });
 
@@ -675,17 +675,17 @@ Deno.test("canonicalHash", async (t) => {
       // TAG_END
       0x00,
     ]);
-    assertEquals(canonicalHash({ a: 1, b: 2 }), expected);
+    assertEquals(modernHash({ a: 1, b: 2 }), expected);
   });
 
   await t.step("nested objects are recursively hashed", () => {
-    const hash = canonicalHash({ x: { y: 1 } });
+    const hash = modernHash({ x: { y: 1 } });
     assertEquals(hash.length, 32);
-    assertNotEquals(hex(hash), hex(canonicalHash({ x: 1 })));
+    assertNotEquals(hex(hash), hex(modernHash({ x: 1 })));
   });
 
   await t.step("object with mixed value types", () => {
-    const hash = canonicalHash({
+    const hash = modernHash({
       str: "hello",
       num: 42,
       bool: true,
@@ -695,7 +695,7 @@ Deno.test("canonicalHash", async (t) => {
     // Consistency
     assertEquals(
       hash,
-      canonicalHash({ str: "hello", num: 42, bool: true, nil: null }),
+      modernHash({ str: "hello", num: 42, bool: true, nil: null }),
     );
   });
 
@@ -704,12 +704,12 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step("same value always produces the same hash", () => {
-    assertEquals(canonicalHash(42), canonicalHash(42));
-    assertEquals(canonicalHash("hello"), canonicalHash("hello"));
-    assertEquals(canonicalHash([1, 2, 3]), canonicalHash([1, 2, 3]));
+    assertEquals(modernHash(42), modernHash(42));
+    assertEquals(modernHash("hello"), modernHash("hello"));
+    assertEquals(modernHash([1, 2, 3]), modernHash([1, 2, 3]));
     assertEquals(
-      canonicalHash({ a: 1 }),
-      canonicalHash({ a: 1 }),
+      modernHash({ a: 1 }),
+      modernHash({ a: 1 }),
     );
   });
 
@@ -735,7 +735,7 @@ Deno.test("canonicalHash", async (t) => {
       new FabricError(new Error("x")),
     ];
     for (const v of values) {
-      assertEquals(canonicalHash(v).length, 32);
+      assertEquals(modernHash(v).length, 32);
     }
   });
 
@@ -743,15 +743,15 @@ Deno.test("canonicalHash", async (t) => {
     "different values of different types produce different hashes",
     () => {
       const hashes = new Set([
-        hex(canonicalHash(null)),
-        hex(canonicalHash(true)),
-        hex(canonicalHash(false)),
-        hex(canonicalHash(0)),
-        hex(canonicalHash("")),
-        hex(canonicalHash(0n)),
-        hex(canonicalHash(undefined)),
-        hex(canonicalHash([])),
-        hex(canonicalHash({})),
+        hex(modernHash(null)),
+        hex(modernHash(true)),
+        hex(modernHash(false)),
+        hex(modernHash(0)),
+        hex(modernHash("")),
+        hex(modernHash(0n)),
+        hex(modernHash(undefined)),
+        hex(modernHash([])),
+        hex(modernHash({})),
       ]);
       // All 9 should be distinct.
       assertEquals(hashes.size, 9);
@@ -764,14 +764,14 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("deeply nested structure", () => {
     const deep = { a: { b: { c: { d: [1, { e: true }] } } } };
-    const hash = canonicalHash(deep);
+    const hash = modernHash(deep);
     assertEquals(hash.length, 32);
-    assertEquals(canonicalHash(deep), hash);
+    assertEquals(modernHash(deep), hash);
   });
 
   await t.step("array with all holes", () => {
     const arr = new Array(5); // all holes
-    const hash = canonicalHash(arr);
+    const hash = modernHash(arr);
     assertEquals(hash.length, 32);
 
     // TAG_ARRAY + TAG_HOLE + LEB128(5) + TAG_END
@@ -786,8 +786,8 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("object with non-ASCII keys sorts by UTF-8 bytes", () => {
     // Keys with non-ASCII should sort by UTF-8 byte values.
-    const h1 = canonicalHash({ "\u00e9": 1, "a": 2 });
-    const h2 = canonicalHash({ "a": 2, "\u00e9": 1 });
+    const h1 = modernHash({ "\u00e9": 1, "a": 2 });
+    const h2 = modernHash({ "a": 2, "\u00e9": 1 });
     assertEquals(h1, h2);
   });
 
@@ -856,7 +856,7 @@ Deno.test("canonicalHash", async (t) => {
         // TAG_END
         0x00,
       ]);
-      assertEquals(canonicalHash(obj), expected);
+      assertEquals(modernHash(obj), expected);
 
       // Also verify the wrong (UTF-16) order produces a different hash.
       const wrongOrder = sha256([
@@ -895,7 +895,7 @@ Deno.test("canonicalHash", async (t) => {
         // TAG_END
         0x00,
       ]);
-      assertNotEquals(hex(canonicalHash(obj)), hex(wrongOrder));
+      assertNotEquals(hex(modernHash(obj)), hex(wrongOrder));
     },
   );
 
@@ -926,7 +926,7 @@ Deno.test("canonicalHash", async (t) => {
         0xBE,
         0xEF,
       ]);
-      assertEquals(hex(canonicalHash(cid)), hex(expected));
+      assertEquals(hex(modernHash(cid)), hex(expected));
     },
   );
 
@@ -936,7 +936,7 @@ Deno.test("canonicalHash", async (t) => {
       const bytes = new Uint8Array([0x01, 0x02, 0x03]);
       const cid1 = new FabricHash(bytes, "fid1");
       const cid2 = new FabricHash(bytes, "fid2");
-      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+      assertNotEquals(hex(modernHash(cid1)), hex(modernHash(cid2)));
     },
   );
 
@@ -951,15 +951,15 @@ Deno.test("canonicalHash", async (t) => {
         new Uint8Array([0x03, 0x04]),
         "fid1",
       );
-      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+      assertNotEquals(hex(modernHash(cid1)), hex(modernHash(cid2)));
     },
   );
 
   // =========================================================================
-  // canonicalHash returns FabricHash
+  // modernHash returns FabricHash
   // =========================================================================
 
-  await t.step("canonicalHash returns FabricHash with fid1 tag", () => {
+  await t.step("modernHash returns FabricHash with fid1 tag", () => {
     const result = canonicalHashRaw(42);
     assertEquals(result instanceof FabricHash, true);
     assertEquals(result.algorithmTag, "fid1");
@@ -984,7 +984,7 @@ Deno.test("canonicalHash", async (t) => {
 // Caching behavior
 // ---------------------------------------------------------------------------
 
-Deno.test("canonicalHash caching", async (t) => {
+Deno.test("modernHash caching", async (t) => {
   await t.step("null returns same object (precomputed constant)", () => {
     const a = canonicalHashRaw(null);
     const b = canonicalHashRaw(null);

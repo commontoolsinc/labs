@@ -3,7 +3,7 @@
  *
  * Compares the two hashing paths used by `hashOf()`:
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
- * - Canonical: `canonicalHash()` single-pass incremental SHA-256
+ * - Canonical: `modernHash()` single-pass incremental SHA-256
  *
  * Uses `setCanonicalHashConfig()` with `BenchContext.start()`/`b.end()` to
  * exclude config setup and teardown from timing.
@@ -16,7 +16,7 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "../value-hash.ts";
-import { canonicalHash } from "../value-hash-modern.ts";
+import { modernHash } from "../value-hash-modern.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 
 // ---------------------------------------------------------------------------
@@ -456,10 +456,10 @@ for (let i = 0; i < 100; i += 3) {
 }
 
 Deno.bench({
-  name: "canonicalHash() - sparse array (100 slots, 34 filled)",
+  name: "modernHash() - sparse array (100 slots, 34 filled)",
   group: "sparse-array",
   fn() {
-    canonicalHash(sparseArray);
+    modernHash(sparseArray);
   },
 });
 

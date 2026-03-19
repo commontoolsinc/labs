@@ -47,7 +47,7 @@ export CT_IDENTITY=./ct.key
 
 ```bash
 # Pass experiment env vars to CLI commands:
-EXPERIMENTAL_CANONICAL_HASHING=true \
+EXPERIMENTAL_MODERN_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
 deno task ct piece new pattern.tsx ...
 ```

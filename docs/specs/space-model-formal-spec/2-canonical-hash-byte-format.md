@@ -23,7 +23,7 @@ implementation plan Phase 6.1.
 The hash function is **SHA-256** (FIPS 180-4). All byte sequences described in
 this document are fed to a SHA-256 context in the order specified.
 
-The digest output is **32 raw bytes** (256 bits). The `canonicalHash()` function
+The digest output is **32 raw bytes** (256 bits). The `modernHash()` function
 wraps the raw bytes into a `StorableContentId` instance (Section 1.4.9 of the
 formal spec) with algorithm tag `fid1`. Callers who need a string
 representation call `toString()` on the result, which produces

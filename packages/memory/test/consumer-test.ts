@@ -54,20 +54,20 @@ const VersionSchema = {
 
 const store = new URL(`memory://`);
 
-for (const canonicalHashing of [false, true]) {
-  describe(`canonicalHashing=${canonicalHashing}`, () => {
+for (const modernHash of [false, true]) {
+  describe(`modernHash=${modernHash}`, () => {
     let doc: `of:${string}`;
     let session: Provider.ProviderSession<Provider.Protocol>;
     let provider: Provider.Provider<Provider.Protocol>;
 
     beforeAll(() => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
       resetCanonicalHashConfig();
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       const open = await Provider.open({
         serviceDid,
         store,

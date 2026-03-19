@@ -101,7 +101,7 @@ export interface ExperimentalOptions {
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
-  canonicalHashing?: boolean;
+  modernHash?: boolean;
 }
 
 export interface RuntimeOptions {
@@ -213,17 +213,17 @@ export class Runtime {
       modernDataModel: false,
       dataModelProtocol: false,
       unifiedJsonEncoding: false,
-      canonicalHashing: false,
+      modernHash: false,
       ...options.experimental,
     };
 
     if (
       this.experimental.modernDataModel &&
-      !this.experimental.canonicalHashing
+      !this.experimental.modernHash
     ) {
       throw new Error(
         "ExperimentalOptions: `modernDataModel` requires " +
-          "`canonicalHashing` to be enabled",
+          "`modernHash` to be enabled",
       );
     }
 
@@ -239,7 +239,7 @@ export class Runtime {
 
     // Propagate experimental flags to the memory layer's ambient config.
     setDataModelConfig(this.experimental);
-    setCanonicalHashConfig(this.experimental.canonicalHashing);
+    setCanonicalHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);

@@ -21,7 +21,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "../type-tags.ts";
-import { canonicalHash } from "../value-hash-modern.ts";
+import { modernHash } from "../value-hash-modern.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -316,10 +316,10 @@ describe("FabricRegExp", () => {
   // Canonical hash
   // --------------------------------------------------------------------------
 
-  describe("canonicalHash", () => {
+  describe("modernHash", () => {
     it("produces a hash for FabricRegExp", () => {
       const sr = new FabricRegExp(/abc/gi);
-      const hash = canonicalHash(sr);
+      const hash = modernHash(sr);
       expect(hash.hash).toBeInstanceOf(Uint8Array);
       expect(hash.hash.length).toBe(32); // SHA-256
     });
@@ -327,20 +327,20 @@ describe("FabricRegExp", () => {
     it("same regex produces same hash", () => {
       const sr1 = new FabricRegExp(/abc/gi);
       const sr2 = new FabricRegExp(/abc/gi);
-      const h1 = Array.from(canonicalHash(sr1).hash);
-      const h2 = Array.from(canonicalHash(sr2).hash);
+      const h1 = Array.from(modernHash(sr1).hash);
+      const h2 = Array.from(modernHash(sr2).hash);
       expect(h1).toEqual(h2);
     });
 
     it("different source produces different hash", () => {
-      const h1 = Array.from(canonicalHash(new FabricRegExp(/abc/)).hash);
-      const h2 = Array.from(canonicalHash(new FabricRegExp(/def/)).hash);
+      const h1 = Array.from(modernHash(new FabricRegExp(/abc/)).hash);
+      const h2 = Array.from(modernHash(new FabricRegExp(/def/)).hash);
       expect(h1).not.toEqual(h2);
     });
 
     it("different flags produce different hash", () => {
-      const h1 = Array.from(canonicalHash(new FabricRegExp(/abc/g)).hash);
-      const h2 = Array.from(canonicalHash(new FabricRegExp(/abc/i)).hash);
+      const h1 = Array.from(modernHash(new FabricRegExp(/abc/g)).hash);
+      const h2 = Array.from(modernHash(new FabricRegExp(/abc/i)).hash);
       expect(h1).not.toEqual(h2);
     });
   });

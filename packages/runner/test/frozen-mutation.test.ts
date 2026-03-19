@@ -48,7 +48,7 @@ describe("frozen-object safety contracts", () => {
         storageManager,
         experimental: {
           modernDataModel: true,
-          canonicalHashing: true,
+          modernHash: true,
         },
       });
     });

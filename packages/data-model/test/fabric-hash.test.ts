@@ -182,7 +182,7 @@ Deno.test("FabricHash", async (t) => {
         const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
         assertInstanceOf(innerRef, FabricHash);
 
-        // Wrap it in a fact-like structure and hashOf again. canonicalHash
+        // Wrap it in a fact-like structure and hashOf again. modernHash
         // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
         const outerSource = {
           cause: innerRef,

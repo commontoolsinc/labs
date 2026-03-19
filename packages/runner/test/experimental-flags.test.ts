@@ -38,19 +38,19 @@ async function tryConstruct(
 }
 
 describe("ExperimentalOptions flag cross-validation", () => {
-  it("throws when modernDataModel is true but canonicalHashing is false", async () => {
+  it("throws when modernDataModel is true but modernHash is false", async () => {
     const msg = await tryConstruct({
       modernDataModel: true,
-      canonicalHashing: false,
+      modernHash: false,
     });
     expect(msg).toBeDefined();
     expect(msg!).toContain(VALIDATION_MSG);
   });
 
-  it("does not throw when both modernDataModel and canonicalHashing are true", async () => {
+  it("does not throw when both modernDataModel and modernHash are true", async () => {
     const msg = await tryConstruct({
       modernDataModel: true,
-      canonicalHashing: true,
+      modernHash: true,
     });
     // May be null (no error) or an unrelated error from the incomplete
     // stub.  Either way, the validation error must NOT appear.
@@ -59,10 +59,10 @@ describe("ExperimentalOptions flag cross-validation", () => {
     }
   });
 
-  it("does not throw when canonicalHashing is true but modernDataModel is false", async () => {
+  it("does not throw when modernHash is true but modernDataModel is false", async () => {
     const msg = await tryConstruct({
       modernDataModel: false,
-      canonicalHashing: true,
+      modernHash: true,
     });
     if (msg !== null) {
       expect(msg).not.toContain(VALIDATION_MSG);

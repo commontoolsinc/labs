@@ -5,7 +5,7 @@ declare global {
   var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
   var $EXPERIMENTAL_DATA_MODEL_PROTOCOL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
-  var $EXPERIMENTAL_CANONICAL_HASHING: string | undefined;
+  var $EXPERIMENTAL_MODERN_HASH: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
 }
 
@@ -24,7 +24,7 @@ export const EXPERIMENTAL = {
   modernDataModel: $EXPERIMENTAL_MODERN_DATA_MODEL === "true",
   dataModelProtocol: $EXPERIMENTAL_DATA_MODEL_PROTOCOL === "true",
   unifiedJsonEncoding: $EXPERIMENTAL_UNIFIED_JSON_ENCODING === "true",
-  canonicalHashing: $EXPERIMENTAL_CANONICAL_HASHING === "true",
+  modernHash: $EXPERIMENTAL_MODERN_HASH === "true",
 };
 
 export const COMPILATION_CACHE_CLIENT = $COMPILATION_CACHE_CLIENT === "true";

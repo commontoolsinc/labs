@@ -42,9 +42,9 @@ function getTraverser(
   return new SchemaObjectTraverser(tx, selector);
 }
 
-for (const canonicalHashing of [false, true]) {
-  describe(`canonicalHashing=${canonicalHashing}`, () => {
-    beforeAll(() => setCanonicalHashConfig(canonicalHashing));
+for (const modernHash of [false, true]) {
+  describe(`modernHash=${modernHash}`, () => {
+    beforeAll(() => setCanonicalHashConfig(modernHash));
     afterAll(() => resetCanonicalHashConfig());
 
     describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -2581,8 +2581,8 @@ for (const canonicalHashing of [false, true]) {
         expect(arr[2]).toBe(30);
       });
     });
-  }); // describe(`canonicalHashing=${canonicalHashing}`)
-} // for canonicalHashing
+  }); // describe(`modernHash=${modernHash}`)
+} // for modernHash
 
 describe("SchemaObjectTraverser unknown type handling", () => {
   it("returns undefined for object value matched by type: unknown schema", () => {

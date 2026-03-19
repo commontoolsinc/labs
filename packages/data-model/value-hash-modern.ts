@@ -7,7 +7,7 @@
  * a single SHA-256 context. See Section 6 of the formal spec and the
  * byte-level spec for the full algorithm.
  *
- * Gated behind `ExperimentalOptions.canonicalHashing`.
+ * Gated behind `ExperimentalOptions.modernHash`.
  */
 import { createHasher, type IncrementalHasher } from "./sha256-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
@@ -103,7 +103,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     case "number":
       if (!Number.isFinite(value)) {
         throw new Error(
-          `canonicalHash: non-finite number not allowed: ${value}`,
+          `modernHash: non-finite number not allowed: ${value}`,
         );
       }
       hasher.update(TAG_NUMBER_BYTES);
@@ -142,7 +142,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `canonicalHash: unsupported type: ${typeof value}`,
+        `modernHash: unsupported type: ${typeof value}`,
       );
   }
 }
@@ -216,7 +216,7 @@ function feedObjectValue(
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
         throw new Error(
-          `canonicalHash: FabricInstance missing typeTag property`,
+          `modernHash: FabricInstance missing typeTag property`,
         );
       }
       const typeTagUtf8 = encoder.encode(typeTag);
@@ -233,7 +233,7 @@ function feedObjectValue(
   }
 
   throw new Error(
-    `canonicalHash: unsupported object type: ${
+    `modernHash: unsupported object type: ${
       value?.constructor?.name ?? typeof value
     }`,
   );
@@ -349,7 +349,7 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
-export function canonicalHash(value: unknown): FabricHash {
+export function modernHash(value: unknown): FabricHash {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;

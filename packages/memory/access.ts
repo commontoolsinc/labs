@@ -95,7 +95,7 @@ export const claim = async <Access extends Invocation>(
         } hash but client sent ${
           keysAreCanonical ? "canonical" : "legacy"
         } hashes.`,
-        `  This usually means the client and server have different EXPERIMENTAL_CANONICAL_HASHING settings.`,
+        `  This usually means the client and server have different EXPERIMENTAL_MODERN_HASH settings.`,
       );
     }
     console.error(`[access] ${details.join("\n")}`);

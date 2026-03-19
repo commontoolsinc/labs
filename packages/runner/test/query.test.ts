@@ -38,9 +38,9 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-for (const canonicalHashing of [false, true]) {
-  describe(`canonicalHashing=${canonicalHashing}`, () => {
-    beforeAll(() => setCanonicalHashConfig(canonicalHashing));
+for (const modernHash of [false, true]) {
+  describe(`modernHash=${modernHash}`, () => {
+    beforeAll(() => setCanonicalHashConfig(modernHash));
     afterAll(() => resetCanonicalHashConfig());
 
     describe("Query", () => {
@@ -587,5 +587,5 @@ for (const canonicalHashing of [false, true]) {
         });
       });
     });
-  }); // describe(`canonicalHashing=${canonicalHashing}`)
-} // for canonicalHashing
+  }); // describe(`modernHash=${modernHash}`)
+} // for modernHash

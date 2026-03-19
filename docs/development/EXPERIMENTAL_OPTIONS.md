@@ -12,7 +12,7 @@ affecting users who haven't opted in.
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
 | `dataModelProtocol` | `EXPERIMENTAL_DATA_MODEL_PROTOCOL` | Enables the fabric protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
-| `canonicalHashing` | `EXPERIMENTAL_CANONICAL_HASHING` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
+| `modernHash` | `EXPERIMENTAL_MODERN_HASH` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
 
 All flags default to `false`. Setting any flag to `true` activates the
 corresponding experimental behavior.
@@ -98,7 +98,7 @@ Browser Web Worker
               |         +-- fabricFromNativeValue() checks currentConfig
               +-- setCanonicalHashConfig(...)
                    +-- canonicalHashingEnabled = true
-                        +-- refer() dispatches to canonicalHash()
+                        +-- refer() dispatches to modernHash()
 ```
 
 Key points:
@@ -137,7 +137,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: modernDataModel, unifiedJsonEncoding, canonicalHashing
+Experimental flags enabled: modernDataModel, unifiedJsonEncoding, modernHash
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.

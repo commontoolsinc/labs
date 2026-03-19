@@ -9,7 +9,7 @@
  * Follows the same dispatch + modern/legacy split pattern used by
  * `fabric-value.ts` / `fabric-value-modern.ts` / `fabric-value-legacy.ts`.
  */
-import { canonicalHash } from "./value-hash-modern.ts";
+import { modernHash } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import { fromBase64url } from "./bigint-encoding.ts";
 import {
@@ -135,7 +135,7 @@ function configureDispatch(): void {
     };
 
     hashOf = (source) => {
-      return canonicalHash(source);
+      return modernHash(source);
     };
   } else {
     // ----- Legacy merkle-reference implementations -----
@@ -148,7 +148,7 @@ function configureDispatch(): void {
 
 /**
  * Activates or deactivates canonical hashing mode. Called by the `Runtime`
- * constructor to propagate `ExperimentalOptions.canonicalHashing` into the
+ * constructor to propagate `ExperimentalOptions.modernHash` into the
  * memory layer.
  */
 export function setCanonicalHashConfig(enabled: boolean): void {

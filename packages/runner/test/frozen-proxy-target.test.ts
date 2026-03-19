@@ -57,7 +57,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
       storageManager,
       experimental: {
         modernDataModel: true,
-        canonicalHashing: true,
+        modernHash: true,
       },
     });
     tx = runtime.edit();
@@ -124,7 +124,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       storageManager,
       experimental: {
         modernDataModel: true,
-        canonicalHashing: true,
+        modernHash: true,
       },
     });
     tx = runtime.edit();

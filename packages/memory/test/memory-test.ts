@@ -29,19 +29,19 @@ const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 const memory = new URL(`memory://`);
 
-for (const canonicalHashing of [false, true]) {
-  describe(`canonicalHashing=${canonicalHashing}`, () => {
+for (const modernHash of [false, true]) {
+  describe(`modernHash=${modernHash}`, () => {
     let doc: `of:${string}`;
     let session: Memory.MemorySession;
 
     beforeAll(() => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
       resetCanonicalHashConfig();
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(canonicalHashing);
+      setCanonicalHashConfig(modernHash);
       const open = await Memory.open({
         store: memory,
         serviceDid,
