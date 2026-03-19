@@ -1,9 +1,9 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type {
-  StorableDatum,
-  StorableObject,
-  StorableValue,
+  FabricDatum,
+  FabricObject,
+  FabricValue,
 } from "@commontools/data-model/fabric-value";
 import type {
   CommitError,
@@ -71,7 +71,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue {
+  ): FabricValue {
     const readResult = this.tx.read(address, options);
     if (
       readResult.error &&
@@ -90,7 +90,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue {
+  ): FabricValue {
     return this.readOrThrow(
       { ...address, path: ["value", ...address.path] },
       options,
@@ -110,7 +110,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void {
     const writeResult = this.tx.write(address, value);
     if (
@@ -126,7 +126,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: StorableObject;
+      let valueObj: FabricObject;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -145,10 +145,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // TypeError on frozen objects. force defaults to true (always clone)
         // because the value may be the transaction's working copy, which
         // must not be mutated in place.
-        valueObj = cloneIfNecessary(currentValue as StorableValue, {
+        valueObj = cloneIfNecessary(currentValue as FabricValue, {
           deep: false,
           frozen: false,
-        }) as StorableObject;
+        }) as FabricObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -157,7 +157,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: StorableObject = valueObj;
+      let nextValue: FabricObject = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.
@@ -167,9 +167,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const isNextKeyArrayIndex = isArrayIndexPropertyName(nextKey);
         nextValue =
           nextValue[key] =
-            (isNextKeyArrayIndex ? [] : {}) as StorableObject;
+            (isNextKeyArrayIndex ? [] : {}) as FabricObject;
       }
-      nextValue[lastKey] = value as StorableDatum;
+      nextValue[lastKey] = value as FabricDatum;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       if (writeResultRetry.error) {
@@ -182,7 +182,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
@@ -316,7 +316,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue {
+  ): FabricValue {
     return this.wrapped.readOrThrow(
       address,
       this.transformReadOptions(options),
@@ -326,7 +326,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue {
+  ): FabricValue {
     return this.wrapped.readValueOrThrow(
       address,
       this.transformReadOptions(options),
@@ -339,21 +339,21 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   write(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
     return this.wrapped.write(address, value);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void {
     return this.wrapped.writeOrThrow(address, value);
   }
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
   }

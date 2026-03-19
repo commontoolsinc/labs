@@ -1,9 +1,9 @@
-import type { StorableValue } from "./fabric-value.ts";
+import type { FabricValue } from "./fabric-value.ts";
 
 /**
  * Well-known symbol for deconstructing a storable instance into its essential
- * state. The returned value may contain nested `StorableValue`s (including
- * other `StorableInstance`s); the serialization system handles recursion.
+ * state. The returned value may contain nested `FabricValue`s (including
+ * other `FabricInstance`s); the serialization system handles recursion.
  * See Section 2.2 of the formal spec.
  */
 export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
@@ -30,19 +30,19 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
  * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
  *   instance is already unfrozen. The caller gets a distinct, mutable object.
  */
-export abstract class StorableInstance {
+export abstract class FabricInstance {
   /**
-   * Returns the essential state of this instance as a `StorableValue`.
+   * Returns the essential state of this instance as a `FabricValue`.
    * Implementations must NOT recursively deconstruct nested values -- the
    * serialization system handles that.
    */
-  abstract [DECONSTRUCT](): StorableValue;
+  abstract [DECONSTRUCT](): FabricValue;
 
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
-  protected abstract shallowUnfrozenClone(): StorableInstance;
+  protected abstract shallowUnfrozenClone(): FabricInstance;
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
@@ -52,11 +52,11 @@ export abstract class StorableInstance {
    * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
    * it if requested.
    */
-  shallowClone(frozen: boolean): StorableInstance {
+  shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
     const copy = this.shallowUnfrozenClone();
     // Cast needed: Object.freeze() returns Readonly<T>, which TS considers
     // incompatible with abstract class types due to protected members.
-    return frozen ? Object.freeze(copy) as StorableInstance : copy;
+    return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
 }

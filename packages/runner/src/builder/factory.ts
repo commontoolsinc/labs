@@ -47,11 +47,11 @@ import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
-import { StorableInstance } from "@commontools/data-model/storable-instance";
+import { FabricInstance } from "@commontools/data-model/storable-instance";
 import { SpecialPrimitiveValue } from "@commontools/data-model/special-primitive-value";
 import {
-  StorableEpochDays,
-  StorableEpochNsec,
+  FabricEpochDays,
+  FabricEpochNsec,
 } from "@commontools/data-model/storable-epoch";
 
 // Runtime implementation of toSchema - this should never be called
@@ -153,12 +153,12 @@ export const createBuilder = (): {
       h,
 
       // Storable value classes -- runtime values backing the type declarations
-      // in api/index.ts. Enables `new StorableEpochNsec(...)` and `instanceof`
+      // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
       // checks in patterns.
-      StorableInstance,
+      FabricInstance,
       SpecialPrimitiveValue,
-      StorableEpochNsec,
-      StorableEpochDays,
+      FabricEpochNsec,
+      FabricEpochDays,
     },
     exportsCallback,
   };

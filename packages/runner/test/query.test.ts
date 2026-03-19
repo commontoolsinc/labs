@@ -13,7 +13,7 @@ import {
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
-import type { StorableDatum } from "@commontools/data-model/fabric-value";
+import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -52,7 +52,7 @@ for (const canonicalHashing of [false, true]) {
         Revision<State>
       >();
       let emulatedStorageTx: IExtendedStorageTransaction;
-      let tracker: CompoundCycleTracker<StorableDatum, JSONSchema | undefined>;
+      let tracker: CompoundCycleTracker<FabricDatum, JSONSchema | undefined>;
 
       beforeEach(() => {
         storageManager = StorageManager.emulate({ as: signer });
@@ -67,7 +67,7 @@ for (const canonicalHashing of [false, true]) {
         const managerTx = new ManagedStorageTransaction(manager);
         emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
         tracker = new CompoundCycleTracker<
-          StorableDatum,
+          FabricDatum,
           JSONSchema | undefined
         >();
       });

@@ -5,8 +5,8 @@ import {
   resetStorableValueConfig,
   setStorableValueConfig,
 } from "../storable-value.ts";
-import type { StorableValue } from "../fabric-value.ts";
-import { StorableEpochNsec } from "../storable-epoch.ts";
+import type { FabricValue } from "../fabric-value.ts";
+import { FabricEpochNsec } from "../storable-epoch.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
 // ============================================================================
@@ -31,13 +31,13 @@ describe("cloneIfNecessary", () => {
       }
 
       it("throws for frozen=true, force=true", () => {
-        const value = { a: 1 } as StorableValue;
+        const value = { a: 1 } as FabricValue;
         expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
           .toThrow("frozen: true, force: true");
       });
 
       it("throws for frozen=false, force=false, deep=true", () => {
-        const value = { a: 1 } as StorableValue;
+        const value = { a: 1 } as FabricValue;
         expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
           .toThrow("frozen: false, force: false, deep: true");
       });
@@ -50,35 +50,35 @@ describe("cloneIfNecessary", () => {
 
   describe("legacy path (flag OFF)", () => {
     it("returns the same object (identity passthrough)", () => {
-      const value = { a: 1, b: [2, 3] } as StorableValue;
+      const value = { a: 1, b: [2, 3] } as FabricValue;
       expect(cloneIfNecessary(value)).toBe(value);
     });
 
     it("returns the same array (identity passthrough)", () => {
-      const value = [1, 2, 3] as StorableValue;
+      const value = [1, 2, 3] as FabricValue;
       expect(cloneIfNecessary(value)).toBe(value);
     });
 
     it("passes through primitives", () => {
-      expect(cloneIfNecessary(42 as StorableValue)).toBe(42);
-      expect(cloneIfNecessary("hello" as StorableValue)).toBe("hello");
+      expect(cloneIfNecessary(42 as FabricValue)).toBe(42);
+      expect(cloneIfNecessary("hello" as FabricValue)).toBe("hello");
       expect(cloneIfNecessary(null)).toBe(null);
-      expect(cloneIfNecessary(true as StorableValue)).toBe(true);
+      expect(cloneIfNecessary(true as FabricValue)).toBe(true);
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
     it("returns identity for frozen=true (default)", () => {
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
     });
 
     it("returns identity for deep=false with frozen=true (default)", () => {
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       expect(cloneIfNecessary(value, { deep: false })).toBe(value);
     });
 
     it("clones when frozen=false (mutable copy via structuredClone)", () => {
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).not.toBe(value);
       expect(result).toEqual({ a: 1 });
@@ -93,7 +93,7 @@ describe("cloneIfNecessary", () => {
   describe("legacy path: deep mutable clone (frozen=false)", () => {
     it("deep-clones a nested object", () => {
       const inner = { x: 1 };
-      const value = { a: inner, b: [2, 3] } as StorableValue;
+      const value = { a: inner, b: [2, 3] } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -108,7 +108,7 @@ describe("cloneIfNecessary", () => {
     it("deep-clones an array of objects", () => {
       const obj1 = { x: 1 };
       const obj2 = { y: 2 };
-      const value = [obj1, obj2] as StorableValue;
+      const value = [obj1, obj2] as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as unknown[];
       expect(result).not.toBe(value);
       expect(result).toEqual([{ x: 1 }, { y: 2 }]);
@@ -119,7 +119,7 @@ describe("cloneIfNecessary", () => {
     it("deep-clones a frozen object into a mutable copy", () => {
       const value = Object.freeze({
         a: Object.freeze({ b: 1 }),
-      }) as StorableValue;
+      }) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -130,18 +130,18 @@ describe("cloneIfNecessary", () => {
     });
 
     it("primitives pass through unchanged", () => {
-      expect(cloneIfNecessary(42 as StorableValue, { frozen: false })).toBe(42);
-      expect(cloneIfNecessary("hi" as StorableValue, { frozen: false })).toBe(
+      expect(cloneIfNecessary(42 as FabricValue, { frozen: false })).toBe(42);
+      expect(cloneIfNecessary("hi" as FabricValue, { frozen: false })).toBe(
         "hi",
       );
       expect(cloneIfNecessary(null, { frozen: false })).toBe(null);
-      expect(cloneIfNecessary(true as StorableValue, { frozen: false })).toBe(
+      expect(cloneIfNecessary(true as FabricValue, { frozen: false })).toBe(
         true,
       );
     });
 
     it("preserves null values in objects", () => {
-      const value = { a: null, b: 1 } as StorableValue;
+      const value = { a: null, b: 1 } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -152,7 +152,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("clones deeply nested structures", () => {
-      const value = { a: { b: { c: { d: 42 } } } } as StorableValue;
+      const value = { a: { b: { c: { d: 42 } } } } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -168,14 +168,14 @@ describe("cloneIfNecessary", () => {
     });
 
     it("handles empty object", () => {
-      const value = {} as StorableValue;
+      const value = {} as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).not.toBe(value);
       expect(result).toEqual({});
     });
 
     it("handles empty array", () => {
-      const value = [] as unknown as StorableValue;
+      const value = [] as unknown as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).not.toBe(value);
       expect(result).toEqual([]);
@@ -189,7 +189,7 @@ describe("cloneIfNecessary", () => {
   describe("legacy path: shallow mutable clone (frozen=false, deep=false)", () => {
     it("shallow-clones an object, preserving inner references", () => {
       const inner = { x: 1 };
-      const value = { a: inner, b: 2 } as StorableValue;
+      const value = { a: inner, b: 2 } as FabricValue;
       const result = cloneIfNecessary(value, {
         frozen: false,
         deep: false,
@@ -202,7 +202,7 @@ describe("cloneIfNecessary", () => {
 
     it("shallow-clones an array, preserving inner references", () => {
       const inner = { x: 1 };
-      const value = [inner, 2, 3] as StorableValue;
+      const value = [inner, 2, 3] as FabricValue;
       const result = cloneIfNecessary(value, {
         frozen: false,
         deep: false,
@@ -215,7 +215,7 @@ describe("cloneIfNecessary", () => {
 
     it("shallow-clones a frozen object into a mutable copy", () => {
       const frozenInner = Object.freeze({ x: 1 });
-      const value = Object.freeze({ a: frozenInner }) as StorableValue;
+      const value = Object.freeze({ a: frozenInner }) as FabricValue;
       const result = cloneIfNecessary(value, {
         frozen: false,
         deep: false,
@@ -234,27 +234,27 @@ describe("cloneIfNecessary", () => {
 
   describe("legacy path: frozen=true options (identity passthrough)", () => {
     it("returns identity for unfrozen object", () => {
-      const value = { a: 1, b: { c: 2 } } as StorableValue;
+      const value = { a: 1, b: { c: 2 } } as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
     });
 
     it("returns identity for frozen object", () => {
-      const value = Object.freeze({ a: 1 }) as StorableValue;
+      const value = Object.freeze({ a: 1 }) as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
     });
 
     it("returns identity for unfrozen array", () => {
-      const value = [1, 2, 3] as StorableValue;
+      const value = [1, 2, 3] as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
     });
 
     it("returns identity for frozen array", () => {
-      const value = Object.freeze([1, 2, 3]) as StorableValue;
+      const value = Object.freeze([1, 2, 3]) as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true })).toBe(value);
     });
 
     it("returns identity with deep=false, frozen=true", () => {
-      const value = { a: { b: 1 } } as StorableValue;
+      const value = { a: { b: 1 } } as FabricValue;
       expect(cloneIfNecessary(value, { frozen: true, deep: false })).toBe(
         value,
       );
@@ -282,21 +282,21 @@ describe("cloneIfNecessary", () => {
   describe("rich path: default options (frozen=true, deep=true)", () => {
     it("passes through primitives unchanged", () => {
       setStorableValueConfig({ richStorableValues: true });
-      expect(cloneIfNecessary(42 as StorableValue)).toBe(42);
-      expect(cloneIfNecessary("hello" as StorableValue)).toBe("hello");
+      expect(cloneIfNecessary(42 as FabricValue)).toBe(42);
+      expect(cloneIfNecessary("hello" as FabricValue)).toBe("hello");
       expect(cloneIfNecessary(null)).toBe(null);
-      expect(cloneIfNecessary(true as StorableValue)).toBe(true);
+      expect(cloneIfNecessary(true as FabricValue)).toBe(true);
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
     it("passes through bigint unchanged", () => {
       setStorableValueConfig({ richStorableValues: true });
-      expect(cloneIfNecessary(42n as StorableValue)).toBe(42n);
+      expect(cloneIfNecessary(42n as FabricValue)).toBe(42n);
     });
 
     it("returns a frozen copy of an unfrozen object", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1, b: "two" } as StorableValue;
+      const value = { a: 1, b: "two" } as FabricValue;
       const result = cloneIfNecessary(value);
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
@@ -305,7 +305,7 @@ describe("cloneIfNecessary", () => {
 
     it("returns a frozen copy of an unfrozen array", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = [1, 2, 3] as StorableValue;
+      const value = [1, 2, 3] as FabricValue;
       const result = cloneIfNecessary(value);
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
@@ -314,7 +314,7 @@ describe("cloneIfNecessary", () => {
 
     it("deep-freezes nested structures", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: { b: [1, 2] } } as StorableValue;
+      const value = { a: { b: [1, 2] } } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.a)).toBe(true);
@@ -325,7 +325,7 @@ describe("cloneIfNecessary", () => {
     it("returns already-deep-frozen value as-is (identity optimization)", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = Object.freeze([1, 2]);
-      const value = Object.freeze({ a: inner }) as StorableValue;
+      const value = Object.freeze({ a: inner }) as FabricValue;
       const result = cloneIfNecessary(value);
       expect(result).toBe(value); // identity -- no clone needed
     });
@@ -335,7 +335,7 @@ describe("cloneIfNecessary", () => {
       // `frozenChild` is a deep-frozen subtree.
       const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
       // `value` is NOT frozen (unfrozen parent), so it must be cloned.
-      const value = { a: frozenChild, b: "mutable" } as StorableValue;
+      const value = { a: frozenChild, b: "mutable" } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       // The outer object is a new frozen clone.
       expect(result).not.toBe(value);
@@ -353,7 +353,7 @@ describe("cloneIfNecessary", () => {
   describe("rich path: frozen=false (deep, force=true default)", () => {
     it("returns a mutable copy of a frozen object", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = Object.freeze({ a: 1, b: "two" }) as StorableValue;
+      const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual({ a: 1, b: "two" });
       expect(result).not.toBe(value);
@@ -362,7 +362,7 @@ describe("cloneIfNecessary", () => {
 
     it("returns a mutable array copy", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = Object.freeze([1, 2, 3]) as StorableValue;
+      const value = Object.freeze([1, 2, 3]) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual([1, 2, 3]);
       expect(result).not.toBe(value);
@@ -372,7 +372,7 @@ describe("cloneIfNecessary", () => {
     it("clones already-mutable values (force=true default)", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = { x: 1 };
-      const value = { a: inner, b: [2, 3] } as StorableValue;
+      const value = { a: inner, b: [2, 3] } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -391,7 +391,7 @@ describe("cloneIfNecessary", () => {
       const inner = Object.freeze([1, 2]);
       const value = Object.freeze({
         a: Object.freeze({ b: inner }),
-      }) as StorableValue;
+      }) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
         string,
         unknown
@@ -411,7 +411,7 @@ describe("cloneIfNecessary", () => {
     it("shallow-clones an unfrozen object to frozen", () => {
       setStorableValueConfig({ richStorableValues: true });
       const inner = { x: 1 };
-      const value = { a: inner } as StorableValue;
+      const value = { a: inner } as FabricValue;
       const result = cloneIfNecessary(value, { deep: false }) as Record<
         string,
         unknown
@@ -424,14 +424,14 @@ describe("cloneIfNecessary", () => {
 
     it("returns already-frozen object as-is (shallow, force=false)", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = Object.freeze({ a: 1 }) as StorableValue;
+      const value = Object.freeze({ a: 1 }) as FabricValue;
       const result = cloneIfNecessary(value, { deep: false });
       expect(result).toBe(value);
     });
 
     it("shallow-clones frozen object to mutable (deep=false, frozen=false)", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = Object.freeze({ a: 1, b: "two" }) as StorableValue;
+      const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -443,7 +443,7 @@ describe("cloneIfNecessary", () => {
 
     it("force-copies mutable object (shallow, frozen=false, force=true)", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -455,7 +455,7 @@ describe("cloneIfNecessary", () => {
 
     it("returns mutable as-is (shallow, frozen=false, force=false)", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -466,7 +466,7 @@ describe("cloneIfNecessary", () => {
 
     it("thaws frozen value (shallow, frozen=false, force=false)", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = Object.freeze({ a: 1 }) as StorableValue;
+      const value = Object.freeze({ a: 1 }) as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
         frozen: false,
@@ -479,15 +479,15 @@ describe("cloneIfNecessary", () => {
   });
 
   // --------------------------------------------------------------------------
-  // StorableError (StorableInstance)
+  // StorableError (FabricInstance)
   // --------------------------------------------------------------------------
 
-  describe("StorableInstance", () => {
+  describe("FabricInstance", () => {
     it("clones StorableError via shallowClone protocol", () => {
       setStorableValueConfig({ richStorableValues: true });
       const error = new StorableError(new Error("test"));
       Object.freeze(error);
-      const result = cloneIfNecessary(error as unknown as StorableValue);
+      const result = cloneIfNecessary(error as unknown as FabricValue);
       expect(result).toBeInstanceOf(StorableError);
       expect(Object.isFrozen(result)).toBe(true);
     });
@@ -497,7 +497,7 @@ describe("cloneIfNecessary", () => {
       const error = new StorableError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(
-        error as unknown as StorableValue,
+        error as unknown as FabricValue,
         { frozen: false },
       );
       expect(result).toBeInstanceOf(StorableError);
@@ -508,7 +508,7 @@ describe("cloneIfNecessary", () => {
     it("handles StorableError nested in an object", () => {
       setStorableValueConfig({ richStorableValues: true });
       const error = new StorableError(new Error("nested"));
-      const value = { err: error, x: 42 } as StorableValue;
+      const value = { err: error, x: 42 } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(result.err).toBeInstanceOf(StorableError);
@@ -523,7 +523,7 @@ describe("cloneIfNecessary", () => {
   describe("undefined preservation", () => {
     it("preserves undefined in objects", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1, b: undefined } as StorableValue;
+      const value = { a: 1, b: undefined } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result.b).toBe(undefined);
       expect("b" in result).toBe(true);
@@ -532,7 +532,7 @@ describe("cloneIfNecessary", () => {
 
     it("preserves undefined in arrays", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = [1, undefined, 3] as StorableValue;
+      const value = [1, undefined, 3] as FabricValue;
       const result = cloneIfNecessary(value) as unknown[];
       expect(result[1]).toBe(undefined);
       expect(1 in result).toBe(true);
@@ -551,7 +551,7 @@ describe("cloneIfNecessary", () => {
       value.a = 1;
       value.b = "two";
       const result = cloneIfNecessary(
-        value as StorableValue,
+        value as FabricValue,
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
       expect(result.a).toBe(1);
@@ -564,7 +564,7 @@ describe("cloneIfNecessary", () => {
       const value = Object.create(null) as Record<string, unknown>;
       value.x = 42;
       const result = cloneIfNecessary(
-        value as StorableValue,
+        value as FabricValue,
         { frozen: false },
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
@@ -577,7 +577,7 @@ describe("cloneIfNecessary", () => {
       const value = Object.create(null) as Record<string, unknown>;
       value.a = 1;
       const result = cloneIfNecessary(
-        value as StorableValue,
+        value as FabricValue,
         { deep: false },
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
@@ -590,7 +590,7 @@ describe("cloneIfNecessary", () => {
       const value = Object.create(null) as Record<string, unknown>;
       value.b = 2;
       const result = cloneIfNecessary(
-        value as StorableValue,
+        value as FabricValue,
         { frozen: false, deep: false },
       ) as Record<string, unknown>;
       expect(Object.getPrototypeOf(result)).toBe(null);
@@ -604,31 +604,31 @@ describe("cloneIfNecessary", () => {
   // --------------------------------------------------------------------------
 
   describe("SpecialPrimitiveValue", () => {
-    it("passes through StorableEpochNsec unchanged", () => {
+    it("passes through FabricEpochNsec unchanged", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const epoch = new StorableEpochNsec(1234567890n);
+      const epoch = new FabricEpochNsec(1234567890n);
       Object.freeze(epoch);
-      const result = cloneIfNecessary(epoch as unknown as StorableValue);
+      const result = cloneIfNecessary(epoch as unknown as FabricValue);
       expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
-    it("passes through StorableEpochNsec when frozen=false", () => {
+    it("passes through FabricEpochNsec when frozen=false", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const epoch = new StorableEpochNsec(42n);
+      const epoch = new FabricEpochNsec(42n);
       Object.freeze(epoch);
       // frozen parameter is irrelevant for special primitives
       const result = cloneIfNecessary(
-        epoch as unknown as StorableValue,
+        epoch as unknown as FabricValue,
         { frozen: false },
       );
       expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
-    it("passes through StorableEpochNsec nested in an object", () => {
+    it("passes through FabricEpochNsec nested in an object", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const epoch = new StorableEpochNsec(999n);
+      const epoch = new FabricEpochNsec(999n);
       Object.freeze(epoch);
-      const value = { time: epoch, label: "test" } as StorableValue;
+      const value = { time: epoch, label: "test" } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(result.time).toBe(epoch); // same instance -- not cloned
@@ -645,7 +645,7 @@ describe("cloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const obj = {} as Record<string, unknown>;
       obj.self = obj;
-      expect(() => cloneIfNecessary(obj as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(obj as FabricValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -654,7 +654,7 @@ describe("cloneIfNecessary", () => {
       setStorableValueConfig({ richStorableValues: true });
       const arr: unknown[] = [1, 2];
       arr.push(arr);
-      expect(() => cloneIfNecessary(arr as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(arr as FabricValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -664,7 +664,7 @@ describe("cloneIfNecessary", () => {
       const a = {} as Record<string, unknown>;
       const b = { parent: a } as Record<string, unknown>;
       a.child = b;
-      expect(() => cloneIfNecessary(a as StorableValue)).toThrow(
+      expect(() => cloneIfNecessary(a as FabricValue)).toThrow(
         "Cannot deep-clone circular reference",
       );
     });
@@ -672,7 +672,7 @@ describe("cloneIfNecessary", () => {
     it("handles shared (diamond) references without throwing", () => {
       setStorableValueConfig({ richStorableValues: true });
       const shared = { x: 1 };
-      const value = { a: shared, b: shared } as StorableValue;
+      const value = { a: shared, b: shared } as FabricValue;
       // Shared (non-circular) references should not throw.
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result).toEqual({ a: { x: 1 }, b: { x: 1 } });
@@ -687,7 +687,7 @@ describe("cloneIfNecessary", () => {
   describe("config lifecycle", () => {
     it("switching from rich to legacy restores identity passthrough", () => {
       setStorableValueConfig({ richStorableValues: true });
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       const richResult = cloneIfNecessary(value);
       expect(richResult).not.toBe(value); // rich path clones
 

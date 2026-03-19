@@ -303,14 +303,14 @@ export interface BuilderFunctionsAndConstants {
   h: HFunction;
 
   // Storable value classes
-  StorableInstance:
-    typeof import("@commontools/data-model/storable-instance").StorableInstance;
+  FabricInstance:
+    typeof import("@commontools/data-model/storable-instance").FabricInstance;
   SpecialPrimitiveValue:
     typeof import("@commontools/data-model/special-primitive-value").SpecialPrimitiveValue;
-  StorableEpochNsec:
-    typeof import("@commontools/data-model/storable-epoch").StorableEpochNsec;
-  StorableEpochDays:
-    typeof import("@commontools/data-model/storable-epoch").StorableEpochDays;
+  FabricEpochNsec:
+    typeof import("@commontools/data-model/storable-epoch").FabricEpochNsec;
+  FabricEpochDays:
+    typeof import("@commontools/data-model/storable-epoch").FabricEpochDays;
 }
 
 // Runtime interface needed by createCell

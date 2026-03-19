@@ -94,7 +94,7 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
  */
 export interface ExperimentalOptions {
-  /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, StorableInstance). */
+  /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   richStorableValues?: boolean;
   /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
   storableProtocol?: boolean;

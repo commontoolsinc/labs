@@ -1,6 +1,6 @@
-import { StorableEpochDays, StorableEpochNsec } from "./storable-epoch.ts";
-import { StorableContentId } from "./storable-content-id.ts";
-import { isStorableInstance } from "./storable-protocol.ts";
+import { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
+import { FabricContentId } from "./storable-content-id.ts";
+import { isFabricInstance } from "./storable-protocol.ts";
 
 /**
  * Canonical type tags for the `/<Type>@<Version>` wire format. Collected in a
@@ -46,10 +46,10 @@ export const TAGS = Object.freeze(
  *
  * Covers two categories:
  * - **Native JS builtins**: Array, Object, Error, Map, Set, Date, Uint8Array.
- * - **System-defined value types**: StorableEpochNsec, StorableEpochDays,
- *   StorableContentId -- classes defined by this system that behave like
+ * - **System-defined value types**: FabricEpochNsec, FabricEpochDays,
+ *   FabricContentId -- classes defined by this system that behave like
  *   primitives (always frozen, pass through conversion unchanged) but aren't
- *   under the open-ended `StorableInstance` umbrella.
+ *   under the open-ended `FabricInstance` umbrella.
  *
  * Additionally, `HasToJSON` is a synthetic tag for values whose class provides
  * a `toJSON()` method but isn't otherwise recognized.
@@ -68,7 +68,7 @@ export const NATIVE_TAGS = Object.freeze(
     EpochDays: "EpochDays",
     ContentId: "ContentId",
     HasToJSON: "HasToJSON",
-    StorableInstance: "StorableInstance",
+    FabricInstance: "FabricInstance",
     Primitive: "Primitive",
   } as const,
 );
@@ -116,11 +116,11 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.Uint8Array;
     case RegExp:
       return NATIVE_TAGS.RegExp;
-    case StorableEpochNsec:
+    case FabricEpochNsec:
       return NATIVE_TAGS.EpochNsec;
-    case StorableEpochDays:
+    case FabricEpochDays:
       return NATIVE_TAGS.EpochDays;
-    case StorableContentId:
+    case FabricContentId:
       return NATIVE_TAGS.ContentId;
 
     default:
@@ -187,8 +187,8 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // Exotic Error subclasses (e.g. DOMException).
     if (Error.isError(value)) return NATIVE_TAGS.Error;
 
-    // StorableInstance values (protocol types with [DECONSTRUCT]).
-    if (isStorableInstance(value)) return NATIVE_TAGS.StorableInstance;
+    // FabricInstance values (protocol types with [DECONSTRUCT]).
+    if (isFabricInstance(value)) return NATIVE_TAGS.FabricInstance;
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;

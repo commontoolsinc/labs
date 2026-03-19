@@ -1,5 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
-import type { StorableValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   isPattern,
   type Pattern,
@@ -49,7 +49,7 @@ export function sendValueToBinding<T>(
       cell.runtime,
       tx,
       ref,
-      value as StorableValue,
+      value as FabricValue,
       { cell: cell.getAsNormalizedFullLink(), binding },
       { meta: ignoreReadForScheduling },
     );

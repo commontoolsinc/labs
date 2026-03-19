@@ -18,8 +18,8 @@ import type {
   State,
 } from "../interface.ts";
 import type {
-  StorableDatum,
-  StorableValue,
+  FabricDatum,
+  FabricValue,
 } from "@commontools/data-model/fabric-value";
 import * as Address from "./address.ts";
 import {
@@ -124,7 +124,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricDatum,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -285,7 +285,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as StorableDatum,
+            is: normalizedMerged as FabricDatum,
             cause: causeRef,
           });
         }
@@ -524,7 +524,7 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError

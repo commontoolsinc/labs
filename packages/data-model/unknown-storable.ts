@@ -1,4 +1,4 @@
-import type { StorableValue } from "./fabric-value.ts";
+import type { FabricValue } from "./fabric-value.ts";
 import { DECONSTRUCT, RECONSTRUCT } from "./storable-instance.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
@@ -10,11 +10,11 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
  * the original wire format. See Section 3.3 of the formal spec.
  */
 export class UnknownStorable extends ExplicitTagStorable {
-  constructor(typeTag: string, state: StorableValue) {
+  constructor(typeTag: string, state: FabricValue) {
     super(typeTag, state);
   }
 
-  [DECONSTRUCT](): StorableValue {
+  [DECONSTRUCT](): FabricValue {
     return { type: this.typeTag, state: this.state };
   }
 
@@ -23,7 +23,7 @@ export class UnknownStorable extends ExplicitTagStorable {
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: StorableValue },
+    state: { type: string; state: FabricValue },
     _context: ReconstructionContext,
   ): UnknownStorable {
     return new UnknownStorable(state.type, state.state);

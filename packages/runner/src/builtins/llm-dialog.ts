@@ -1,4 +1,4 @@
-import type { StorableValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -2024,7 +2024,7 @@ export function llmDialog(
         pinCell: { $stream: true },
         unpinAllCells: { $stream: true },
         pinnedCells: [],
-      } as StorableValue);
+      } as FabricValue);
 
       // Declare `addMessage` handler and register
       createHandler<BuiltInLLMMessage>(

@@ -8,7 +8,7 @@ import {
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceAndURI } from "../src/scheduler.ts";
-import type { StorableDatum } from "@commontools/data-model/fabric-value";
+import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -744,7 +744,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         { a: 1 },
-        { a: undefined } as StorableDatum,
+        { a: undefined } as FabricDatum,
       );
       expect(result).toEqual([action1]);
     });
@@ -1566,8 +1566,8 @@ describe("determineTriggeredActions", () => {
         dependencies.set(action, [[`item${i}`]]);
       }
 
-      const before: StorableDatum = {};
-      const after: StorableDatum = {};
+      const before: FabricDatum = {};
+      const after: FabricDatum = {};
       for (let i = 0; i < 1000; i++) {
         (before as any)[`item${i}`] = i;
         (after as any)[`item${i}`] = i;
@@ -1716,8 +1716,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
       );
 
       // Action B and C should trigger because __#0 appeared,
@@ -1882,8 +1882,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
       );
 
       // Should trigger
@@ -1911,8 +1911,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -1929,8 +1929,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1947,8 +1947,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1965,8 +1965,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a"],
         { nonRecursive: true },
       );
@@ -1986,16 +1986,16 @@ describe("determineTriggeredActions", () => {
 
       const recursiveResult = determineTriggeredActions(
         new Map([[recursiveAction, [["value", "a"]]]]),
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a", "existing"],
       );
       expect(recursiveResult).toEqual([recursiveAction]);
 
       const nonRecursiveResult = determineTriggeredActions(
         new Map([[nonRecursiveAction, [["value", "a"]]]]),
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -2012,8 +2012,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as StorableDatum,
-        after as StorableDatum,
+        before as FabricDatum,
+        after as FabricDatum,
         ["value"],
         { nonRecursive: true },
       );
@@ -2122,8 +2122,8 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as StorableDatum,
-    after as StorableDatum,
+    before as FabricDatum,
+    after as FabricDatum,
   );
 });
 
@@ -2231,7 +2231,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as StorableDatum,
-    after as StorableDatum,
+    before as FabricDatum,
+    after as FabricDatum,
   );
 });

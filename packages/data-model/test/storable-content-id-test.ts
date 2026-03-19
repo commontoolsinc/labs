@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as Reference from "merkle-reference";
-import { StorableContentId } from "../storable-content-id.ts";
+import { FabricContentId } from "../storable-content-id.ts";
 import {
   contentIdFromJSON,
   fromString,
@@ -19,19 +19,19 @@ import {
 const SAMPLE_HASH = new Uint8Array(32);
 for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
-Deno.test("StorableContentId", async (t) => {
+Deno.test("FabricContentId", async (t) => {
   // -----------------------------------------------------------------
-  // StorableContentId extensions
+  // FabricContentId extensions
   // -----------------------------------------------------------------
 
   await t.step("toString() produces fid1:<base64> format", () => {
-    const cid = new StorableContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
     const str = cid.toString();
     assert(str.startsWith("fid1:"), `Expected fid1: prefix, got: ${str}`);
   });
 
   await t.step("toJSON() produces { '/': 'fid1:<base64>' }", () => {
-    const cid = new StorableContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
     const json = cid.toJSON();
     assertEquals(typeof json["/"], "string");
     assert(
@@ -42,7 +42,7 @@ Deno.test("StorableContentId", async (t) => {
   });
 
   await t.step(".bytes returns a defensive copy of .hash", () => {
-    const cid = new StorableContentId(SAMPLE_HASH, "fid1");
+    const cid = new FabricContentId(SAMPLE_HASH, "fid1");
     const bytes = cid.bytes;
     // Contents match.
     assertEquals(bytes, cid.hash);
@@ -57,7 +57,7 @@ Deno.test("StorableContentId", async (t) => {
   });
 
   await t.step("copyHashInto copies hash bytes into target buffer", () => {
-    const cid = new StorableContentId(SAMPLE_HASH, "sha3");
+    const cid = new FabricContentId(SAMPLE_HASH, "sha3");
     const target = new Uint8Array(32);
     const returned = cid.copyHashInto(target);
     // Returns the same target buffer.
@@ -69,7 +69,7 @@ Deno.test("StorableContentId", async (t) => {
   await t.step(
     '["/"] getter returns the raw hash bytes (not a copy)',
     () => {
-      const cid = new StorableContentId(SAMPLE_HASH, "test2");
+      const cid = new FabricContentId(SAMPLE_HASH, "test2");
       const slash = cid["/"];
       // Should be the exact same array reference as .hash (not a defensive copy).
       assert(
@@ -86,17 +86,17 @@ Deno.test("StorableContentId", async (t) => {
   // -----------------------------------------------------------------
 
   await t.step(
-    "contentIdFromJSON round-trips through StorableContentId when canonical hashing is on",
+    "contentIdFromJSON round-trips through FabricContentId when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
-        const original = new StorableContentId(SAMPLE_HASH, "fid1");
+        const original = new FabricContentId(SAMPLE_HASH, "fid1");
         const json = original.toJSON();
         const reconstructed = contentIdFromJSON(json);
 
-        // The reconstructed value should be a StorableContentId.
-        assertInstanceOf(reconstructed, StorableContentId);
-        const cid = reconstructed as unknown as StorableContentId;
+        // The reconstructed value should be a FabricContentId.
+        assertInstanceOf(reconstructed, FabricContentId);
+        const cid = reconstructed as unknown as FabricContentId;
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
       } finally {
@@ -106,17 +106,17 @@ Deno.test("StorableContentId", async (t) => {
   );
 
   await t.step(
-    "fromString round-trips through StorableContentId when canonical hashing is on",
+    "fromString round-trips through FabricContentId when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
-        const original = new StorableContentId(SAMPLE_HASH, "sha3");
+        const original = new FabricContentId(SAMPLE_HASH, "sha3");
         const str = original.toString();
         const reconstructed = fromString(str);
 
-        assertInstanceOf(reconstructed, StorableContentId);
-        const cid = reconstructed as unknown as StorableContentId;
+        assertInstanceOf(reconstructed, FabricContentId);
+        const cid = reconstructed as unknown as FabricContentId;
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
         assertEquals(cid.algorithmTag, "sha3");
@@ -143,9 +143,9 @@ Deno.test("StorableContentId", async (t) => {
   );
 
   await t.step(
-    "isContentId returns true for StorableContentId instances",
+    "isContentId returns true for FabricContentId instances",
     () => {
-      const cid = new StorableContentId(SAMPLE_HASH, "fid1");
+      const cid = new FabricContentId(SAMPLE_HASH, "fid1");
       assert(isContentId(cid));
     },
   );
@@ -161,12 +161,12 @@ Deno.test("StorableContentId", async (t) => {
   );
 
   await t.step(
-    "refer() returns StorableContentId when canonical hashing is on",
+    "refer() returns FabricContentId when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
         const result = refer({ hello: "world" });
-        assertInstanceOf(result, StorableContentId);
+        assertInstanceOf(result, FabricContentId);
       } finally {
         resetCanonicalHashConfig();
       }
@@ -174,16 +174,16 @@ Deno.test("StorableContentId", async (t) => {
   );
 
   await t.step(
-    "nested refer() works when canonical hashing is on (no throw on StorableContentId in value tree)",
+    "nested refer() works when canonical hashing is on (no throw on FabricContentId in value tree)",
     () => {
       setCanonicalHashConfig(true);
       try {
-        // First refer produces a StorableContentId.
+        // First refer produces a FabricContentId.
         const innerRef = refer({ the: "text/plain", of: "entity:123" });
-        assertInstanceOf(innerRef, StorableContentId);
+        assertInstanceOf(innerRef, FabricContentId);
 
         // Wrap it in a fact-like structure and refer again. canonicalHash
-        // handles StorableContentId via TAG_CONTENT_ID, so this must not throw.
+        // handles FabricContentId via TAG_CONTENT_ID, so this must not throw.
         const outerSource = {
           cause: innerRef,
           the: "text/plain",
@@ -191,7 +191,7 @@ Deno.test("StorableContentId", async (t) => {
           is: { value: 42 },
         };
         const outerRef = refer(outerSource);
-        assertInstanceOf(outerRef, StorableContentId);
+        assertInstanceOf(outerRef, FabricContentId);
       } finally {
         resetCanonicalHashConfig();
       }
@@ -209,8 +209,8 @@ Deno.test("StorableContentId", async (t) => {
         const result = refer({ test: true });
         assert(Reference.is(result), "Expected a Reference.View instance");
         assert(
-          !(result instanceof StorableContentId),
-          "Should not be StorableContentId when flag is off",
+          !(result instanceof FabricContentId),
+          "Should not be FabricContentId when flag is off",
         );
       } finally {
         resetCanonicalHashConfig();

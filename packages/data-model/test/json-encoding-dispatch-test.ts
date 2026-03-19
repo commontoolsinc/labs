@@ -7,7 +7,7 @@ import {
   valueFromJson,
 } from "../json-encoding-dispatch.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import type { StorableValue } from "../fabric-value.ts";
+import type { FabricValue } from "../fabric-value.ts";
 
 /** Mock runtime for deserialization calls. */
 const mockRuntime: ReconstructionContext = {
@@ -17,12 +17,12 @@ const mockRuntime: ReconstructionContext = {
 };
 
 /** Encode then decode a value through the current dispatch configuration. */
-function roundTrip(value: StorableValue): StorableValue {
+function roundTrip(value: FabricValue): FabricValue {
   return valueFromJson(jsonFromValue(value), mockRuntime);
 }
 
 /** Assert that encoding a value produces the expected JSON wire format. */
-function expectWireFormat(value: StorableValue, expected: unknown): void {
+function expectWireFormat(value: FabricValue, expected: unknown): void {
   expect(JSON.parse(jsonFromValue(value))).toEqual(expected);
 }
 
@@ -42,7 +42,7 @@ describe("json-encoding-dispatch", () => {
 
   describe("default state (flag OFF)", () => {
     it("jsonFromValue produces valid JSON for objects", () => {
-      const value = { hello: "world" } as StorableValue;
+      const value = { hello: "world" } as FabricValue;
       expect(jsonFromValue(value)).toBe('{"hello":"world"}');
     });
 
@@ -51,9 +51,9 @@ describe("json-encoding-dispatch", () => {
     });
 
     it("jsonFromValue stringifies primitives", () => {
-      expect(jsonFromValue(42 as StorableValue)).toBe("42");
-      expect(jsonFromValue("hello" as StorableValue)).toBe('"hello"');
-      expect(jsonFromValue(true as StorableValue)).toBe("true");
+      expect(jsonFromValue(42 as FabricValue)).toBe("42");
+      expect(jsonFromValue("hello" as FabricValue)).toBe('"hello"');
+      expect(jsonFromValue(true as FabricValue)).toBe("true");
     });
 
     it("valueFromJson parses objects", () => {
@@ -66,7 +66,7 @@ describe("json-encoding-dispatch", () => {
     });
 
     it("round-trip preserves objects", () => {
-      const original = { a: 1, b: [2, 3] } as StorableValue;
+      const original = { a: 1, b: [2, 3] } as FabricValue;
       expect(roundTrip(original)).toEqual(original);
     });
   });
@@ -83,7 +83,7 @@ describe("json-encoding-dispatch", () => {
 
     it("round-trip preserves bigint", () => {
       setJsonEncodingConfig(true);
-      expect(roundTrip(42n as StorableValue)).toBe(42n);
+      expect(roundTrip(42n as FabricValue)).toBe(42n);
     });
 
     it("jsonFromValue encodes undefined to tagged JSON", () => {
@@ -93,7 +93,7 @@ describe("json-encoding-dispatch", () => {
 
     it("jsonFromValue encodes bigint to tagged JSON", () => {
       setJsonEncodingConfig(true);
-      expectWireFormat(42n as StorableValue, { "/BigInt@1": "Kg" });
+      expectWireFormat(42n as FabricValue, { "/BigInt@1": "Kg" });
     });
 
     it("valueFromJson decodes tagged undefined", () => {
@@ -110,13 +110,13 @@ describe("json-encoding-dispatch", () => {
 
     it("round-trip preserves plain objects", () => {
       setJsonEncodingConfig(true);
-      const value = { a: 1, b: "two" } as StorableValue;
+      const value = { a: 1, b: "two" } as FabricValue;
       expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
     it("round-trip preserves arrays", () => {
       setJsonEncodingConfig(true);
-      const value = [1, "two", null] as StorableValue;
+      const value = [1, "two", null] as FabricValue;
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
@@ -127,9 +127,9 @@ describe("json-encoding-dispatch", () => {
 
     it("JSON-safe primitives stringify normally", () => {
       setJsonEncodingConfig(true);
-      expect(jsonFromValue(42 as StorableValue)).toBe("42");
-      expect(jsonFromValue("hello" as StorableValue)).toBe('"hello"');
-      expect(jsonFromValue(true as StorableValue)).toBe("true");
+      expect(jsonFromValue(42 as FabricValue)).toBe("42");
+      expect(jsonFromValue("hello" as FabricValue)).toBe('"hello"');
+      expect(jsonFromValue(true as FabricValue)).toBe("true");
       expect(jsonFromValue(null)).toBe("null");
     });
   });
@@ -141,19 +141,19 @@ describe("json-encoding-dispatch", () => {
   describe("edge cases (flag ON)", () => {
     it("round-trip preserves object with slash-prefixed key", () => {
       setJsonEncodingConfig(true);
-      const value = { "/foo": "bar" } as StorableValue;
+      const value = { "/foo": "bar" } as FabricValue;
       expect(roundTrip(value)).toEqual({ "/foo": "bar" });
     });
 
     it("decoded objects are frozen", () => {
       setJsonEncodingConfig(true);
-      const value = { a: 1, b: "two" } as StorableValue;
+      const value = { a: 1, b: "two" } as FabricValue;
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
     it("decoded arrays are frozen", () => {
       setJsonEncodingConfig(true);
-      const value = [1, 2, 3] as StorableValue;
+      const value = [1, 2, 3] as FabricValue;
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
@@ -163,7 +163,7 @@ describe("json-encoding-dispatch", () => {
         name: "test",
         count: 42n,
         missing: undefined,
-      } as StorableValue;
+      } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.count).toBe(42n);
@@ -181,7 +181,7 @@ describe("json-encoding-dispatch", () => {
       // Write path wraps in /object, read path unwraps it.
       const sigilLink = {
         "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
-      } as StorableValue;
+      } as FabricValue;
       expect(roundTrip(sigilLink)).toEqual(sigilLink);
     });
 
@@ -190,7 +190,7 @@ describe("json-encoding-dispatch", () => {
       const value = {
         name: "test",
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
-      } as StorableValue;
+      } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.ref).toEqual(
@@ -200,13 +200,13 @@ describe("json-encoding-dispatch", () => {
 
     it("{ '/': 'string' } round-trips via /object escaping", () => {
       setJsonEncodingConfig(true);
-      const entityId = { "/": "bafyabc123" } as StorableValue;
+      const entityId = { "/": "bafyabc123" } as FabricValue;
       expect(roundTrip(entityId)).toEqual(entityId);
     });
 
     it("$stream marker passes through unchanged", () => {
       setJsonEncodingConfig(true);
-      const value = { $stream: true } as StorableValue;
+      const value = { $stream: true } as FabricValue;
       expect(roundTrip(value)).toEqual({ $stream: true });
     });
 
@@ -214,7 +214,7 @@ describe("json-encoding-dispatch", () => {
       setJsonEncodingConfig(true);
       const value = {
         "@Error": { name: "TypeError", message: "oops", stack: "" },
-      } as StorableValue;
+      } as FabricValue;
       expect(roundTrip(value)).toEqual({
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       });
@@ -224,7 +224,7 @@ describe("json-encoding-dispatch", () => {
       setJsonEncodingConfig(true);
       const value = {
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
-      } as StorableValue;
+      } as FabricValue;
       expect(roundTrip(value)).toEqual({
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
       });
@@ -236,7 +236,7 @@ describe("json-encoding-dispatch", () => {
         count: 42n,
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
         items: [1, { "/": "bafyxyz" }, undefined],
-      } as StorableValue;
+      } as FabricValue;
       const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.count).toBe(42n);
       expect(decoded.ref).toEqual(
@@ -252,7 +252,7 @@ describe("json-encoding-dispatch", () => {
       const value = [
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
         { "/": { "link@1": { id: "of:bafydef", path: ["x"] } } },
-      ] as StorableValue;
+      ] as FabricValue;
       expect(roundTrip(value)).toEqual(value);
     });
   });
@@ -264,7 +264,7 @@ describe("json-encoding-dispatch", () => {
   describe("flag OFF behavior (explicit)", () => {
     it("jsonFromValue is plain stringify after explicit OFF", () => {
       setJsonEncodingConfig(false);
-      const value = { "/foo": 1 } as StorableValue;
+      const value = { "/foo": 1 } as FabricValue;
       expect(jsonFromValue(value)).toBe('{"/foo":1}');
     });
 
@@ -288,7 +288,7 @@ describe("json-encoding-dispatch", () => {
       setJsonEncodingConfig(true);
       resetJsonEncodingConfig();
       // Should be plain stringify again.
-      const value = { a: 1 } as StorableValue;
+      const value = { a: 1 } as FabricValue;
       expect(jsonFromValue(value)).toBe('{"a":1}');
     });
 
@@ -299,7 +299,7 @@ describe("json-encoding-dispatch", () => {
 
       // Cycle 1: OFF
       resetJsonEncodingConfig();
-      expect(jsonFromValue({ a: 1 } as StorableValue)).toBe('{"a":1}');
+      expect(jsonFromValue({ a: 1 } as FabricValue)).toBe('{"a":1}');
 
       // Cycle 2: ON
       setJsonEncodingConfig(true);
@@ -307,7 +307,7 @@ describe("json-encoding-dispatch", () => {
 
       // Cycle 2: OFF
       resetJsonEncodingConfig();
-      expect(jsonFromValue({ b: 2 } as StorableValue)).toBe('{"b":2}');
+      expect(jsonFromValue({ b: 2 } as FabricValue)).toBe('{"b":2}');
     });
 
     it("setJsonEncodingConfig(false) after true restores passthrough", () => {

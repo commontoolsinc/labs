@@ -1231,7 +1231,7 @@ describe("storable-value", () => {
 
   // =========================================================================
   // Error internals conversion (rich path): cause and custom properties must
-  // be recursively converted to StorableValue before wrapping in StorableError
+  // be recursively converted to FabricValue before wrapping in StorableError
   // =========================================================================
 
   describe("Error internals deep conversion (rich path)", () => {
@@ -1294,7 +1294,7 @@ describe("storable-value", () => {
       const error = new Error("file error", { cause });
       const result = storableFromNativeValue(error) as StorableError;
 
-      // cause should be a plain object (already valid StorableValue).
+      // cause should be a plain object (already valid FabricValue).
       expect(result.error.cause).toEqual({ code: "ENOENT", path: "/missing" });
       expect(Object.isFrozen(result.error.cause)).toBe(true);
     });

@@ -2,7 +2,7 @@
  * Effectively-immutable wrappers for built-in collection types (`Map`, `Set`).
  * Each extends the native class so `instanceof` checks still pass,
  * but all mutation methods throw. Used by the storable-value unwrap layer to
- * preserve immutability guarantees across the StorableValue -> native
+ * preserve immutability guarantees across the FabricValue -> native
  * round-trip.
  *
  * See Section 2.9 of the formal spec (frozen built-in types).
@@ -30,7 +30,7 @@ function throwIfFrozen(obj: object): void {
  * Effectively-immutable `Map` wrapper. Extends `Map` so that `instanceof Map`
  * checks still pass, but all mutation methods throw. Returned by
  * `nativeValueFromStorableValue()` for `StorableMap` to preserve the
- * immutability guarantee across the StorableValue -> native round-trip.
+ * immutability guarantee across the FabricValue -> native round-trip.
  *
  * Uses `Object.freeze(this)` after population; mutation overrides check
  * `Object.isFrozen(this)`.
@@ -65,7 +65,7 @@ export class FrozenMap<K, V> extends Map<K, V> {
  * Effectively-immutable `Set` wrapper. Extends `Set` so that `instanceof Set`
  * checks still pass, but all mutation methods throw. Returned by
  * `nativeValueFromStorableValue()` for `StorableSet` to preserve the
- * immutability guarantee across the StorableValue -> native round-trip.
+ * immutability guarantee across the FabricValue -> native round-trip.
  *
  * Uses `Object.freeze(this)` after population; mutation overrides check
  * `Object.isFrozen(this)`.

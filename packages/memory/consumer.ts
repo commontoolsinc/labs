@@ -47,7 +47,7 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import type { StorableDatum } from "@commontools/data-model/fabric-value";
+import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
   type ContentId,
   contentIdFromJSON,
@@ -830,7 +830,7 @@ class QuerySubscriptionInvocation<
   override perform(commit: EnhancedCommit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
-    const differential: OfTheCause<{ is?: StorableDatum; since: number }> = {};
+    const differential: OfTheCause<{ is?: FabricDatum; since: number }> = {};
 
     // A revision-only commit (empty commit payload) carries deferred schema
     // traversal results. Skip commit parsing — just deliver revisions.

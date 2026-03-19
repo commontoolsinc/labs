@@ -1,4 +1,4 @@
-import type { StorableValue } from "./fabric-value.ts";
+import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
 import { JsonEncodingContext } from "./json-encoding.ts";
 
@@ -23,7 +23,7 @@ const jsonEncodingContext = new JsonEncodingContext();
  * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
  * equivalent to `JSON.stringify(value)`.
  */
-export let jsonFromValue: (value: StorableValue) => string;
+export let jsonFromValue: (value: FabricValue) => string;
 
 /**
  * Decode a JSON string back into a storable value. When unified JSON
@@ -34,7 +34,7 @@ export let jsonFromValue: (value: StorableValue) => string;
 export let valueFromJson: (
   json: string,
   runtime: ReconstructionContext,
-) => StorableValue;
+) => FabricValue;
 
 // ---------------------------------------------------------------------------
 // Unified JSON encoding flag and dispatch configuration
@@ -57,20 +57,20 @@ function configureDispatch(): void {
   if (jsonEncodingEnabled) {
     // ----- Unified JSON encoding implementations -----
 
-    jsonFromValue = (value: StorableValue): string => {
+    jsonFromValue = (value: FabricValue): string => {
       return jsonEncodingContext.encode(value);
     };
 
     valueFromJson = (
       json: string,
       runtime: ReconstructionContext,
-    ): StorableValue => {
+    ): FabricValue => {
       return jsonEncodingContext.decode(json, runtime);
     };
   } else {
     // ----- Passthrough (flag OFF) -----
 
-    jsonFromValue = (value: StorableValue): string => {
+    jsonFromValue = (value: FabricValue): string => {
       const result = JSON.stringify(value);
       if (result === undefined) {
         throw new Error(
@@ -83,8 +83,8 @@ function configureDispatch(): void {
     valueFromJson = (
       json: string,
       _runtime: ReconstructionContext,
-    ): StorableValue => {
-      return JSON.parse(json) as StorableValue;
+    ): FabricValue => {
+      return JSON.parse(json) as FabricValue;
     };
   }
 }

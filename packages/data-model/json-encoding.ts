@@ -1,5 +1,5 @@
-import type { StorableValue } from "./fabric-value.ts";
-import { RECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
+import type { FabricValue } from "./fabric-value.ts";
+import { type FabricInstance, RECONSTRUCT } from "./storable-instance.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
@@ -43,7 +43,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,
-    StorableClass<StorableInstance>
+    StorableClass<FabricInstance>
   >();
 
   /** Whether failed reconstructions produce `ProblematicStorable` instead of
@@ -59,7 +59,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: StorableInstance) => this.getTagFor(value),
+      getTagFor: (value: FabricInstance) => this.getTagFor(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
@@ -80,7 +80,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * Encode a storable value to a JSON string. Serializes rich types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
-  encode(value: StorableValue): string {
+  encode(value: FabricValue): string {
     return JSON.stringify(this.serialize(value));
   }
 
@@ -88,7 +88,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * Decode a JSON string back into a storable value. Parses the string,
    * then deserializes tagged forms back into rich runtime types.
    */
-  decode(data: string, runtime: ReconstructionContext): StorableValue {
+  decode(data: string, runtime: ReconstructionContext): FabricValue {
     const parsed = JSON.parse(data) as JsonWireValue;
     return this.deserialize(parsed, runtime);
   }
@@ -100,7 +100,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /**
    * Serialize a storable value to UTF-8 JSON bytes.
    */
-  encodeToBytes(value: StorableValue): Uint8Array {
+  encodeToBytes(value: FabricValue): Uint8Array {
     return this.toBytes(this.serialize(value));
   }
 
@@ -110,7 +110,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   decodeFromBytes(
     bytes: Uint8Array,
     runtime: ReconstructionContext,
-  ): StorableValue {
+  ): FabricValue {
     const tree = this.fromBytes(bytes);
     return this.deserialize(tree, runtime);
   }
@@ -120,7 +120,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /** Get the wire format tag for a storable instance's type. */
-  private getTagFor(value: StorableInstance): string {
+  private getTagFor(value: FabricInstance): string {
     if (value instanceof ExplicitTagStorable) {
       return value.typeTag;
     }
@@ -136,7 +136,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Get the class that can reconstruct instances for a given tag. */
   private getClassFor(
     tag: string,
-  ): StorableClass<StorableInstance> | undefined {
+  ): StorableClass<FabricInstance> | undefined {
     return this.registry.get(tag);
   }
 
@@ -203,7 +203,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * values. See Section 4.5 of the formal spec.
    */
   private serialize(
-    value: StorableValue,
+    value: FabricValue,
     _seen?: Set<object>,
     registry: TypeHandlerRegistry = defaultRegistry,
   ): JsonWireValue {
@@ -222,7 +222,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       const result = handler.serialize(
         value,
         this.codec,
-        (v: StorableValue) => this.serialize(v, seen, registry),
+        (v: FabricValue) => this.serialize(v, seen, registry),
       );
 
       if (value !== null && typeof value === "object") {
@@ -260,7 +260,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(TAGS.hole, count));
         } else {
           result.push(
-            this.serialize(value[i] as StorableValue, seen, registry),
+            this.serialize(value[i] as FabricValue, seen, registry),
           );
           i++;
         }
@@ -280,7 +280,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const result: Record<string, JsonWireValue> = {};
     for (
       const [key, val] of Object.entries(
-        value as Record<string, StorableValue>,
+        value as Record<string, FabricValue>,
       )
     ) {
       result[key] = this.serialize(val, seen, registry);
@@ -309,7 +309,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     data: JsonWireValue,
     runtime: ReconstructionContext,
     registry: TypeHandlerRegistry = defaultRegistry,
-  ): StorableValue {
+  ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
       const { tag, state } = decoded;
@@ -317,7 +317,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       // `TAGS.object` unwrapping (Section 5.6).
       if (tag === TAGS.object) {
         const inner = state as Record<string, JsonWireValue>;
-        const result: Record<string, StorableValue> = {};
+        const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
           result[key] = this.deserialize(val, runtime, registry);
         }
@@ -326,7 +326,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // `TAGS.quote` literal handling (Section 5.6).
       if (tag === TAGS.quote) {
-        return deepFreeze(state) as StorableValue;
+        return deepFreeze(state) as FabricValue;
       }
 
       // --- Type handler dispatch ---
@@ -342,9 +342,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
           } catch (e: unknown) {
             return new ProblematicStorable(
               tag,
-              state as unknown as StorableValue,
+              state as unknown as FabricValue,
               e instanceof Error ? e.message : String(e),
-            ) as unknown as StorableValue;
+            ) as unknown as FabricValue;
           }
         }
         return handler.deserialize(
@@ -364,26 +364,26 @@ export class JsonEncodingContext implements SerializationContext<string> {
             return cls[RECONSTRUCT](
               deserializedState,
               runtime,
-            ) as unknown as StorableValue;
+            ) as unknown as FabricValue;
           } catch (e: unknown) {
             return new ProblematicStorable(
               tag,
               deserializedState,
               e instanceof Error ? e.message : String(e),
-            ) as unknown as StorableValue;
+            ) as unknown as FabricValue;
           }
         }
         return cls[RECONSTRUCT](
           deserializedState,
           runtime,
-        ) as unknown as StorableValue;
+        ) as unknown as FabricValue;
       }
 
       // Unknown type: preserve for round-tripping.
       return new UnknownStorable(
         tag,
         deserializedState,
-      ) as unknown as StorableValue;
+      ) as unknown as FabricValue;
     }
 
     // Primitives pass through.
@@ -421,7 +421,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // Plain objects: recursively deserialize values, then freeze.
-    const result: Record<string, StorableValue> = {};
+    const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
       result[key] = this.deserialize(val, runtime, registry);
     }

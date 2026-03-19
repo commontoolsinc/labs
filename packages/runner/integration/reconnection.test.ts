@@ -14,7 +14,7 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import type { StorableObject } from "@commontools/data-model/fabric-value";
+import type { FabricObject } from "@commontools/data-model/fabric-value";
 import { env } from "@commontools/integration";
 import type { JSONSchema } from "@commontools/api";
 const { API_URL } = env;
@@ -67,7 +67,7 @@ Deno.test({
     };
     const testSelector = { path: [], schema: testSchema };
 
-    interface UpdateValue extends StorableObject {
+    interface UpdateValue extends FabricObject {
       value: number;
       timestamp: string;
     }

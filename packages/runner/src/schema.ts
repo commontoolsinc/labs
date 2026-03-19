@@ -6,8 +6,8 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
 import type {
-  StorableDatum,
-  StorableValue,
+  FabricDatum,
+  FabricValue,
 } from "@commontools/data-model/fabric-value";
 import { cloneIfNecessary } from "@commontools/data-model/storable-value";
 import { createCell, isCell } from "./cell.ts";
@@ -310,7 +310,7 @@ export function processDefaultValue(
 
 function mergeDefaults(
   schema: JSONSchema | undefined,
-  defaultValue: Readonly<StorableDatum>,
+  defaultValue: Readonly<FabricDatum>,
 ): JSONSchema {
   const result: JSONSchemaMutable = {
     ...(isRecord(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
@@ -485,7 +485,7 @@ export function validateAndTransform(
 }
 
 class TransformObjectCreator
-  implements IObjectCreator<AnyCellWrapping<StorableDatum>> {
+  implements IObjectCreator<AnyCellWrapping<FabricDatum>> {
   constructor(
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
@@ -521,9 +521,9 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<StorableDatum>>,
+    _obj: Record<string, Immutable<FabricDatum>>,
     _key: string,
-    _value: StorableDatum,
+    _value: FabricDatum,
   ) {
     // We want to exclude properties when we have a properties map provided
     // in the schema, but it doesn't include our property, and we don't have
@@ -540,8 +540,8 @@ class TransformObjectCreator
   // If not, we will actually resolve our links to get to our values.
   createObject(
     link: NormalizedFullLink,
-    value: AnyCellWrapping<StorableDatum> | undefined,
-  ): AnyCellWrapping<StorableDatum> {
+    value: AnyCellWrapping<FabricDatum> | undefined,
+  ): AnyCellWrapping<FabricDatum> {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -559,7 +559,7 @@ class TransformObjectCreator
           { ...link, schema: restSchema },
           getTransactionForChildCells(this.tx),
           this.synced,
-        ) as AnyCellWrapping<StorableDatum>;
+        ) as AnyCellWrapping<FabricDatum>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
@@ -587,7 +587,7 @@ class TransformObjectCreator
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
         // is a no-op for unfrozen objects and shallow-clones frozen ones.
-        value = cloneIfNecessary(value as StorableValue, {
+        value = cloneIfNecessary(value as FabricValue, {
           deep: false,
           frozen: false,
           force: false,

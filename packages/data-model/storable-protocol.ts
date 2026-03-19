@@ -1,6 +1,6 @@
-import type { StorableValue } from "./fabric-value.ts";
+import type { FabricValue } from "./fabric-value.ts";
 
-import { RECONSTRUCT, StorableInstance } from "./storable-instance.ts";
+import { FabricInstance, RECONSTRUCT } from "./storable-instance.ts";
 
 /**
  * A class that can reconstruct storable instances from essential state. The
@@ -8,27 +8,27 @@ import { RECONSTRUCT, StorableInstance } from "./storable-instance.ts";
  * reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
  */
-export interface StorableClass<T extends StorableInstance> {
+export interface StorableClass<T extends FabricInstance> {
   /**
    * Reconstruct an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
    */
-  [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
+  [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
 
 /**
  * A converter that can reconstruct arbitrary values (not necessarily
- * `StorableInstance`s) from essential state. Used for built-in JS types like
+ * `FabricInstance`s) from essential state. Used for built-in JS types like
  * `Error` that participate in the serialization protocol but don't implement
- * `StorableInstance`. See Section 1.4.1 of the formal spec.
+ * `FabricInstance`. See Section 1.4.1 of the formal spec.
  */
 export interface StorableConverter<T> {
   /**
    * Reconstruct a value from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system.
    */
-  [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
+  [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
 
 /**
@@ -42,15 +42,15 @@ export interface ReconstructionContext {
    *  existing instances during reconstruction. */
   getCell(
     ref: { id: string; path: string[]; space: string },
-  ): StorableInstance;
+  ): FabricInstance;
 }
 
 /**
  * Type guard: checks whether a value implements the storable protocol.
  * See Section 2.6 of the formal spec.
  */
-export function isStorableInstance(value: unknown): value is StorableInstance {
-  return value instanceof StorableInstance;
+export function isFabricInstance(value: unknown): value is FabricInstance {
+  return value instanceof FabricInstance;
 }
 
 /**
@@ -68,11 +68,11 @@ export interface SerializationContext<SerializedForm = unknown> {
   readonly lenient: boolean;
 
   /** Encode a storable value into serialized form for boundary crossing. */
-  encode(value: StorableValue): SerializedForm;
+  encode(value: FabricValue): SerializedForm;
 
   /** Decode a serialized form back into a storable value. */
   decode(
     data: SerializedForm,
     runtime: ReconstructionContext,
-  ): StorableValue;
+  ): FabricValue;
 }

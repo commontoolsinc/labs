@@ -11,9 +11,9 @@
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { StorableContentId } from "./storable-content-id.ts";
+import { FabricContentId } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
-import { DECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
+import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -91,7 +91,7 @@ function feedLength(hasher: IncrementalHasher, value: number): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Feed a single `StorableValue` into the hasher, using the type-tagged
+ * Feed a single `FabricValue` into the hasher, using the type-tagged
  * byte format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
@@ -148,7 +148,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (special primitives, StorableInstance, Array,
+ * Feed an object-typed value (special primitives, FabricInstance, Array,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
  * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).
@@ -158,7 +158,7 @@ function feedObjectValue(
   value: object,
 ): void {
   // StorableUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
-  // StorableInstance wrapper, not a native Uint8Array. Handle before the
+  // FabricInstance wrapper, not a native Uint8Array. Handle before the
   // tagFromNativeValue switch.
   if (value instanceof StorableUint8Array) {
     hasher.update(TAG_BYTES_BYTES);
@@ -192,7 +192,7 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.ContentId: {
-      const cid = value as StorableContentId;
+      const cid = value as FabricContentId;
       hasher.update(TAG_CONTENT_ID_BYTES);
       const algTagUtf8 = encoder.encode(cid.algorithmTag);
       feedLength(hasher, algTagUtf8.length);
@@ -210,24 +210,24 @@ function feedObjectValue(
       feedPlainObject(hasher, value as Record<string, unknown>);
       return;
 
-    case NATIVE_TAGS.StorableInstance: {
-      // StorableInstance (generic protocol path via DECONSTRUCT).
+    case NATIVE_TAGS.FabricInstance: {
+      // FabricInstance (generic protocol path via DECONSTRUCT).
       hasher.update(TAG_INSTANCE_BYTES);
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
         throw new Error(
-          `canonicalHash: StorableInstance missing typeTag property`,
+          `canonicalHash: FabricInstance missing typeTag property`,
         );
       }
       const typeTagUtf8 = encoder.encode(typeTag);
       feedLength(hasher, typeTagUtf8.length);
       hasher.update(typeTagUtf8);
-      const state = (value as StorableInstance)[DECONSTRUCT]();
+      const state = (value as FabricInstance)[DECONSTRUCT]();
       feedValue(hasher, state);
       return;
     }
 
-      // Error, Map, Set, Date, HasToJSON: not valid StorableValue types for
+      // Error, Map, Set, Date, HasToJSON: not valid FabricValue types for
       // hashing -- they should have been converted before reaching here.
       // Fall through to the error path below.
   }
@@ -301,10 +301,10 @@ function feedPlainObject(
 // ---------------------------------------------------------------------------
 
 /** Compute the hash of a value without consulting or populating any cache. */
-function computeHash(value: unknown): StorableContentId {
+function computeHash(value: unknown): FabricContentId {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return new StorableContentId(hasher.digest(), "fid1");
+  return new FabricContentId(hasher.digest(), "fid1");
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ const FALSE_HASH = computeHash(false);
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint,
-  StorableContentId
+  FabricContentId
 >({
   capacity: 50_000,
 });
@@ -335,21 +335,21 @@ const primitiveHashCache = new LRUCache<
  * immutable, so their hash is stable and safe to cache by identity.
  * Mutable objects are always recomputed.
  */
-const frozenObjectHashCache = new WeakMap<object, StorableContentId>();
+const frozenObjectHashCache = new WeakMap<object, FabricContentId>();
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the canonical SHA-256 hash of a `StorableValue`. Returns a
- * `StorableContentId` with algorithm tag `fid1` (fabric ID, v1).
+ * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
+ * `FabricContentId` with algorithm tag `fid1` (fabric ID, v1).
  * The caller (`refer()`) extracts the raw digest via `.hash` for
  * `Reference.fromDigest()`.
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
-export function canonicalHash(value: unknown): StorableContentId {
+export function canonicalHash(value: unknown): FabricContentId {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;

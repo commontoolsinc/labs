@@ -23,15 +23,15 @@
  * Subclasses include Cell, Stream, and native-object wrappers (StorableError,
  * StorableMap, etc.).
  */
-export interface StorableInstance {
-  shallowClone(frozen: boolean): StorableInstance;
+export interface FabricInstance {
+  shallowClone(frozen: boolean): FabricInstance;
 }
 
-export interface StorableInstanceConstructor {
-  prototype: StorableInstance;
+export interface FabricInstanceConstructor {
+  prototype: FabricInstance;
 }
 
-export declare const StorableInstance: StorableInstanceConstructor;
+export declare const FabricInstance: FabricInstanceConstructor;
 
 /** Abstract base class for "special primitive" storable types. */
 // deno-lint-ignore no-empty-interface
@@ -47,59 +47,59 @@ export declare const SpecialPrimitiveValue: SpecialPrimitiveValueConstructor;
  * Temporal type representing nanoseconds from the POSIX Epoch.
  * Wraps a `bigint` value.
  */
-export interface StorableEpochNsec extends SpecialPrimitiveValue {
+export interface FabricEpochNsec extends SpecialPrimitiveValue {
   readonly value: bigint;
 }
 
-export interface StorableEpochNsecConstructor {
-  new (value: bigint): StorableEpochNsec;
-  prototype: StorableEpochNsec;
+export interface FabricEpochNsecConstructor {
+  new (value: bigint): FabricEpochNsec;
+  prototype: FabricEpochNsec;
 }
 
-export declare const StorableEpochNsec: StorableEpochNsecConstructor;
+export declare const FabricEpochNsec: FabricEpochNsecConstructor;
 
 /**
  * Temporal type representing days from the POSIX Epoch.
  * Wraps a `bigint` value.
  */
-export interface StorableEpochDays extends SpecialPrimitiveValue {
+export interface FabricEpochDays extends SpecialPrimitiveValue {
   readonly value: bigint;
 }
 
-export interface StorableEpochDaysConstructor {
-  new (value: bigint): StorableEpochDays;
-  prototype: StorableEpochDays;
+export interface FabricEpochDaysConstructor {
+  new (value: bigint): FabricEpochDays;
+  prototype: FabricEpochDays;
 }
 
-export declare const StorableEpochDays: StorableEpochDaysConstructor;
+export declare const FabricEpochDays: FabricEpochDaysConstructor;
 
 /**
  * A value that can be stored in the storage layer. Similar to `JSONValue` but
  * intended for use at storage boundaries.
  */
-export type StorableValue = StorableDatum | undefined;
+export type FabricValue = FabricDatum | undefined;
 
 /**
  * The full set of values that the storage layer can represent.
  */
-export type StorableDatum =
+export type FabricDatum =
   | null
   | boolean
   | number
   | string
   | bigint
-  | StorableEpochNsec
-  | StorableEpochDays
-  | StorableArray
-  | StorableObject
-  | StorableInstance
+  | FabricEpochNsec
+  | FabricEpochDays
+  | FabricArray
+  | FabricObject
+  | FabricInstance
   | undefined;
 
 /** An array of storable data. */
-export interface StorableArray extends ArrayLike<StorableDatum> {}
+export interface FabricArray extends ArrayLike<FabricDatum> {}
 
 /** An object/record of storable data. */
-export interface StorableObject extends Record<string, StorableDatum> {}
+export interface FabricObject extends Record<string, FabricDatum> {}
 
 // ============================================================================
 // Runtime Constants

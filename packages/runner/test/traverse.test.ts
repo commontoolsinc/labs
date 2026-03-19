@@ -12,7 +12,7 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import type { StorableDatum } from "@commontools/data-model/fabric-value";
+import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
   canBranchMatch,
   CompoundCycleTracker,
@@ -35,7 +35,7 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-): SchemaObjectTraverser<StorableDatum> {
+): SchemaObjectTraverser<FabricDatum> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
@@ -541,7 +541,7 @@ for (const canonicalHashing of [false, true]) {
             },
           };
         }
-        function makeRevision(id: URI, value: StorableDatum): Revision<State> {
+        function makeRevision(id: URI, value: FabricDatum): Revision<State> {
           return {
             the: "application/json",
             of: id,
@@ -568,7 +568,7 @@ for (const canonicalHashing of [false, true]) {
           }
           function makeRevision(
             id: URI,
-            value: StorableDatum,
+            value: FabricDatum,
           ): Revision<State> {
             return {
               the: "application/json",
@@ -600,7 +600,7 @@ for (const canonicalHashing of [false, true]) {
           const managedTx = new ManagedStorageTransaction(manager);
           const tx = new ExtendedStorageTransaction(managedTx);
           const tracker = new CompoundCycleTracker<
-            Immutable<StorableDatum>,
+            Immutable<FabricDatum>,
             JSONSchema | undefined
           >();
           const cfc = new ContextualFlowControl();
@@ -612,7 +612,7 @@ for (const canonicalHashing of [false, true]) {
               path: ["value", "foo"],
               space: "did:null:null",
             },
-            value: (revA.is as any).value.foo as StorableDatum,
+            value: (revA.is as any).value.foo as FabricDatum,
           };
           const docASelector = {
             path: ["value", "foo"],
@@ -667,7 +667,7 @@ for (const canonicalHashing of [false, true]) {
           const managedTx = new ManagedStorageTransaction(manager);
           const tx = new ExtendedStorageTransaction(managedTx);
           const tracker = new CompoundCycleTracker<
-            Immutable<StorableDatum>,
+            Immutable<FabricDatum>,
             JSONSchema | undefined
           >();
           const cfc = new ContextualFlowControl();
@@ -679,7 +679,7 @@ for (const canonicalHashing of [false, true]) {
               path: ["value", "current"],
               space: "did:null:null",
             },
-            value: (revA.is as any).value.current as StorableDatum,
+            value: (revA.is as any).value.current as FabricDatum,
           };
           const docASelector = { path: ["value", "current"], schema: true };
           const [curDoc, _selector1] = getAtPath(
@@ -735,7 +735,7 @@ for (const canonicalHashing of [false, true]) {
           const managedTx = new ManagedStorageTransaction(manager);
           const tx = new ExtendedStorageTransaction(managedTx);
           const tracker = new CompoundCycleTracker<
-            Immutable<StorableDatum>,
+            Immutable<FabricDatum>,
             JSONSchema | undefined
           >();
           const cfc = new ContextualFlowControl();
@@ -747,7 +747,7 @@ for (const canonicalHashing of [false, true]) {
               path: ["value", "current"],
               space: "did:null:null",
             },
-            value: (revA.is as any).value.current as StorableDatum,
+            value: (revA.is as any).value.current as FabricDatum,
           };
           const docASelector = {
             path: ["value", "current"],
@@ -816,7 +816,7 @@ for (const canonicalHashing of [false, true]) {
         const managedTx = new ManagedStorageTransaction(manager);
         const tx = new ExtendedStorageTransaction(managedTx);
         const tracker: PointerCycleTracker = new CompoundCycleTracker<
-          Immutable<StorableDatum>,
+          Immutable<FabricDatum>,
           JSONSchema | undefined
         >();
         const cfc = new ContextualFlowControl();
@@ -1096,7 +1096,7 @@ for (const canonicalHashing of [false, true]) {
       // type-mismatch error without needing a broken link.
 
       function makeArrayDoc(
-        docValue: StorableDatum[],
+        docValue: FabricDatum[],
       ): {
         store: Map<string, Revision<State>>;
         docUri: URI;
@@ -2149,7 +2149,7 @@ for (const canonicalHashing of [false, true]) {
 
       /** Access the protected schemaTracker from the traverser. */
       function getSchemaTracker(
-        traverser: SchemaObjectTraverser<StorableDatum>,
+        traverser: SchemaObjectTraverser<FabricDatum>,
       ): MapSet<string, SchemaPathSelector> {
         return (traverser as any).schemaTracker;
       }

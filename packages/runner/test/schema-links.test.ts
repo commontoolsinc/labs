@@ -7,7 +7,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
-import type { StorableValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createDataCellURI } from "../src/link-utils.ts";
@@ -1388,7 +1388,7 @@ describe("Schema - Link Resolution", () => {
             },
           },
         },
-      } as StorableValue);
+      } as FabricValue);
 
       // data cell's system points to cellB's argument.system
       const dataCellURI = createDataCellURI({

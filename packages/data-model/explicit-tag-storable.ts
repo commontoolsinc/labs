@@ -1,5 +1,5 @@
-import type { StorableValue } from "./fabric-value.ts";
-import { StorableInstance } from "./storable-instance.ts";
+import type { FabricValue } from "./fabric-value.ts";
+import { FabricInstance } from "./storable-instance.ts";
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.
@@ -7,16 +7,16 @@ import { StorableInstance } from "./storable-instance.ts";
  * (failed deconstruction/reconstruction). Enables a single `instanceof`
  * check where code needs to handle both.
  *
- * Extends `StorableInstance` so subclasses inherit the `shallowClone()` method.
+ * Extends `FabricInstance` so subclasses inherit the `shallowClone()` method.
  *
  * See Section 3.2 of the formal spec.
  */
-export abstract class ExplicitTagStorable extends StorableInstance {
+export abstract class ExplicitTagStorable extends FabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,
     /** The raw state, already recursively processed by the deserializer. */
-    readonly state: StorableValue,
+    readonly state: FabricValue,
   ) {
     super();
   }

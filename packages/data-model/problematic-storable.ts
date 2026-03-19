@@ -1,4 +1,4 @@
-import type { StorableValue } from "./fabric-value.ts";
+import type { FabricValue } from "./fabric-value.ts";
 import { DECONSTRUCT, RECONSTRUCT } from "./storable-instance.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
@@ -12,14 +12,14 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 export class ProblematicStorable extends ExplicitTagStorable {
   constructor(
     typeTag: string,
-    state: StorableValue,
+    state: FabricValue,
     /** A description of what went wrong. */
     readonly error: string,
   ) {
     super(typeTag, state);
   }
 
-  [DECONSTRUCT](): StorableValue {
+  [DECONSTRUCT](): FabricValue {
     return { type: this.typeTag, state: this.state, error: this.error };
   }
 
@@ -28,7 +28,7 @@ export class ProblematicStorable extends ExplicitTagStorable {
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: StorableValue; error: string },
+    state: { type: string; state: FabricValue; error: string },
     _context: ReconstructionContext,
   ): ProblematicStorable {
     return new ProblematicStorable(state.type, state.state, state.error);

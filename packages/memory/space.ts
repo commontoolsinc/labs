@@ -70,10 +70,7 @@ export type {
   SelectSchemaResult,
   SelectSchemaStats,
 } from "./space-schema.ts";
-import {
-  StorableDatum,
-  StorableValue,
-} from "@commontools/data-model/fabric-value";
+import { FabricDatum, FabricValue } from "@commontools/data-model/fabric-value";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
@@ -577,7 +574,7 @@ const recall = <Space extends MemorySpace>(
       // `revision.is` is typed `undefined` in some union members, but at
       // runtime the storage row can carry a value. Before the encoding
       // dispatch, `JSON.parse` returned `any` which silently satisfied the
-      // type; `valueFromJson` returns `StorableValue`, so we need a cast.
+      // type; `valueFromJson` returns `FabricValue`, so we need a cast.
       // deno-lint-ignore no-explicit-any
       (revision as any).is = valueFromJson(
         row.is,
@@ -713,7 +710,7 @@ export type SelectedFact = {
   the: MIME;
   of: URI;
   cause: CauseString;
-  is?: StorableDatum;
+  is?: FabricDatum;
   since: number;
 };
 
@@ -725,7 +722,7 @@ const toFact = function (row: StateRow): SelectedFact {
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
     is: row.is
-      ? valueFromJson(row.is, storageReconstructionContext) as StorableDatum
+      ? valueFromJson(row.is, storageReconstructionContext) as FabricDatum
       : undefined,
     since: row.since,
   };
@@ -785,7 +782,7 @@ export const selectFact = function <Space extends MemorySpace>(
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
-  datum: StorableValue,
+  datum: FabricValue,
 ): string => {
   if (datum === undefined) {
     return "undefined";
@@ -1219,7 +1216,7 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
 };
 
 export const LABEL_TYPE = "application/label+json" as const;
-export type FactSelectionValue = { is?: StorableDatum; since: number };
+export type FactSelectionValue = { is?: FabricDatum; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
 // includedFacts may include more than one cause for a single doc.

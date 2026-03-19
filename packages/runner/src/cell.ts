@@ -10,7 +10,7 @@ import {
   shallowStorableFromNativeValue,
 } from "@commontools/data-model/storable-value";
 import type { MemorySpace } from "@commontools/memory/interface";
-import type { StorableValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -186,33 +186,33 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     /**
-     * Reads the cell's raw storable value as `StorableValue`, bypassing the
+     * Reads the cell's raw storable value as `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
      * By default (or with `{ frozen: true }`), returns a deep-frozen
-     * `Immutable<StorableValue>`. Pass `{ frozen: false }` to get a mutable
+     * `Immutable<FabricValue>`. Pass `{ frozen: false }` to get a mutable
      * deep copy instead.
      *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
       options?: IReadOptions & { frozen?: true },
-    ): Immutable<StorableValue>;
+    ): Immutable<FabricValue>;
     getRawUntyped(
       options: IReadOptions & { frozen: false },
-    ): StorableValue;
-    getRawUntyped(options?: IReadOptions): StorableValue;
-    setRaw(value: (NoInfer<T> & StorableValue) | undefined): void;
+    ): FabricValue;
+    getRawUntyped(options?: IReadOptions): FabricValue;
+    setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
-     * Sets the raw cell value to any `StorableValue`, bypassing the cell's
+     * Sets the raw cell value to any `FabricValue`, bypassing the cell's
      * type parameter `T`. Use this when writing pre-formed storable data
      * (e.g., `SigilLink` references, stream markers) that is valid at the
      * storage layer but does not conform to the cell's schema type.
      *
      * Prefer `setRaw()` when the value matches `T`.
      */
-    setRawUntyped(value: StorableValue): void;
+    setRawUntyped(value: FabricValue): void;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -369,7 +369,7 @@ interface CauseContainer {
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
  */
-export class CellImpl<T extends StorableValue>
+export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
   private readOnlyReason: string | undefined;
 
@@ -1211,13 +1211,13 @@ export class CellImpl<T extends StorableValue>
 
   getRawUntyped(
     options?: IReadOptions & { frozen?: true },
-  ): Immutable<StorableValue>;
+  ): Immutable<FabricValue>;
   getRawUntyped(
     options: IReadOptions & { frozen: false },
-  ): StorableValue;
+  ): FabricValue;
   getRawUntyped(
     options?: IReadOptions & { frozen?: boolean },
-  ): StorableValue {
+  ): FabricValue {
     const frozen = options?.frozen ?? true;
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
@@ -1233,11 +1233,11 @@ export class CellImpl<T extends StorableValue>
     return cloneIfNecessary(value, { frozen });
   }
 
-  setRaw(value: (NoInfer<T> & StorableValue) | undefined): void {
+  setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: StorableValue): void {
+  setRawUntyped(value: FabricValue): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to

@@ -33,7 +33,7 @@ import {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import { StorableDatum } from "@commontools/data-model/fabric-value";
+import { FabricDatum } from "@commontools/data-model/fabric-value";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
@@ -833,7 +833,7 @@ class MemoryProviderSession<
 
   private toSelection(factVersions: Revision<Fact>[]) {
     const selection: Memory.OfTheCause<
-      { is?: StorableDatum; since: number }
+      { is?: FabricDatum; since: number }
     > = {};
     for (const fact of factVersions) {
       setRevision(

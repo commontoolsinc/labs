@@ -1,8 +1,8 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 import type {
-  StorableNativeObject,
-  StorableValue,
-  StorableValueLayer,
+  FabricNativeObject,
+  FabricValue,
+  FabricValueLayer,
 } from "./fabric-value.ts";
 import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
 
@@ -18,7 +18,7 @@ import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
  */
 function specialInstanceToStorableValue(
   value: unknown,
-): StorableValueLayer | null {
+): FabricValueLayer | null {
   if (Error.isError(value)) {
     const error = value as Error;
     // Return a single-key object using the `@` prefix convention established
@@ -68,7 +68,7 @@ function hasToJSONMethod(
  */
 export function isStorableValueLegacy(
   value: unknown,
-): value is StorableValueLayer {
+): value is FabricValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -105,14 +105,14 @@ export function isStorableValueLegacy(
 /**
  * Legacy implementation of `canBeStored()` for the JSON-only type system.
  * In legacy mode, equivalent to `isStorableValueLegacy()` since the legacy
- * path doesn't support `StorableNativeObject` types.
+ * path doesn't support `FabricNativeObject` types.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
  */
 export function canBeStoredLegacy(
   value: unknown,
-): value is StorableValue | StorableNativeObject {
+): value is FabricValue | FabricNativeObject {
   return isStorableValueLegacy(value);
 }
 
@@ -136,17 +136,17 @@ export function canBeStoredLegacy(
  * Callers must resolve `CloneOptions` defaults and validate before calling;
  * the dispatcher in `storable-value.ts` handles that.
  *
- * @param value - An already-valid `StorableValue`.
+ * @param value - An already-valid `FabricValue`.
  * @param frozen - Whether the result should be frozen.
  * @param deep - Whether to clone deeply or shallowly.
  * @param force - Whether to force a copy.
  */
 export function cloneIfNecessaryLegacy(
-  value: StorableValue,
+  value: FabricValue,
   frozen: boolean,
   deep: boolean,
   force: boolean,
-): StorableValue {
+): FabricValue {
   const needClone = force || Object.isFrozen(value);
   if (frozen || !needClone) {
     return value;
@@ -155,14 +155,14 @@ export function cloneIfNecessaryLegacy(
   if (deep) {
     return structuredClone(value);
   } else if (Array.isArray(value)) {
-    const arr = value as StorableValue[];
-    const copy: StorableValue[] = new Array(arr.length);
+    const arr = value as FabricValue[];
+    const copy: FabricValue[] = new Array(arr.length);
     for (let i = 0; i < arr.length; i++) {
       if (i in arr) copy[i] = arr[i];
     }
     return copy;
   } else {
-    return { ...(value as Record<string, unknown>) } as StorableValue;
+    return { ...(value as Record<string, unknown>) } as FabricValue;
   }
 }
 
@@ -177,7 +177,7 @@ export function cloneIfNecessaryLegacy(
  */
 export function shallowStorableFromNativeValueLegacy(
   value: unknown,
-): StorableValueLayer {
+): FabricValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -278,7 +278,7 @@ const PROCESSING = Symbol("PROCESSING");
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function storableFromNativeValueLegacy(value: unknown): StorableValue {
+export function storableFromNativeValueLegacy(value: unknown): FabricValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
@@ -286,7 +286,7 @@ export function storableFromNativeValueLegacy(value: unknown): StorableValue {
     value,
     new Map(),
     false,
-  ) as StorableValue;
+  ) as FabricValue;
 }
 
 /**
@@ -297,7 +297,7 @@ function storableFromNativeValueLegacyInternal(
   original: unknown,
   converted: Map<object, unknown>,
   inArray: boolean,
-): StorableValue | typeof OMIT {
+): FabricValue | typeof OMIT {
   // Track the original value for cycle detection and caching. This is important
   // because `shallowStorableFromNativeValue()` may return a different object (e.g., for sparse
   // arrays or values with `toJSON()`), but circular references and shared
@@ -313,7 +313,7 @@ function storableFromNativeValueLegacyInternal(
       // Already converted this object; return cached result. This handles
       // shared references efficiently and ensures consistent results since
       // `toJSON()` could return different values on repeated calls.
-      return cached as StorableValue;
+      return cached as FabricValue;
     }
     // Mark as currently processing (ancestor) before converting.
     converted.set(original, PROCESSING);
@@ -336,7 +336,7 @@ function storableFromNativeValueLegacyInternal(
 
   // Try to convert the top level to storable form. Calls the legacy function
   // directly since storableFromNativeValueLegacyInternal is part of the legacy path.
-  let value: StorableValueLayer;
+  let value: FabricValueLayer;
   try {
     value = shallowStorableFromNativeValueLegacy(original);
   } catch (e) {
@@ -360,11 +360,11 @@ function storableFromNativeValueLegacyInternal(
       return inArray ? null : OMIT;
     }
     // At this point, value is a primitive (null, boolean, number, string) or
-    // undefined - all valid StorableValue types.
-    return value as StorableValue;
+    // undefined - all valid FabricValue types.
+    return value as FabricValue;
   }
 
-  let result: StorableValue;
+  let result: FabricValue;
 
   // Recursively process arrays and objects.
   if (Array.isArray(value)) {
@@ -372,9 +372,9 @@ function storableFromNativeValueLegacyInternal(
     value.forEach((v, i) => {
       arr[i] = storableFromNativeValueLegacyInternal(v, converted, true);
     });
-    result = arr as StorableValue;
+    result = arr as FabricValue;
   } else {
-    const entries: [string, StorableValue][] = [];
+    const entries: [string, FabricValue][] = [];
     for (const [key, val] of Object.entries(value)) {
       const convertedVal = storableFromNativeValueLegacyInternal(
         val,
@@ -385,7 +385,7 @@ function storableFromNativeValueLegacyInternal(
         entries.push([key, convertedVal]);
       }
     }
-    result = Object.fromEntries(entries) as StorableValue;
+    result = Object.fromEntries(entries) as FabricValue;
   }
 
   // Cache the result for the original object.

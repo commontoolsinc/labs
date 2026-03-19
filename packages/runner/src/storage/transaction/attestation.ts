@@ -2,9 +2,9 @@ import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
 import type {
-  StorableDatum,
-  StorableObject,
-  StorableValue,
+  FabricDatum,
+  FabricObject,
+  FabricValue,
 } from "@commontools/data-model/fabric-value";
 import type {
   IAttestation,
@@ -81,10 +81,10 @@ export const UnsupportedMediaTypeError = (
  * with O(D) structural sharing where D is path depth.
  */
 const setAtPath = (
-  root: StorableValue,
+  root: FabricValue,
   path: readonly MemoryAddressPathComponent[],
-  value: StorableValue,
-): { ok: StorableValue } | {
+  value: FabricValue,
+): { ok: FabricValue } | {
   error: { at: number; type: string; notFound?: boolean };
 } => {
   // Base case: empty path = replace root
@@ -158,12 +158,12 @@ const setAtPath = (
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
     const newArray = sparseArrayCopy(root);
-    newArray[index] = result.ok as StorableDatum;
+    newArray[index] = result.ok as FabricDatum;
     return { ok: newArray };
   }
 
   // Handle objects
-  const obj = root as StorableObject;
+  const obj = root as FabricObject;
 
   // Terminal case
   if (rest.length === 0) {
@@ -171,7 +171,7 @@ const setAtPath = (
     if (value === undefined) {
       if (!(key in obj)) return { ok: root }; // delete non-existent = noop
       const { [key]: _, ...without } = obj;
-      return { ok: without as StorableDatum };
+      return { ok: without as FabricDatum };
     }
     return { ok: { ...obj, [key]: value } };
   }
@@ -189,7 +189,7 @@ const setAtPath = (
     };
   }
   if (result.ok === nested) return { ok: root }; // noop propagation
-  return { ok: { ...obj, [key]: result.ok as StorableDatum } };
+  return { ok: { ...obj, [key]: result.ok as FabricDatum } };
 };
 
 /**
@@ -205,7 +205,7 @@ const setAtPath = (
 export const write = (
   source: IAttestation,
   address: IMemoryAddress,
-  value: StorableValue,
+  value: FabricValue,
 ): Result<
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -380,7 +380,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as StorableObject)[key];
+      value = (value as FabricObject)[key];
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
@@ -465,7 +465,7 @@ export const load = (
           };
         } else if (mediaType === "application/json") {
           // Handle JSON media type
-          let value: StorableDatum;
+          let value: FabricDatum;
           try {
             value = JSON.parse(content);
             result = { ok: { address: { ...address, path: [] }, value } };
@@ -565,8 +565,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: StorableDatum;
-  actual?: StorableDatum;
+  expected?: FabricDatum;
+  actual?: FabricDatum;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;

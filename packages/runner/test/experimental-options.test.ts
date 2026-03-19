@@ -201,7 +201,7 @@ describe("ExperimentalOptions", () => {
     it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
       setStorableValueConfig({ richStorableValues: true });
       // An object whose toJSON() returns undefined. In the rich path, undefined
-      // is a valid StorableValue, so this gets stored in the converted map as
+      // is a valid FabricValue, so this gets stored in the converted map as
       // `undefined`. The bug (before the has() fix) would treat a subsequent
       // lookup as a cache miss because `converted.get(obj) === undefined` can't
       // distinguish "stored undefined" from "key not found".

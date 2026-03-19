@@ -1,7 +1,7 @@
-import type { StorableValue } from "./fabric-value.ts";
-import { DECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
+import type { FabricValue } from "./fabric-value.ts";
+import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
 import {
-  isStorableInstance,
+  isFabricInstance,
   type ReconstructionContext,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
@@ -19,7 +19,7 @@ export type JsonWireValue =
   | string
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
-import { StorableEpochDays, StorableEpochNsec } from "./storable-epoch.ts";
+import { FabricEpochDays, FabricEpochNsec } from "./storable-epoch.ts";
 import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,
@@ -40,7 +40,7 @@ export interface TypeHandlerCodec {
   /** Wrap a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
   /** Get the wire format tag for a storable instance's type. */
-  getTagFor(value: StorableInstance): string;
+  getTagFor(value: FabricInstance): string;
 }
 
 /**
@@ -58,7 +58,7 @@ export interface TypeHandler {
    * during serialization to find the right handler via linear scan. Order
    * matters: more specific handlers should be checked first.
    */
-  canSerialize(value: StorableValue): boolean;
+  canSerialize(value: FabricValue): boolean;
 
   /**
    * Serialize the value. Only called after `canSerialize` returned `true`.
@@ -66,9 +66,9 @@ export interface TypeHandler {
    * recursively serializing nested values via the provided `recurse` callback.
    */
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    recurse: (v: StorableValue) => JsonWireValue,
+    recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue;
 
   /**
@@ -79,8 +79,8 @@ export interface TypeHandler {
   deserialize(
     state: JsonWireValue,
     runtime: ReconstructionContext,
-    recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue;
+    recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue;
 }
 
 /**
@@ -109,7 +109,7 @@ export class TypeHandlerRegistry {
    * if no handler matches (the caller should fall through to structural
    * handling for primitives, arrays, and plain objects).
    */
-  findSerializer(value: StorableValue): TypeHandler | undefined {
+  findSerializer(value: FabricValue): TypeHandler | undefined {
     for (const handler of this.handlers) {
       if (handler.canSerialize(value)) {
         return handler;
@@ -138,7 +138,7 @@ function makeProblematic(
   state: JsonWireValue,
   message: string,
 ): ProblematicStorable {
-  return new ProblematicStorable(tag, state as StorableValue, message);
+  return new ProblematicStorable(tag, state as FabricValue, message);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,14 +152,14 @@ function makeProblematic(
 export const UndefinedHandler: TypeHandler = {
   tag: TAGS.Undefined,
 
-  canSerialize(value: StorableValue): boolean {
+  canSerialize(value: FabricValue): boolean {
     return value === undefined;
   },
 
   serialize(
-    _value: StorableValue,
+    _value: FabricValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => JsonWireValue,
+    _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     return codec.wrapTag(TAGS.Undefined, null);
   },
@@ -167,8 +167,8 @@ export const UndefinedHandler: TypeHandler = {
   deserialize(
     _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue {
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
     return undefined;
   },
 };
@@ -185,14 +185,14 @@ export const UndefinedHandler: TypeHandler = {
 export const BigIntHandler: TypeHandler = {
   tag: TAGS.BigInt,
 
-  canSerialize(value: StorableValue): boolean {
+  canSerialize(value: FabricValue): boolean {
     return typeof value === "bigint";
   },
 
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => JsonWireValue,
+    _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
     const b64 = toUnpaddedBase64url(bytes);
@@ -202,8 +202,8 @@ export const BigIntHandler: TypeHandler = {
   deserialize(
     state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue {
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
     if (typeof state !== "string") {
       return makeProblematic(
         TAGS.BigInt,
@@ -225,26 +225,26 @@ export const BigIntHandler: TypeHandler = {
 };
 
 /**
- * Handler for `StorableEpochNsec`. Serializes to a flat base64 string encoding
+ * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochNsec@1": "<base64>" }`. StorableEpochNsec is a direct
- * member of StorableDatum (not a StorableInstance), so this handler uses
+ * Wire format: `{ "/EpochNsec@1": "<base64>" }`. FabricEpochNsec is a direct
+ * member of FabricDatum (not a FabricInstance), so this handler uses
  * `instanceof` directly.
  * See Section 5.3 of the formal spec.
  */
 export const EpochNsecHandler: TypeHandler = {
   tag: TAGS.EpochNsec,
 
-  canSerialize(value: StorableValue): boolean {
-    return value instanceof StorableEpochNsec;
+  canSerialize(value: FabricValue): boolean {
+    return value instanceof FabricEpochNsec;
   },
 
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => JsonWireValue,
+    _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    const nsec = (value as StorableEpochNsec).value;
+    const nsec = (value as FabricEpochNsec).value;
     const bytes = bigintToMinimalTwosComplement(nsec);
     const b64 = toUnpaddedBase64url(bytes);
     return codec.wrapTag(TAGS.EpochNsec, b64 as JsonWireValue);
@@ -253,8 +253,8 @@ export const EpochNsecHandler: TypeHandler = {
   deserialize(
     state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue {
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
     if (typeof state !== "string") {
       return makeProblematic(
         TAGS.EpochNsec,
@@ -265,7 +265,7 @@ export const EpochNsecHandler: TypeHandler = {
     try {
       const bytes = fromBase64url(state);
       const bigint = bigintFromMinimalTwosComplement(bytes);
-      return new StorableEpochNsec(bigint) as unknown as StorableValue;
+      return new FabricEpochNsec(bigint) as unknown as FabricValue;
     } catch {
       return makeProblematic(
         TAGS.EpochNsec,
@@ -277,26 +277,26 @@ export const EpochNsecHandler: TypeHandler = {
 };
 
 /**
- * Handler for `StorableEpochDays`. Serializes to a flat base64 string encoding
+ * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochDays@1": "<base64>" }`. StorableEpochDays is a direct
- * member of StorableDatum (not a StorableInstance), so this handler uses
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. FabricEpochDays is a direct
+ * member of FabricDatum (not a FabricInstance), so this handler uses
  * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
   tag: TAGS.EpochDays,
 
-  canSerialize(value: StorableValue): boolean {
-    return value instanceof StorableEpochDays;
+  canSerialize(value: FabricValue): boolean {
+    return value instanceof FabricEpochDays;
   },
 
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => JsonWireValue,
+    _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    const days = (value as StorableEpochDays).value;
+    const days = (value as FabricEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
     const b64 = toUnpaddedBase64url(bytes);
     return codec.wrapTag(TAGS.EpochDays, b64 as JsonWireValue);
@@ -305,8 +305,8 @@ export const EpochDaysHandler: TypeHandler = {
   deserialize(
     state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue {
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
     if (typeof state !== "string") {
       return makeProblematic(
         TAGS.EpochDays,
@@ -317,7 +317,7 @@ export const EpochDaysHandler: TypeHandler = {
     try {
       const bytes = fromBase64url(state);
       const bigint = bigintFromMinimalTwosComplement(bytes);
-      return new StorableEpochDays(bigint) as unknown as StorableValue;
+      return new FabricEpochDays(bigint) as unknown as FabricValue;
     } catch {
       return makeProblematic(
         TAGS.EpochDays,
@@ -329,7 +329,7 @@ export const EpochDaysHandler: TypeHandler = {
 };
 
 /**
- * Handler for `StorableInstance` values (custom protocol types, including
+ * Handler for `FabricInstance` values (custom protocol types, including
  * `StorableError` and `ExplicitTagStorable` subtypes). Serializes via
  * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
  * dispatched via this handler's tag (since each instance type has its own
@@ -337,21 +337,21 @@ export const EpochDaysHandler: TypeHandler = {
  * registry for those tags.
  */
 export const StorableInstanceHandler: TypeHandler = {
-  // This tag is not used for deserialization dispatch -- StorableInstance
+  // This tag is not used for deserialization dispatch -- FabricInstance
   // types are looked up by their individual tags. The handler is registered
   // for serialization matching only.
   tag: "",
 
-  canSerialize(value: StorableValue): boolean {
-    return isStorableInstance(value);
+  canSerialize(value: FabricValue): boolean {
+    return isFabricInstance(value);
   },
 
   serialize(
-    value: StorableValue,
+    value: FabricValue,
     codec: TypeHandlerCodec,
-    recurse: (v: StorableValue) => JsonWireValue,
+    recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    const inst = value as StorableInstance;
+    const inst = value as FabricInstance;
 
     // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
     // preserved typeTag and re-serialize their stored state.
@@ -360,7 +360,7 @@ export const StorableInstanceHandler: TypeHandler = {
       return codec.wrapTag(inst.typeTag, serializedState);
     }
 
-    // General StorableInstance: use DECONSTRUCT and codec for tag.
+    // General FabricInstance: use DECONSTRUCT and codec for tag.
     const state = inst[DECONSTRUCT]();
     const tag = codec.getTagFor(inst);
     const serializedState = recurse(state);
@@ -370,9 +370,9 @@ export const StorableInstanceHandler: TypeHandler = {
   deserialize(
     _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => StorableValue,
-  ): StorableValue {
-    // Not reached via tag dispatch -- StorableInstance deserialization is
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
+    // Not reached via tag dispatch -- FabricInstance deserialization is
     // handled by the class registry fallback in deserialize().
     throw new Error("StorableInstanceHandler.deserialize should not be called");
   },
@@ -381,18 +381,18 @@ export const StorableInstanceHandler: TypeHandler = {
 /**
  * Create a registry with the built-in type handlers. The order matters for
  * serialization: `EpochNsec` and `EpochDays` are checked first (direct
- * StorableDatum members that need `instanceof`-based matching), then
- * `StorableInstance` (generic protocol types), then `bigint` and `undefined`.
+ * FabricDatum members that need `instanceof`-based matching), then
+ * `FabricInstance` (generic protocol types), then `bigint` and `undefined`.
  * Primitives (null, boolean, number, string), arrays, and plain objects are
  * handled as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // EpochNsec/EpochDays first -- they are direct StorableDatum members matched
+  // EpochNsec/EpochDays first -- they are direct FabricDatum members matched
   // by instanceof, and must be checked before the generic StorableInstanceHandler.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
-  // StorableInstance (generic -- checked via isStorableInstance brand).
+  // FabricInstance (generic -- checked via isFabricInstance brand).
   // Covers StorableError, UnknownStorable, ProblematicStorable, etc.
   registry.register(StorableInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).

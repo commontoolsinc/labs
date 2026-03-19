@@ -1,9 +1,9 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { Immutable } from "@commontools/utils/types";
 import type {
-  StorableNativeObject,
-  StorableValue,
-  StorableValueLayer,
+  FabricNativeObject,
+  FabricValue,
+  FabricValueLayer,
 } from "./fabric-value.ts";
 import {
   canBeStoredRich,
@@ -93,7 +93,7 @@ export function resetStorableValueConfig(): void {
 export function storableFromNativeValue(
   value: unknown,
   freeze = true,
-): StorableValue {
+): FabricValue {
   return currentConfig.richStorableValues
     ? storableFromNativeValueRich(value, freeze)
     : storableFromNativeValueLegacy(value);
@@ -111,41 +111,41 @@ export function storableFromNativeValue(
  *   passthrough regardless.
  */
 export function nativeFromStorableValue(
-  value: StorableValue,
+  value: FabricValue,
   frozen = true,
-): StorableValue {
+): FabricValue {
   return currentConfig.richStorableValues
-    ? nativeFromStorableValueRich(value, frozen) as StorableValue
+    ? nativeFromStorableValueRich(value, frozen) as FabricValue
     : value;
 }
 
 /**
- * Clone an already-valid `StorableValue` to achieve a desired frozenness,
+ * Clone an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
  * Unlike `storableFromNativeValue` (which converts native JS values into
  * storable wrappers), this function assumes the input is already a valid
- * `StorableValue` and only adjusts frozenness by cloning where necessary.
+ * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
  * Flag ON (rich): delegates to `cloneIfNecessaryRich`.
  *
- * @param value - An already-valid `StorableValue`.
+ * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
  */
-export function cloneIfNecessary<T extends StorableValue>(
+export function cloneIfNecessary<T extends FabricValue>(
   value: T,
   options?: CloneOptions & { frozen?: true },
 ): Immutable<T>;
-export function cloneIfNecessary<T extends StorableValue>(
+export function cloneIfNecessary<T extends FabricValue>(
   value: T,
   options: CloneOptions & { frozen: false },
 ): T;
-export function cloneIfNecessary<T extends StorableValue>(
+export function cloneIfNecessary<T extends FabricValue>(
   value: T,
   options?: CloneOptions,
 ): T;
-export function cloneIfNecessary<T extends StorableValue>(
+export function cloneIfNecessary<T extends FabricValue>(
   value: T,
   options?: CloneOptions,
 ): T {
@@ -190,7 +190,7 @@ export function cloneIfNecessary<T extends StorableValue>(
  */
 export function isStorableValue(
   value: unknown,
-): value is StorableValueLayer {
+): value is FabricValueLayer {
   return currentConfig.richStorableValues
     ? isStorableValueRich(value)
     : isStorableValueLegacy(value);
@@ -198,7 +198,7 @@ export function isStorableValue(
 
 /**
  * Returns `true` if `storableFromNativeValue()` would succeed on the value.
- * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
+ * Checks whether the value is a `FabricValue`, a `FabricNativeObject`,
  * or a deep tree thereof.
  *
  * Flag OFF (legacy): equivalent to `isStorableValue()` (non-recursive).
@@ -210,7 +210,7 @@ export function isStorableValue(
  */
 export function canBeStored(
   value: unknown,
-): value is StorableValue | StorableNativeObject {
+): value is FabricValue | FabricNativeObject {
   return currentConfig.richStorableValues
     ? canBeStoredRich(value)
     : canBeStoredLegacy(value);
@@ -237,7 +237,7 @@ export function canBeStored(
 export function shallowStorableFromNativeValue(
   value: unknown,
   freeze = true,
-): StorableValueLayer {
+): FabricValueLayer {
   return currentConfig.richStorableValues
     ? shallowStorableFromNativeValueRich(value, freeze)
     : shallowStorableFromNativeValueLegacy(value);

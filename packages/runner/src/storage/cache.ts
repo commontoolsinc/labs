@@ -1,5 +1,5 @@
 import { fromString, refer } from "@commontools/data-model/value-hash";
-import type { StorableDatum } from "@commontools/data-model/fabric-value";
+import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -288,7 +288,7 @@ class Heap implements SyncPush<Revision<State>> {
 type RevisionArchive = {
   the: The;
   of: Entity;
-  is?: StorableDatum;
+  is?: FabricDatum;
   cause?: string;
   since: number;
 };
@@ -561,7 +561,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     }
     const traverse = (
       value: Readonly<any>,
-    ): StorableDatum => {
+    ): FabricDatum => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
@@ -1380,7 +1380,7 @@ export class Replica {
       return;
     }
 
-    const initialACL: StorableDatum = {
+    const initialACL: FabricDatum = {
       value: {
         [userIdentity.did()]: "OWNER",
         [ANYONE_USER]: "WRITE",
@@ -1761,7 +1761,7 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<
     string,
-    Set<(value: StorageValue<StorableDatum>) => void>
+    Set<(value: StorageValue<FabricDatum>) => void>
   > = new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid

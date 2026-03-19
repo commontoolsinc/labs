@@ -3,8 +3,8 @@ import { getLogger } from "@commontools/utils/logger";
 import { isRecord, type Mutable } from "@commontools/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import type {
-  StorableDatum,
-  StorableValue,
+  FabricDatum,
+  FabricValue,
 } from "@commontools/data-model/fabric-value";
 import {
   type Frame,
@@ -168,7 +168,7 @@ export class Runner {
       [TYPE]: string;
       spell?: SigilLink;
       argument?: T;
-      internal?: StorableDatum;
+      internal?: FabricDatum;
       resultRef: SigilLink;
     };
 
@@ -287,7 +287,7 @@ export class Runner {
     const internal = Object.assign(
       {},
       cellAwareDeepCopy(
-        (defaults as unknown as { internal: StorableDatum })?.internal,
+        (defaults as unknown as { internal: FabricDatum })?.internal,
       ),
       cellAwareDeepCopy(
         isRecord(pattern.initial) && isRecord(pattern.initial.internal)
@@ -295,7 +295,7 @@ export class Runner {
           : {},
       ),
       isRecord(previousInternal) ? previousInternal : {},
-    ) as StorableDatum;
+    ) as FabricDatum;
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
@@ -320,7 +320,7 @@ export class Runner {
         }),
       internal,
       ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
-    } as StorableValue);
+    } as FabricValue);
     if (argument) {
       diffAndUpdate(
         this.runtime,
@@ -344,7 +344,7 @@ export class Runner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRawUntyped(result as StorableValue);
+      resultCell.withTx(tx).setRawUntyped(result as FabricValue);
     }
 
     // [unsafe closures:] For patterns from closures, add a materialize factory
@@ -1033,7 +1033,7 @@ export class Runner {
    * @param value The value to search for patterns
    */
   private discoverAndCacheFunctionsFromValue(
-    value: StorableValue,
+    value: FabricValue,
     seen: Set<object>,
   ): void {
     if (isPattern(value)) {
@@ -1057,7 +1057,7 @@ export class Runner {
 
     // Recursively search in objects and arrays
     if (Array.isArray(value)) {
-      for (const item of value as StorableValue[]) {
+      for (const item of value as FabricValue[]) {
         this.discoverAndCacheFunctionsFromValue(item, seen);
       }
       return;
@@ -1065,7 +1065,7 @@ export class Runner {
 
     for (const key in value as Record<string, any>) {
       this.discoverAndCacheFunctionsFromValue(
-        value[key] as StorableValue,
+        value[key] as FabricValue,
         seen,
       );
     }
@@ -1074,8 +1074,8 @@ export class Runner {
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: StorableValue,
-    outputBindings: StorableValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -1152,8 +1152,8 @@ export class Runner {
   private instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: StorableValue,
-    outputBindings: StorableValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -1196,8 +1196,8 @@ export class Runner {
     // Check if $event is a stream alias
     let streamLink: NormalizedFullLink | undefined = undefined;
     if (isRecord(inputs) && "$event" in inputs) {
-      let value: StorableDatum | undefined = inputs.$event as
-        | StorableDatum
+      let value: FabricDatum | undefined = inputs.$event as
+        | FabricDatum
         | undefined;
       while (isWriteRedirectLink(value)) {
         const maybeStreamLink = resolveLink(
@@ -1739,8 +1739,8 @@ export class Runner {
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: StorableValue,
-    outputBindings: StorableValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -1881,8 +1881,8 @@ export class Runner {
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
     _module: Module,
-    inputBindings: StorableValue,
-    outputBindings: StorableValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
     processCell: Cell<any>,
     _addCancel: AddCancel,
     _pattern: Pattern,
@@ -1895,8 +1895,8 @@ export class Runner {
   private instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: StorableValue,
-    outputBindings: StorableValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     _pattern: Pattern,
@@ -2070,7 +2070,7 @@ export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
  */
 export function extractDefaultValues(
   schema: JSONSchema,
-): StorableValue {
+): FabricValue {
   if (typeof schema !== "object" || schema === null) return undefined;
 
   if (

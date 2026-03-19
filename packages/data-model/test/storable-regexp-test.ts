@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
-import { isStorableInstance } from "../storable-protocol.ts";
+import { isFabricInstance } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import type { StorableValue } from "../fabric-value.ts";
+import type { FabricValue } from "../fabric-value.ts";
 import {
   isConvertibleNativeInstance,
   nativeValueFromStorableValue,
@@ -40,9 +40,9 @@ describe("StorableRegExp", () => {
   // --------------------------------------------------------------------------
 
   describe("wrapper basics", () => {
-    it("implements StorableInstance (isStorableInstance returns true)", () => {
+    it("implements FabricInstance (isFabricInstance returns true)", () => {
       const sr = new StorableRegExp(/abc/gi);
-      expect(isStorableInstance(sr)).toBe(true);
+      expect(isFabricInstance(sr)).toBe(true);
     });
 
     it("has typeTag 'RegExp@1'", () => {
@@ -69,7 +69,7 @@ describe("StorableRegExp", () => {
   describe("[DECONSTRUCT]", () => {
     it("returns source, flags, and flavor", () => {
       const sr = new StorableRegExp(/abc/gi);
-      const state = sr[DECONSTRUCT]() as Record<string, StorableValue>;
+      const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.source).toBe("abc");
       expect(state.flags).toBe("gi");
       expect(state.flavor).toBe("es2025");
@@ -77,7 +77,7 @@ describe("StorableRegExp", () => {
 
     it("returns correct source for complex pattern", () => {
       const sr = new StorableRegExp(/^foo\d+\.bar$/);
-      const state = sr[DECONSTRUCT]() as Record<string, StorableValue>;
+      const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.source).toBe("^foo\\d+\\.bar$");
       expect(state.flags).toBe("");
       expect(state.flavor).toBe("es2025");
@@ -85,7 +85,7 @@ describe("StorableRegExp", () => {
 
     it("returns empty flags for no-flag regexp", () => {
       const sr = new StorableRegExp(/abc/);
-      const state = sr[DECONSTRUCT]() as Record<string, StorableValue>;
+      const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.flags).toBe("");
     });
 
@@ -105,7 +105,7 @@ describe("StorableRegExp", () => {
 
   describe("[RECONSTRUCT]", () => {
     it("creates StorableRegExp from state", () => {
-      const state = { source: "abc", flags: "gi" } as StorableValue;
+      const state = { source: "abc", flags: "gi" } as FabricValue;
       const result = StorableRegExp[RECONSTRUCT](state, dummyContext);
       expect(result).toBeInstanceOf(StorableRegExp);
       expect(result.regex.source).toBe("abc");
@@ -114,7 +114,7 @@ describe("StorableRegExp", () => {
     });
 
     it("defaults to empty source, flags, and es2025 flavor", () => {
-      const state = {} as StorableValue;
+      const state = {} as FabricValue;
       const result = StorableRegExp[RECONSTRUCT](state, dummyContext);
       expect(result.regex.source).toBe("(?:)");
       expect(result.regex.flags).toBe("");
@@ -126,7 +126,7 @@ describe("StorableRegExp", () => {
         source: "abc",
         flags: "g",
         flavor: "pcre2",
-      } as StorableValue;
+      } as FabricValue;
       const result = StorableRegExp[RECONSTRUCT](state, dummyContext);
       expect(result.regex.source).toBe("abc");
       expect(result.regex.flags).toBe("g");
@@ -254,7 +254,7 @@ describe("StorableRegExp", () => {
   describe("nativeValueFromStorableValue", () => {
     it("unwraps StorableRegExp to frozen RegExp (default)", () => {
       const sr = new StorableRegExp(/abc/gi);
-      const result = nativeValueFromStorableValue(sr as StorableValue);
+      const result = nativeValueFromStorableValue(sr as FabricValue);
       expect(result).toBeInstanceOf(RegExp);
       expect((result as RegExp).source).toBe("abc");
       expect((result as RegExp).flags).toBe("gi");
@@ -264,7 +264,7 @@ describe("StorableRegExp", () => {
     it("unwraps StorableRegExp to unfrozen RegExp when frozen=false", () => {
       const sr = new StorableRegExp(/abc/gi);
       const result = nativeValueFromStorableValue(
-        sr as StorableValue,
+        sr as FabricValue,
         false,
       );
       expect(result).toBeInstanceOf(RegExp);

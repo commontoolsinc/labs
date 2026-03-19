@@ -10,7 +10,7 @@
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
-export class StorableContentId extends SpecialPrimitiveValue {
+export class FabricContentId extends SpecialPrimitiveValue {
   constructor(
     /** The raw hash bytes. */
     readonly hash: Uint8Array,

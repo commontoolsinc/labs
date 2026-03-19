@@ -5,8 +5,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
-import { StorableContentId } from "../storable-content-id.ts";
-import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
+import { FabricContentId } from "../storable-content-id.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
 import {
   StorableError,
   StorableUint8Array,
@@ -370,11 +370,11 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // StorableEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)
+  // FabricEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)
   // =========================================================================
 
   await t.step(
-    "StorableEpochNsec(0n) matches hand-computed byte stream",
+    "FabricEpochNsec(0n) matches hand-computed byte stream",
     () => {
       // TAG_EPOCH_NSEC (0x27) + LEB128(1) + [0x00]
       const expected = sha256([
@@ -382,28 +382,28 @@ Deno.test("canonicalHash", async (t) => {
         0x01,
         0x00,
       ]);
-      assertEquals(canonicalHash(new StorableEpochNsec(0n)), expected);
+      assertEquals(canonicalHash(new FabricEpochNsec(0n)), expected);
     },
   );
 
-  await t.step("StorableEpochNsec with different values differ", () => {
-    const d1 = new StorableEpochNsec(0n);
-    const d2 = new StorableEpochNsec(1704067200000000000n);
+  await t.step("FabricEpochNsec with different values differ", () => {
+    const d1 = new FabricEpochNsec(0n);
+    const d2 = new FabricEpochNsec(1704067200000000000n);
     assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
   });
 
-  await t.step("StorableEpochNsec with negative value (pre-epoch)", () => {
-    const nsec = new StorableEpochNsec(-1000000000n);
+  await t.step("FabricEpochNsec with negative value (pre-epoch)", () => {
+    const nsec = new FabricEpochNsec(-1000000000n);
     const hash = canonicalHash(nsec);
     assertEquals(hash.length, 32);
   });
 
   // =========================================================================
-  // StorableEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)
+  // FabricEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)
   // =========================================================================
 
   await t.step(
-    "StorableEpochDays(0n) matches hand-computed byte stream",
+    "FabricEpochDays(0n) matches hand-computed byte stream",
     () => {
       // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
       const expected = sha256([
@@ -411,34 +411,34 @@ Deno.test("canonicalHash", async (t) => {
         0x01,
         0x00,
       ]);
-      assertEquals(canonicalHash(new StorableEpochDays(0n)), expected);
+      assertEquals(canonicalHash(new FabricEpochDays(0n)), expected);
     },
   );
 
-  await t.step("StorableEpochDays with different values differ", () => {
-    const d1 = new StorableEpochDays(0n);
-    const d2 = new StorableEpochDays(19723n);
+  await t.step("FabricEpochDays with different values differ", () => {
+    const d1 = new FabricEpochDays(0n);
+    const d2 = new FabricEpochDays(19723n);
     assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
   });
 
-  await t.step("StorableEpochDays with negative value (pre-epoch)", () => {
-    const days = new StorableEpochDays(-365n);
+  await t.step("FabricEpochDays with negative value (pre-epoch)", () => {
+    const days = new FabricEpochDays(-365n);
     const hash = canonicalHash(days);
     assertEquals(hash.length, 32);
   });
 
   await t.step(
-    "StorableEpochNsec and StorableEpochDays with same bigint differ",
+    "FabricEpochNsec and FabricEpochDays with same bigint differ",
     () => {
       // Same underlying value, different tag -> different hash
-      const nsec = new StorableEpochNsec(100n);
-      const days = new StorableEpochDays(100n);
+      const nsec = new FabricEpochNsec(100n);
+      const days = new FabricEpochDays(100n);
       assertNotEquals(hex(canonicalHash(nsec)), hex(canonicalHash(days)));
     },
   );
 
   // =========================================================================
-  // StorableError (StorableInstance via DECONSTRUCT)
+  // StorableError (FabricInstance via DECONSTRUCT)
   // =========================================================================
 
   await t.step(
@@ -732,8 +732,8 @@ Deno.test("canonicalHash", async (t) => {
       [1, 2],
       {},
       { a: 1 },
-      new StorableEpochNsec(0n),
-      new StorableEpochDays(0n),
+      new FabricEpochNsec(0n),
+      new FabricEpochDays(0n),
       new StorableUint8Array(new Uint8Array([1])),
       new StorableError(new Error("x")),
     ];
@@ -903,15 +903,15 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // StorableContentId hashing (TAG_CONTENT_ID = 0x29)
+  // FabricContentId hashing (TAG_CONTENT_ID = 0x29)
   // =========================================================================
 
   await t.step(
-    "StorableContentId matches hand-computed byte stream",
+    "FabricContentId matches hand-computed byte stream",
     () => {
       // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
       // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
-      const cid = new StorableContentId(
+      const cid = new FabricContentId(
         new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
         "fid1",
       );
@@ -934,23 +934,23 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step(
-    "StorableContentId with different algorithm tags produce different hashes",
+    "FabricContentId with different algorithm tags produce different hashes",
     () => {
       const bytes = new Uint8Array([0x01, 0x02, 0x03]);
-      const cid1 = new StorableContentId(bytes, "fid1");
-      const cid2 = new StorableContentId(bytes, "fid2");
+      const cid1 = new FabricContentId(bytes, "fid1");
+      const cid2 = new FabricContentId(bytes, "fid2");
       assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
     },
   );
 
   await t.step(
-    "StorableContentId with different hash bytes produce different hashes",
+    "FabricContentId with different hash bytes produce different hashes",
     () => {
-      const cid1 = new StorableContentId(
+      const cid1 = new FabricContentId(
         new Uint8Array([0x01, 0x02]),
         "fid1",
       );
-      const cid2 = new StorableContentId(
+      const cid2 = new FabricContentId(
         new Uint8Array([0x03, 0x04]),
         "fid1",
       );
@@ -959,17 +959,17 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // canonicalHash returns StorableContentId
+  // canonicalHash returns FabricContentId
   // =========================================================================
 
-  await t.step("canonicalHash returns StorableContentId with fid1 tag", () => {
+  await t.step("canonicalHash returns FabricContentId with fid1 tag", () => {
     const result = canonicalHashRaw(42);
-    assertEquals(result instanceof StorableContentId, true);
+    assertEquals(result instanceof FabricContentId, true);
     assertEquals(result.algorithmTag, "fid1");
     assertEquals(result.hash.length, 32);
   });
 
-  await t.step("StorableContentId.toString() produces fid1:<base64>", () => {
+  await t.step("FabricContentId.toString() produces fid1:<base64>", () => {
     const result = canonicalHashRaw(42);
     const str = result.toString();
     assertEquals(str.startsWith("fid1:"), true);
@@ -977,7 +977,7 @@ Deno.test("canonicalHash", async (t) => {
     assertEquals(str.includes("="), false);
   });
 
-  await t.step("StorableContentId is frozen (SpecialPrimitiveValue)", () => {
+  await t.step("FabricContentId is frozen (SpecialPrimitiveValue)", () => {
     const result = canonicalHashRaw(42);
     assertEquals(Object.isFrozen(result), true);
   });

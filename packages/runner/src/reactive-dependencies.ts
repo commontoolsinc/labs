@@ -1,6 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import type { StorableValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
@@ -20,7 +20,7 @@ export interface DetermineTriggeredActionsOptions {
   nonRecursive?: boolean;
 }
 
-type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
+type Keyable = Record<MemoryAddressPathComponent, FabricValue>;
 
 /**
  * Sorts and compactifies the paths.
@@ -106,8 +106,8 @@ export function addressesToPathByEntity(
  */
 export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
-  before: StorableValue,
-  after: StorableValue,
+  before: FabricValue,
+  after: FabricValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
   options?: DetermineTriggeredActionsOptions,
 ): Action[] {
@@ -139,8 +139,8 @@ export function determineTriggeredActions(
   let currentPath: readonly MemoryAddressPathComponent[] = [];
 
   // *Values: An array of data values along currentPath
-  const beforeValues: StorableValue[] = [before];
-  const afterValues: StorableValue[] = [after];
+  const beforeValues: FabricValue[] = [before];
+  const afterValues: FabricValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
   let beforeLastObject = isRecord(before) ? 0 : -1;
@@ -266,8 +266,8 @@ function commonPrefixLength(
  * - Primitives: changed iff the value changed.
  */
 function shallowEqual(
-  before: StorableValue,
-  after: StorableValue,
+  before: FabricValue,
+  after: FabricValue,
 ): boolean {
   // Links compare by full identity — a different link target matters.
   if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
