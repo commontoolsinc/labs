@@ -556,7 +556,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): FabricValue;
+  ): Immutable<FabricValue>;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -570,7 +570,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): FabricValue;
+  ): Immutable<FabricValue>;
 
   /**
    * Writes a value into a storage at a given address, including creating parent

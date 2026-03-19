@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { Immutable, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import {
   cloneIfNecessary,
@@ -69,7 +69,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): FabricValue {
+  ): Immutable<FabricValue> {
     const readResult = this.tx.read(address, options);
     if (
       readResult.error &&
@@ -88,7 +88,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): FabricValue {
+  ): Immutable<FabricValue> {
     return this.readOrThrow(
       { ...address, path: ["value", ...address.path] },
       options,

@@ -261,13 +261,15 @@ export function readMaybeLink(
 
   const maybeSigilLink = readSubPath(["/", LINK_V1_TAG]);
   if (
-    // Sigil link:
+    // Sigil link: { "/": { "link@1": { id: <id>, ... } } }
     (isRecord(maybeSigilLink) &&
-      (!onlyWriteRedirects || maybeSigilLink.overwrite === "redirect")) ||
-    // Legacy cell link:
+      (!onlyWriteRedirects ||
+        ("overwrite" in maybeSigilLink &&
+          maybeSigilLink.overwrite === "redirect"))) ||
+    // Legacy cell link: { cell: {"/": <id> }, path: [] }
     (!onlyWriteRedirects && typeof readSubPath(["cell", "/"]) === "string" &&
       Array.isArray(readSubPath(["path"]))) ||
-    // Legacy alias:
+    // Legacy alias: { $alias: { path: [] } }
     Array.isArray(readSubPath(["$alias", "path"]))
   ) {
     return parseLink(readSubPath([]) as CellLink, link);
