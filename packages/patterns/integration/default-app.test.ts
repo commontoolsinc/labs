@@ -41,6 +41,20 @@ const CAPTURE_RUNNER_TRIGGER_COUNTS = (() => {
     return false;
   }
 })();
+const CAPTURE_WISH_FLOW_LOG = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_WISH_FLOW_LOG") === "1";
+  } catch {
+    return false;
+  }
+})();
+const CAPTURE_WISH_FLOW_COUNTS = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_WISH_FLOW_COUNTS") === "1";
+  } catch {
+    return false;
+  }
+})();
 
 describe("default-app flow test", () => {
   const shell = new ShellIntegration();
@@ -83,6 +97,20 @@ describe("default-app flow test", () => {
     }
 
     if (CAPTURE_RUNNER_TRIGGER_COUNTS) {
+      console.log("Reset logger baselines...");
+      await waitFor(async () => {
+        return await resetLoggerBaselines(page);
+      });
+    }
+
+    if (CAPTURE_WISH_FLOW_LOG) {
+      console.log("Enable wish-flow logger...");
+      await waitFor(async () => {
+        return await armWishFlowLogger(page);
+      });
+    }
+
+    if (CAPTURE_WISH_FLOW_COUNTS && !CAPTURE_RUNNER_TRIGGER_COUNTS) {
       console.log("Reset logger baselines...");
       await waitFor(async () => {
         return await resetLoggerBaselines(page);
@@ -141,6 +169,24 @@ describe("default-app flow test", () => {
       console.log(
         "Runner trigger-flow counts (create note):",
         JSON.stringify(runnerCounts, null, 2),
+      );
+    }
+
+    if (CAPTURE_WISH_FLOW_LOG) {
+      const wishLogs = await collectCapturedConsoleLogs(page, "[WISH");
+      assert(wishLogs, "Expected runner wish-flow logs to be available");
+      console.log(
+        "Runner wish-flow logs (create note):",
+        JSON.stringify(wishLogs, null, 2),
+      );
+    }
+
+    if (CAPTURE_WISH_FLOW_COUNTS) {
+      const wishCounts = await collectWishFlowCounts(page);
+      assert(wishCounts, "Expected runner wish-flow counts to be available");
+      console.log(
+        "Runner wish-flow counts (create note):",
+        JSON.stringify(wishCounts, null, 2),
       );
     }
 
@@ -214,42 +260,25 @@ async function armWriteTrace(page: Page): Promise<boolean> {
 }
 
 async function armRunnerTriggerLogger(page: Page): Promise<boolean> {
+  await ensureCapturedConsole(page);
   return await page.evaluate(async () => {
     const api = globalThis.commontools?.rt;
-    const globalState = globalThis as typeof globalThis & {
-      __ctCapturedConsoleLogs?: Array<{ method: string; text: string }>;
-      __ctConsolePatched?: boolean;
-    };
     if (!api) return false;
-
-    if (!globalState.__ctConsolePatched) {
-      globalState.__ctCapturedConsoleLogs = [];
-      const methods = ["debug", "info", "warn", "error", "log"] as const;
-      for (const method of methods) {
-        const original = console[method].bind(console);
-        console[method] = (...args: unknown[]) => {
-          const text = args.map((arg) => {
-            if (typeof arg === "string") return arg;
-            try {
-              return JSON.stringify(arg);
-            } catch {
-              return String(arg);
-            }
-          }).join(" ");
-          globalState.__ctCapturedConsoleLogs?.push({ method, text });
-          if ((globalState.__ctCapturedConsoleLogs?.length ?? 0) > 500) {
-            globalState.__ctCapturedConsoleLogs?.splice(0, 100);
-          }
-          return original(...args);
-        };
-      }
-      globalState.__ctConsolePatched = true;
-    } else {
-      globalState.__ctCapturedConsoleLogs = [];
-    }
 
     await api.setLoggerEnabled(true, "runner.trigger-flow");
     await api.setLoggerLevel("debug", "runner.trigger-flow");
+    return true;
+  });
+}
+
+async function armWishFlowLogger(page: Page): Promise<boolean> {
+  await ensureCapturedConsole(page);
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools?.rt;
+    if (!api) return false;
+
+    await api.setLoggerEnabled(true, "runner.wish-flow");
+    await api.setLoggerLevel("debug", "runner.wish-flow");
     return true;
   });
 }
@@ -519,6 +548,126 @@ async function collectRunnerTriggerFlowCounts(page: Page): Promise<unknown> {
       setupInternal: toRows("setup-internal/"),
       instantiatePatternNode: toRows("instantiate-pattern-node/"),
     };
+  });
+}
+
+async function collectWishFlowCounts(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools?.rt;
+    if (!api) return null;
+
+    const { counts, timing } = await api.getLoggerCounts();
+    const loggerCounts = counts["runner.wish-flow"];
+    if (!loggerCounts) return null;
+    type CountRow = {
+      total: number;
+      debug: number;
+      info: number;
+      warn: number;
+      error: number;
+    };
+    const keyedCounts = loggerCounts as Record<string, CountRow>;
+
+    const toRows = (prefix: string) =>
+      Object.entries(keyedCounts)
+        .filter(([key]) => key.startsWith(prefix))
+        .sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0))
+        .slice(0, 16)
+        .map(([key, value]) => ({
+          key,
+          total: value.total ?? 0,
+          debug: value.debug ?? 0,
+          info: value.info ?? 0,
+          warn: value.warn ?? 0,
+          error: value.error ?? 0,
+        }));
+
+    type TimingRow = {
+      count: number;
+      average: number;
+      p50: number;
+      p95: number;
+      max: number;
+      lastTime: number;
+    };
+    const timingRows = (timing["runner.wish-flow"] ?? {}) as Record<
+      string,
+      TimingRow
+    >;
+    const toTimingRows = (prefix: string) =>
+      Object.entries(timingRows)
+        .filter(([key]) => key.startsWith(prefix))
+        .sort((a, b) => (b[1].average ?? 0) - (a[1].average ?? 0))
+        .slice(0, 16)
+        .map(([key, value]) => ({
+          key,
+          count: value.count ?? 0,
+          average: Number((value.average ?? 0).toFixed(3)),
+          p50: Number((value.p50 ?? 0).toFixed(3)),
+          p95: Number((value.p95 ?? 0).toFixed(3)),
+          max: Number((value.max ?? 0).toFixed(3)),
+          lastTime: Number((value.lastTime ?? 0).toFixed(3)),
+        }));
+
+    return {
+      start: toRows("wish/start/"),
+      startSource: toRows("wish/start-source/"),
+      resolve: toRows("wish/resolve/"),
+      resolveSource: toRows("wish/resolve-source/"),
+      resolveMs: toRows("wish/resolve-ms/"),
+      searchHashtag: toRows("wish/search-hashtag/"),
+      sync: toRows("wish/sync/"),
+      syncSource: toRows("wish/sync-source/"),
+      syncMs: toRows("wish/sync-ms/"),
+      sendFast: toRows("wish/send-fast/"),
+      sendFastSource: toRows("wish/send-fast-source/"),
+      launchSuggestion: toRows("wish/launch-suggestion/"),
+      runSuggestion: toRows("wish/run-suggestion/"),
+      runSuggestionSource: toRows("wish/run-suggestion-source/"),
+      errors: toRows("wish/error/"),
+      freeform: toRows("wish/freeform/"),
+      resolveTiming: toTimingRows("wish/resolve/"),
+      resolveSourceTiming: toTimingRows("wish/resolve-source/"),
+      syncTiming: toTimingRows("wish/sync/"),
+      syncSourceTiming: toTimingRows("wish/sync-source/"),
+    };
+  });
+}
+
+async function ensureCapturedConsole(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const globalState = globalThis as typeof globalThis & {
+      __ctCapturedConsoleLogs?: Array<{ method: string; text: string }>;
+      __ctConsolePatched?: boolean;
+    };
+
+    if (!globalState.__ctConsolePatched) {
+      globalState.__ctCapturedConsoleLogs = [];
+      const methods = ["debug", "info", "warn", "error", "log"] as const;
+      for (const method of methods) {
+        const original = console[method].bind(console);
+        console[method] = (...args: unknown[]) => {
+          const text = args.map((arg) => {
+            if (typeof arg === "string") return arg;
+            try {
+              return JSON.stringify(arg);
+            } catch {
+              return String(arg);
+            }
+          }).join(" ");
+          globalState.__ctCapturedConsoleLogs?.push({ method, text });
+          if ((globalState.__ctCapturedConsoleLogs?.length ?? 0) > 500) {
+            globalState.__ctCapturedConsoleLogs?.splice(0, 100);
+          }
+          return original(...args);
+        };
+      }
+      globalState.__ctConsolePatched = true;
+    } else {
+      globalState.__ctCapturedConsoleLogs = [];
+    }
+
+    return true;
   });
 }
 

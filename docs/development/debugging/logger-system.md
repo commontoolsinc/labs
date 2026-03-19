@@ -81,6 +81,9 @@ For scheduler churn debugging, prefer targeted loggers before raising the whole
   re-schedule causality
 - `runner.trigger-flow` for nested `Runner.run()`, `setupInternal()`, and
   `instantiatePatternNode()` activity keyed by the current source action id
+- `runner.wish-flow` for `wish()` query resolution, hashtag-search branches,
+  and whether a call stays on the direct fast path or launches a suggestion
+  pattern
 - `scheduler` for broader settle-loop, debounce, cycle, and execution details
 
 Because logger messages are lazily evaluated, expensive callback payloads only

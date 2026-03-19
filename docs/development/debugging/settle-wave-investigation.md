@@ -396,6 +396,23 @@ This logger keys counts by source action id, so even without reading every log
 line you can tell whether nested runs are coming from `raw:wish`,
 `raw:navigateTo`, or a handler/computation path.
 
+Enable the focused wish logger when you need to know whether `wish()` itself is
+causing nested pattern launches or is only acting as a broad reader over hot
+indexes:
+
+```js
+await commontools.rt.setLoggerEnabled(true, "runner.wish-flow")
+await commontools.rt.setLoggerLevel("debug", "runner.wish-flow")
+```
+
+Use it to answer these questions quickly:
+
+- Is the hot path direct tag/path resolution, or is `wish()` launching a
+  suggestion pattern?
+- Which queries are rerunning most often during one interaction?
+- Are failures coming from hashtag search (`#notebook`, `#allNotes`, etc.) or
+  from the well-known `#default` / `#mentionable` / `#recent` paths?
+
 If you still need settle-loop internals, then raise the broader scheduler logger:
 
 ```js
@@ -428,6 +445,51 @@ The important distinction is:
 So a direct `raw:async -> Runner.run` stack is currently a strong signal for
 `wish`, while navigation-related churn tends to show up through
 runtime-processor or piece-manager follow-on paths instead.
+
+## Wish Findings
+
+The first useful split is between two very different `wish()` behaviors:
+
+- direct well-known tag/path resolution:
+  `#default`, `#mentionable`, `#recent`, `/...`
+- suggestion-pattern launch:
+  freeform query or multi-result picker, which calls `runtime.runSynced()`
+
+For the `Notes -> New Note` flow on a reused note-heavy space, the current
+instrumentation shows:
+
+- no `wish` suggestion-pattern launches at all
+- no `wish`-driven `runSynced()` re-entry in that interaction window
+- repeated direct reads of `#mentionable` (`4` times), plus one each of
+  `#default`, `#recent`, and `#favorites`
+- one-shot hashtag-search misses for `#notebook` and `#allNotes`
+
+That means the observed storm is not primarily "`wish()` is recursively
+launching more patterns". In this flow, `wish()` is mainly serving as a set of
+reactive readers over broad cells:
+
+- [`note.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/notes/note.tsx)
+  reads `#default`, `#mentionable`, `#recent`, `#notebook`, and `#allNotes`
+- [`summary-index.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/summary-index.tsx)
+  reads `#mentionable`
+- [`favorites-manager.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/favorites-manager.tsx)
+  reads `#favorites`
+
+So the current working theory is:
+
+- adding one note rewrites broad root state such as `allPieces` and
+  `backlinksIndex/mentionable`
+- every mounted `wish()` reader of those cells reruns
+- the real cost is the breadth and size of the invalidated data, not a
+  suggestion-pattern loop inside `wish()`
+
+If the note count effect grows further, the next place to instrument is not
+`wish()` picker launching. It is the producers behind `#mentionable` and
+`#default`, especially:
+
+- [`backlinks-index.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/backlinks-index.tsx)
+- [`default-app.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/default-app.tsx)
+- [`note.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/notes/note.tsx)
 
 ### What To Look For In Debug Logs
 

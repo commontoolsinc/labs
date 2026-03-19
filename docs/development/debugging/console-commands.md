@@ -145,6 +145,10 @@ await commontools.rt.setLoggerEnabled(false, "runner") // disable one
 // Focus on nested piece/materialization runs
 await commontools.rt.setLoggerEnabled(true, "runner.trigger-flow")
 await commontools.rt.setLoggerLevel("debug", "runner.trigger-flow")
+
+// Focus on wish() branch choice and query resolution
+await commontools.rt.setLoggerEnabled(true, "runner.wish-flow")
+await commontools.rt.setLoggerLevel("debug", "runner.wish-flow")
 ```
 
 ## Worker Settle Stats

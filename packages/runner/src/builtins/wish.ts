@@ -14,9 +14,15 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
 import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { getPatternEnvironment } from "../env.ts";
+import { getLogger } from "@commontools/utils/logger";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
+const wishFlowLogger = getLogger("runner.wish-flow", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
 
 // Schema for mentionable array - items are cell references (asCell: true)
 // Don't restrict properties so .get() returns full cell data
@@ -39,6 +45,65 @@ export type ParsedWishTarget = {
   key: "/" | WishTag;
   path: string[];
 };
+
+function getTxDebugActionId(
+  tx?: IExtendedStorageTransaction,
+): string | undefined {
+  return tx
+    ? (tx.tx as { debugActionId?: string }).debugActionId
+    : undefined;
+}
+
+function sanitizeQueryKey(query: string): string {
+  const normalized = query.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
+  if (!normalized) return "empty";
+  return normalized.slice(0, 80);
+}
+
+function sanitizeSourceKey(sourceKey: string): string {
+  const normalized = sourceKey.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
+  if (!normalized) return "none";
+  return normalized.slice(0, 80);
+}
+
+function formatScope(scope?: string[]): string {
+  return scope && scope.length > 0 ? scope.join(",") : "(default)";
+}
+
+function describeCell(cell: Cell<unknown>): string {
+  const link = cell.getAsNormalizedFullLink();
+  const path = link.path.length > 0 ? `/${link.path.join("/")}` : "";
+  return `${link.space}/${link.id}${path}`;
+}
+
+function bucketDuration(ms: number): string {
+  if (ms < 1) return "lt1ms";
+  if (ms < 5) return "1to5ms";
+  if (ms < 20) return "5to20ms";
+  if (ms < 100) return "20to100ms";
+  return "gte100ms";
+}
+
+function getResolutionKind(parsed: ParsedWishTarget): string {
+  switch (parsed.key) {
+    case "/":
+    case "#default":
+    case "#mentionable":
+    case "#summaryIndex":
+    case "#knowledgeGraph":
+    case "#allPieces":
+    case "#recent":
+    case "#now":
+      return "space-target";
+    case "#favorites":
+    case "#journal":
+    case "#learned":
+    case "#profile":
+      return "home-target";
+    default:
+      return "hashtag-search";
+  }
+}
 
 export function parseWishTarget(target: string): ParsedWishTarget {
   const trimmed = target.trim();
@@ -222,6 +287,20 @@ function searchMentionablesForHashtag(
 
     return tagMatchesHashtag(tag, searchTermWithoutHash);
   });
+
+  const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
+  const query = `#${searchTermWithoutHash}`;
+  wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () => [
+    `[WISH SEARCH] source=${sourceKey}`,
+    `query=${query}`,
+    `scope=${formatScope(ctx.scope)}`,
+    `space=${describeCell(spaceCell ?? getSpaceCell(ctx))}`,
+    `mentionableCount=${mentionables.length}`,
+    `matchCount=${matches.length}`,
+    matches.length > 0
+      ? `matches=${matches.slice(0, 5).map((cell) => describeCell(cell)).join(", ")}`
+      : undefined,
+  ].filter(Boolean));
 
   return {
     matches: matches.map((match) => ({ cell: match, pathPrefix })),
@@ -583,6 +662,9 @@ export function wish(
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
+    const sourceKey = getTxDebugActionId(providedTx) ?? "none";
+    const queryKey = sanitizeQueryKey(input.situation);
+    const sourceBucket = sanitizeSourceKey(sourceKey);
 
     const tx = providedTx || runtime.edit();
 
@@ -609,6 +691,16 @@ export function wish(
       // Once fetch completes, run the pattern without a tx (it creates its own)
       void suggestionPatternFetchPromise.then((pattern) => {
         if (pattern) {
+          wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
+            `[WISH RUN SUGGESTION] source=${sourceKey}`,
+            `query=${input.situation}`,
+            `mode=fetch-then-run`,
+            `result=${suggestionPatternResultCell ? describeCell(suggestionPatternResultCell) : "unknown"}`,
+          ]);
+          wishFlowLogger.debug(
+            `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
+            () => [`source=${sourceKey}`],
+          );
           runtime.run(
             undefined,
             pattern,
@@ -618,6 +710,16 @@ export function wish(
         }
       });
     } else {
+      wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
+        `[WISH RUN SUGGESTION] source=${sourceKey}`,
+        `query=${input.situation}`,
+        `mode=reuse-pattern`,
+        `result=${suggestionPatternResultCell ? describeCell(suggestionPatternResultCell) : "unknown"}`,
+      ]);
+      wishFlowLogger.debug(
+        `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
+        () => [`source=${sourceKey}`],
+      );
       runtime.run(
         tx,
         suggestionPattern,
@@ -638,15 +740,23 @@ export function wish(
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
+    const sourceKey = getTxDebugActionId(tx) ?? "none";
+    const sourceBucket = sanitizeSourceKey(sourceKey);
 
     if (typeof targetValue === "object") {
       const { query, path, schema, context, scope, headless } =
         targetValue as WishParams;
+      const queryKey = sanitizeQueryKey(String(query ?? ""));
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
         }" has no query.`;
+        wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
+          `[WISH ERROR] source=${sourceKey}`,
+          `query=${String(query ?? "")}`,
+          `error=${errorMsg}`,
+        ]);
         sendResult(
           tx,
           {
@@ -661,7 +771,20 @@ export function wish(
 
       // If the query is a path or a hash tag, resolve it directly
       if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
+        wishFlowLogger.debug(`wish/start/${queryKey}`, () => [
+          `[WISH START] source=${sourceKey}`,
+          `query=${query}`,
+          `scope=${formatScope(scope)}`,
+          `headless=${Boolean(headless)}`,
+          `path=${JSON.stringify(path ?? [])}`,
+          `parent=${describeCell(parentCell)}`,
+        ]);
+        wishFlowLogger.debug(
+          `wish/start-source/${queryKey}/${sourceBucket}`,
+          () => [`source=${sourceKey}`],
+        );
         try {
+          const resolveStartedAt = performance.now();
           const parsed = parseWishTarget(query);
           parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope, nowCell };
@@ -698,6 +821,42 @@ export function wish(
             (cell, index) =>
               resultCells.findIndex((c) => c.equals(cell)) === index,
           );
+          const resolveMs = Number(
+            (performance.now() - resolveStartedAt).toFixed(3),
+          );
+
+          wishFlowLogger.debug(`wish/resolve/${queryKey}`, () => [
+            `[WISH RESOLVE] source=${sourceKey}`,
+            `query=${query}`,
+            `kind=${getResolutionKind(parsed)}`,
+            `baseResolutions=${baseResolutions.length}`,
+            `uniqueResults=${uniqueResultCells.length}`,
+            `resolveMs=${resolveMs}`,
+            uniqueResultCells.length > 0
+              ? `results=${uniqueResultCells.slice(0, 5).map((cell) => describeCell(cell)).join(", ")}`
+              : undefined,
+          ].filter(Boolean));
+          wishFlowLogger.debug(
+            `wish/resolve-source/${queryKey}/${sourceBucket}`,
+            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
+          );
+          wishFlowLogger.debug(
+            `wish/resolve-ms/${queryKey}/${bucketDuration(resolveMs)}`,
+            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
+          );
+          wishFlowLogger.time(
+            resolveStartedAt,
+            "wish",
+            "resolve",
+            queryKey,
+          );
+          wishFlowLogger.time(
+            resolveStartedAt,
+            "wish",
+            "resolve-source",
+            queryKey,
+            sourceBucket,
+          );
 
           // Unified shape: always return { result, candidates, [UI] }
           // For single result, use fast path (no picker needed)
@@ -713,6 +872,16 @@ export function wish(
             // Single result or headless mode - fast path with unified shape
             // Prefer the result cell's own [UI]; fall back to ct-cell-link
             const resultUI = uniqueResultCells[0].key(UI).get();
+            wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
+              `[WISH FAST PATH] source=${sourceKey}`,
+              `query=${query}`,
+              `mode=${headless ? "headless" : "single-result"}`,
+              `result=${describeCell(uniqueResultCells[0])}`,
+            ]);
+            wishFlowLogger.debug(
+              `wish/send-fast-source/${queryKey}/${sourceBucket}`,
+              () => [`source=${sourceKey}`],
+            );
             sendResult(tx, {
               result: uniqueResultCells[0],
               candidates: candidatesCell,
@@ -755,6 +924,11 @@ export function wish(
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
+          wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
+            `[WISH ERROR] source=${sourceKey}`,
+            `query=${query}`,
+            `error=${errorMsg}`,
+          ]);
           sendResult(
             tx,
             {
@@ -767,6 +941,11 @@ export function wish(
         }
       } else if (headless) {
         // Headless mode with freeform query — no suggestion pattern
+        wishFlowLogger.debug(`wish/freeform/${queryKey}`, () => [
+          `[WISH FREEFORM] source=${sourceKey}`,
+          `query=${query}`,
+          `mode=headless`,
+        ]);
         sendResult(
           tx,
           {
@@ -777,6 +956,11 @@ export function wish(
         );
       } else {
         // Otherwise it's a generic query, instantiate suggestion.tsx
+        wishFlowLogger.debug(`wish/launch-suggestion/${queryKey}`, () => [
+          `[WISH LAUNCH SUGGESTION] source=${sourceKey}`,
+          `query=${query}`,
+          `mode=freeform`,
+        ]);
         sendResult(
           tx,
           launchSuggestionPattern(
