@@ -66,7 +66,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { storableFromNativeValue } from "@commontools/data-model/storable-value";
+import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -616,7 +616,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
     // Deep-clone the source to ensure consistent serialization.
-    this.source = storableFromNativeValue(
+    this.source = fabricFromNativeValue(
       source,
     ) as ConsumerInvocationFor<Ability, Protocol>;
     this.#reference = hashOf(this.source);

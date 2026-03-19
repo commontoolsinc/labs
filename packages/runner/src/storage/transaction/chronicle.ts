@@ -1,6 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { storableFromNativeValue } from "@commontools/data-model/storable-value";
+import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
 import type {
   Assertion,
   IAttestation,
@@ -268,8 +268,8 @@ export class Chronicle {
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.
-        const normalizedMerged = storableFromNativeValue(merged.value);
-        const normalizedLoaded = storableFromNativeValue(loaded.is);
+        const normalizedMerged = fabricFromNativeValue(merged.value);
+        const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
         if (deepEqual(normalizedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.

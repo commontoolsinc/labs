@@ -1042,7 +1042,7 @@ describe("numeric path key edge cases", () => {
 
     // Creates sparse array with value at index 99.
     // Note: array remains sparse at transaction layer; densification (holes → null)
-    // occurs either during commit (via storableFromNativeValue) or when serialized
+    // occurs either during commit (via fabricFromNativeValue) or when serialized
     // to JSON for stable storage.
     expect(Array.isArray(data)).toBe(true);
     expect((data as unknown[]).length).toBe(100);

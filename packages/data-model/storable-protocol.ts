@@ -8,7 +8,7 @@ import { FabricInstance, RECONSTRUCT } from "./storable-instance.ts";
  * reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
  */
-export interface StorableClass<T extends FabricInstance> {
+export interface FabricClass<T extends FabricInstance> {
   /**
    * Reconstruct an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
@@ -23,7 +23,7 @@ export interface StorableClass<T extends FabricInstance> {
  * `Error` that participate in the serialization protocol but don't implement
  * `FabricInstance`. See Section 1.4.1 of the formal spec.
  */
-export interface StorableConverter<T> {
+export interface FabricValueConverter<T> {
   /**
    * Reconstruct a value from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system.
@@ -63,7 +63,7 @@ export function isFabricInstance(value: unknown): value is FabricInstance {
  * machinery is private to the context implementation.
  */
 export interface SerializationContext<SerializedForm = unknown> {
-  /** Whether failed reconstructions produce `ProblematicStorable` instead of
+  /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. @default false */
   readonly lenient: boolean;
 

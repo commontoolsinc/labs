@@ -3,12 +3,12 @@ import { type FabricInstance, RECONSTRUCT } from "./storable-instance.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
-  type StorableClass,
+  type FabricClass,
 } from "./storable-protocol.ts";
-import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+import { ExplicitTagValue } from "./explicit-tag-storable.ts";
 import { deepFreeze } from "./deep-freeze.ts";
-import { UnknownStorable } from "./unknown-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+import { UnknownValue } from "./unknown-storable.ts";
+import { ProblematicValue } from "./problematic-storable.ts";
 import {
   createDefaultRegistry,
   type JsonWireValue,
@@ -16,11 +16,11 @@ import {
   type TypeHandlerRegistry,
 } from "./json-type-handlers.ts";
 import {
-  StorableError,
-  StorableMap,
-  StorableRegExp,
-  StorableSet,
-  StorableUint8Array,
+  FabricError,
+  FabricMap,
+  FabricRegExp,
+  FabricSet,
+  FabricUint8Array,
 } from "./storable-native-instances.ts";
 import { TAGS } from "./type-tags.ts";
 
@@ -43,10 +43,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,
-    StorableClass<FabricInstance>
+    FabricClass<FabricInstance>
   >();
 
-  /** Whether failed reconstructions produce `ProblematicStorable` instead of
+  /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. */
   readonly lenient: boolean;
 
@@ -65,11 +65,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Register native wrapper classes for deserialization. Each wrapper's
     // static [RECONSTRUCT] method is used by the class registry fallback
     // path in deserialize().
-    this.registry.set(TAGS.Error, StorableError);
-    this.registry.set(TAGS.Map, StorableMap);
-    this.registry.set(TAGS.Set, StorableSet);
-    this.registry.set(TAGS.Bytes, StorableUint8Array);
-    this.registry.set(TAGS.RegExp, StorableRegExp);
+    this.registry.set(TAGS.Error, FabricError);
+    this.registry.set(TAGS.Map, FabricMap);
+    this.registry.set(TAGS.Set, FabricSet);
+    this.registry.set(TAGS.Bytes, FabricUint8Array);
+    this.registry.set(TAGS.RegExp, FabricRegExp);
   }
 
   // -------------------------------------------------------------------------
@@ -121,7 +121,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /** Get the wire format tag for a storable instance's type. */
   private getTagFor(value: FabricInstance): string {
-    if (value instanceof ExplicitTagStorable) {
+    if (value instanceof ExplicitTagValue) {
       return value.typeTag;
     }
     const typeTag = (value as { typeTag?: unknown }).typeTag;
@@ -136,7 +136,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Get the class that can reconstruct instances for a given tag. */
   private getClassFor(
     tag: string,
-  ): StorableClass<FabricInstance> | undefined {
+  ): FabricClass<FabricInstance> | undefined {
     return this.registry.get(tag);
   }
 
@@ -340,7 +340,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
               (v: JsonWireValue) => this.deserialize(v, runtime, registry),
             );
           } catch (e: unknown) {
-            return new ProblematicStorable(
+            return new ProblematicValue(
               tag,
               state as unknown as FabricValue,
               e instanceof Error ? e.message : String(e),
@@ -366,7 +366,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
               runtime,
             ) as unknown as FabricValue;
           } catch (e: unknown) {
-            return new ProblematicStorable(
+            return new ProblematicValue(
               tag,
               deserializedState,
               e instanceof Error ? e.message : String(e),
@@ -380,7 +380,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
 
       // Unknown type: preserve for round-tripping.
-      return new UnknownStorable(
+      return new UnknownValue(
         tag,
         deserializedState,
       ) as unknown as FabricValue;

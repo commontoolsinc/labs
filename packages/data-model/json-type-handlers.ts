@@ -4,8 +4,8 @@ import {
   isFabricInstance,
   type ReconstructionContext,
 } from "./storable-protocol.ts";
-import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+import { ExplicitTagValue } from "./explicit-tag-storable.ts";
+import { ProblematicValue } from "./problematic-storable.ts";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -125,11 +125,11 @@ export class TypeHandlerRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Utility: ProblematicStorable factory
+// Utility: ProblematicValue factory
 // ---------------------------------------------------------------------------
 
 /**
- * Create a `ProblematicStorable` for a deserialization failure. The type tag
+ * Create a `ProblematicValue` for a deserialization failure. The type tag
  * is preserved for round-tripping; the message provides human-readable
  * diagnostics.
  */
@@ -137,8 +137,8 @@ function makeProblematic(
   tag: string,
   state: JsonWireValue,
   message: string,
-): ProblematicStorable {
-  return new ProblematicStorable(tag, state as FabricValue, message);
+): ProblematicValue {
+  return new ProblematicValue(tag, state as FabricValue, message);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +330,7 @@ export const EpochDaysHandler: TypeHandler = {
 
 /**
  * Handler for `FabricInstance` values (custom protocol types, including
- * `StorableError` and `ExplicitTagStorable` subtypes). Serializes via
+ * `FabricError` and `ExplicitTagValue` subtypes). Serializes via
  * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
  * dispatched via this handler's tag (since each instance type has its own
  * tag like `TAGS.Error`); instead, the deserializer falls back to the class
@@ -353,9 +353,9 @@ export const StorableInstanceHandler: TypeHandler = {
   ): JsonWireValue {
     const inst = value as FabricInstance;
 
-    // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
+    // ExplicitTagValue (UnknownValue, ProblematicValue): use
     // preserved typeTag and re-serialize their stored state.
-    if (inst instanceof ExplicitTagStorable) {
+    if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
       return codec.wrapTag(inst.typeTag, serializedState);
     }
@@ -393,7 +393,7 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
   // FabricInstance (generic -- checked via isFabricInstance brand).
-  // Covers StorableError, UnknownStorable, ProblematicStorable, etc.
+  // Covers FabricError, UnknownValue, ProblematicValue, etc.
   registry.register(StorableInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
   registry.register(BigIntHandler);

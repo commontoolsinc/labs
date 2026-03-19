@@ -1,7 +1,7 @@
 import type { FabricValue } from "./fabric-value.ts";
 import { DECONSTRUCT, RECONSTRUCT } from "./storable-instance.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
-import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+import { ExplicitTagValue } from "./explicit-tag-storable.ts";
 
 /**
  * Holds a value whose deconstruction or reconstruction failed. Preserves the
@@ -9,7 +9,7 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
  * mode to allow graceful degradation rather than hard failures.
  * See Section 3.5 of the formal spec.
  */
-export class ProblematicStorable extends ExplicitTagStorable {
+export class ProblematicValue extends ExplicitTagValue {
   constructor(
     typeTag: string,
     state: FabricValue,
@@ -23,14 +23,14 @@ export class ProblematicStorable extends ExplicitTagStorable {
     return { type: this.typeTag, state: this.state, error: this.error };
   }
 
-  protected shallowUnfrozenClone(): ProblematicStorable {
-    return new ProblematicStorable(this.typeTag, this.state, this.error);
+  protected shallowUnfrozenClone(): ProblematicValue {
+    return new ProblematicValue(this.typeTag, this.state, this.error);
   }
 
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue; error: string },
     _context: ReconstructionContext,
-  ): ProblematicStorable {
-    return new ProblematicStorable(state.type, state.state, state.error);
+  ): ProblematicValue {
+    return new ProblematicValue(state.type, state.state, state.error);
   }
 }

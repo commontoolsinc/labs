@@ -15,8 +15,8 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
+  resetDataModelConfig,
+  setDataModelConfig,
 } from "@commontools/data-model/storable-value";
 import {
   resetCanonicalHashConfig,
@@ -238,7 +238,7 @@ export class Runtime {
     }
 
     // Propagate experimental flags to the memory layer's ambient config.
-    setStorableValueConfig(this.experimental);
+    setDataModelConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     this.id = options.storageManager.id;
@@ -402,7 +402,7 @@ export class Runtime {
     this.harness.dispose();
 
     // Reset experimental storable config to defaults
-    resetStorableValueConfig();
+    resetDataModelConfig();
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();
 

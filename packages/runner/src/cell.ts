@@ -7,7 +7,7 @@ import {
 import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
-  shallowStorableFromNativeValue,
+  shallowFabricFromNativeValue,
 } from "@commontools/data-model/storable-value";
 import type { MemorySpace } from "@commontools/memory/interface";
 import type { FabricValue } from "@commontools/data-model/fabric-value";
@@ -1979,7 +1979,7 @@ export function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Already seen, return previously annotated result. Check this before
-  // shallowStorableFromNativeValue() to handle circular references properly.
+  // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
 
   // Cell links pass through unchanged.
@@ -1992,7 +1992,7 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
-  const converted = shallowStorableFromNativeValue(value);
+  const converted = shallowFabricFromNativeValue(value);
   const convertedIsRecord = isRecord(converted);
 
   // If conversion changed the value, cache the result so shared references
@@ -2094,11 +2094,11 @@ export function convertCellsToLinks(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  value = shallowStorableFromNativeValue(value);
+  value = shallowFabricFromNativeValue(value);
 
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
-    // `shallowStorableFromNativeValue()` converted this into a primitive value of some sort.
+    // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>

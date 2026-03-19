@@ -4,9 +4,9 @@ import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
 import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
 import { isFabricInstance } from "../storable-protocol.ts";
 import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-  shallowStorableFromNativeValue,
+  resetDataModelConfig,
+  setDataModelConfig,
+  shallowFabricFromNativeValue,
 } from "../storable-value.ts";
 
 describe("FabricEpochNsec", () => {
@@ -94,16 +94,16 @@ describe("FabricEpochDays (protocol)", () => {
 });
 
 describe("SpecialPrimitiveValue (storable-value integration)", () => {
-  it("passes through shallowStorableFromNativeValue unchanged even with freeze=false", () => {
-    setStorableValueConfig({ richStorableValues: true });
+  it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
+    setDataModelConfig({ richStorableValues: true });
     try {
       const nsec = new FabricEpochNsec(123n);
       const days = new FabricEpochDays(456n);
       // freeze=false should still return the same instance (not a copy).
-      expect(shallowStorableFromNativeValue(nsec, false)).toBe(nsec);
-      expect(shallowStorableFromNativeValue(days, false)).toBe(days);
+      expect(shallowFabricFromNativeValue(nsec, false)).toBe(nsec);
+      expect(shallowFabricFromNativeValue(days, false)).toBe(days);
     } finally {
-      resetStorableValueConfig();
+      resetDataModelConfig();
     }
   });
 });

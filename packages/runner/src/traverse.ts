@@ -727,7 +727,7 @@ export abstract class BaseObjectTraverser {
         }
         const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
-        // transforms in this system, e.g. toJSON and shallowStorableFromNativeValue)
+        // transforms in this system, e.g. toJSON and shallowFabricFromNativeValue)
         newValue[index] = v === undefined ? null : v as FabricDatum;
       });
       // Our link is based on the last link in the chain and not the first.

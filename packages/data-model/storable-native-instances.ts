@@ -20,7 +20,7 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 /**
  * Returns `true` if the value is a native JS object type that the storable
  * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
- * the "wild-west" instances that get converted into `StorableNativeWrapper`
+ * the "wild-west" instances that get converted into `FabricNativeWrapper`
  * subclasses or `FabricInstance` types by the conversion layer.
  *
  * Arrays, plain objects, objects with `toJSON()`, and system-defined special
@@ -118,9 +118,9 @@ function errorClassFromType(type: string): ErrorConstructor {
  * objects (Error, Map, Set, Uint8Array) into the `FabricValue` layer.
  * Provides a common `toNativeValue()` method used by both the shallow and
  * deep unwrap functions, replacing their `instanceof` cascades with a single
- * `instanceof StorableNativeWrapper` check.
+ * `instanceof FabricNativeWrapper` check.
  */
-export abstract class StorableNativeWrapper<T extends object>
+export abstract class FabricNativeWrapper<T extends object>
   extends FabricInstance {
   abstract readonly typeTag: string;
 
@@ -142,17 +142,17 @@ export abstract class StorableNativeWrapper<T extends object>
 }
 
 // ---------------------------------------------------------------------------
-// StorableError
+// FabricError
 // ---------------------------------------------------------------------------
 
 /**
  * Wrapper for `Error` instances in the storable type system. Bridges native
  * `Error` (JS wild west) into the strongly-typed `FabricValue` layer by
  * implementing `FabricInstance`. The serialization layer handles
- * `StorableError` via the generic `StorableInstanceHandler` path.
+ * `FabricError` via the generic `StorableInstanceHandler` path.
  * See Section 1.4.1 of the formal spec.
  */
-export class StorableError extends StorableNativeWrapper<Error> {
+export class FabricError extends FabricNativeWrapper<Error> {
   /** The type tag used in the wire format (`TAGS.Error`). */
   readonly typeTag = TAGS.Error;
 
@@ -176,7 +176,7 @@ export class StorableError extends StorableNativeWrapper<Error> {
    * custom enumerable properties are already `FabricValue`. The conversion
    * layer (`convertErrorInternals()` in `storable-value-modern.ts`) ensures
    * this by recursively converting Error internals before wrapping in
-   * `StorableError`. The `as FabricValue` casts below are therefore safe.
+   * `FabricError`. The `as FabricValue` casts below are therefore safe.
    */
   [DECONSTRUCT](): FabricValue {
     const type = this.error.constructor.name;
@@ -200,8 +200,8 @@ export class StorableError extends StorableNativeWrapper<Error> {
     return state as FabricValue;
   }
 
-  protected shallowUnfrozenClone(): StorableError {
-    return new StorableError(this.error);
+  protected shallowUnfrozenClone(): FabricError {
+    return new FabricError(this.error);
   }
 
   protected get wrappedValue(): Error {
@@ -217,15 +217,15 @@ export class StorableError extends StorableNativeWrapper<Error> {
   }
 
   /**
-   * Reconstruct a `StorableError` from its essential state. Nested values
+   * Reconstruct a `FabricError` from its essential state. Nested values
    * in `state` have already been reconstructed by the serialization system.
-   * Returns a `StorableError` wrapping the reconstructed `Error`; callers
-   * who need the native `Error` use `nativeValueFromStorableValue()`.
+   * Returns a `FabricError` wrapping the reconstructed `Error`; callers
+   * who need the native `Error` use `nativeValueFromFabricValue()`.
    */
   static [RECONSTRUCT](
     state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableError {
+  ): FabricError {
     const s = state as Record<string, FabricValue>;
     const type = (s.type as string) ?? (s.name as string) ?? "Error";
     // null name means "same as type" (the common case optimization).
@@ -256,7 +256,7 @@ export class StorableError extends StorableNativeWrapper<Error> {
       }
     }
 
-    return new StorableError(error);
+    return new FabricError(error);
   }
 }
 
@@ -269,19 +269,19 @@ export class StorableError extends StorableNativeWrapper<Error> {
  * throw until Map support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableMap
-  extends StorableNativeWrapper<Map<FabricValue, FabricValue>> {
+export class FabricMap
+  extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
   readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
   }
 
   [DECONSTRUCT](): FabricValue {
-    throw new Error("StorableMap: not yet implemented");
+    throw new Error("FabricMap: not yet implemented");
   }
 
-  protected shallowUnfrozenClone(): StorableMap {
-    return new StorableMap(this.map);
+  protected shallowUnfrozenClone(): FabricMap {
+    return new FabricMap(this.map);
   }
 
   protected get wrappedValue(): Map<FabricValue, FabricValue> {
@@ -299,8 +299,8 @@ export class StorableMap
   static [RECONSTRUCT](
     _state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableMap {
-    throw new Error("StorableMap: not yet implemented");
+  ): FabricMap {
+    throw new Error("FabricMap: not yet implemented");
   }
 }
 
@@ -309,18 +309,18 @@ export class StorableMap
  * throw until Set support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableSet extends StorableNativeWrapper<Set<FabricValue>> {
+export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
   }
 
   [DECONSTRUCT](): FabricValue {
-    throw new Error("StorableSet: not yet implemented");
+    throw new Error("FabricSet: not yet implemented");
   }
 
-  protected shallowUnfrozenClone(): StorableSet {
-    return new StorableSet(this.set);
+  protected shallowUnfrozenClone(): FabricSet {
+    return new FabricSet(this.set);
   }
 
   protected get wrappedValue(): Set<FabricValue> {
@@ -338,8 +338,8 @@ export class StorableSet extends StorableNativeWrapper<Set<FabricValue>> {
   static [RECONSTRUCT](
     _state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableSet {
-    throw new Error("StorableSet: not yet implemented");
+  ): FabricSet {
+    throw new Error("FabricSet: not yet implemented");
   }
 }
 
@@ -350,7 +350,7 @@ export class StorableSet extends StorableNativeWrapper<Set<FabricValue>> {
  * `{ source, flags, flavor }`.
  * See Section 1.4.1 of the formal spec.
  */
-export class StorableRegExp extends StorableNativeWrapper<RegExp> {
+export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   /** The type tag used in the wire format (`TAGS.RegExp`). */
   readonly typeTag = TAGS.RegExp;
 
@@ -377,8 +377,8 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
     } as FabricValue;
   }
 
-  protected shallowUnfrozenClone(): StorableRegExp {
-    return new StorableRegExp(this.regex, this.flavor);
+  protected shallowUnfrozenClone(): FabricRegExp {
+    return new FabricRegExp(this.regex, this.flavor);
   }
 
   protected get wrappedValue(): RegExp {
@@ -399,18 +399,18 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
   }
 
   /**
-   * Reconstruct a `StorableRegExp` from its essential state
+   * Reconstruct a `FabricRegExp` from its essential state
    * (`{ source, flags, flavor }`).
    */
   static [RECONSTRUCT](
     state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableRegExp {
+  ): FabricRegExp {
     const s = state as Record<string, FabricValue>;
     const source = (s.source as string) ?? "";
     const flags = (s.flags as string) ?? "";
     const flavor = (s.flavor as string) ?? "es2025";
-    return new StorableRegExp(new RegExp(source, flags), flavor);
+    return new FabricRegExp(new RegExp(source, flags), flavor);
   }
 }
 
@@ -433,19 +433,19 @@ function rejectExtraRegExpProperties(regex: RegExp): void {
  * Extra properties beyond the wrapped value are not supported on non-Error
  * wrappers.
  */
-export class StorableUint8Array
-  extends StorableNativeWrapper<Blob | Uint8Array> {
+export class FabricUint8Array
+  extends FabricNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = TAGS.Bytes;
   constructor(readonly bytes: Uint8Array) {
     super();
   }
 
   [DECONSTRUCT](): FabricValue {
-    throw new Error("StorableUint8Array: not yet implemented");
+    throw new Error("FabricUint8Array: not yet implemented");
   }
 
-  protected shallowUnfrozenClone(): StorableUint8Array {
-    return new StorableUint8Array(this.bytes);
+  protected shallowUnfrozenClone(): FabricUint8Array {
+    return new FabricUint8Array(this.bytes);
   }
 
   protected get wrappedValue(): Uint8Array {
@@ -468,8 +468,8 @@ export class StorableUint8Array
   static [RECONSTRUCT](
     _state: FabricValue,
     _context: ReconstructionContext,
-  ): StorableUint8Array {
-    throw new Error("StorableUint8Array: not yet implemented");
+  ): FabricUint8Array {
+    throw new Error("FabricUint8Array: not yet implemented");
   }
 }
 
@@ -482,22 +482,22 @@ export class StorableUint8Array
  * freeze-state adjustment for types that support it.
  *
  * Behavior by value category:
- * - **StorableNativeWrapper** (Error, Map, Set, Uint8Array): delegates to
+ * - **FabricNativeWrapper** (Error, Map, Set, Uint8Array): delegates to
  *   `toNativeValue(frozen)`, which adjusts freeze state.
  * - **Arrays and plain objects**: freeze state is adjusted to match `frozen`
  *   (shallow copy if needed).
  * - **SpecialPrimitiveValue** (EpochNsec, EpochDays, ContentId): pass through
  *   as-is (always frozen by construction).
- * - **Non-native FabricInstance** (Cell, Stream, UnknownStorable, etc.):
+ * - **Non-native FabricInstance** (Cell, Stream, UnknownValue, etc.):
  *   pass through as-is (freeze state is an internal concern of the wrapper).
  * - **Primitives** (null, undefined, boolean, number, string, bigint):
  *   inherently immutable, pass through unchanged.
  */
-export function nativeValueFromStorableValue(
+export function nativeValueFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): unknown {
-  if (value instanceof StorableNativeWrapper) {
+  if (value instanceof FabricNativeWrapper) {
     return value.toNativeValue(frozen);
   }
 
@@ -513,7 +513,7 @@ export function nativeValueFromStorableValue(
     return value;
   }
 
-  // Non-native FabricInstance values (Cell, Stream, UnknownStorable, etc.)
+  // Non-native FabricInstance values (Cell, Stream, UnknownValue, etc.)
   // pass through unchanged -- spreading would strip their prototype/methods,
   // and their freeze state is an internal concern of the wrapper.
   if (isFabricInstance(value)) return value;
@@ -547,31 +547,31 @@ export function nativeValueFromStorableValue(
 
 /**
  * Deep unwrap: recursively walk a `FabricValue` tree, unwrapping any
- * `StorableNativeWrapper` values to their underlying native types via
+ * `FabricNativeWrapper` values to their underlying native types via
  * `toNativeValue()`. Non-native `FabricInstance` values (Cell, Stream,
- * UnknownStorable, etc.) pass through as-is.
+ * UnknownValue, etc.) pass through as-is.
  *
  * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
  * Arrays and objects are copied and frozen/unfrozen accordingly. For
- * `StorableError`, the inner Error's `cause` and custom properties are also
+ * `FabricError`, the inner Error's `cause` and custom properties are also
  * recursively unwrapped (since they may contain `FabricInstance` wrappers).
  *
  * When `frozen` is true (the default), collections are returned as FrozenMap /
  * FrozenSet and plain objects/arrays are frozen. When false, mutable copies are
  * returned.
  */
-export function nativeFromStorableValueRich(
+export function nativeFromFabricValueModern(
   value: FabricValue,
   frozen = true,
 ): unknown {
-  // StorableError: deep-unwrap the inner Error's internals (cause, custom
+  // FabricError: deep-unwrap the inner Error's internals (cause, custom
   // properties) since they may contain FabricInstance wrappers.
-  if (value instanceof StorableError) {
+  if (value instanceof FabricError) {
     return deepUnwrapError(value.error, frozen);
   }
 
   // Other native wrappers (Map, Set, Uint8Array) -> native types.
-  if (value instanceof StorableNativeWrapper) {
+  if (value instanceof FabricNativeWrapper) {
     return value.toNativeValue(frozen);
   }
 
@@ -581,7 +581,7 @@ export function nativeFromStorableValueRich(
     return value;
   }
 
-  // Other FabricInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.
+  // Other FabricInstance (Cell, Stream, UnknownValue, etc.) -- pass through.
   if (isFabricInstance(value)) return value;
 
   // Storable primitives (null, undefined, boolean, number, string, bigint)
@@ -599,7 +599,7 @@ export function nativeFromStorableValueRich(
         // Preserve sparse holes.
         result.length = i + 1;
       } else {
-        result[i] = nativeFromStorableValueRich(
+        result[i] = nativeFromFabricValueModern(
           value[i] as FabricValue,
           frozen,
         );
@@ -614,7 +614,7 @@ export function nativeFromStorableValueRich(
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!UNSAFE_KEYS.has(key)) {
-      result[key] = nativeFromStorableValueRich(
+      result[key] = nativeFromFabricValueModern(
         val as FabricValue,
         frozen,
       );
@@ -637,7 +637,7 @@ function deepUnwrapError(error: Error, frozen: boolean): Error {
 
   // Recursively unwrap cause.
   if (error.cause !== undefined) {
-    copy.cause = nativeFromStorableValueRich(
+    copy.cause = nativeFromFabricValueModern(
       error.cause as FabricValue,
       frozen,
     );
@@ -648,7 +648,7 @@ function deepUnwrapError(error: Error, frozen: boolean): Error {
   for (const key of Object.keys(error)) {
     if (SKIP.has(key) || UNSAFE_KEYS.has(key)) continue;
     (copy as unknown as Record<string, unknown>)[key] =
-      nativeFromStorableValueRich(
+      nativeFromFabricValueModern(
         (error as unknown as Record<string, unknown>)[key] as FabricValue,
         frozen,
       );

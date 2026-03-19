@@ -1,5 +1,5 @@
 import { hashOf } from "@commontools/data-model/value-hash";
-import { storableFromNativeValue } from "@commontools/data-model/storable-value";
+import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -36,7 +36,7 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   delete (inputsOnly as Record<string, unknown>).result;
   // hashOf() cannot hash undefined values; normalize to a deep storable shape
   // (omits undefined object props, converts undefined array elements to null).
-  const storableInputs = storableFromNativeValue(inputsOnly);
+  const storableInputs = fabricFromNativeValue(inputsOnly);
   const normalized = storableInputs === undefined ? {} : storableInputs;
   return hashOf(normalized as Record<string, unknown>).toString();
 }

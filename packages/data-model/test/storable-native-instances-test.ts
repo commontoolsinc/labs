@@ -6,13 +6,13 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
   isConvertibleNativeInstance,
-  nativeFromStorableValueRich,
-  nativeValueFromStorableValue,
-  StorableError,
-  StorableMap,
-  StorableNativeWrapper,
-  StorableSet,
-  StorableUint8Array,
+  nativeFromFabricValueModern,
+  nativeValueFromFabricValue,
+  FabricError,
+  FabricMap,
+  FabricNativeWrapper,
+  FabricSet,
+  FabricUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
@@ -34,33 +34,33 @@ const dummyContext: ReconstructionContext = {
 
 describe("storable-native-instances", () => {
   // --------------------------------------------------------------------------
-  // StorableError
+  // FabricError
   // --------------------------------------------------------------------------
 
-  describe("StorableError", () => {
+  describe("FabricError", () => {
     it("implements FabricInstance (isFabricInstance returns true)", () => {
-      const se = new StorableError(new Error("test"));
+      const se = new FabricError(new Error("test"));
       expect(isFabricInstance(se)).toBe(true);
     });
 
     it("has typeTag 'Error@1'", () => {
-      const se = new StorableError(new Error("test"));
+      const se = new FabricError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
     });
 
     it("wraps the original Error", () => {
       const err = new TypeError("bad");
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       expect(se.error).toBe(err);
     });
 
-    it("is instanceof StorableNativeWrapper", () => {
-      const se = new StorableError(new Error("test"));
-      expect(se instanceof StorableNativeWrapper).toBe(true);
+    it("is instanceof FabricNativeWrapper", () => {
+      const se = new FabricError(new Error("test"));
+      expect(se instanceof FabricNativeWrapper).toBe(true);
     });
 
     it("[DECONSTRUCT] returns type, name=null (common case), message, stack", () => {
-      const se = new StorableError(new Error("hello"));
+      const se = new FabricError(new Error("hello"));
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("Error");
       expect(state.name).toBe(null);
@@ -69,7 +69,7 @@ describe("storable-native-instances", () => {
     });
 
     it("[DECONSTRUCT] name is null when type === name (TypeError)", () => {
-      const se = new StorableError(new TypeError("bad"));
+      const se = new FabricError(new TypeError("bad"));
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null);
@@ -78,15 +78,15 @@ describe("storable-native-instances", () => {
     it("[DECONSTRUCT] name is non-null when type !== name", () => {
       const err = new TypeError("bad");
       err.name = "CustomName";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe("CustomName");
     });
 
     it("[DECONSTRUCT] includes cause when present", () => {
-      const inner = new StorableError(new Error("inner"));
-      const outer = new StorableError(
+      const inner = new FabricError(new Error("inner"));
+      const outer = new FabricError(
         new Error("outer", { cause: inner }),
       );
       const state = outer[DECONSTRUCT]() as Record<string, FabricValue>;
@@ -97,7 +97,7 @@ describe("storable-native-instances", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.code).toBe(42);
       expect(state.detail).toBe("more info");
@@ -109,7 +109,7 @@ describe("storable-native-instances", () => {
         value: "bad",
         enumerable: true,
       });
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect("__proto__" in state).toBe(false);
     });
@@ -122,7 +122,7 @@ describe("storable-native-instances", () => {
         enumerable: true,
       });
       (err as unknown as Record<string, unknown>).name = "Error";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.message).toBe("original");
     });
@@ -130,19 +130,19 @@ describe("storable-native-instances", () => {
     it("[DECONSTRUCT] omits stack when undefined", () => {
       const err = new Error("no stack");
       err.stack = undefined;
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect("stack" in state).toBe(false);
     });
 
-    it("[RECONSTRUCT] creates StorableError from state (null name = same as type)", () => {
+    it("[RECONSTRUCT] creates FabricError from state (null name = same as type)", () => {
       const state = {
         type: "Error",
         name: null,
         message: "hello",
       } as FabricValue;
-      const result = StorableError[RECONSTRUCT](state, dummyContext);
-      expect(result).toBeInstanceOf(StorableError);
+      const result = FabricError[RECONSTRUCT](state, dummyContext);
+      expect(result).toBeInstanceOf(FabricError);
       expect(result.error).toBeInstanceOf(Error);
       expect(result.error.name).toBe("Error");
       expect(result.error.message).toBe("hello");
@@ -159,7 +159,7 @@ describe("storable-native-instances", () => {
       ];
       for (const [type, cls] of cases) {
         const state = { type, name: null, message: "test" } as FabricValue;
-        const result = StorableError[RECONSTRUCT](state, dummyContext);
+        const result = FabricError[RECONSTRUCT](state, dummyContext);
         expect(result.error).toBeInstanceOf(cls);
         expect(result.error.name).toBe(type);
       }
@@ -171,7 +171,7 @@ describe("storable-native-instances", () => {
         name: "CustomTypeName",
         message: "mismatch",
       } as FabricValue;
-      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      const result = FabricError[RECONSTRUCT](state, dummyContext);
       expect(result.error).toBeInstanceOf(TypeError);
       expect(result.error.name).toBe("CustomTypeName");
     });
@@ -181,7 +181,7 @@ describe("storable-native-instances", () => {
         name: "TypeError",
         message: "old format",
       } as FabricValue;
-      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      const result = FabricError[RECONSTRUCT](state, dummyContext);
       expect(result.error).toBeInstanceOf(TypeError);
     });
 
@@ -191,7 +191,7 @@ describe("storable-native-instances", () => {
         name: "MyCustomError",
         message: "custom",
       } as FabricValue;
-      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      const result = FabricError[RECONSTRUCT](state, dummyContext);
       expect(result.error.name).toBe("MyCustomError");
     });
 
@@ -203,7 +203,7 @@ describe("storable-native-instances", () => {
         cause: "something went wrong",
         code: 404,
       } as FabricValue;
-      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      const result = FabricError[RECONSTRUCT](state, dummyContext);
       expect(result.error.cause).toBe("something went wrong");
       expect(
         (result.error as unknown as Record<string, unknown>).code,
@@ -214,10 +214,10 @@ describe("storable-native-instances", () => {
       const original = new Error("round trip");
       original.name = "CustomError";
       (original as unknown as Record<string, unknown>).code = 42;
-      const se = new StorableError(original);
+      const se = new FabricError(original);
 
       const state = se[DECONSTRUCT]();
-      const restored = StorableError[RECONSTRUCT](state, dummyContext);
+      const restored = FabricError[RECONSTRUCT](state, dummyContext);
 
       expect(restored.error.name).toBe("CustomError");
       expect(restored.error.message).toBe("round trip");
@@ -229,13 +229,13 @@ describe("storable-native-instances", () => {
     it("round-trips TypeError with overridden name", () => {
       const original = new TypeError("bad value");
       original.name = "SpecialType";
-      const se = new StorableError(original);
+      const se = new FabricError(original);
 
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe("SpecialType");
 
-      const restored = StorableError[RECONSTRUCT](
+      const restored = FabricError[RECONSTRUCT](
         state as FabricValue,
         dummyContext,
       );
@@ -245,7 +245,7 @@ describe("storable-native-instances", () => {
 
     it("toNativeValue(true) returns frozen error (copy of unfrozen)", () => {
       const err = new Error("native");
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = se.toNativeValue(true);
       // Creates a frozen copy since the input is unfrozen.
       expect(result).toBeInstanceOf(Error);
@@ -258,7 +258,7 @@ describe("storable-native-instances", () => {
     it("toNativeValue(true) returns same error if already frozen", () => {
       const err = new Error("native");
       Object.freeze(err);
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = se.toNativeValue(true);
       expect(result).toBe(err); // same reference
       expect(Object.isFrozen(result)).toBe(true);
@@ -266,7 +266,7 @@ describe("storable-native-instances", () => {
 
     it("toNativeValue(false) returns unfrozen error", () => {
       const err = new Error("native");
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = se.toNativeValue(false);
       expect(result).toBe(err); // same reference (already unfrozen)
       expect(Object.isFrozen(result)).toBe(false);
@@ -275,7 +275,7 @@ describe("storable-native-instances", () => {
     it("toNativeValue(false) returns unfrozen copy of frozen error", () => {
       const err = new Error("native");
       Object.freeze(err);
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = se.toNativeValue(false);
       // Creates an unfrozen copy since the input is frozen.
       expect(result).toBeInstanceOf(Error);
@@ -285,59 +285,59 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Stub wrappers (StorableMap, StorableSet, StorableUint8Array)
+  // Stub wrappers (FabricMap, FabricSet, FabricUint8Array)
   // --------------------------------------------------------------------------
 
   describe("stub wrappers", () => {
-    it("StorableMap implements FabricInstance", () => {
-      const sm = new StorableMap(new Map());
+    it("FabricMap implements FabricInstance", () => {
+      const sm = new FabricMap(new Map());
       expect(isFabricInstance(sm)).toBe(true);
       expect(sm.typeTag).toBe("Map@1");
     });
 
-    it("StorableMap is instanceof StorableNativeWrapper", () => {
-      const sm = new StorableMap(new Map());
-      expect(sm instanceof StorableNativeWrapper).toBe(true);
+    it("FabricMap is instanceof FabricNativeWrapper", () => {
+      const sm = new FabricMap(new Map());
+      expect(sm instanceof FabricNativeWrapper).toBe(true);
     });
 
-    it("StorableMap [DECONSTRUCT] throws (stub)", () => {
-      const sm = new StorableMap(new Map());
+    it("FabricMap [DECONSTRUCT] throws (stub)", () => {
+      const sm = new FabricMap(new Map());
       expect(() => sm[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableMap [RECONSTRUCT] throws (stub)", () => {
-      expect(() => StorableMap[RECONSTRUCT](null, dummyContext)).toThrow(
+    it("FabricMap [RECONSTRUCT] throws (stub)", () => {
+      expect(() => FabricMap[RECONSTRUCT](null, dummyContext)).toThrow(
         "not yet implemented",
       );
     });
 
-    it("StorableMap.toNativeValue(true) returns FrozenMap", () => {
+    it("FabricMap.toNativeValue(true) returns FrozenMap", () => {
       const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(map);
+      const sm = new FabricMap(map);
       const result = sm.toNativeValue(true);
       expect(result).toBeInstanceOf(FrozenMap);
       expect((result as FrozenMap<string, number>).get("a")).toBe(1);
     });
 
-    it("StorableMap.toNativeValue(false) returns the original Map", () => {
+    it("FabricMap.toNativeValue(false) returns the original Map", () => {
       const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(map);
+      const sm = new FabricMap(map);
       const result = sm.toNativeValue(false);
       expect(result).toBe(map); // same reference
       expect(result).toBeInstanceOf(Map);
       expect(result).not.toBeInstanceOf(FrozenMap);
     });
 
-    it("StorableMap.toNativeValue(true) returns same FrozenMap if already frozen", () => {
+    it("FabricMap.toNativeValue(true) returns same FrozenMap if already frozen", () => {
       const fm = new FrozenMap<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(fm);
+      const sm = new FabricMap(fm);
       const result = sm.toNativeValue(true);
       expect(result).toBe(fm); // same reference
     });
 
-    it("StorableMap.toNativeValue(false) copies a FrozenMap to mutable Map", () => {
+    it("FabricMap.toNativeValue(false) copies a FrozenMap to mutable Map", () => {
       const fm = new FrozenMap<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(fm);
+      const sm = new FabricMap(fm);
       const result = sm.toNativeValue(false);
       expect(result).not.toBe(fm);
       expect(result).toBeInstanceOf(Map);
@@ -345,44 +345,44 @@ describe("storable-native-instances", () => {
       expect(result.get("a" as FabricValue)).toBe(1);
     });
 
-    it("StorableSet implements FabricInstance", () => {
-      const ss = new StorableSet(new Set());
+    it("FabricSet implements FabricInstance", () => {
+      const ss = new FabricSet(new Set());
       expect(isFabricInstance(ss)).toBe(true);
       expect(ss.typeTag).toBe("Set@1");
     });
 
-    it("StorableSet [DECONSTRUCT] throws (stub)", () => {
-      const ss = new StorableSet(new Set());
+    it("FabricSet [DECONSTRUCT] throws (stub)", () => {
+      const ss = new FabricSet(new Set());
       expect(() => ss[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableSet.toNativeValue(true) returns FrozenSet", () => {
+    it("FabricSet.toNativeValue(true) returns FrozenSet", () => {
       const set = new Set<FabricValue>([1, 2]);
-      const ss = new StorableSet(set);
+      const ss = new FabricSet(set);
       const result = ss.toNativeValue(true);
       expect(result).toBeInstanceOf(FrozenSet);
       expect((result as FrozenSet<number>).has(1)).toBe(true);
     });
 
-    it("StorableSet.toNativeValue(false) returns the original Set", () => {
+    it("FabricSet.toNativeValue(false) returns the original Set", () => {
       const set = new Set<FabricValue>([1, 2]);
-      const ss = new StorableSet(set);
+      const ss = new FabricSet(set);
       const result = ss.toNativeValue(false);
       expect(result).toBe(set); // same reference
       expect(result).toBeInstanceOf(Set);
       expect(result).not.toBeInstanceOf(FrozenSet);
     });
 
-    it("StorableSet.toNativeValue(true) returns same FrozenSet if already frozen", () => {
+    it("FabricSet.toNativeValue(true) returns same FrozenSet if already frozen", () => {
       const fs = new FrozenSet<FabricValue>([1, 2]);
-      const ss = new StorableSet(fs);
+      const ss = new FabricSet(fs);
       const result = ss.toNativeValue(true);
       expect(result).toBe(fs); // same reference
     });
 
-    it("StorableSet.toNativeValue(false) copies a FrozenSet to mutable Set", () => {
+    it("FabricSet.toNativeValue(false) copies a FrozenSet to mutable Set", () => {
       const fs = new FrozenSet<FabricValue>([1, 2]);
-      const ss = new StorableSet(fs);
+      const ss = new FabricSet(fs);
       const result = ss.toNativeValue(false);
       expect(result).not.toBe(fs);
       expect(result).toBeInstanceOf(Set);
@@ -390,37 +390,37 @@ describe("storable-native-instances", () => {
       expect(result.has(1 as FabricValue)).toBe(true);
     });
 
-    it("StorableUint8Array implements FabricInstance", () => {
-      const su = new StorableUint8Array(new Uint8Array([1, 2, 3]));
+    it("FabricUint8Array implements FabricInstance", () => {
+      const su = new FabricUint8Array(new Uint8Array([1, 2, 3]));
       expect(isFabricInstance(su)).toBe(true);
       expect(su.typeTag).toBe("Bytes@1");
     });
 
-    it("StorableUint8Array [DECONSTRUCT] throws (stub)", () => {
-      const su = new StorableUint8Array(new Uint8Array());
+    it("FabricUint8Array [DECONSTRUCT] throws (stub)", () => {
+      const su = new FabricUint8Array(new Uint8Array());
       expect(() => su[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableUint8Array.toNativeValue(true) returns Blob", () => {
+    it("FabricUint8Array.toNativeValue(true) returns Blob", () => {
       const bytes = new Uint8Array([1, 2, 3]);
-      const su = new StorableUint8Array(bytes);
+      const su = new FabricUint8Array(bytes);
       const result = su.toNativeValue(true);
       expect(result).toBeInstanceOf(Blob);
       expect((result as Blob).size).toBe(3);
       expect((result as Blob).type).toBe("");
     });
 
-    it("StorableUint8Array.toNativeValue(true) Blob contains correct data", async () => {
+    it("FabricUint8Array.toNativeValue(true) Blob contains correct data", async () => {
       const bytes = new Uint8Array([10, 20, 30]);
-      const su = new StorableUint8Array(bytes);
+      const su = new FabricUint8Array(bytes);
       const blob = su.toNativeValue(true) as Blob;
       const buf = await blob.arrayBuffer();
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([10, 20, 30]));
     });
 
-    it("StorableUint8Array.toNativeValue(false) returns the original", () => {
+    it("FabricUint8Array.toNativeValue(false) returns the original", () => {
       const bytes = new Uint8Array([1, 2, 3]);
-      const su = new StorableUint8Array(bytes);
+      const su = new FabricUint8Array(bytes);
       const result = su.toNativeValue(false);
       expect(result).toBe(bytes); // same reference
       expect(result).toBeInstanceOf(Uint8Array);
@@ -428,108 +428,108 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // nativeValueFromStorableValue (shallow unwrap)
+  // nativeValueFromFabricValue (shallow unwrap)
   // --------------------------------------------------------------------------
 
-  describe("nativeValueFromStorableValue", () => {
-    it("unwraps StorableError to frozen Error (default)", () => {
+  describe("nativeValueFromFabricValue", () => {
+    it("unwraps FabricError to frozen Error (default)", () => {
       const err = new TypeError("test");
-      const se = new StorableError(err);
-      const result = nativeValueFromStorableValue(se as FabricValue);
+      const se = new FabricError(err);
+      const result = nativeValueFromFabricValue(se as FabricValue);
       // Creates a frozen copy since the input error is unfrozen.
       expect(result).toBeInstanceOf(TypeError);
       expect((result as Error).message).toBe("test");
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("unwraps StorableMap to FrozenMap (default frozen)", () => {
+    it("unwraps FabricMap to FrozenMap (default frozen)", () => {
       const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(map);
-      const result = nativeValueFromStorableValue(sm as FabricValue);
+      const sm = new FabricMap(map);
+      const result = nativeValueFromFabricValue(sm as FabricValue);
       expect(result).toBeInstanceOf(FrozenMap);
       expect((result as FrozenMap<string, number>).get("a")).toBe(1);
     });
 
-    it("unwraps StorableMap to original Map when frozen=false", () => {
+    it("unwraps FabricMap to original Map when frozen=false", () => {
       const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new StorableMap(map);
-      const result = nativeValueFromStorableValue(sm as FabricValue, false);
+      const sm = new FabricMap(map);
+      const result = nativeValueFromFabricValue(sm as FabricValue, false);
       expect(result).toBe(map); // same reference
       expect(result).toBeInstanceOf(Map);
       expect(result).not.toBeInstanceOf(FrozenMap);
     });
 
-    it("unwraps StorableSet to FrozenSet (default frozen)", () => {
+    it("unwraps FabricSet to FrozenSet (default frozen)", () => {
       const set = new Set<FabricValue>([1, 2, 3]);
-      const ss = new StorableSet(set);
-      const result = nativeValueFromStorableValue(ss as FabricValue);
+      const ss = new FabricSet(set);
+      const result = nativeValueFromFabricValue(ss as FabricValue);
       expect(result).toBeInstanceOf(FrozenSet);
       expect((result as FrozenSet<number>).has(1)).toBe(true);
     });
 
-    it("unwraps StorableSet to original Set when frozen=false", () => {
+    it("unwraps FabricSet to original Set when frozen=false", () => {
       const set = new Set<FabricValue>([1, 2, 3]);
-      const ss = new StorableSet(set);
-      const result = nativeValueFromStorableValue(ss as FabricValue, false);
+      const ss = new FabricSet(set);
+      const result = nativeValueFromFabricValue(ss as FabricValue, false);
       expect(result).toBe(set); // same reference
       expect(result).toBeInstanceOf(Set);
       expect(result).not.toBeInstanceOf(FrozenSet);
     });
 
-    it("unwraps StorableUint8Array to Blob (default frozen)", () => {
+    it("unwraps FabricUint8Array to Blob (default frozen)", () => {
       const bytes = new Uint8Array([1, 2, 3]);
-      const su = new StorableUint8Array(bytes);
-      const result = nativeValueFromStorableValue(su as FabricValue);
+      const su = new FabricUint8Array(bytes);
+      const result = nativeValueFromFabricValue(su as FabricValue);
       expect(result).toBeInstanceOf(Blob);
       expect((result as Blob).size).toBe(3);
     });
 
-    it("unwraps StorableUint8Array to original Uint8Array when frozen=false", () => {
+    it("unwraps FabricUint8Array to original Uint8Array when frozen=false", () => {
       const bytes = new Uint8Array([1, 2, 3]);
-      const su = new StorableUint8Array(bytes);
-      const result = nativeValueFromStorableValue(su as FabricValue, false);
+      const su = new FabricUint8Array(bytes);
+      const result = nativeValueFromFabricValue(su as FabricValue, false);
       expect(result).toBe(bytes); // same reference
     });
 
     it("passes through primitives", () => {
-      expect(nativeValueFromStorableValue(42)).toBe(42);
-      expect(nativeValueFromStorableValue("hello")).toBe("hello");
-      expect(nativeValueFromStorableValue(null)).toBe(null);
-      expect(nativeValueFromStorableValue(true)).toBe(true);
+      expect(nativeValueFromFabricValue(42)).toBe(42);
+      expect(nativeValueFromFabricValue("hello")).toBe("hello");
+      expect(nativeValueFromFabricValue(null)).toBe(null);
+      expect(nativeValueFromFabricValue(true)).toBe(true);
     });
 
     it("returns frozen copy of unfrozen plain objects (frozen=true)", () => {
       const obj = { a: 1 } as FabricValue;
-      const result = nativeValueFromStorableValue(obj);
+      const result = nativeValueFromFabricValue(obj);
       expect(Object.isFrozen(result)).toBe(true);
       expect((result as Record<string, unknown>).a).toBe(1);
     });
 
     it("passes through frozen plain objects (frozen=true)", () => {
       const obj = Object.freeze({ a: 1 }) as FabricValue;
-      expect(nativeValueFromStorableValue(obj)).toBe(obj);
+      expect(nativeValueFromFabricValue(obj)).toBe(obj);
     });
 
     it("passes through unfrozen plain objects (frozen=false)", () => {
       const obj = { a: 1 } as FabricValue;
-      expect(nativeValueFromStorableValue(obj, false)).toBe(obj);
+      expect(nativeValueFromFabricValue(obj, false)).toBe(obj);
     });
 
     it("returns frozen copy of unfrozen arrays (frozen=true)", () => {
       const arr = [1, 2] as FabricValue;
-      const result = nativeValueFromStorableValue(arr);
+      const result = nativeValueFromFabricValue(arr);
       expect(Object.isFrozen(result)).toBe(true);
       expect(result).toEqual([1, 2]);
     });
 
     it("passes through frozen arrays (frozen=true)", () => {
       const arr = Object.freeze([1, 2]) as FabricValue;
-      expect(nativeValueFromStorableValue(arr)).toBe(arr);
+      expect(nativeValueFromFabricValue(arr)).toBe(arr);
     });
 
     it("passes through unfrozen arrays (frozen=false)", () => {
       const arr = [1, 2] as FabricValue;
-      expect(nativeValueFromStorableValue(arr, false)).toBe(arr);
+      expect(nativeValueFromFabricValue(arr, false)).toBe(arr);
     });
 
     it("freezing a sparse array preserves holes", () => {
@@ -537,7 +537,7 @@ describe("storable-native-instances", () => {
       const sparse = new Array(3) as FabricValue[];
       sparse[0] = 1 as FabricValue;
       sparse[2] = 3 as FabricValue;
-      const result = nativeValueFromStorableValue(
+      const result = nativeValueFromFabricValue(
         sparse as FabricValue,
       ) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
@@ -554,7 +554,7 @@ describe("storable-native-instances", () => {
       sparse[0] = 1 as FabricValue;
       sparse[2] = 3 as FabricValue;
       Object.freeze(sparse);
-      const result = nativeValueFromStorableValue(
+      const result = nativeValueFromFabricValue(
         sparse as FabricValue,
         false,
       ) as unknown[];
@@ -568,14 +568,14 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // nativeFromStorableValueRich (deep unwrap)
+  // nativeFromFabricValueModern (deep unwrap)
   // --------------------------------------------------------------------------
 
-  describe("nativeFromStorableValueRich", () => {
-    it("unwraps StorableError in nested object", () => {
-      const se = new StorableError(new Error("deep"));
+  describe("nativeFromFabricValueModern", () => {
+    it("unwraps FabricError in nested object", () => {
+      const se = new FabricError(new Error("deep"));
       const obj = { error: se } as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
@@ -583,28 +583,28 @@ describe("storable-native-instances", () => {
       expect((result.error as Error).message).toBe("deep");
     });
 
-    it("unwraps StorableMap in nested array", () => {
-      const sm = new StorableMap(
+    it("unwraps FabricMap in nested array", () => {
+      const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
       const arr = [sm] as FabricValue;
-      const result = nativeFromStorableValueRich(arr) as unknown[];
+      const result = nativeFromFabricValueModern(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenMap);
     });
 
-    it("unwraps StorableMap to mutable Map when frozen=false", () => {
-      const sm = new StorableMap(
+    it("unwraps FabricMap to mutable Map when frozen=false", () => {
+      const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
       const arr = [sm] as FabricValue;
-      const result = nativeFromStorableValueRich(arr, false) as unknown[];
+      const result = nativeFromFabricValueModern(arr, false) as unknown[];
       expect(result[0]).toBeInstanceOf(Map);
       expect(result[0]).not.toBeInstanceOf(FrozenMap);
     });
 
     it("passes through primitives at all levels", () => {
       const obj = { a: 1, b: "two", c: null, d: true } as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
@@ -612,13 +612,13 @@ describe("storable-native-instances", () => {
     });
 
     it("recursively unwraps nested structures", () => {
-      const se = new StorableError(new Error("nested"));
+      const se = new FabricError(new Error("nested"));
       const obj = {
         outer: {
           inner: se,
         },
       } as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as {
+      const result = nativeFromFabricValueModern(obj) as {
         outer: { inner: Error };
       };
       expect(result.outer.inner).toBeInstanceOf(Error);

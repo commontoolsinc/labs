@@ -9,18 +9,18 @@ import {
   canBeStoredRich,
   cloneIfNecessaryRich,
   type CloneOptions,
-  isStorableValueRich,
-  shallowStorableFromNativeValueRich,
-  storableFromNativeValueRich,
+  isFabricValueModern,
+  shallowFabricFromNativeValueModern,
+  fabricFromNativeValueModern,
 } from "./storable-value-modern.ts";
 export type { CloneOptions } from "./storable-value-modern.ts";
-import { nativeFromStorableValueRich } from "./storable-native-instances.ts";
+import { nativeFromFabricValueModern } from "./storable-native-instances.ts";
 import {
   canBeStoredLegacy,
   cloneIfNecessaryLegacy,
-  isStorableValueLegacy,
-  shallowStorableFromNativeValueLegacy,
-  storableFromNativeValueLegacy,
+  isFabricValueLegacy,
+  shallowFabricFromNativeValueLegacy,
+  fabricFromNativeValueLegacy,
 } from "./storable-value-legacy.ts";
 export {
   isArrayIndexPropertyName,
@@ -38,31 +38,31 @@ export {
  *
  * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
  */
-export interface ExperimentalStorableConfig {
+export interface ExperimentalDataModelConfig {
   /** When `true`, storable value functions use the extended type system
    *  (bigint, Map, Set, Uint8Array, Date, etc.). */
   richStorableValues: boolean;
 }
 
-const defaultConfig: ExperimentalStorableConfig = {
+const defaultConfig: ExperimentalDataModelConfig = {
   richStorableValues: false,
 };
 
-let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
+let currentConfig: ExperimentalDataModelConfig = { ...defaultConfig };
 
 /**
  * Activates experimental storable-value features. Called by the `Runtime`
  * constructor to propagate `ExperimentalOptions` into the memory layer.
  * Merges the provided partial config with defaults.
  */
-export function setStorableValueConfig(
-  config: Partial<ExperimentalStorableConfig>,
+export function setDataModelConfig(
+  config: Partial<ExperimentalDataModelConfig>,
 ): void {
   currentConfig = { ...defaultConfig, ...config };
 }
 
 /** Returns the current experimental storable-value configuration. */
-export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
+export function getExperimentalDataModelConfig(): ExperimentalDataModelConfig {
   return currentConfig;
 }
 
@@ -71,7 +71,7 @@ export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
-export function resetStorableValueConfig(): void {
+export function resetDataModelConfig(): void {
   currentConfig = { ...defaultConfig };
 }
 
@@ -82,40 +82,40 @@ export function resetStorableValueConfig(): void {
 /**
  * Convert a native JS value to storable form (deep, recursive).
  *
- * Flag OFF (legacy): performs deep conversion via `storableFromNativeValueLegacy`.
+ * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy`.
  * Flag ON (rich): wraps native types (Error, Date, RegExp, etc.) into
- * storable wrappers and deep-freezes via `storableFromNativeValueRich`.
+ * storable wrappers and deep-freezes via `fabricFromNativeValueModern`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
  *   applies when `richStorableValues` is ON; the legacy path does not
  *   freeze.
  */
-export function storableFromNativeValue(
+export function fabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValue {
   return currentConfig.richStorableValues
-    ? storableFromNativeValueRich(value, freeze)
-    : storableFromNativeValueLegacy(value);
+    ? fabricFromNativeValueModern(value, freeze)
+    : fabricFromNativeValueLegacy(value);
 }
 
 /**
  * Convert a storable value back to native form.
  *
  * Flag OFF (legacy): identity passthrough. Flag ON (rich): unwraps storable
- * wrappers (StorableError, StorableMap, etc.) back to native JS types via
- * `nativeFromStorableValueRich`.
+ * wrappers (FabricError, FabricMap, etc.) back to native JS types via
+ * `nativeFromFabricValueModern`.
  *
  * @param frozen - When `true` (default), deep-freezes the result. Only
  *   applies when `richStorableValues` is ON; the legacy path is a
  *   passthrough regardless.
  */
-export function nativeFromStorableValue(
+export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricValue {
   return currentConfig.richStorableValues
-    ? nativeFromStorableValueRich(value, frozen) as FabricValue
+    ? nativeFromFabricValueModern(value, frozen) as FabricValue
     : value;
 }
 
@@ -123,7 +123,7 @@ export function nativeFromStorableValue(
  * Clone an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
- * Unlike `storableFromNativeValue` (which converts native JS values into
+ * Unlike `fabricFromNativeValue` (which converts native JS values into
  * storable wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
@@ -182,26 +182,26 @@ export function cloneIfNecessary<T extends FabricValue>(
  * not recursively validate nested values in arrays or objects.
  *
  * Flag OFF (legacy): storable values are JSON-encodable values plus
- * `undefined`. Flag ON (rich): delegates to `isStorableValueRich` which
+ * `undefined`. Flag ON (rich): delegates to `isFabricValueModern` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
-export function isStorableValue(
+export function isFabricValue(
   value: unknown,
 ): value is FabricValueLayer {
   return currentConfig.richStorableValues
-    ? isStorableValueRich(value)
-    : isStorableValueLegacy(value);
+    ? isFabricValueModern(value)
+    : isFabricValueLegacy(value);
 }
 
 /**
- * Returns `true` if `storableFromNativeValue()` would succeed on the value.
+ * Returns `true` if `fabricFromNativeValue()` would succeed on the value.
  * Checks whether the value is a `FabricValue`, a `FabricNativeObject`,
  * or a deep tree thereof.
  *
- * Flag OFF (legacy): equivalent to `isStorableValue()` (non-recursive).
+ * Flag OFF (legacy): equivalent to `isFabricValue()` (non-recursive).
  * Flag ON (rich): delegates to the rich `canBeStored` which recursively
  * validates nested values.
  *
@@ -226,7 +226,7 @@ export function canBeStored(
  * converted via `toJSON()` if available.
  *
  * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
- * `shallowStorableFromNativeValueRich` which handles the extended type system.
+ * `shallowFabricFromNativeValueModern` which handles the extended type system.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
@@ -234,13 +234,13 @@ export function canBeStored(
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to storable form.
  */
-export function shallowStorableFromNativeValue(
+export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
   return currentConfig.richStorableValues
-    ? shallowStorableFromNativeValueRich(value, freeze)
-    : shallowStorableFromNativeValueLegacy(value);
+    ? shallowFabricFromNativeValueModern(value, freeze)
+    : shallowFabricFromNativeValueLegacy(value);
 }
 
 // ---------------------------------------------------------------------------

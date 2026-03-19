@@ -12,7 +12,7 @@
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./storable-content-id.ts";
-import { StorableUint8Array } from "./storable-native-instances.ts";
+import { FabricUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, type FabricInstance } from "./storable-instance.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
@@ -157,10 +157,10 @@ function feedObjectValue(
   hasher: IncrementalHasher,
   value: object,
 ): void {
-  // StorableUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
+  // FabricUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
   // FabricInstance wrapper, not a native Uint8Array. Handle before the
   // tagFromNativeValue switch.
-  if (value instanceof StorableUint8Array) {
+  if (value instanceof FabricUint8Array) {
     hasher.update(TAG_BYTES_BYTES);
     const bytes = value.bytes;
     feedLength(hasher, bytes.length);

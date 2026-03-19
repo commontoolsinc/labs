@@ -59,14 +59,14 @@ function hasToJSONMethod(
 }
 
 /**
- * Legacy implementation of `isStorableValue()` for the JSON-only type system.
+ * Legacy implementation of `isFabricValue()` for the JSON-only type system.
  * Determines if the given value is considered "storable" per se (without
  * invoking any conversions such as `.toJSON()`).
  *
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
-export function isStorableValueLegacy(
+export function isFabricValueLegacy(
   value: unknown,
 ): value is FabricValueLayer {
   switch (typeof value) {
@@ -78,7 +78,7 @@ export function isStorableValueLegacy(
 
     case "number": {
       // Finite numbers are storable. Note: `-0` is accepted because it gets
-      // normalized to `0` during conversion (see `shallowStorableFromNativeValue()`).
+      // normalized to `0` during conversion (see `shallowFabricFromNativeValue()`).
       // `NaN` and `Infinity` are not JSON-encodable and thus not storable.
       return Number.isFinite(value);
     }
@@ -104,7 +104,7 @@ export function isStorableValueLegacy(
 
 /**
  * Legacy implementation of `canBeStored()` for the JSON-only type system.
- * In legacy mode, equivalent to `isStorableValueLegacy()` since the legacy
+ * In legacy mode, equivalent to `isFabricValueLegacy()` since the legacy
  * path doesn't support `FabricNativeObject` types.
  *
  * @param value - The value to check.
@@ -113,7 +113,7 @@ export function isStorableValueLegacy(
 export function canBeStoredLegacy(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
-  return isStorableValueLegacy(value);
+  return isFabricValueLegacy(value);
 }
 
 /**
@@ -167,7 +167,7 @@ export function cloneIfNecessaryLegacy(
 }
 
 /**
- * Legacy implementation of `shallowStorableFromNativeValue()` for the
+ * Legacy implementation of `shallowFabricFromNativeValue()` for the
  * JSON-only type system. Converts a value to storable form without recursing
  * into nested values.
  *
@@ -175,7 +175,7 @@ export function cloneIfNecessaryLegacy(
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
-export function shallowStorableFromNativeValueLegacy(
+export function shallowFabricFromNativeValueLegacy(
   value: unknown,
 ): FabricValueLayer {
   switch (typeof value) {
@@ -203,7 +203,7 @@ export function shallowStorableFromNativeValueLegacy(
       if (hasToJSONMethod(value)) {
         const converted = value.toJSON();
 
-        if (!isStorableValueLegacy(converted)) {
+        if (!isFabricValueLegacy(converted)) {
           throw new Error(
             `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
           );
@@ -262,7 +262,7 @@ export function shallowStorableFromNativeValueLegacy(
 }
 
 // Sentinel value used to indicate that a property should be omitted during
-// conversion in `storableFromNativeValueLegacy()`.
+// conversion in `fabricFromNativeValueLegacy()`.
 const OMIT = Symbol("OMIT");
 
 // Sentinel value used in the `converted` map to indicate an object is currently
@@ -278,7 +278,7 @@ const PROCESSING = Symbol("PROCESSING");
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function storableFromNativeValueLegacy(value: unknown): FabricValue {
+export function fabricFromNativeValueLegacy(value: unknown): FabricValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
@@ -299,7 +299,7 @@ function storableFromNativeValueLegacyInternal(
   inArray: boolean,
 ): FabricValue | typeof OMIT {
   // Track the original value for cycle detection and caching. This is important
-  // because `shallowStorableFromNativeValue()` may return a different object (e.g., for sparse
+  // because `shallowFabricFromNativeValue()` may return a different object (e.g., for sparse
   // arrays or values with `toJSON()`), but circular references and shared
   // references point to the original.
   const isOriginalRecord = isRecord(original);
@@ -338,7 +338,7 @@ function storableFromNativeValueLegacyInternal(
   // directly since storableFromNativeValueLegacyInternal is part of the legacy path.
   let value: FabricValueLayer;
   try {
-    value = shallowStorableFromNativeValueLegacy(original);
+    value = shallowFabricFromNativeValueLegacy(original);
   } catch (e) {
     // Clean up converted map before propagating error.
     if (isOriginalRecord) {

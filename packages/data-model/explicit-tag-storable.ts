@@ -3,7 +3,7 @@ import { FabricInstance } from "./storable-instance.ts";
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.
- * Used by `UnknownStorable` (unrecognized types) and `ProblematicStorable`
+ * Used by `UnknownValue` (unrecognized types) and `ProblematicValue`
  * (failed deconstruction/reconstruction). Enables a single `instanceof`
  * check where code needs to handle both.
  *
@@ -11,7 +11,7 @@ import { FabricInstance } from "./storable-instance.ts";
  *
  * See Section 3.2 of the formal spec.
  */
-export abstract class ExplicitTagStorable extends FabricInstance {
+export abstract class ExplicitTagValue extends FabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,

@@ -6,23 +6,23 @@ import { isFabricInstance } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
-import { UnknownStorable } from "../unknown-storable.ts";
-import { ProblematicStorable } from "../problematic-storable.ts";
-import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
+import { UnknownValue } from "../unknown-storable.ts";
+import { ProblematicValue } from "../problematic-storable.ts";
+import { ExplicitTagValue } from "../explicit-tag-storable.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
 import {
-  nativeFromStorableValueRich,
-  nativeValueFromStorableValue,
-  StorableError,
-  StorableMap,
-  StorableSet,
+  nativeFromFabricValueModern,
+  nativeValueFromFabricValue,
+  FabricError,
+  FabricMap,
+  FabricSet,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   canBeStored,
-  resetStorableValueConfig,
-  setStorableValueConfig,
-  shallowStorableFromNativeValue,
+  resetDataModelConfig,
+  setDataModelConfig,
+  shallowFabricFromNativeValue,
 } from "../storable-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
@@ -111,16 +111,16 @@ describe("json encoding", () => {
       expect(result.count).toBe(42);
     });
 
-    it("round-trips StorableError through Uint8Array", () => {
+    it("round-trips FabricError through Uint8Array", () => {
       const { context, runtime } = makeTestContext();
-      const err = new StorableError(new TypeError("oops"));
+      const err = new FabricError(new TypeError("oops"));
       const bytes = context.encodeToBytes(err as FabricValue);
       const result = context.decodeFromBytes(
         bytes,
         runtime,
       );
-      expect(result).toBeInstanceOf(StorableError);
-      const se = result as unknown as StorableError;
+      expect(result).toBeInstanceOf(FabricError);
+      const se = result as unknown as FabricError;
       expect(se.error).toBeInstanceOf(TypeError);
       expect(se.error.message).toBe("oops");
     });
@@ -136,7 +136,7 @@ describe("json encoding", () => {
       const { context, runtime } = makeTestContext();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
-        error: new StorableError(new Error("fail")),
+        error: new FabricError(new Error("fail")),
         nothing: undefined,
       } as unknown as FabricValue;
       const bytes = context.encodeToBytes(value);
@@ -146,7 +146,7 @@ describe("json encoding", () => {
       ) as Record<string, FabricValue>;
       const users = result.users as FabricValue[];
       expect((users[0] as Record<string, FabricValue>).name).toBe("Alice");
-      expect(result.error).toBeInstanceOf(StorableError);
+      expect(result.error).toBeInstanceOf(FabricError);
       expect(result.nothing).toBe(undefined);
     });
   });
@@ -364,41 +364,41 @@ describe("json encoding", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
-    it("rejects padded base64 input (ProblematicStorable)", () => {
+    it("rejects padded base64 input (ProblematicValue)", () => {
       // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
       const data = { "/BigInt@1": "Kg==" } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
     });
 
-    it("deserializes non-string state to ProblematicStorable", () => {
+    it("deserializes non-string state to ProblematicValue", () => {
       const data = { "/BigInt@1": 42 } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
       expect(prob.state).toBe(42);
     });
 
-    it("deserializes null state to ProblematicStorable", () => {
+    it("deserializes null state to ProblematicValue", () => {
       const data = { "/BigInt@1": null } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicStorable);
+      expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("deserializes object state to ProblematicStorable", () => {
+    it("deserializes object state to ProblematicValue", () => {
       const data = { "/BigInt@1": { bad: true } } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicStorable);
+      expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("deserializes empty base64 string to ProblematicStorable", () => {
+    it("deserializes empty base64 string to ProblematicValue", () => {
       const data = { "/BigInt@1": "" } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
     });
   });
@@ -536,56 +536,56 @@ describe("json encoding", () => {
 
   describe("Date -> FabricEpochNsec conversion", () => {
     it("converts Date(0) to FabricEpochNsec(0n)", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       try {
         const date = new Date(0);
-        const result = shallowStorableFromNativeValue(
+        const result = shallowFabricFromNativeValue(
           date,
         ) as unknown as FabricEpochNsec;
         expect(result).toBeInstanceOf(FabricEpochNsec);
         expect(result.value).toBe(0n);
       } finally {
-        resetStorableValueConfig();
+        resetDataModelConfig();
       }
     });
 
     it("converts Date to nanoseconds (msec * 1_000_000)", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       try {
         const date = new Date("2024-01-01T00:00:00.000Z");
-        const result = shallowStorableFromNativeValue(
+        const result = shallowFabricFromNativeValue(
           date,
         ) as unknown as FabricEpochNsec;
         expect(result).toBeInstanceOf(FabricEpochNsec);
         const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
         expect(result.value).toBe(expectedNsec);
       } finally {
-        resetStorableValueConfig();
+        resetDataModelConfig();
       }
     });
 
     it("converts negative Date to negative nanoseconds", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       try {
         const date = new Date(-86400000); // -1 day
-        const result = shallowStorableFromNativeValue(
+        const result = shallowFabricFromNativeValue(
           date,
         ) as unknown as FabricEpochNsec;
         expect(result).toBeInstanceOf(FabricEpochNsec);
         expect(result.value).toBe(-86400000000000n);
       } finally {
-        resetStorableValueConfig();
+        resetDataModelConfig();
       }
     });
   });
 
   // --------------------------------------------------------------------------
-  // StorableError (Error wrapper)
+  // FabricError (Error wrapper)
   // --------------------------------------------------------------------------
 
-  describe("StorableError", () => {
-    it("serializes basic StorableError to /Error@1", () => {
-      const se = new StorableError(new Error("test"));
+  describe("FabricError", () => {
+    it("serializes basic FabricError to /Error@1", () => {
+      const se = new FabricError(new Error("test"));
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -596,52 +596,52 @@ describe("json encoding", () => {
       expect(state.message).toBe("test");
     });
 
-    it("round-trips basic Error via StorableError", () => {
-      const se = new StorableError(new Error("hello"));
+    it("round-trips basic Error via FabricError", () => {
+      const se = new FabricError(new Error("hello"));
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
-      expect(result).toBeInstanceOf(StorableError);
+      ) as unknown as FabricError;
+      expect(result).toBeInstanceOf(FabricError);
       expect(result.error).toBeInstanceOf(Error);
       expect(result.error.name).toBe("Error");
       expect(result.error.message).toBe("hello");
     });
 
     it("round-trips TypeError", () => {
-      const se = new StorableError(new TypeError("bad type"));
+      const se = new FabricError(new TypeError("bad type"));
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
-      expect(result).toBeInstanceOf(StorableError);
+      ) as unknown as FabricError;
+      expect(result).toBeInstanceOf(FabricError);
       expect(result.error).toBeInstanceOf(TypeError);
       expect(result.error.name).toBe("TypeError");
       expect(result.error.message).toBe("bad type");
     });
 
     it("round-trips RangeError", () => {
-      const se = new StorableError(new RangeError("out of range"));
+      const se = new FabricError(new RangeError("out of range"));
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
-      expect(result).toBeInstanceOf(StorableError);
+      ) as unknown as FabricError;
+      expect(result).toBeInstanceOf(FabricError);
       expect(result.error).toBeInstanceOf(RangeError);
       expect(result.error.name).toBe("RangeError");
     });
 
     it("round-trips Error with cause", () => {
-      const inner = new StorableError(new Error("inner"));
-      const outer = new StorableError(
+      const inner = new FabricError(new Error("inner"));
+      const outer = new FabricError(
         new Error("outer", { cause: inner }),
       );
       const result = roundTrip(
         outer as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error.message).toBe("outer");
-      // The cause was serialized as a StorableError (the inner wrapper).
-      // After round-trip, the cause is a StorableError.
-      expect(result.error.cause).toBeInstanceOf(StorableError);
+      // The cause was serialized as a FabricError (the inner wrapper).
+      // After round-trip, the cause is a FabricError.
+      expect(result.error.cause).toBeInstanceOf(FabricError);
       expect(
-        (result.error.cause as StorableError).error.message,
+        (result.error.cause as FabricError).error.message,
       ).toBe("inner");
     });
 
@@ -649,10 +649,10 @@ describe("json encoding", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error.message).toBe("oops");
       expect(
         (result.error as unknown as Record<string, unknown>).code,
@@ -665,17 +665,17 @@ describe("json encoding", () => {
     it("round-trips Error with custom name", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error.name).toBe("MyCustomError");
       expect(result.error.message).toBe("custom");
     });
 
     it("wire format has name: null when name matches type (TypeError)", () => {
       // TypeError: name === constructor.name === "TypeError"
-      const se = new StorableError(new TypeError("type check"));
+      const se = new FabricError(new TypeError("type check"));
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -688,7 +688,7 @@ describe("json encoding", () => {
     it("wire format has explicit name when name differs from type", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -701,10 +701,10 @@ describe("json encoding", () => {
     it("round-trips TypeError preserving name === type identity", () => {
       // After round-trip, name and type should both be "TypeError",
       // and the Error should reconstruct as a TypeError instance.
-      const se = new StorableError(new TypeError("rt"));
+      const se = new FabricError(new TypeError("rt"));
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error).toBeInstanceOf(TypeError);
       expect(result.error.name).toBe("TypeError");
       expect(result.error.constructor.name).toBe("TypeError");
@@ -714,42 +714,42 @@ describe("json encoding", () => {
       // Error constructor is "Error" but name is overridden.
       const err = new Error("mismatch");
       err.name = "CustomName";
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const result = roundTrip(
         se as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error).toBeInstanceOf(Error);
       expect(result.error.name).toBe("CustomName");
       expect(result.error.constructor.name).toBe("Error");
     });
 
-    it("isFabricInstance returns true for StorableError", () => {
-      const se = new StorableError(new Error("test"));
+    it("isFabricInstance returns true for FabricError", () => {
+      const se = new FabricError(new Error("test"));
       expect(isFabricInstance(se)).toBe(true);
     });
 
     it("has typeTag property", () => {
-      const se = new StorableError(new Error("test"));
+      const se = new FabricError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
     });
 
-    it("round-trips StorableError with pre-converted cause (raw Error)", () => {
-      // Simulates what storableFromNativeValue produces: a StorableError
-      // wrapping an Error whose cause is itself a StorableError (not a
+    it("round-trips FabricError with pre-converted cause (raw Error)", () => {
+      // Simulates what fabricFromNativeValue produces: a FabricError
+      // wrapping an Error whose cause is itself a FabricError (not a
       // raw Error). The serializer's recurse on [DECONSTRUCT] output
       // must find FabricValue, not raw Error.
-      const innerSe = new StorableError(new Error("inner"));
+      const innerSe = new FabricError(new Error("inner"));
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      const outerSe = new StorableError(outerErr);
+      const outerSe = new FabricError(outerErr);
 
       const result = roundTrip(
         outerSe as FabricValue,
-      ) as unknown as StorableError;
+      ) as unknown as FabricError;
       expect(result.error.message).toBe("outer");
-      expect(result.error.cause).toBeInstanceOf(StorableError);
+      expect(result.error.cause).toBeInstanceOf(FabricError);
       expect(
-        (result.error.cause as StorableError).error.message,
+        (result.error.cause as FabricError).error.message,
       ).toBe("inner");
     });
   });
@@ -1020,44 +1020,44 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Unknown type tags -> UnknownStorable
+  // Unknown type tags -> UnknownValue
   // --------------------------------------------------------------------------
 
   describe("unknown type tags", () => {
-    it("decode() produces UnknownStorable for unrecognized tags", () => {
+    it("decode() produces UnknownValue for unrecognized tags", () => {
       const data = {
         "/FutureType@2": { some: "data" },
       } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(UnknownStorable);
-      const unknown = result as unknown as UnknownStorable;
+      expect(result).toBeInstanceOf(UnknownValue);
+      const unknown = result as unknown as UnknownValue;
       expect(unknown.typeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("encode preserves UnknownStorable tag in wire format", () => {
-      // Encoding an UnknownStorable produces the original tagged form.
-      const us = new UnknownStorable("FutureType@2", { some: "data" });
+    it("encode preserves UnknownValue tag in wire format", () => {
+      // Encoding an UnknownValue produces the original tagged form.
+      const us = new UnknownValue("FutureType@2", { some: "data" });
       const wireFormat = toWireFormat(us as FabricValue);
       expect(wireFormat).toEqual({
         "/FutureType@2": { some: "data" },
       });
     });
 
-    it("UnknownStorable round-trips through encode/decode", () => {
-      const us = new UnknownStorable("FutureType@2", { some: "data" });
+    it("UnknownValue round-trips through encode/decode", () => {
+      const us = new UnknownValue("FutureType@2", { some: "data" });
       const result = roundTrip(us as FabricValue);
-      expect(result).toBeInstanceOf(UnknownStorable);
-      const unknown = result as unknown as UnknownStorable;
+      expect(result).toBeInstanceOf(UnknownValue);
+      const unknown = result as unknown as UnknownValue;
       expect(unknown.typeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("/hole outside array context becomes UnknownStorable", () => {
+    it("/hole outside array context becomes UnknownValue", () => {
       const data = { "/hole": 5 } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(UnknownStorable);
-      const unknown = result as unknown as UnknownStorable;
+      expect(result).toBeInstanceOf(UnknownValue);
+      const unknown = result as unknown as UnknownValue;
       expect(unknown.typeTag).toBe("hole");
       expect(unknown.state).toBe(5);
     });
@@ -1099,8 +1099,8 @@ describe("json encoding", () => {
 
     it("throws on FabricInstance whose state references itself", () => {
       const { context } = makeTestContext();
-      // Create an UnknownStorable whose state transitively references itself.
-      const us = new UnknownStorable("Test@1", null);
+      // Create an UnknownValue whose state transitively references itself.
+      const us = new UnknownValue("Test@1", null);
       // Mutate state to create a cycle: us -> [us] -> us.
       (us as unknown as { state: FabricValue }).state = [
         us,
@@ -1121,12 +1121,12 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // ProblematicStorable (lenient mode)
+  // ProblematicValue (lenient mode)
   // --------------------------------------------------------------------------
 
-  describe("ProblematicStorable (lenient mode)", () => {
-    it("encode preserves ProblematicStorable's original tag and state", () => {
-      const prob = new ProblematicStorable(
+  describe("ProblematicValue (lenient mode)", () => {
+    it("encode preserves ProblematicValue's original tag and state", () => {
+      const prob = new ProblematicValue(
         "BadType@1",
         "original data",
         "something went wrong",
@@ -1146,12 +1146,12 @@ describe("json encoding", () => {
         },
       };
 
-      // BigInt@1 with a non-string state produces ProblematicStorable
+      // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
       const data = { "/BigInt@1": 42 } as JsonWireValue;
       const result = context.decode(JSON.stringify(data), runtime);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
     });
 
@@ -1169,8 +1169,8 @@ describe("json encoding", () => {
         "/Map@1": [["key", "value"]],
       } as JsonWireValue;
       const result = context.decode(JSON.stringify(data), runtime);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("Map@1");
     });
   });
@@ -1254,13 +1254,13 @@ describe("json encoding", () => {
       expect(isFabricInstance({ a: 1 })).toBe(false);
     });
 
-    it("returns true for UnknownStorable", () => {
-      const us = new UnknownStorable("Test@1", null);
+    it("returns true for UnknownValue", () => {
+      const us = new UnknownValue("Test@1", null);
       expect(isFabricInstance(us)).toBe(true);
     });
 
-    it("returns true for ProblematicStorable", () => {
-      const ps = new ProblematicStorable("Test@1", null, "oops");
+    it("returns true for ProblematicValue", () => {
+      const ps = new ProblematicValue("Test@1", null, "oops");
       expect(isFabricInstance(ps)).toBe(true);
     });
 
@@ -1277,25 +1277,25 @@ describe("json encoding", () => {
       expect(isFabricInstance(instance)).toBe(true);
     });
 
-    it("returns true for StorableError", () => {
-      const se = new StorableError(new Error("test"));
+    it("returns true for FabricError", () => {
+      const se = new FabricError(new Error("test"));
       expect(isFabricInstance(se)).toBe(true);
     });
   });
 
   // --------------------------------------------------------------------------
-  // UnknownStorable
+  // UnknownValue
   // --------------------------------------------------------------------------
 
-  describe("UnknownStorable", () => {
+  describe("UnknownValue", () => {
     it("preserves typeTag and state", () => {
-      const us = new UnknownStorable("FancyType@3", { data: [1, 2, 3] });
+      const us = new UnknownValue("FancyType@3", { data: [1, 2, 3] });
       expect(us.typeTag).toBe("FancyType@3");
       expect(us.state).toEqual({ data: [1, 2, 3] });
     });
 
     it("has DECONSTRUCT method", () => {
-      const us = new UnknownStorable("Test@1", "state");
+      const us = new UnknownValue("Test@1", "state");
       expect(us[DECONSTRUCT]()).toEqual({
         type: "Test@1",
         state: "state",
@@ -1304,19 +1304,19 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // ProblematicStorable
+  // ProblematicValue
   // --------------------------------------------------------------------------
 
-  describe("ProblematicStorable", () => {
+  describe("ProblematicValue", () => {
     it("preserves typeTag, state, and error", () => {
-      const ps = new ProblematicStorable("BadType@1", { x: 1 }, "boom");
+      const ps = new ProblematicValue("BadType@1", { x: 1 }, "boom");
       expect(ps.typeTag).toBe("BadType@1");
       expect(ps.state).toEqual({ x: 1 });
       expect(ps.error).toBe("boom");
     });
 
     it("has DECONSTRUCT method", () => {
-      const ps = new ProblematicStorable("T@1", "s", "e");
+      const ps = new ProblematicValue("T@1", "s", "e");
       expect(ps[DECONSTRUCT]()).toEqual({
         type: "T@1",
         state: "s",
@@ -1326,26 +1326,26 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // ExplicitTagStorable base class
+  // ExplicitTagValue base class
   // --------------------------------------------------------------------------
 
-  describe("ExplicitTagStorable", () => {
-    it("UnknownStorable is an instance of ExplicitTagStorable", () => {
-      const us = new UnknownStorable("Test@1", "state");
-      expect(us instanceof ExplicitTagStorable).toBe(true);
+  describe("ExplicitTagValue", () => {
+    it("UnknownValue is an instance of ExplicitTagValue", () => {
+      const us = new UnknownValue("Test@1", "state");
+      expect(us instanceof ExplicitTagValue).toBe(true);
     });
 
-    it("ProblematicStorable is an instance of ExplicitTagStorable", () => {
-      const ps = new ProblematicStorable("Test@1", "state", "oops");
-      expect(ps instanceof ExplicitTagStorable).toBe(true);
+    it("ProblematicValue is an instance of ExplicitTagValue", () => {
+      const ps = new ProblematicValue("Test@1", "state", "oops");
+      expect(ps instanceof ExplicitTagValue).toBe(true);
     });
 
-    it("ExplicitTagStorable provides access to typeTag and state", () => {
-      const us: ExplicitTagStorable = new UnknownStorable("Tag@2", 42);
+    it("ExplicitTagValue provides access to typeTag and state", () => {
+      const us: ExplicitTagValue = new UnknownValue("Tag@2", 42);
       expect(us.typeTag).toBe("Tag@2");
       expect(us.state).toBe(42);
 
-      const ps: ExplicitTagStorable = new ProblematicStorable(
+      const ps: ExplicitTagValue = new ProblematicValue(
         "Bad@1",
         "data",
         "err",
@@ -1385,11 +1385,11 @@ describe("json encoding", () => {
           throw new Error("not implemented");
         },
       };
-      const se = new StorableError(new Error("test"));
+      const se = new FabricError(new Error("test"));
       const encoded = ctx.encode(se as FabricValue);
       const decoded = ctx.decode(encoded, runtime);
-      expect(decoded).toBeInstanceOf(StorableError);
-      expect((decoded as unknown as StorableError).error.message).toBe("test");
+      expect(decoded).toBeInstanceOf(FabricError);
+      expect((decoded as unknown as FabricError).error.message).toBe("test");
     });
 
     it("encodeToBytes/decodeFromBytes round-trip", () => {
@@ -1401,7 +1401,7 @@ describe("json encoding", () => {
       };
       const data = {
         name: "test",
-        error: new StorableError(new Error("fail")),
+        error: new FabricError(new Error("fail")),
       } as unknown as FabricValue;
       const bytes = ctx.encodeToBytes(data);
       expect(bytes).toBeInstanceOf(Uint8Array);
@@ -1410,7 +1410,7 @@ describe("json encoding", () => {
         FabricValue
       >;
       expect(decoded.name).toBe("test");
-      expect(decoded.error).toBeInstanceOf(StorableError);
+      expect(decoded.error).toBeInstanceOf(FabricError);
     });
 
     it("lenient defaults to false", () => {
@@ -1425,23 +1425,23 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // nativeValueFromStorableValue
+  // nativeValueFromFabricValue
   // --------------------------------------------------------------------------
 
-  describe("nativeValueFromStorableValue", () => {
-    it("unwraps StorableError to Error (frozen)", () => {
+  describe("nativeValueFromFabricValue", () => {
+    it("unwraps FabricError to Error (frozen)", () => {
       const err = new Error("test");
-      const se = new StorableError(err);
-      const result = nativeValueFromStorableValue(se as FabricValue);
+      const se = new FabricError(err);
+      const result = nativeValueFromFabricValue(se as FabricValue);
       expect(result).toBeInstanceOf(Error);
       expect((result as Error).message).toBe("test");
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("unwraps StorableError to Error (unfrozen)", () => {
+    it("unwraps FabricError to Error (unfrozen)", () => {
       const err = new Error("test");
-      const se = new StorableError(err);
-      const result = nativeValueFromStorableValue(
+      const se = new FabricError(err);
+      const result = nativeValueFromFabricValue(
         se as FabricValue,
         false,
       );
@@ -1451,72 +1451,72 @@ describe("json encoding", () => {
     });
 
     it("passes through primitives", () => {
-      expect(nativeValueFromStorableValue(null)).toBe(null);
-      expect(nativeValueFromStorableValue(undefined)).toBe(undefined);
-      expect(nativeValueFromStorableValue(42)).toBe(42);
-      expect(nativeValueFromStorableValue("hello")).toBe("hello");
-      expect(nativeValueFromStorableValue(true)).toBe(true);
+      expect(nativeValueFromFabricValue(null)).toBe(null);
+      expect(nativeValueFromFabricValue(undefined)).toBe(undefined);
+      expect(nativeValueFromFabricValue(42)).toBe(42);
+      expect(nativeValueFromFabricValue("hello")).toBe("hello");
+      expect(nativeValueFromFabricValue(true)).toBe(true);
     });
 
     it("returns frozen copy of unfrozen plain objects (frozen=true)", () => {
       const obj = { a: 1 } as unknown as FabricValue;
-      const result = nativeValueFromStorableValue(obj);
+      const result = nativeValueFromFabricValue(obj);
       expect(Object.isFrozen(result)).toBe(true);
       expect((result as Record<string, unknown>).a).toBe(1);
     });
 
     it("passes through unfrozen plain objects (frozen=false)", () => {
       const obj = { a: 1 } as unknown as FabricValue;
-      expect(nativeValueFromStorableValue(obj, false)).toBe(obj);
+      expect(nativeValueFromFabricValue(obj, false)).toBe(obj);
     });
 
     it("passes through frozen plain objects (frozen=true)", () => {
       const obj = Object.freeze({ a: 1 }) as unknown as FabricValue;
-      expect(nativeValueFromStorableValue(obj, true)).toBe(obj);
+      expect(nativeValueFromFabricValue(obj, true)).toBe(obj);
     });
 
     it("returns unfrozen copy of frozen plain objects (frozen=false)", () => {
       const obj = Object.freeze({ a: 1 }) as unknown as FabricValue;
-      const result = nativeValueFromStorableValue(obj, false);
+      const result = nativeValueFromFabricValue(obj, false);
       expect(Object.isFrozen(result)).toBe(false);
       expect((result as Record<string, unknown>).a).toBe(1);
     });
 
     it("returns frozen copy of unfrozen arrays (frozen=true)", () => {
       const arr = [1, 2, 3] as FabricValue;
-      const result = nativeValueFromStorableValue(arr);
+      const result = nativeValueFromFabricValue(arr);
       expect(Object.isFrozen(result)).toBe(true);
       expect(result).toEqual([1, 2, 3]);
     });
 
     it("passes through unfrozen arrays (frozen=false)", () => {
       const arr = [1, 2, 3] as FabricValue;
-      expect(nativeValueFromStorableValue(arr, false)).toBe(arr);
+      expect(nativeValueFromFabricValue(arr, false)).toBe(arr);
     });
 
     it("passes through non-native FabricInstance unchanged (frozen=true)", () => {
-      // Non-native FabricInstance values (UnknownStorable, Cell, etc.) pass
+      // Non-native FabricInstance values (UnknownValue, Cell, etc.) pass
       // through as-is -- spreading would strip their prototype/methods.
-      const us = new UnknownStorable("Test@1", null);
-      const result = nativeValueFromStorableValue(us as FabricValue);
+      const us = new UnknownValue("Test@1", null);
+      const result = nativeValueFromFabricValue(us as FabricValue);
       expect(result).toBe(us);
     });
 
     it("passes through non-native FabricInstance unchanged (frozen=false)", () => {
-      const us = new UnknownStorable("Test@1", null);
-      expect(nativeValueFromStorableValue(
+      const us = new UnknownValue("Test@1", null);
+      expect(nativeValueFromFabricValue(
         us as FabricValue,
         false,
       )).toBe(us);
     });
 
-    it("unwraps StorableMap to FrozenMap", () => {
+    it("unwraps FabricMap to FrozenMap", () => {
       const map = new Map<FabricValue, FabricValue>([
         ["a", 1],
         ["b", 2],
       ] as [FabricValue, FabricValue][]);
-      const sm = new StorableMap(map);
-      const result = nativeValueFromStorableValue(
+      const sm = new FabricMap(map);
+      const result = nativeValueFromFabricValue(
         sm as FabricValue,
       );
       expect(result).toBeInstanceOf(FrozenMap);
@@ -1526,10 +1526,10 @@ describe("json encoding", () => {
       expect((result as Map<string, number>).size).toBe(2);
     });
 
-    it("unwraps StorableSet to FrozenSet", () => {
+    it("unwraps FabricSet to FrozenSet", () => {
       const set = new Set<FabricValue>([1, 2, 3] as FabricValue[]);
-      const ss = new StorableSet(set);
-      const result = nativeValueFromStorableValue(
+      const ss = new FabricSet(set);
+      const result = nativeValueFromFabricValue(
         ss as FabricValue,
       );
       expect(result).toBeInstanceOf(FrozenSet);
@@ -1542,18 +1542,18 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // nativeFromStorableValueRich
+  // nativeFromFabricValueModern
   // --------------------------------------------------------------------------
 
-  describe("nativeFromStorableValueRich", () => {
-    it("deeply unwraps StorableError in objects (frozen)", () => {
+  describe("nativeFromFabricValueModern", () => {
+    it("deeply unwraps FabricError in objects (frozen)", () => {
       const err = new Error("deep");
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const obj = {
         error: se,
         code: 500,
       } as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
@@ -1564,11 +1564,11 @@ describe("json encoding", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("deeply unwraps StorableError in arrays (frozen)", () => {
+    it("deeply unwraps FabricError in arrays (frozen)", () => {
       const err = new Error("array");
-      const se = new StorableError(err);
+      const se = new FabricError(err);
       const arr = [1, se, 3] as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(arr) as unknown[];
+      const result = nativeFromFabricValueModern(arr) as unknown[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(Error);
       expect((result[1] as Error).message).toBe("array");
@@ -1582,7 +1582,7 @@ describe("json encoding", () => {
         a: 1,
         b: "two",
       }) as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(obj, false) as Record<
+      const result = nativeFromFabricValueModern(obj, false) as Record<
         string,
         unknown
       >;
@@ -1594,7 +1594,7 @@ describe("json encoding", () => {
 
     it("output is frozen when frozen=true (default)", () => {
       const obj = { a: 1, b: "two" } as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
@@ -1606,7 +1606,7 @@ describe("json encoding", () => {
       arr[0] = 1;
       arr[2] = 3;
       Object.freeze(arr);
-      const result = nativeFromStorableValueRich(
+      const result = nativeFromFabricValueModern(
         arr as FabricValue,
       ) as unknown[];
       expect(result.length).toBe(3);
@@ -1616,22 +1616,22 @@ describe("json encoding", () => {
     });
 
     it("passes through non-native FabricInstance", () => {
-      const us = new UnknownStorable("Test@1", null);
+      const us = new UnknownValue("Test@1", null);
       const obj = { thing: us } as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
       expect(result.thing).toBe(us);
     });
 
-    it("deeply unwraps StorableMap to FrozenMap", () => {
+    it("deeply unwraps FabricMap to FrozenMap", () => {
       const map = new Map<FabricValue, FabricValue>([
         ["x", 10],
       ] as [FabricValue, FabricValue][]);
-      const sm = new StorableMap(map);
+      const sm = new FabricMap(map);
       const obj = { data: sm } as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(obj) as Record<
+      const result = nativeFromFabricValueModern(obj) as Record<
         string,
         unknown
       >;
@@ -1639,32 +1639,32 @@ describe("json encoding", () => {
       expect((result.data as Map<string, number>).get("x")).toBe(10);
     });
 
-    it("deeply unwraps StorableSet to FrozenSet", () => {
+    it("deeply unwraps FabricSet to FrozenSet", () => {
       const set = new Set<FabricValue>([42] as FabricValue[]);
-      const ss = new StorableSet(set);
+      const ss = new FabricSet(set);
       const arr = [ss] as unknown as FabricValue;
-      const result = nativeFromStorableValueRich(arr) as unknown[];
+      const result = nativeFromFabricValueModern(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenSet);
       expect((result[0] as Set<number>).has(42)).toBe(true);
     });
 
     it("deeply unwraps Error internals (C2)", () => {
-      // Error with a StorableError cause and a custom StorableMap property.
+      // Error with a FabricError cause and a custom FabricMap property.
       const innerErr = new Error("inner");
-      const innerSe = new StorableError(innerErr);
+      const innerSe = new FabricError(innerErr);
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      (outerErr as unknown as Record<string, unknown>).data = new StorableMap(
+      (outerErr as unknown as Record<string, unknown>).data = new FabricMap(
         new Map([["k", 1]] as [FabricValue, FabricValue][]),
       );
-      const outerSe = new StorableError(outerErr);
+      const outerSe = new FabricError(outerErr);
 
-      const result = nativeFromStorableValueRich(
+      const result = nativeFromFabricValueModern(
         outerSe as FabricValue,
       ) as Error;
       expect(result).toBeInstanceOf(Error);
       expect(result.message).toBe("outer");
-      // cause should be deeply unwrapped to a native Error, not StorableError.
+      // cause should be deeply unwrapped to a native Error, not FabricError.
       expect(result.cause).toBeInstanceOf(Error);
       expect((result.cause as Error).message).toBe("inner");
       // custom property should be unwrapped to FrozenMap.
@@ -1674,12 +1674,12 @@ describe("json encoding", () => {
 
     it("deeply unwraps Error internals unfrozen (C2)", () => {
       const innerErr = new Error("inner");
-      const innerSe = new StorableError(innerErr);
+      const innerSe = new FabricError(innerErr);
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      const outerSe = new StorableError(outerErr);
+      const outerSe = new FabricError(outerErr);
 
-      const result = nativeFromStorableValueRich(
+      const result = nativeFromFabricValueModern(
         outerSe as FabricValue,
         false,
       ) as Error;
@@ -1720,34 +1720,34 @@ describe("json encoding", () => {
       expect("debug" in meta).toBe(true);
     });
 
-    it("round-trips StorableError in array", () => {
-      const se = new StorableError(new Error("oops"));
+    it("round-trips FabricError in array", () => {
+      const se = new FabricError(new Error("oops"));
       const arr = [1, se, 3] as unknown as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
       expect(result[0]).toBe(1);
-      expect(result[1]).toBeInstanceOf(StorableError);
+      expect(result[1]).toBeInstanceOf(FabricError);
       expect(
-        (result[1] as unknown as StorableError).error.message,
+        (result[1] as unknown as FabricError).error.message,
       ).toBe("oops");
       expect(result[2]).toBe(3);
     });
 
-    it("round-trips StorableError as object value", () => {
+    it("round-trips FabricError as object value", () => {
       const obj = {
-        error: new StorableError(new Error("fail")),
+        error: new FabricError(new Error("fail")),
         code: 500,
       } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
-      expect(result.error).toBeInstanceOf(StorableError);
+      expect(result.error).toBeInstanceOf(FabricError);
       expect(
-        (result.error as unknown as StorableError).error.message,
+        (result.error as unknown as FabricError).error.message,
       ).toBe("fail");
       expect(result.code).toBe(500);
     });
 
     it("wire format is unchanged (backward compatible)", () => {
-      // StorableError should produce the same wire format as the old ErrorHandler.
-      const se = new StorableError(new TypeError("compat test"));
+      // FabricError should produce the same wire format as the old ErrorHandler.
+      const se = new FabricError(new TypeError("compat test"));
       const serialized = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -1765,10 +1765,10 @@ describe("json encoding", () => {
 
   describe("canBeStored", () => {
     beforeEach(() => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
     });
     afterEach(() => {
-      resetStorableValueConfig();
+      resetDataModelConfig();
     });
 
     // -- Primitives that ARE storable --
@@ -1842,8 +1842,8 @@ describe("json encoding", () => {
     });
 
     // -- FabricInstance values --
-    it("accepts StorableError wrappers", () => {
-      expect(canBeStored(new StorableError(new Error("test")))).toBe(true);
+    it("accepts FabricError wrappers", () => {
+      expect(canBeStored(new FabricError(new Error("test")))).toBe(true);
     });
 
     // -- Containers --

@@ -1,13 +1,13 @@
 /**
  * Contract tests for frozen-object safety.
  *
- * When `richStorableValues` is ON, `storableFromNativeValueRich()` deep-freezes all
+ * When `richStorableValues` is ON, `fabricFromNativeValueModern()` deep-freezes all
  * stored objects at commit time. Code paths that read these frozen objects from
  * storage must clone before mutating.
  *
  * The writeOrThrow tests use a two-transaction pattern to exercise the real
  * freeze:
- * - tx1: write data and commit (storableFromNativeValue freezes the objects)
+ * - tx1: write data and commit (fabricFromNativeValue freezes the objects)
  * - tx2: read the frozen data and exercise the code path under test
  *
  * The remaining tests verify the defensive cloning contracts directly: that
@@ -21,7 +21,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { resetStorableValueConfig } from "@commontools/data-model/storable-value";
+import { resetDataModelConfig } from "@commontools/data-model/storable-value";
 import { resetCanonicalHashConfig } from "@commontools/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
@@ -31,7 +31,7 @@ const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();
 
 function resetAllConfigs() {
-  resetStorableValueConfig();
+  resetDataModelConfig();
   resetCanonicalHashConfig();
   resetJsonEncodingConfig();
 }
@@ -61,7 +61,7 @@ describe("frozen-object safety contracts", () => {
 
     it("writes through a frozen parent when intermediate path is missing", async () => {
       // tx1: write {value: {existing: "data"}} and commit. The commit
-      // freezes the value object via storableFromNativeValueRich.
+      // freezes the value object via fabricFromNativeValueModern.
       const tx1 = runtime.edit();
       tx1.writeOrThrow({
         space,

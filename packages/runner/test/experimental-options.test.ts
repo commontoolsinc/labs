@@ -4,14 +4,14 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
-  getExperimentalStorableConfig,
-  isStorableValue,
-  resetStorableValueConfig,
-  setStorableValueConfig,
-  shallowStorableFromNativeValue,
-  storableFromNativeValue,
+  getExperimentalDataModelConfig,
+  isFabricValue,
+  resetDataModelConfig,
+  setDataModelConfig,
+  shallowFabricFromNativeValue,
+  fabricFromNativeValue,
 } from "@commontools/data-model/storable-value";
-import { StorableError } from "@commontools/data-model/storable-native-instances";
+import { FabricError } from "@commontools/data-model/storable-native-instances";
 import {
   hashOf,
   resetCanonicalHashConfig,
@@ -23,12 +23,12 @@ const signer = await Identity.fromPassphrase("test experimental");
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
  * Runtime construction/disposal correctly propagates flags to the ambient
- * storable-value config, and that `shallowStorableFromNativeValue`/`storableFromNativeValue`
+ * storable-value config, and that `shallowFabricFromNativeValue`/`fabricFromNativeValue`
  * respect the `richStorableValues` gate.
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
-    resetStorableValueConfig();
+    resetDataModelConfig();
     resetCanonicalHashConfig();
   });
 
@@ -70,20 +70,20 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("shallowStorableFromNativeValue with richStorableValues flag", () => {
+  describe("shallowFabricFromNativeValue with richStorableValues flag", () => {
     it("works normally when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(shallowStorableFromNativeValue("hello")).toBe("hello");
-      expect(shallowStorableFromNativeValue(42)).toBe(42);
-      expect(shallowStorableFromNativeValue(null)).toBe(null);
-      expect(shallowStorableFromNativeValue(true)).toBe(true);
-      expect(shallowStorableFromNativeValue({ a: 1 })).toEqual({ a: 1 });
+      setDataModelConfig({ richStorableValues: false });
+      expect(shallowFabricFromNativeValue("hello")).toBe("hello");
+      expect(shallowFabricFromNativeValue(42)).toBe(42);
+      expect(shallowFabricFromNativeValue(null)).toBe(null);
+      expect(shallowFabricFromNativeValue(true)).toBe(true);
+      expect(shallowFabricFromNativeValue({ a: 1 })).toEqual({ a: 1 });
     });
 
     it("converts Error to @Error object when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
+      setDataModelConfig({ richStorableValues: false });
       const err = new Error("test error");
-      const result = shallowStorableFromNativeValue(err);
+      const result = shallowFabricFromNativeValue(err);
       expect(result).toEqual({
         "@Error": {
           name: "Error",
@@ -95,47 +95,47 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts undefined in arrays to null when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const result = shallowStorableFromNativeValue([1, undefined, 3]);
+      setDataModelConfig({ richStorableValues: false });
+      const result = shallowFabricFromNativeValue([1, undefined, 3]);
       expect(result).toEqual([1, null, 3]);
     });
 
-    it("wraps Error in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+    it("wraps Error in FabricError when flag is ON", () => {
+      setDataModelConfig({ richStorableValues: true });
       const err = new Error("test error");
-      const result = shallowStorableFromNativeValue(err);
-      expect(result).toBeInstanceOf(StorableError);
-      expect((result as StorableError).error.message).toBe("test error");
+      const result = shallowFabricFromNativeValue(err);
+      expect(result).toBeInstanceOf(FabricError);
+      expect((result as FabricError).error.message).toBe("test error");
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       const arr = [1, undefined, 3];
-      const result = shallowStorableFromNativeValue(arr);
+      const result = shallowFabricFromNativeValue(arr);
       expect(result).toEqual(arr);
       expect((result as unknown[])[1]).toBe(undefined);
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
+      setDataModelConfig({ richStorableValues: true });
+      resetDataModelConfig();
       const err = new Error("test");
-      const result = shallowStorableFromNativeValue(err);
+      const result = shallowFabricFromNativeValue(err);
       expect(result).toHaveProperty("@Error");
     });
   });
 
-  describe("storableFromNativeValue with richStorableValues flag", () => {
+  describe("fabricFromNativeValue with richStorableValues flag", () => {
     it("works normally when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(storableFromNativeValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
-      expect(storableFromNativeValue([1, 2, 3])).toEqual([1, 2, 3]);
+      setDataModelConfig({ richStorableValues: false });
+      expect(fabricFromNativeValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
+      expect(fabricFromNativeValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
     it("converts nested Error to @Error object when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
+      setDataModelConfig({ richStorableValues: false });
       const err = new Error("nested");
-      const result = storableFromNativeValue({ data: err });
+      const result = fabricFromNativeValue({ data: err });
       expect(result).toEqual({
         data: {
           "@Error": {
@@ -149,42 +149,42 @@ describe("ExperimentalOptions", () => {
     });
 
     it("omits undefined-valued object properties when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      const result = storableFromNativeValue({ a: 1, b: undefined, c: 3 });
+      setDataModelConfig({ richStorableValues: false });
+      const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, c: 3 });
     });
 
-    it("wraps nested Error in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+    it("wraps nested Error in FabricError when flag is ON", () => {
+      setDataModelConfig({ richStorableValues: true });
       const err = new Error("nested");
-      const result = storableFromNativeValue({ data: err }) as Record<
+      const result = fabricFromNativeValue({ data: err }) as Record<
         string,
         unknown
       >;
-      expect(result.data).toBeInstanceOf(StorableError);
-      expect((result.data as StorableError).error.message).toBe("nested");
+      expect(result.data).toBeInstanceOf(FabricError);
+      expect((result.data as FabricError).error.message).toBe("nested");
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      const result = storableFromNativeValue({ a: 1, b: undefined, c: 3 });
+      setDataModelConfig({ richStorableValues: true });
+      const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, b: undefined, c: 3 });
       expect(Object.hasOwn(result as object, "b")).toBe(true);
     });
 
-    it("wraps Error in array in StorableError when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+    it("wraps Error in array in FabricError when flag is ON", () => {
+      setDataModelConfig({ richStorableValues: true });
       const err = new Error("in array");
-      const result = storableFromNativeValue([1, err, 3]) as unknown[];
-      expect(result[1]).toBeInstanceOf(StorableError);
-      expect((result[1] as StorableError).error.message).toBe("in array");
+      const result = fabricFromNativeValue([1, err, 3]) as unknown[];
+      expect(result[1]).toBeInstanceOf(FabricError);
+      expect((result[1] as FabricError).error.message).toBe("in array");
     });
 
     it("preserves sparse array holes when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
-      const result = storableFromNativeValue(sparse) as unknown[];
+      const result = fabricFromNativeValue(sparse) as unknown[];
       expect(result.length).toBe(3);
       expect(0 in result).toBe(true);
       expect(1 in result).toBe(false); // hole preserved
@@ -192,21 +192,21 @@ describe("ExperimentalOptions", () => {
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
-      const result = storableFromNativeValue({ a: 1, b: undefined });
+      setDataModelConfig({ richStorableValues: true });
+      resetDataModelConfig();
+      const result = fabricFromNativeValue({ a: 1, b: undefined });
       expect(result).toEqual({ a: 1 });
     });
 
     it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       // An object whose toJSON() returns undefined. In the rich path, undefined
       // is a valid FabricValue, so this gets stored in the converted map as
       // `undefined`. The bug (before the has() fix) would treat a subsequent
       // lookup as a cache miss because `converted.get(obj) === undefined` can't
       // distinguish "stored undefined" from "key not found".
       const undef = { toJSON: () => undefined };
-      const result = storableFromNativeValue({ a: undef, b: undef }) as Record<
+      const result = fabricFromNativeValue({ a: undef, b: undef }) as Record<
         string,
         unknown
       >;
@@ -221,46 +221,46 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("isStorableValue with richStorableValues flag", () => {
+  describe("isFabricValue with richStorableValues flag", () => {
     it("rejects Error when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(isStorableValue(new Error("test"))).toBe(false);
+      setDataModelConfig({ richStorableValues: false });
+      expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("rejects [undefined] when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
-      expect(isStorableValue([undefined])).toBe(false);
+      setDataModelConfig({ richStorableValues: false });
+      expect(isFabricValue([undefined])).toBe(false);
     });
 
-    it("rejects Error even when flag is ON (needs conversion to StorableError)", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      expect(isStorableValue(new Error("test"))).toBe(false);
+    it("rejects Error even when flag is ON (needs conversion to FabricError)", () => {
+      setDataModelConfig({ richStorableValues: true });
+      expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("accepts [undefined] when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      expect(isStorableValue([undefined])).toBe(true);
+      setDataModelConfig({ richStorableValues: true });
+      expect(isFabricValue([undefined])).toBe(true);
     });
 
     it("accepts sparse arrays when flag is ON", () => {
-      setStorableValueConfig({ richStorableValues: true });
+      setDataModelConfig({ richStorableValues: true });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
-      expect(isStorableValue(sparse)).toBe(true);
+      expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("accepts sparse arrays when flag is OFF", () => {
-      setStorableValueConfig({ richStorableValues: false });
+      setDataModelConfig({ richStorableValues: false });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
-      expect(isStorableValue(sparse)).toBe(true);
+      expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      resetStorableValueConfig();
-      expect(isStorableValue(new Error("test"))).toBe(false);
-      expect(isStorableValue([undefined])).toBe(false);
+      setDataModelConfig({ richStorableValues: true });
+      resetDataModelConfig();
+      expect(isFabricValue(new Error("test"))).toBe(false);
+      expect(isFabricValue([undefined])).toBe(false);
     });
   });
 
@@ -276,7 +276,7 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      const config = getExperimentalStorableConfig();
+      const config = getExperimentalDataModelConfig();
       expect(config.richStorableValues).toBe(true);
 
       await runtime.dispose();
@@ -290,7 +290,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
       });
 
-      const config = getExperimentalStorableConfig();
+      const config = getExperimentalDataModelConfig();
       expect(config.richStorableValues).toBe(false);
 
       await runtime.dispose();
@@ -308,12 +308,12 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      expect(getExperimentalStorableConfig().richStorableValues).toBe(true);
+      expect(getExperimentalDataModelConfig().richStorableValues).toBe(true);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getExperimentalStorableConfig().richStorableValues).toBe(false);
+      expect(getExperimentalDataModelConfig().richStorableValues).toBe(false);
     });
   });
 

@@ -20,8 +20,8 @@
 
 /**
  * Abstract base class for values that participate in the storable protocol.
- * Subclasses include Cell, Stream, and native-object wrappers (StorableError,
- * StorableMap, etc.).
+ * Subclasses include Cell, Stream, and native-object wrappers (FabricError,
+ * FabricMap, etc.).
  */
 export interface FabricInstance {
   shallowClone(frozen: boolean): FabricInstance;

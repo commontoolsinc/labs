@@ -42,8 +42,8 @@ export type FabricDatum =
   // -- Containers --
   | FabricArray
   | FabricObject
-  // -- Protocol types (Cell, Stream, UnknownStorable, ProblematicStorable,
-  //    and native wrappers like StorableError at runtime) --
+  // -- Protocol types (Cell, Stream, UnknownValue, ProblematicValue,
+  //    and native wrappers like FabricError at runtime) --
   | FabricInstance
   // -- Extended primitives (experimental: richStorableValues) --
   | undefined;
@@ -57,13 +57,13 @@ export interface FabricArray extends ArrayLike<FabricDatum> {}
  * Note: `__proto__` and `constructor` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
- * values enter the storable system (e.g., `storableFromNativeValue`).
+ * values enter the storable system (e.g., `fabricFromNativeValue`).
  */
 export interface FabricObject extends Record<string, FabricDatum> {}
 
 /**
  * A single "layer" of storable conversion -- the result of shallow conversion
- * via `shallowStorableFromNativeValue()`. Arrays and objects have the right
+ * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
  * conversion (e.g., Error instances in a `cause` chain).
  */
@@ -75,13 +75,13 @@ export type FabricValueLayer =
 /**
  * Union of raw native JS **object** types that the storable type system can
  * convert into `FabricInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `shallowStorableFromNativeValue()` accepts
+ * "sausage grinder" -- `shallowFabricFromNativeValue()` accepts
  * `FabricValue | FabricNativeObject`, meaning callers can pass in either
  * already-storable data or raw native JS objects. The conversion produces
- * `FabricInstance` wrappers (StorableError, StorableMap, etc.) that live
+ * `FabricInstance` wrappers (FabricError, FabricMap, etc.) that live
  * inside `FabricValue` via the `FabricInstance` arm of `FabricDatum`.
  *
- * `Blob` is included because `StorableUint8Array.toNativeValue(true)` returns
+ * `Blob` is included because `FabricUint8Array.toNativeValue(true)` returns
  * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
  * serialization path throws on `Blob` since its data access methods are async.
  *

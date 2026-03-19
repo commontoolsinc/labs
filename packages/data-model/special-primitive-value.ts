@@ -5,8 +5,8 @@
  * types (`FabricEpochNsec`, `FabricEpochDays`) and content IDs
  * (`FabricHash`).
  *
- * Analogous to `ExplicitTagStorable` (which unifies `UnknownStorable` and
- * `ProblematicStorable`), this class enables a single `instanceof` check
+ * Analogous to `ExplicitTagValue` (which unifies `UnknownValue` and
+ * `ProblematicValue`), this class enables a single `instanceof` check
  * where code needs to handle any special primitive uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).

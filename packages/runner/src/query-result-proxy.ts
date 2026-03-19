@@ -114,7 +114,7 @@ export function createQueryResultProxy<T>(
   }
 
   // When richStorableValues is enabled, stored objects are deep-frozen during
-  // storage normalization (storableFromNativeValueRich). A frozen proxy target
+  // storage normalization (fabricFromNativeValueModern). A frozen proxy target
   // would force every property access through the invariant guard (ECMAScript
   // 10.5.8: a [[Get]] trap on a non-configurable, non-writable data property
   // must return the target's own value), bypassing the get trap's link

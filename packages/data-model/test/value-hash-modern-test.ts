@@ -8,8 +8,8 @@ import { canonicalHash as canonicalHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../storable-content-id.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../storable-epoch.ts";
 import {
-  StorableError,
-  StorableUint8Array,
+  FabricError,
+  FabricUint8Array,
 } from "../storable-native-instances.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
@@ -341,13 +341,13 @@ Deno.test("canonicalHash", async (t) => {
   });
 
   // =========================================================================
-  // StorableUint8Array
+  // FabricUint8Array
   // =========================================================================
 
   await t.step(
-    "StorableUint8Array produces TAG_BYTES + LEB128 length + raw bytes",
+    "FabricUint8Array produces TAG_BYTES + LEB128 length + raw bytes",
     () => {
-      const bytes = new StorableUint8Array(new Uint8Array([1, 2, 3]));
+      const bytes = new FabricUint8Array(new Uint8Array([1, 2, 3]));
       // LEB128(3) = [0x03]
       const expected = sha256([
         0x25,
@@ -361,9 +361,9 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step(
-    "empty StorableUint8Array produces TAG_BYTES + zero length",
+    "empty FabricUint8Array produces TAG_BYTES + zero length",
     () => {
-      const bytes = new StorableUint8Array(new Uint8Array([]));
+      const bytes = new FabricUint8Array(new Uint8Array([]));
       const expected = sha256([0x25, 0x00]);
       assertEquals(canonicalHash(bytes), expected);
     },
@@ -438,16 +438,16 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // StorableError (FabricInstance via DECONSTRUCT)
+  // FabricError (FabricInstance via DECONSTRUCT)
   // =========================================================================
 
   await t.step(
-    "StorableError matches byte stream built from DECONSTRUCT output",
+    "FabricError matches byte stream built from DECONSTRUCT output",
     () => {
       // Build the expected byte stream programmatically because the
       // deconstructed state includes `stack` which is environment-dependent.
       // We construct the stream the same way canonicalHash does, then SHA-256 it.
-      const error = new StorableError(new Error("test"));
+      const error = new FabricError(new Error("test"));
       const enc = new TextEncoder();
 
       // TAG_INSTANCE (0x12) + LEB128(typeTagLen) + typeTag UTF-8
@@ -455,7 +455,7 @@ Deno.test("canonicalHash", async (t) => {
       const stream: number[] = [0x12, typeTagUtf8.length, ...typeTagUtf8];
 
       // Deconstructed state is an object with sorted keys.
-      // StorableError.DECONSTRUCT() returns:
+      // FabricError.DECONSTRUCT() returns:
       //   { type: "Error", name: null, message: "test", stack: <string> }
       // Keys sorted by UTF-8: message, name, stack, type
       stream.push(0x11); // TAG_OBJECT
@@ -505,14 +505,14 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step("different errors produce different hashes", () => {
-    const e1 = new StorableError(new Error("hello"));
-    const e2 = new StorableError(new Error("world"));
+    const e1 = new FabricError(new Error("hello"));
+    const e2 = new FabricError(new Error("world"));
     assertNotEquals(hex(canonicalHash(e1)), hex(canonicalHash(e2)));
   });
 
   await t.step("TypeError vs Error produce different hashes", () => {
-    const e1 = new StorableError(new Error("msg"));
-    const e2 = new StorableError(new TypeError("msg"));
+    const e1 = new FabricError(new Error("msg"));
+    const e2 = new FabricError(new TypeError("msg"));
     assertNotEquals(hex(canonicalHash(e1)), hex(canonicalHash(e2)));
   });
 
@@ -734,8 +734,8 @@ Deno.test("canonicalHash", async (t) => {
       { a: 1 },
       new FabricEpochNsec(0n),
       new FabricEpochDays(0n),
-      new StorableUint8Array(new Uint8Array([1])),
-      new StorableError(new Error("x")),
+      new FabricUint8Array(new Uint8Array([1])),
+      new FabricError(new Error("x")),
     ];
     for (const v of values) {
       assertEquals(canonicalHash(v).length, 32);
