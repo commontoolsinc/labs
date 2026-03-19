@@ -1,6 +1,6 @@
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricHash } from "./fabric-hash.ts";
-import { isFabricInstance } from "./fabric-protocol.ts";
+import { isFabricInstance } from "./fabric-instance.ts";
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.

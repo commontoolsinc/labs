@@ -60,3 +60,11 @@ export abstract class FabricInstance {
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
 }
+
+/**
+ * Type guard: checks whether a value implements the fabric protocol.
+ * See Section 2.6 of the formal spec.
+ */
+export function isFabricInstance(value: unknown): value is FabricInstance {
+  return value instanceof FabricInstance;
+}

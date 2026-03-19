@@ -4,7 +4,7 @@ import {
   type FabricClass,
   type ReconstructionContext,
   type SerializationContext,
-} from "./fabric-protocol.ts";
+} from "./fabric-value.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownValue } from "./unknown-value.ts";

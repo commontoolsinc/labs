@@ -28,7 +28,6 @@
     "./fabric-epoch": "./fabric-epoch.ts",
     "./bigint-encoding": "./bigint-encoding.ts",
     "./fabric-hash": "./fabric-hash.ts",
-    "./fabric-protocol": "./fabric-protocol.ts",
     "./fabric-type-tags": "./fabric-type-tags.ts",
     "./native-type-tags": "./native-type-tags.ts",
     "./explicit-tag-value": "./explicit-tag-value.ts",

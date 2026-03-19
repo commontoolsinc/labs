@@ -3,7 +3,7 @@ import { DECONSTRUCT, type FabricInstance } from "./fabric-instance.ts";
 import {
   isFabricInstance,
   type ReconstructionContext,
-} from "./fabric-protocol.ts";
+} from "./fabric-value.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { ProblematicValue } from "./problematic-value.ts";
 

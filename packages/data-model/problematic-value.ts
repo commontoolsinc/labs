@@ -1,6 +1,6 @@
 import type { FabricValue } from "./fabric-value.ts";
 import { DECONSTRUCT, RECONSTRUCT } from "./fabric-instance.ts";
-import type { ReconstructionContext } from "./fabric-protocol.ts";
+import type { ReconstructionContext } from "./fabric-value.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 
 /**

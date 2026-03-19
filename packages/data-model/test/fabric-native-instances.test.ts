@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-protocol.ts";
-import type { ReconstructionContext } from "../fabric-protocol.ts";
+import { isFabricInstance } from "../fabric-instance.ts";
+import type { ReconstructionContext } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
   FabricError,

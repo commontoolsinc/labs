@@ -5,7 +5,7 @@ import type {
   FabricValueLayer,
 } from "./fabric-value.ts";
 import type { FabricInstance } from "./fabric-instance.ts";
-import { isFabricInstance } from "./fabric-protocol.ts";
+import { isFabricInstance } from "./fabric-instance.ts";
 import { FabricPrimitive } from "./fabric-primitive.ts";
 import { FabricEpochNsec } from "./fabric-epoch.ts";
 import {

@@ -3,7 +3,7 @@ import { DECONSTRUCT, FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
 import {
   isFabricInstance,
   type ReconstructionContext,
-} from "./fabric-protocol.ts";
+} from "./fabric-value.ts";
 import { FabricPrimitive } from "./fabric-primitive.ts";
 
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";

@@ -1,5 +1,5 @@
 import type { FabricValue } from "./fabric-value.ts";
-import type { ReconstructionContext } from "./fabric-protocol.ts";
+import type { ReconstructionContext } from "./fabric-value.ts";
 import { JsonEncodingContext } from "./json-encoding.ts";
 
 // ---------------------------------------------------------------------------
