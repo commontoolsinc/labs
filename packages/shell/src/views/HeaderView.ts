@@ -43,7 +43,7 @@ export class XHeaderView extends BaseView {
     .header {
       display: flex;
       align-items: center;
-      padding: 24px;
+      padding: 1.5rem;
       position: sticky;
       top: 0;
       z-index: 3;
@@ -54,7 +54,7 @@ export class XHeaderView extends BaseView {
       display: flex;
       flex: 1;
       align-items: center;
-      gap: 8px;
+      gap: 0.5rem;
     }
 
     /* Logo picker button */
@@ -76,19 +76,19 @@ export class XHeaderView extends BaseView {
     .nav-picker-container {
       display: flex;
       align-items: center;
-      gap: 4px;
-      padding: 4px;
+      gap: 0.25rem;
+      padding: 0.25rem;
       border-radius: 6px;
     }
 
     .nav-picker ct-logo {
-      width: 24px;
-      height: 24px;
+      width: 1.5rem;
+      height: 1.5rem;
     }
 
     .chevron-down {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
       color: var(--gray-800, #2c3138);
     }
 
@@ -96,7 +96,7 @@ export class XHeaderView extends BaseView {
     .header-breadcrumbs {
       display: none;
       align-items: center;
-      gap: 6px;
+      gap: 0.375rem;
       min-width: 0;
     }
 
@@ -109,8 +109,8 @@ export class XHeaderView extends BaseView {
     .header-breadcrumbs .header-space {
       font-family: "JetBrainsMono", monospace;
       font-weight: 500;
-      font-size: 12px;
-      line-height: 16px;
+      font-size: 0.75rem;
+      line-height: 1rem;
       color: var(--gray-300, #8a909b);
       white-space: nowrap;
       cursor: pointer;
@@ -123,14 +123,14 @@ export class XHeaderView extends BaseView {
 
     .header-breadcrumbs .header-separator {
       color: var(--gray-300, #8a909b);
-      font-size: 12px;
+      font-size: 0.75rem;
     }
 
     .header-breadcrumbs .header-piece-name {
       font-family: "JetBrainsMono", monospace;
       font-weight: 500;
-      font-size: 13px;
-      line-height: 16px;
+      font-size: 0.8125rem;
+      line-height: 1rem;
       color: var(--gray-800, #2c3138);
       white-space: nowrap;
       overflow: hidden;
@@ -181,11 +181,11 @@ export class XHeaderView extends BaseView {
       .menu-panel {
         position: absolute;
         top: 0;
-        left: 16px;
-        width: 320px;
-        padding: 16px;
+        left: 1rem;
+        width: 20rem;
+        padding: 1rem;
         border-radius: 12px;
-        transform: translateY(64px);
+        transform: translateY(4rem);
         opacity: 0;
         transition: opacity 0.15s ease;
         overflow: visible;
@@ -210,7 +210,7 @@ export class XHeaderView extends BaseView {
 
       .menu-panel {
         width: 100%;
-        padding: 24px;
+        padding: 1.5rem;
         border-radius: 0 0 16px 16px;
         overflow: hidden;
         clip-path: inset(0 0 100% 0);
@@ -239,14 +239,14 @@ export class XHeaderView extends BaseView {
       border: none;
       background: none;
       border-radius: 6px;
-      padding: 4px;
+      padding: 0.25rem;
       align-self: flex-start;
-      margin-bottom: 24px;
+      margin-bottom: 1.5rem;
     }
 
     @media (min-width: 769px) {
       .menu-close {
-        margin-bottom: 8px;
+        margin-bottom: 0.5rem;
       }
     }
 
@@ -255,8 +255,8 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-close-icon {
-      width: 24px;
-      height: 24px;
+      width: 1.5rem;
+      height: 1.5rem;
       color: var(--gray-800, #2c3138);
     }
 
@@ -264,7 +264,7 @@ export class XHeaderView extends BaseView {
     .menu-title {
       display: flex;
       flex-direction: column;
-      padding-bottom: 12px;
+      padding-bottom: 0.75rem;
     }
 
     @media (min-width: 769px) {
@@ -276,12 +276,12 @@ export class XHeaderView extends BaseView {
     .breadcrumb {
       display: flex;
       align-items: center;
-      padding: 4px 16px;
+      padding: 0.25rem 1rem;
     }
 
     .breadcrumb-icon {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
       color: var(--gray-300, #8a909b);
       flex-shrink: 0;
       display: flex;
@@ -291,30 +291,30 @@ export class XHeaderView extends BaseView {
     .breadcrumb-text {
       font-family: "JetBrainsMono", monospace;
       font-weight: 500;
-      font-size: 11px;
-      line-height: 16px;
+      font-size: 0.6875rem;
+      line-height: 1rem;
       color: var(--gray-300, #8a909b);
       letter-spacing: -0.22px;
       white-space: nowrap;
-      margin-left: 6px;
+      margin-left: 0.375rem;
     }
 
     .breadcrumb-chevron {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
       color: var(--gray-300, #8a909b);
       opacity: 0.5;
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      margin-left: 8px;
+      margin-left: 0.5rem;
     }
 
     .piece-title-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
       cursor: pointer;
       border-radius: 6px;
       border: none;
@@ -330,8 +330,8 @@ export class XHeaderView extends BaseView {
     .piece-title-text {
       font-family: "JetBrainsMono", monospace;
       font-weight: 500;
-      font-size: 16px;
-      line-height: 24px;
+      font-size: 1rem;
+      line-height: 1.5rem;
       color: var(--gray-800, #2c3138);
       letter-spacing: -0.32px;
       white-space: nowrap;
@@ -340,11 +340,11 @@ export class XHeaderView extends BaseView {
     }
 
     .piece-title-chevron {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
       color: var(--gray-800, #2c3138);
       flex-shrink: 0;
-      margin-left: 2px;
+      margin-left: 0.125rem;
       display: flex;
       align-items: center;
       transition: transform 0.15s ease;
@@ -358,22 +358,22 @@ export class XHeaderView extends BaseView {
     .piece-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      padding: 8px 16px;
+      gap: 0.25rem;
+      padding: 0.5rem 1rem;
     }
 
     .piece-pill {
       display: inline-flex;
       align-items: center;
-      padding: 6px 12px;
+      padding: 0.375rem 0.75rem;
       border: 1px solid var(--layer-2-divider, #e1e3e8);
       border-radius: 20px;
       background: none;
       cursor: pointer;
       font-family: "JetBrainsMono", monospace;
       font-weight: 500;
-      font-size: 12px;
-      line-height: 16px;
+      font-size: 0.75rem;
+      line-height: 1rem;
       color: var(--gray-800, #2c3138);
       letter-spacing: -0.22px;
       white-space: nowrap;
@@ -401,8 +401,8 @@ export class XHeaderView extends BaseView {
     .menu-item {
       display: flex;
       align-items: center;
-      gap: 16px;
-      padding: 16px;
+      gap: 1rem;
+      padding: 1rem;
       border-radius: 8px;
       cursor: pointer;
       border: none;
@@ -416,8 +416,8 @@ export class XHeaderView extends BaseView {
     }
 
     .menu-item-icon {
-      width: 24px;
-      height: 24px;
+      width: 1.5rem;
+      height: 1.5rem;
       flex-shrink: 0;
       color: var(--gray-800, #2c3138);
     }
@@ -425,8 +425,8 @@ export class XHeaderView extends BaseView {
     .menu-item-label {
       font-family: "JetBrainsMono", monospace;
       font-weight: 600;
-      font-size: 13px;
-      line-height: 24px;
+      font-size: 0.8125rem;
+      line-height: 1.5rem;
       color: var(--gray-800, #2c3138);
       letter-spacing: 0.3px;
       white-space: nowrap;
@@ -436,11 +436,11 @@ export class XHeaderView extends BaseView {
     }
 
     .divider {
-      height: 16px;
+      height: 1rem;
       display: flex;
       align-items: center;
       width: 100%;
-      padding: 0 16px;
+      padding: 0 1rem;
       box-sizing: border-box;
     }
 
