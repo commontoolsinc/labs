@@ -180,4 +180,54 @@ describe("header menu tests", () => {
       }
     });
   });
+
+  it("opens and closes the desktop piece switcher", async () => {
+    const page = shell.page();
+    await loginAndGoto();
+
+    // Wait for the piece trigger to appear in the header breadcrumb
+    await waitFor(async () => {
+      try {
+        await pierce(page, ".header-piece-trigger", 500);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    // Click the piece trigger to open the dropdown
+    const trigger = await pierce(page, ".header-piece-trigger");
+    await trigger.click();
+
+    // Dropdown should appear
+    await waitFor(async () => {
+      try {
+        await pierce(page, ".header-piece-dropdown", 500);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    // Trigger should have aria-expanded=true
+    assertEquals(
+      await trigger.evaluate(
+        (el: Element) => el.getAttribute("aria-expanded"),
+      ),
+      "true",
+    );
+
+    // Close via Escape
+    await page.keyboard.press("Escape");
+
+    // Dropdown should be gone
+    await waitFor(async () => {
+      try {
+        await pierce(page, ".header-piece-dropdown", 200);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  });
 });

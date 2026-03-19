@@ -35,6 +35,10 @@ export class XHeaderView extends BaseView {
       box-sizing: inherit;
     }
 
+    button {
+      font-family: inherit;
+    }
+
     svg {
       width: 100%;
       height: 100%;
@@ -125,14 +129,59 @@ export class XHeaderView extends BaseView {
       font-size: 0.75rem;
     }
 
-    .header-breadcrumbs .header-piece-name {
+    .header-piece-wrapper {
+      position: relative;
+    }
+
+    .header-piece-trigger {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0.25rem 0.375rem;
+      border-radius: 6px;
       font-weight: 500;
       font-size: 0.8125rem;
       line-height: 1rem;
+      font-family: inherit;
+    }
 
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .header-piece-trigger:hover {
+      background: rgba(0, 0, 0, 0.04);
+    }
+
+    .header-piece-chevron {
+      width: 0.625rem;
+      height: 0.625rem;
+      color: var(--gray-300, #8a909b);
+      display: flex;
+      align-items: center;
+      transition: transform 0.15s ease;
+    }
+
+    .header-piece-chevron.expanded {
+      transform: rotate(180deg);
+    }
+
+    .header-piece-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 0.25rem;
+      min-width: 15rem;
+      max-width: 20rem;
+      background: white;
+      border-radius: 8px;
+      box-shadow:
+        0px 4px 16px 0px rgba(0, 0, 0, 0.08),
+        0px 3px 8px 0px rgba(0, 0, 0, 0.04),
+        0px 0px 3px 0px rgba(0, 0, 0, 0.12);
+      padding: 0.5rem;
+      z-index: 10;
+      max-height: 20rem;
+      overflow-y: auto;
     }
 
     /* Menu overlay - desktop: dropdown, mobile: full-width */
@@ -353,38 +402,46 @@ export class XHeaderView extends BaseView {
     .piece-list {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
-      padding: 0.5rem 1rem;
+      padding: 0.25rem 0;
+      margin-left: 1rem;
     }
 
-    .piece-pill {
-      display: inline-flex;
+    .piece-item {
+      display: flex;
       align-items: center;
-      padding: 0.375rem 0.75rem;
-      border: 1px solid var(--layer-2-divider, #e1e3e8);
-      border-radius: 20px;
+      gap: 0.5rem;
+      padding: 0.375rem 1rem;
+      border: none;
+      border-radius: 6px;
       background: none;
       cursor: pointer;
-
-      font-weight: 500;
-      font-size: 0.75rem;
-      line-height: 1rem;
-
-      letter-spacing: -0.22px;
+      font-weight: 400;
+      font-size: 0.8125rem;
+      line-height: 1.25rem;
+      color: var(--gray-300, #8a909b);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       text-align: left;
-      transition: background 0.1s ease;
+      width: 100%;
     }
 
-    .piece-pill:hover {
+    .piece-item:hover {
       background: rgba(0, 0, 0, 0.03);
+      color: inherit;
     }
 
-    .piece-pill.active {
-      border-color: var(--accent-blue, #4979fa);
-      color: var(--accent-blue, #4979fa);
+    .piece-item.active {
+      color: inherit;
+    }
+
+    .piece-item.active::before {
+      content: "";
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: 50%;
+      background: var(--accent-blue, #4979fa);
+      flex-shrink: 0;
     }
 
     /* Menu items */
@@ -478,6 +535,9 @@ export class XHeaderView extends BaseView {
   private pieceListExpanded = false;
 
   @state()
+  private headerPieceDropdownOpen = false;
+
+  @state()
   private _serverFavorites: readonly FavoriteEntry[] = [];
 
   @state()
@@ -521,6 +581,7 @@ export class XHeaderView extends BaseView {
     this._setupFavoritesSubscription();
     this.addEventListener("keydown", this._handleKeyDown);
     globalThis.addEventListener("resize", this._handleResize);
+    globalThis.addEventListener("click", this._closeHeaderPieceDropdown);
   }
 
   override disconnectedCallback(): void {
@@ -528,6 +589,7 @@ export class XHeaderView extends BaseView {
     this._cleanupFavoritesSubscription();
     this.removeEventListener("keydown", this._handleKeyDown);
     globalThis.removeEventListener("resize", this._handleResize);
+    globalThis.removeEventListener("click", this._closeHeaderPieceDropdown);
     if (this._resizeTimer) clearTimeout(this._resizeTimer);
   }
 
@@ -540,11 +602,18 @@ export class XHeaderView extends BaseView {
   };
 
   private _handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && this.menuOpen) {
-      e.preventDefault();
-      this.menuOpen = false;
-      this.pieceListExpanded = false;
-      this._focusTrigger();
+    if (e.key === "Escape") {
+      if (this.headerPieceDropdownOpen) {
+        e.preventDefault();
+        this.headerPieceDropdownOpen = false;
+        return;
+      }
+      if (this.menuOpen) {
+        e.preventDefault();
+        this.menuOpen = false;
+        this.pieceListExpanded = false;
+        this._focusTrigger();
+      }
     }
   };
 
@@ -592,7 +661,8 @@ export class XHeaderView extends BaseView {
         )
         .map((r) => r.value);
     },
-    args: () => [this.rt, this.pieceListExpanded] as const,
+    args: () =>
+      [this.rt, this.pieceListExpanded || this.headerPieceDropdownOpen] as const,
   });
 
   private handleAuthClick(e: Event) {
@@ -663,6 +733,20 @@ export class XHeaderView extends BaseView {
     this.pieceListExpanded = !this.pieceListExpanded;
   }
 
+  private handleToggleHeaderPieceDropdown(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.headerPieceDropdownOpen = !this.headerPieceDropdownOpen;
+  }
+
+  private _closeHeaderPieceDropdown = (e: Event) => {
+    const path = e.composedPath();
+    const wrapper = this.renderRoot.querySelector(".header-piece-wrapper");
+    if (wrapper && !path.includes(wrapper)) {
+      this.headerPieceDropdownOpen = false;
+    }
+  };
+
   private handlePieceClick(e: Event) {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
       "[data-piece-id]",
@@ -673,6 +757,7 @@ export class XHeaderView extends BaseView {
     const pieceId = target.dataset.pieceId!;
     this.menuOpen = false;
     this.pieceListExpanded = false;
+    this.headerPieceDropdownOpen = false;
     if (this.spaceName) {
       navigate({ spaceName: this.spaceName, pieceId });
     } else if (this.spaceDid) {
@@ -949,7 +1034,7 @@ export class XHeaderView extends BaseView {
         ${pieces.map((piece) =>
           html`
             <button
-              class="piece-pill ${piece.id === this.pieceId ? "active" : ""}"
+              class="piece-item ${piece.id === this.pieceId ? "active" : ""}"
               data-piece-id="${piece.id}"
             >
               ${piece.name}
@@ -994,7 +1079,24 @@ export class XHeaderView extends BaseView {
                 ${this.pieceTitle
                   ? html`
                     <span class="header-separator">/</span>
-                    <span class="header-piece-name">${this.pieceTitle}</span>
+                    <span class="header-piece-wrapper">
+                      <button class="header-piece-trigger"
+                        @click="${this.handleToggleHeaderPieceDropdown}"
+                        aria-haspopup="true"
+                        aria-expanded="${this.headerPieceDropdownOpen}">
+                        ${this.pieceTitle}
+                        <span class="header-piece-chevron ${this.headerPieceDropdownOpen ? "expanded" : ""}">
+                          ${this.iconChevronDown()}
+                        </span>
+                      </button>
+                      ${this.headerPieceDropdownOpen
+                        ? html`
+                          <div class="header-piece-dropdown">
+                            ${this.renderPieceList()}
+                          </div>
+                        `
+                        : nothing}
+                    </span>
                   `
                   : nothing}
               `
