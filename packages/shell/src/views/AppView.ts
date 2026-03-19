@@ -211,11 +211,6 @@ export class XAppView extends BaseView {
     }
   }
 
-  #handlePatternRecreated = () => {
-    // Re-run the space root pattern task to pick up the newly recreated pattern
-    this._spaceRootPattern.run();
-  };
-
   // Always defer to the loaded active pattern for the ID,
   // but until that loads, use an ID in the view if available.
   private getActivePatternId(): string | undefined {
@@ -267,10 +262,7 @@ export class XAppView extends BaseView {
           .pieceTitle="${this.pieceTitle}"
           .pieceId="${pieceId}"
           .isViewingDefaultPattern="${isViewingDefaultPattern}"
-          .showShellPieceListView="${config.showShellPieceListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
-          .showSidebar="${config.showSidebar ?? false}"
-          @pattern-recreated="${this.#handlePatternRecreated}"
         ></x-header-view>
         <div class="content-area">
           ${content}

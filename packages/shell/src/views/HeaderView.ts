@@ -1,11 +1,11 @@
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { KeyStore } from "@commontools/identity";
+import { type DID, KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { navigate } from "../../shared/mod.ts";
 import { Task } from "@lit/task";
-import { NAME, type PageHandle, type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle } from "@commontools/runtime-client";
 import type { FavoriteEntry } from "@commontools/home-schemas";
 import "../components/Flex.ts";
 
@@ -199,7 +199,6 @@ export class XHeaderView extends BaseView {
       .menu-panel {
         width: 100%;
         padding: 24px;
-        padding-top: 24px;
         border-radius: 0 0 16px 16px;
         overflow: hidden;
         clip-path: inset(0 0 100% 0);
@@ -305,6 +304,10 @@ export class XHeaderView extends BaseView {
       padding: 8px 16px;
       cursor: pointer;
       border-radius: 6px;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
     }
 
     .piece-title-row:hover {
@@ -454,16 +457,13 @@ export class XHeaderView extends BaseView {
   spaceName?: string;
 
   @property({ attribute: false })
-  spaceDid?: string;
+  spaceDid?: DID;
 
   @property({ attribute: false })
   isLoggedIn = false;
 
   @property()
   showDebuggerView = false;
-
-  @property()
-  showSidebar = false;
 
   @property({ attribute: false })
   isViewingDefaultPattern = false;
@@ -515,12 +515,29 @@ export class XHeaderView extends BaseView {
   override connectedCallback(): void {
     super.connectedCallback();
     this._setupFavoritesSubscription();
+    this.addEventListener("keydown", this._handleKeyDown);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._cleanupFavoritesSubscription();
+    this.removeEventListener("keydown", this._handleKeyDown);
   }
+
+  private _handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.menuOpen) {
+      e.preventDefault();
+      this.menuOpen = false;
+      this.pieceListExpanded = false;
+      // Return focus to the trigger button
+      this.updateComplete.then(() => {
+        const trigger = this.renderRoot.querySelector<HTMLElement>(
+          ".nav-picker",
+        );
+        trigger?.focus();
+      });
+    }
+  };
 
   protected override willUpdate(changedProperties: PropertyValues): void {
     if (changedProperties.has("rt")) {
@@ -534,34 +551,39 @@ export class XHeaderView extends BaseView {
   }
 
   private _pieces = new Task(this, {
-    task: async ([rt]): Promise<PieceItem[]> => {
-      if (!rt) return [];
+    task: async ([rt, expanded]): Promise<PieceItem[]> => {
+      if (!rt || !expanded) return [];
       await rt.synced();
       const piecesListCell = await rt.getPiecesListCell();
       await piecesListCell.sync();
       const piecesList = piecesListCell.get() as any[];
       if (!piecesList) return [];
 
-      const items: PieceItem[] = [];
+      const ids: string[] = [];
       for (const pieceData of piecesList) {
         const id = pieceData?.id?.() ?? pieceData?.$ID;
-        if (!id) continue;
-        try {
-          const page = await rt.getPattern(id);
-          // Sync the cell to ensure name data is available
-          await page.cell().sync();
-          const name = page.name();
-          items.push({
-            id: page.id(),
-            name: name ?? `Piece #${page.id().slice(0, 6)}`,
-          });
-        } catch {
-          // Skip pieces that can't be resolved
-        }
+        if (id) ids.push(id);
       }
-      return items;
+
+      const results = await Promise.allSettled(
+        ids.map(async (id) => {
+          const page = await rt.getPattern(id);
+          await page.cell().sync();
+          return {
+            id: page.id(),
+            name: page.name() ?? `Piece #${page.id().slice(0, 6)}`,
+          };
+        }),
+      );
+
+      return results
+        .filter(
+          (r): r is PromiseFulfilledResult<PieceItem> =>
+            r.status === "fulfilled",
+        )
+        .map((r) => r.value);
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.pieceListExpanded] as const,
   });
 
   private handleAuthClick(e: Event) {
@@ -585,16 +607,6 @@ export class XHeaderView extends BaseView {
       value: !this.showDebuggerView,
     });
     this.menuOpen = false;
-  }
-
-  private handleSidebarToggleClick(e: Event) {
-    e.preventDefault();
-    e.stopPropagation();
-    this.command({
-      type: "set-config",
-      key: "showSidebar",
-      value: !this.showSidebar,
-    });
   }
 
   private handleLogoClick(e: Event) {
@@ -621,18 +633,21 @@ export class XHeaderView extends BaseView {
     this.pieceListExpanded = !this.pieceListExpanded;
   }
 
-  private handlePieceClick(piece: PieceItem) {
-    return (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.menuOpen = false;
-      this.pieceListExpanded = false;
-      if (this.spaceName) {
-        navigate({ spaceName: this.spaceName, pieceId: piece.id });
-      } else if (this.spaceDid) {
-        navigate({ spaceDid: this.spaceDid as any, pieceId: piece.id });
-      }
-    };
+  private handlePieceClick(e: Event) {
+    const target = (e.target as HTMLElement).closest<HTMLElement>(
+      "[data-piece-id]",
+    );
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pieceId = target.dataset.pieceId!;
+    this.menuOpen = false;
+    this.pieceListExpanded = false;
+    if (this.spaceName) {
+      navigate({ spaceName: this.spaceName, pieceId });
+    } else if (this.spaceDid) {
+      navigate({ spaceDid: this.spaceDid, pieceId });
+    }
   }
 
   private handleNavigateUp(e: Event) {
@@ -644,7 +659,7 @@ export class XHeaderView extends BaseView {
       if (this.spaceName) {
         navigate({ spaceName: this.spaceName });
       } else if (this.spaceDid) {
-        navigate({ spaceDid: this.spaceDid as any });
+        navigate({ spaceDid: this.spaceDid });
       }
     } else {
       // At space root — go home
@@ -829,11 +844,11 @@ export class XHeaderView extends BaseView {
       `;
     }
     return html`
-      <div class="piece-list">
+      <div class="piece-list" @click="${this.handlePieceClick}">
         ${pieces.map((piece) => html`
           <button
             class="piece-pill ${piece.id === this.pieceId ? "active" : ""}"
-            @click="${this.handlePieceClick(piece)}"
+            data-piece-id="${piece.id}"
           >${piece.name}</button>
         `)}
       </div>
@@ -843,11 +858,16 @@ export class XHeaderView extends BaseView {
   override render() {
     const connectionStatus = this.getConnectionStatus();
     const connectionColor = getConnectionColor(connectionStatus);
+    const isFavorite = this._isFavorite();
 
     return html`
       <div class="header">
         <div class="header-start">
-          <button class="nav-picker" @click="${this.handleLogoClick}">
+          <button class="nav-picker"
+            @click="${this.handleLogoClick}"
+            aria-haspopup="true"
+            aria-expanded="${this.menuOpen}"
+            aria-label="Open menu">
             <span class="nav-picker-container">
               <ct-logo
                 .backgroundColor="${connectionColor}"
@@ -872,9 +892,11 @@ export class XHeaderView extends BaseView {
       <div class="menu-container ${this.menuOpen ? "open" : ""}">
         <div class="menu-backdrop"
           @click="${this.handleBackdropClick}"></div>
-        <div class="menu-panel">
+        <div class="menu-panel" role="menu">
           <div class="menu-inner">
-            <button class="menu-close" @click="${this.handleCloseMenu}">
+            <button class="menu-close"
+              @click="${this.handleCloseMenu}"
+              aria-label="Close menu">
               <span class="menu-close-icon">${this.iconClose()}</span>
             </button>
             <div class="menu-title">
@@ -891,20 +913,21 @@ export class XHeaderView extends BaseView {
                 `
         : nothing
     }
-              <div class="piece-title-row"
-                @click="${this.handleTogglePieceList}">
+              <button class="piece-title-row"
+                @click="${this.handleTogglePieceList}"
+                aria-expanded="${this.pieceListExpanded}">
                 <span class="piece-title-text">
                   ${this.pieceTitle || "Untitled"}
                 </span>
                 <span class="piece-title-chevron ${this.pieceListExpanded ? "expanded" : ""}">
                   ${this.iconChevronDown()}
                 </span>
-              </div>
+              </button>
               ${this.pieceListExpanded ? this.renderPieceList() : nothing}
             </div>
 
             <div class="menu-rows">
-              <button class="menu-item"
+              <button class="menu-item" role="menuitem"
                 @click="${this.handleNavigateUp}">
                 <span class="menu-item-icon">${this.iconArrowLeft()}</span>
                 <span class="menu-item-label">${this._navigateUpLabel}</span>
@@ -915,22 +938,22 @@ export class XHeaderView extends BaseView {
               ${
       this.pieceId
         ? html`
-                  <button class="menu-item"
+                  <button class="menu-item" role="menuitem"
                     @click="${this.handleToggleFavorite}">
-                    <span class="menu-item-icon">${this.iconStar(this._isFavorite())}</span>
-                    <span class="menu-item-label">${this._isFavorite() ? "Remove from Favorites" : "Add to Favorites"}</span>
+                    <span class="menu-item-icon">${this.iconStar(isFavorite)}</span>
+                    <span class="menu-item-label">${isFavorite ? "Remove from Favorites" : "Add to Favorites"}</span>
                   </button>
                 `
         : nothing
     }
 
-              <button class="menu-item"
+              <button class="menu-item" role="menuitem"
                 @click="${this.handleCopyLink}">
                 <span class="menu-item-icon">${this.iconLink()}</span>
                 <span class="menu-item-label">Copy link</span>
               </button>
 
-              <button class="menu-item"
+              <button class="menu-item" role="menuitem"
                 @click="${this.handleDebuggerToggleClick}">
                 <span class="menu-item-icon">${this.iconBug()}</span>
                 <span class="menu-item-label">Toggle debug mode</span>
@@ -938,7 +961,7 @@ export class XHeaderView extends BaseView {
 
               <div class="divider"><div class="divider-line"></div></div>
 
-              <button class="menu-item"
+              <button class="menu-item" role="menuitem"
                 @click="${this.handleAuthClick}">
                 <span class="menu-item-icon">${this.iconLogOut()}</span>
                 <span class="menu-item-label">Sign out</span>
