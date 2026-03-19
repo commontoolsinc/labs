@@ -38,10 +38,11 @@ export function resolveCellPath<T>(
   path: CellPath,
 ): unknown {
   let currentCell = cell as Cell<unknown>;
+  let parentValue: unknown = undefined;
 
   for (const segment of path) {
-    const currentValue = currentCell.get() as unknown;
-    if (currentValue != null && typeof currentValue !== "object") {
+    parentValue = currentCell.get() as unknown;
+    if (parentValue != null && typeof parentValue !== "object") {
       throw new Error(
         `Cannot access path "${
           path.join("/")
@@ -54,10 +55,18 @@ export function resolveCellPath<T>(
   const resolvedValue = currentCell.get();
   if (path.length > 0 && resolvedValue === undefined) {
     const segment = path[path.length - 1];
+    const availableKeys = parentValue != null && typeof parentValue === "object"
+      ? Object.keys(parentValue as Record<string, unknown>)
+        .filter((k) => !k.startsWith("$"))
+        .sort()
+      : [];
+    const keysHint = availableKeys.length > 0
+      ? `. Available keys: ${availableKeys.join(", ")}`
+      : "";
     throw new Error(
       `Cannot access path "${
         path.join("/")
-      }" - property "${segment}" not found`,
+      }" - property "${segment}" not found${keysHint}`,
     );
   }
 

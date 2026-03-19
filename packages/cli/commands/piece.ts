@@ -557,7 +557,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   /* piece get */
   .command(
     "get",
-    `Get a value from a piece at a specific path.
+    `Get a value from a piece at a specific path. Omit path to return the full result.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
@@ -571,12 +571,16 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     `ct piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
     `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
   )
+  .example(
+    `ct piece get ${EX_ID} ${EX_COMP_PIECE}`,
+    `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
-  .arguments("<path:string>")
+  .arguments("[path:string]")
   .action(async (options, pathString) => {
     const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parsePath(pathString);
+    const pathSegments = pathString ? parsePath(pathString) : [];
     const value = await getCellValue(pieceConfig, pathSegments, {
       input: options.input,
     });
