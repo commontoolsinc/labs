@@ -27,10 +27,7 @@ import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
-import {
-  searchPattern as searchHistoryPattern,
-  type SuggestionHistoryEntry,
-} from "./suggestion-history.tsx";
+import SuggestionHistory from "./suggestion-history.tsx";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 const triggerGeneration = handler<
@@ -121,9 +118,7 @@ export default pattern<
     entries: SummaryIndexEntry[];
   }>({ query: "#summaryIndex" }).result!;
 
-  const historyEntries = wish<Default<SuggestionHistoryEntry[], []>>({
-    query: "#suggestions",
-  }).result;
+  const suggestionHistory = SuggestionHistory({});
 
   const patternIndexUrl = wish<{ url: Writable<string> }>({
     query: "#pattern-index",
@@ -197,9 +192,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,
       }),
-      searchHistory: patternTool(searchHistoryPattern, {
-        entries: historyEntries,
-      }),
+      searchHistory: suggestionHistory.search,
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
       askUserQuestion: {

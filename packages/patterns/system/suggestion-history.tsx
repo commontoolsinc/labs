@@ -4,6 +4,8 @@ import {
   type Default,
   NAME,
   pattern,
+  patternTool,
+  type PatternToolResult,
   UI,
   type VNode,
   wish,
@@ -17,7 +19,11 @@ export type SuggestionHistoryEntry = {
 };
 
 type Input = Record<string, never>;
-type Output = { [UI]: VNode };
+type Output = {
+  entries: SuggestionHistoryEntry[];
+  search: PatternToolResult<{ entries: SuggestionHistoryEntry[] }>;
+  [UI]: VNode;
+};
 
 function extractText(content: any): string {
   if (typeof content === "string") return content;
@@ -106,6 +112,8 @@ const SuggestionHistory = pattern<Input, Output>(() => {
         </ct-grid>
       </ct-screen>
     ),
+    entries,
+    search: patternTool(searchPattern, { entries }),
   };
 });
 
