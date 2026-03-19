@@ -88,8 +88,7 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  | FabricEpochNsec
-  | FabricEpochDays
+  | FabricPrimitive
   | FabricArray
   | FabricObject
   | FabricInstance

@@ -1,5 +1,5 @@
 import type { FabricInstance } from "./fabric-instance.ts";
-import type { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
+import type { FabricPrimitive } from "./fabric-primitive.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { Immutable } from "@commontools/utils/types";
 import {
@@ -48,9 +48,10 @@ export type FabricValue = FabricDatum | undefined;
  *
  * Most native JS object types (`Error`, `Map`, `Set`, `Uint8Array`) enter the
  * fabric layer via wrapper classes that implement `FabricInstance`. However,
- * temporal types (`FabricEpochNsec`, `FabricEpochDays`) and `bigint` are
- * direct members of `FabricDatum` without implementing `FabricInstance`.
- * Native `Date` is converted to `FabricEpochNsec` during conversion.
+ * fabric primitives (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`) and
+ * `bigint` are direct members of `FabricDatum` without implementing
+ * `FabricInstance`. Native `Date` is converted to `FabricEpochNsec` during
+ * conversion.
  *
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
@@ -63,9 +64,8 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  // -- Temporal primitives --
-  | FabricEpochNsec
-  | FabricEpochDays
+  // -- Fabric primitives (FabricEpochNsec, FabricEpochDays, FabricHash) --
+  | FabricPrimitive
   // -- Containers --
   | FabricArray
   | FabricObject
