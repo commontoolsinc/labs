@@ -1,9 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
+import {
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  RECONSTRUCT,
+  type ReconstructionContext,
+} from "../interface.ts";
 import {
   FabricError,
   FabricMap,
@@ -11,9 +14,9 @@ import {
   FabricSet,
   FabricUint8Array,
   isConvertibleNativeInstance,
-  nativeFromFabricValueModern,
   nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
+import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   NATIVE_TAGS,
@@ -38,9 +41,9 @@ describe("fabric-native-instances", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricError", () => {
-    it("implements FabricInstance (isFabricInstance returns true)", () => {
+    it("implements FabricInstance (instanceof returns true)", () => {
       const se = new FabricError(new Error("test"));
-      expect(isFabricInstance(se)).toBe(true);
+      expect(se instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag 'Error@1'", () => {
@@ -291,7 +294,7 @@ describe("fabric-native-instances", () => {
   describe("stub wrappers", () => {
     it("FabricMap implements FabricInstance", () => {
       const sm = new FabricMap(new Map());
-      expect(isFabricInstance(sm)).toBe(true);
+      expect(sm instanceof FabricInstance).toBe(true);
       expect(sm.typeTag).toBe("Map@1");
     });
 
@@ -347,7 +350,7 @@ describe("fabric-native-instances", () => {
 
     it("FabricSet implements FabricInstance", () => {
       const ss = new FabricSet(new Set());
-      expect(isFabricInstance(ss)).toBe(true);
+      expect(ss instanceof FabricInstance).toBe(true);
       expect(ss.typeTag).toBe("Set@1");
     });
 
@@ -392,7 +395,7 @@ describe("fabric-native-instances", () => {
 
     it("FabricUint8Array implements FabricInstance", () => {
       const su = new FabricUint8Array(new Uint8Array([1, 2, 3]));
-      expect(isFabricInstance(su)).toBe(true);
+      expect(su instanceof FabricInstance).toBe(true);
       expect(su.typeTag).toBe("Bytes@1");
     });
 

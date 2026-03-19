@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
+import {
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  RECONSTRUCT,
+  type ReconstructionContext,
+} from "../interface.ts";
 import {
   FabricNativeWrapper,
   FabricRegExp,
@@ -40,9 +43,9 @@ describe("FabricRegExp", () => {
   // --------------------------------------------------------------------------
 
   describe("wrapper basics", () => {
-    it("implements FabricInstance (isFabricInstance returns true)", () => {
+    it("implements FabricInstance (instanceof check)", () => {
       const sr = new FabricRegExp(/abc/gi);
-      expect(isFabricInstance(sr)).toBe(true);
+      expect(sr instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag 'RegExp@1'", () => {

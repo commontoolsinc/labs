@@ -47,8 +47,10 @@ import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
-import { FabricInstance } from "@commontools/data-model/fabric-instance";
-import { FabricPrimitive } from "@commontools/data-model/fabric-primitive";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commontools/data-model/fabric-value";
 import {
   FabricEpochDays,
   FabricEpochNsec,

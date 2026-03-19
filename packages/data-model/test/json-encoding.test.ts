@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
-import { DECONSTRUCT, FabricInstance } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
+import {
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  type ReconstructionContext,
+} from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
@@ -14,9 +16,9 @@ import {
   FabricError,
   FabricMap,
   FabricSet,
-  nativeFromFabricValueModern,
   nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
+import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   canBeStored,
@@ -725,7 +727,7 @@ describe("json encoding", () => {
 
     it("isFabricInstance returns true for FabricError", () => {
       const se = new FabricError(new Error("test"));
-      expect(isFabricInstance(se)).toBe(true);
+      expect(se instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag property", () => {
@@ -1231,37 +1233,37 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // data-model-protocol: isFabricInstance type guard
+  // data-model-protocol: FabricInstance instanceof checks
   // --------------------------------------------------------------------------
 
-  describe("isFabricInstance type guard", () => {
+  describe("FabricInstance instanceof checks", () => {
     it("returns false for null", () => {
-      expect(isFabricInstance(null)).toBe(false);
+      expect((null as unknown) instanceof FabricInstance).toBe(false);
     });
 
     it("returns false for undefined", () => {
-      expect(isFabricInstance(undefined)).toBe(false);
+      expect((undefined as unknown) instanceof FabricInstance).toBe(false);
     });
 
     it("returns false for primitives", () => {
-      expect(isFabricInstance(42)).toBe(false);
-      expect(isFabricInstance("hello")).toBe(false);
-      expect(isFabricInstance(true)).toBe(false);
+      expect((42 as unknown) instanceof FabricInstance).toBe(false);
+      expect(("hello" as unknown) instanceof FabricInstance).toBe(false);
+      expect((true as unknown) instanceof FabricInstance).toBe(false);
     });
 
     it("returns false for plain objects", () => {
-      expect(isFabricInstance({})).toBe(false);
-      expect(isFabricInstance({ a: 1 })).toBe(false);
+      expect(({} as unknown) instanceof FabricInstance).toBe(false);
+      expect(({ a: 1 } as unknown) instanceof FabricInstance).toBe(false);
     });
 
     it("returns true for UnknownValue", () => {
       const us = new UnknownValue("Test@1", null);
-      expect(isFabricInstance(us)).toBe(true);
+      expect(us instanceof FabricInstance).toBe(true);
     });
 
     it("returns true for ProblematicValue", () => {
       const ps = new ProblematicValue("Test@1", null, "oops");
-      expect(isFabricInstance(ps)).toBe(true);
+      expect(ps instanceof FabricInstance).toBe(true);
     });
 
     it("returns true for custom FabricInstance subclass", () => {
@@ -1274,12 +1276,12 @@ describe("json encoding", () => {
         }
       }
       const instance = new CustomStorable();
-      expect(isFabricInstance(instance)).toBe(true);
+      expect(instance instanceof FabricInstance).toBe(true);
     });
 
     it("returns true for FabricError", () => {
       const se = new FabricError(new Error("test"));
-      expect(isFabricInstance(se)).toBe(true);
+      expect(se instanceof FabricInstance).toBe(true);
     });
   });
 

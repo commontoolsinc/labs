@@ -10,9 +10,9 @@
 // ============================================================================
 //
 // Pattern-visible declarations for the fabric value type system. Canonical
-// implementations live in submodule files (fabric-value.ts, fabric-instance.ts,
-// etc.) — these inline declarations mirror the public surface so the pattern
-// compiler can resolve them without relative imports.
+// implementations live in data-model submodule files (interface.ts,
+// fabric-value.ts, etc.) — these inline declarations mirror the public surface
+// so the pattern compiler can resolve them without relative imports.
 //
 // SYNC NOTE: These declarations must stay in sync with the canonical
 // definitions in the submodule files. If they drift, pattern type-checking

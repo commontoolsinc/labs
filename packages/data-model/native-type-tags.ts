@@ -1,6 +1,6 @@
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricHash } from "./fabric-hash.ts";
-import { isFabricInstance } from "./fabric-instance.ts";
+import { FabricInstance } from "./interface.ts";
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
@@ -151,7 +151,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     if (Error.isError(value)) return NATIVE_TAGS.Error;
 
     // FabricInstance values (protocol types with [DECONSTRUCT]).
-    if (isFabricInstance(value)) return NATIVE_TAGS.FabricInstance;
+    if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;

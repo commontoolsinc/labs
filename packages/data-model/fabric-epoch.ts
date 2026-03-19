@@ -1,4 +1,4 @@
-import { FabricPrimitive } from "./fabric-primitive.ts";
+import { FabricPrimitive } from "./interface.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
