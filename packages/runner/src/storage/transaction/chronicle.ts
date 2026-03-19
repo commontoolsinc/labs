@@ -20,7 +20,7 @@ import type {
 import type {
   StorableDatum,
   StorableValue,
-} from "@commontools/memory/interface";
+} from "@commontools/data-model/fabric-value";
 import * as Address from "./address.ts";
 import {
   attest,

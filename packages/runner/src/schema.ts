@@ -8,7 +8,7 @@ import type { JSONValue } from "@commontools/api";
 import type {
   StorableDatum,
   StorableValue,
-} from "@commontools/memory/interface";
+} from "@commontools/data-model/fabric-value";
 import { cloneIfNecessary } from "@commontools/data-model/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";

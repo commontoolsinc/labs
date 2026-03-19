@@ -7,9 +7,9 @@ import type {
   OfTheCause,
   Select,
   SelectAll,
-  StorableDatum,
   URI,
 } from "./interface.ts";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 export const SelectAllString = "_";
 
 export const from = (

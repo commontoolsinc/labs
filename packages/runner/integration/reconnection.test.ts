@@ -12,9 +12,9 @@ import type {
   MemorySpace,
   Revision,
   State,
-  StorableObject,
   URI,
 } from "@commontools/memory/interface";
+import type { StorableObject } from "@commontools/data-model/fabric-value";
 import { env } from "@commontools/integration";
 import type { JSONSchema } from "@commontools/api";
 const { API_URL } = env;

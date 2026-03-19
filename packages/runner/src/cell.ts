@@ -9,7 +9,8 @@ import {
   isArrayIndexPropertyName,
   shallowStorableFromNativeValue,
 } from "@commontools/data-model/storable-value";
-import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
+import type { MemorySpace } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {

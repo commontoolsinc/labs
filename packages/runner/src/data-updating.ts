@@ -8,7 +8,7 @@ import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import type {
   StorableObject,
   StorableValue,
-} from "@commontools/memory/interface";
+} from "@commontools/data-model/fabric-value";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";

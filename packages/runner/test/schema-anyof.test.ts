@@ -6,7 +6,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";

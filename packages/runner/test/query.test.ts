@@ -13,7 +13,7 @@ import {
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,

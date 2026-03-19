@@ -4,9 +4,9 @@ import type {
   Revision,
   SchemaPathSelector,
   State,
-  StorableDatum,
   URI,
 } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import {
   IMemorySpaceValueAttestation,
   SchemaObjectTraverser,

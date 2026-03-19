@@ -1,5 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import {
   isPattern,
   type Pattern,

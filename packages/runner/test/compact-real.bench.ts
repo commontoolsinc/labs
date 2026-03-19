@@ -2,7 +2,7 @@
 import { ChangeSet, compactChangeSet } from "../src/data-updating.ts";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
 import type { IAttestation } from "../src/storage/interface.ts";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 
 const space = "did:test:space" as `did:${string}:${string}`;
 const docId = "test:doc" as `${string}:${string}`;

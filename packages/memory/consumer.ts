@@ -41,13 +41,13 @@ import type {
   Selection,
   Selector,
   Signer,
-  StorableDatum,
   Transaction,
   TransactionResult,
   UCAN,
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import {
   type ContentId,
   contentIdFromJSON,

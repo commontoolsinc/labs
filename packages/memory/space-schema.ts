@@ -3,7 +3,7 @@ import {
   type JSONObject,
   type JSONSchema,
 } from "@commontools/runner";
-import type { StorableDatum } from "./interface.ts";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,

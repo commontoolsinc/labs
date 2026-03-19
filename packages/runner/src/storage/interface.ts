@@ -14,14 +14,16 @@ import type {
   SchemaPathSelector,
   Signer,
   State,
-  StorableDatum,
-  StorableValue,
   The as MediaType,
   TransactionError,
   Unit,
   URI,
   Variant,
 } from "@commontools/memory/interface";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/data-model/fabric-value";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
 

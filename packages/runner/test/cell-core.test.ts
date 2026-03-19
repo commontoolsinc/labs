@@ -7,7 +7,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";

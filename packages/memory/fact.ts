@@ -1,4 +1,5 @@
-import type { StorableDatum, URI } from "./interface.ts";
+import type { URI } from "./interface.ts";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import {
   Assertion,
   Fact,

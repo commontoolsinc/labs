@@ -70,7 +70,10 @@ export type {
   SelectSchemaResult,
   SelectSchemaStats,
 } from "./space-schema.ts";
-import { StorableDatum, StorableValue } from "./interface.ts";
+import {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/data-model/fabric-value";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,

@@ -1,4 +1,4 @@
-import type { StorableValue } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,

@@ -1,6 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { StorableValue } from "@commontools/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";

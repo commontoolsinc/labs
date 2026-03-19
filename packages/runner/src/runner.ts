@@ -5,7 +5,7 @@ import { rendererVDOMSchema } from "./schemas.ts";
 import type {
   StorableDatum,
   StorableValue,
-} from "@commontools/memory/interface";
+} from "@commontools/data-model/fabric-value";
 import {
   type Frame,
   isModule,

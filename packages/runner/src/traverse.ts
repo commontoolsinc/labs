@@ -5,10 +5,12 @@ import type {
   MemorySpace,
   Result,
   SchemaPathSelector,
-  StorableDatum,
-  StorableValue,
   Unit,
 } from "@commontools/memory/interface";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/data-model/fabric-value";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
 // TODO(@ubik2): Ideally this would import from "@commontools/utils/types",

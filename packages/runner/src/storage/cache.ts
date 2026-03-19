@@ -1,5 +1,5 @@
 import { fromString, refer } from "@commontools/data-model/value-hash";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import type {
   CauseString,
   Changes as MemoryChanges,

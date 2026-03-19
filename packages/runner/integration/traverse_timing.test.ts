@@ -1,9 +1,6 @@
 import type { JSONObject } from "@commontools/api";
-import type {
-  MemorySpace,
-  MIME,
-  StorableDatum,
-} from "@commontools/memory/interface";
+import type { MemorySpace, MIME } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   type BaseMemoryAddress,

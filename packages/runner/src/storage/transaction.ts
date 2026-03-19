@@ -1,5 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import type {
   ChangeGroup,
   CommitError,

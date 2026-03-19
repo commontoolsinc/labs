@@ -4,7 +4,7 @@ import type {
   StorableDatum,
   StorableObject,
   StorableValue,
-} from "@commontools/memory/interface";
+} from "@commontools/data-model/fabric-value";
 import type {
   CommitError,
   IAttestation,

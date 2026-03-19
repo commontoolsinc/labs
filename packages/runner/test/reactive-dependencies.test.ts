@@ -8,7 +8,7 @@ import {
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceAndURI } from "../src/scheduler.ts";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,

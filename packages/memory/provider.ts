@@ -28,12 +28,12 @@ import {
   Revision,
   SchemaQuery,
   Selection,
-  StorableDatum,
   Subscribe,
   Subscriber,
   Transaction,
   UCAN,
 } from "./interface.ts";
+import { StorableDatum } from "@commontools/data-model/fabric-value";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
