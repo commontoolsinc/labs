@@ -28,6 +28,7 @@ export class XHeaderView extends BaseView {
       display: block;
       width: 100%;
       height: auto;
+      color: var(--gray-800, #2c3138);
     }
 
     *, *::before, *::after {
@@ -89,7 +90,6 @@ export class XHeaderView extends BaseView {
     .chevron-down {
       width: 0.75rem;
       height: 0.75rem;
-      color: var(--gray-800, #2c3138);
     }
 
     /* Header breadcrumbs (desktop only) */
@@ -107,7 +107,6 @@ export class XHeaderView extends BaseView {
     }
 
     .header-breadcrumbs .header-space {
-      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 0.75rem;
       line-height: 1rem;
@@ -118,7 +117,7 @@ export class XHeaderView extends BaseView {
     }
 
     .header-breadcrumbs .header-space:hover {
-      color: var(--gray-800, #2c3138);
+      color: inherit;
     }
 
     .header-breadcrumbs .header-separator {
@@ -127,11 +126,10 @@ export class XHeaderView extends BaseView {
     }
 
     .header-breadcrumbs .header-piece-name {
-      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 0.8125rem;
       line-height: 1rem;
-      color: var(--gray-800, #2c3138);
+
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -257,7 +255,6 @@ export class XHeaderView extends BaseView {
     .menu-close-icon {
       width: 1.5rem;
       height: 1.5rem;
-      color: var(--gray-800, #2c3138);
     }
 
     /* Menu title section */
@@ -289,7 +286,6 @@ export class XHeaderView extends BaseView {
     }
 
     .breadcrumb-text {
-      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 0.6875rem;
       line-height: 1rem;
@@ -328,11 +324,10 @@ export class XHeaderView extends BaseView {
     }
 
     .piece-title-text {
-      font-family: "JetBrainsMono", monospace;
       font-weight: 500;
       font-size: 1rem;
       line-height: 1.5rem;
-      color: var(--gray-800, #2c3138);
+
       letter-spacing: -0.32px;
       white-space: nowrap;
       overflow: hidden;
@@ -342,7 +337,7 @@ export class XHeaderView extends BaseView {
     .piece-title-chevron {
       width: 0.75rem;
       height: 0.75rem;
-      color: var(--gray-800, #2c3138);
+
       flex-shrink: 0;
       margin-left: 0.125rem;
       display: flex;
@@ -370,11 +365,11 @@ export class XHeaderView extends BaseView {
       border-radius: 20px;
       background: none;
       cursor: pointer;
-      font-family: "JetBrainsMono", monospace;
+
       font-weight: 500;
       font-size: 0.75rem;
       line-height: 1rem;
-      color: var(--gray-800, #2c3138);
+
       letter-spacing: -0.22px;
       white-space: nowrap;
       overflow: hidden;
@@ -419,15 +414,13 @@ export class XHeaderView extends BaseView {
       width: 1.5rem;
       height: 1.5rem;
       flex-shrink: 0;
-      color: var(--gray-800, #2c3138);
     }
 
     .menu-item-label {
-      font-family: "JetBrainsMono", monospace;
       font-weight: 600;
       font-size: 0.8125rem;
       line-height: 1.5rem;
-      color: var(--gray-800, #2c3138);
+
       letter-spacing: 0.3px;
       white-space: nowrap;
       overflow: hidden;
