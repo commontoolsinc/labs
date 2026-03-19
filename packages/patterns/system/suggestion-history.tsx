@@ -19,6 +19,24 @@ export type SuggestionHistoryEntry = {
 type Input = Record<string, never>;
 type Output = { [UI]: VNode };
 
+function extractText(content: any): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((p: any) => p.type === "text" && p.text)
+      .map((p: any) => p.text)
+      .join(" ");
+  }
+  return "";
+}
+
+function messageText(entry: SuggestionHistoryEntry): string {
+  return (entry.messages ?? [])
+    .filter((m: any) => m.role === "user")
+    .map((m: any) => extractText(m.content))
+    .join(" ");
+}
+
 export const searchPattern = pattern<
   { query: string; entries: SuggestionHistoryEntry[] },
   SuggestionHistoryEntry[]
@@ -28,11 +46,8 @@ export const searchPattern = pattern<
     const q = query.toLowerCase().trim();
     return entries.filter(
       (entry: SuggestionHistoryEntry) =>
-        (entry.messages ?? [])
-          .find((m: any) => m.role === "user")
-          ?.content?.toString()
-          ?.toLowerCase()
-          ?.includes(q) || (entry.timestamp ?? "").includes(q),
+        messageText(entry).toLowerCase().includes(q) ||
+        (entry.timestamp ?? "").includes(q),
     );
   });
 });
