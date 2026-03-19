@@ -14,4 +14,4 @@ export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
 export * as Telemetry from "./telemetry.ts";
 export * from "./acl.ts";
-export * from "./reference.ts";
+export * from "@commontools/data-model/value-hash";

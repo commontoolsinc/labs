@@ -1,4 +1,7 @@
-import type { ContentId, DefinedReferent } from "./reference.ts";
+import type {
+  ContentId,
+  DefinedReferent,
+} from "@commontools/data-model/value-hash";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 
 // Canonical definitions of StorableValue and related types now live in

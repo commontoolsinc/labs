@@ -8,7 +8,11 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import { type ContentId, fromString, refer } from "./reference.ts";
+import {
+  type ContentId,
+  fromString,
+  refer,
+} from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,

@@ -40,7 +40,7 @@ import {
   type ContentId,
   fromString as causeFromString,
   refer,
-} from "./reference.ts";
+} from "@commontools/data-model/value-hash";
 import {
   redactCommitData,
   selectFact,

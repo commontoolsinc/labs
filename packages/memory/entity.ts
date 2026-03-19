@@ -1,4 +1,4 @@
-import { contentIdFromJSON, refer } from "./reference.ts";
+import { contentIdFromJSON, refer } from "@commontools/data-model/value-hash";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;

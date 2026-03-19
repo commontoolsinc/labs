@@ -48,7 +48,11 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { type ContentId, contentIdFromJSON, refer } from "./reference.ts";
+import {
+  type ContentId,
+  contentIdFromJSON,
+  refer,
+} from "@commontools/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
