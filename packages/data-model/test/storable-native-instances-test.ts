@@ -4,7 +4,6 @@ import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
 import { isStorableInstance } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../fabric-value.ts";
-import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import {
   isConvertibleNativeInstance,
   nativeFromStorableValueRich,
@@ -16,11 +15,6 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-  shallowStorableFromNativeValue,
-} from "../storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -434,25 +428,6 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // StorableEpochNsec / StorableEpochDays integration with memory
-  // (Core class tests live in @commontools/data-model)
-  // --------------------------------------------------------------------------
-
-  describe("StorableEpochNsec", () => {
-    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
-      const sn = new StorableEpochNsec(0n);
-      expect(isStorableInstance(sn)).toBe(false);
-    });
-  });
-
-  describe("StorableEpochDays", () => {
-    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
-      const sd = new StorableEpochDays(0n);
-      expect(isStorableInstance(sd)).toBe(false);
-    });
-  });
-
-  // --------------------------------------------------------------------------
   // nativeValueFromStorableValue (shallow unwrap)
   // --------------------------------------------------------------------------
 
@@ -850,24 +825,6 @@ describe("storable-native-instances", () => {
 
     it("returns false for objects with toJSON()", () => {
       expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
-    });
-  });
-
-  // Core SpecialPrimitiveValue/epoch class tests live in
-  // @commontools/data-model. Only memory-integration tests remain here.
-
-  describe("SpecialPrimitiveValue (memory integration)", () => {
-    it("passes through shallowStorableFromNativeValue unchanged even with freeze=false", () => {
-      setStorableValueConfig({ richStorableValues: true });
-      try {
-        const nsec = new StorableEpochNsec(123n);
-        const days = new StorableEpochDays(456n);
-        // freeze=false should still return the same instance (not a copy).
-        expect(shallowStorableFromNativeValue(nsec, false)).toBe(nsec);
-        expect(shallowStorableFromNativeValue(days, false)).toBe(days);
-      } finally {
-        resetStorableValueConfig();
-      }
     });
   });
 });

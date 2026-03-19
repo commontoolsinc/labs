@@ -2,6 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
+import { isStorableInstance } from "@commontools/data-model/storable-protocol";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+  shallowStorableFromNativeValue,
+} from "../storable-value.ts";
 
 describe("StorableEpochNsec", () => {
   it("wraps a bigint value", () => {
@@ -70,5 +76,34 @@ describe("StorableEpochDays", () => {
 
   it("instances are always frozen", () => {
     expect(Object.isFrozen(new StorableEpochDays(100n))).toBe(true);
+  });
+});
+
+describe("StorableEpochNsec (protocol)", () => {
+  it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
+    const sn = new StorableEpochNsec(0n);
+    expect(isStorableInstance(sn)).toBe(false);
+  });
+});
+
+describe("StorableEpochDays (protocol)", () => {
+  it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
+    const sd = new StorableEpochDays(0n);
+    expect(isStorableInstance(sd)).toBe(false);
+  });
+});
+
+describe("SpecialPrimitiveValue (storable-value integration)", () => {
+  it("passes through shallowStorableFromNativeValue unchanged even with freeze=false", () => {
+    setStorableValueConfig({ richStorableValues: true });
+    try {
+      const nsec = new StorableEpochNsec(123n);
+      const days = new StorableEpochDays(456n);
+      // freeze=false should still return the same instance (not a copy).
+      expect(shallowStorableFromNativeValue(nsec, false)).toBe(nsec);
+      expect(shallowStorableFromNativeValue(days, false)).toBe(days);
+    } finally {
+      resetStorableValueConfig();
+    }
   });
 });
