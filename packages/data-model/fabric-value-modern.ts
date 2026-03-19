@@ -15,7 +15,7 @@ import {
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
-import { isArrayWithOnlyIndexProperties } from "./fabric-value-utils.ts";
+import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /** Reject native objects with extra enumerable properties. */
 function rejectExtraProperties(value: object, typeName: string): void {

@@ -42,7 +42,7 @@
     "./json-type-handlers": "./json-type-handlers.ts",
     "./fabric-value-legacy": "./fabric-value-legacy.ts",
     "./fabric-value-modern": "./fabric-value-modern.ts",
-    "./fabric-value-utils": "./fabric-value-utils.ts",
+    "./array-utils": "./array-utils.ts",
     "./value-hash": "./value-hash.ts",
     "./value-hash-legacy": "./value-hash-legacy.ts"
   }

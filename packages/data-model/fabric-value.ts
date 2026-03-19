@@ -22,7 +22,7 @@ import {
 export {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
-} from "./fabric-value-utils.ts";
+} from "./array-utils.ts";
 
 // ===========================================================================
 // Type definitions

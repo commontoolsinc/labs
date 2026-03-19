@@ -4,7 +4,7 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./fabric-value.ts";
-import { isArrayWithOnlyIndexProperties } from "./fabric-value-utils.ts";
+import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /**
  * Converts specially-recognized class instances to their designated fabric
