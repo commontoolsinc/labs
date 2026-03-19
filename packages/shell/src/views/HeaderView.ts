@@ -404,6 +404,8 @@ export class XHeaderView extends BaseView {
       flex-direction: column;
       padding: 0.25rem 0;
       margin-left: 1rem;
+      max-height: 15rem;
+      overflow-y: auto;
     }
 
     .piece-item {
@@ -424,6 +426,7 @@ export class XHeaderView extends BaseView {
       text-overflow: ellipsis;
       text-align: left;
       width: 100%;
+      flex-shrink: 0;
     }
 
     .piece-item:hover {
@@ -662,7 +665,10 @@ export class XHeaderView extends BaseView {
         .map((r) => r.value);
     },
     args: () =>
-      [this.rt, this.pieceListExpanded || this.headerPieceDropdownOpen] as const,
+      [
+        this.rt,
+        this.pieceListExpanded || this.headerPieceDropdownOpen,
+      ] as const,
   });
 
   private handleAuthClick(e: Event) {
@@ -1080,12 +1086,17 @@ export class XHeaderView extends BaseView {
                   ? html`
                     <span class="header-separator">/</span>
                     <span class="header-piece-wrapper">
-                      <button class="header-piece-trigger"
+                      <button
+                        class="header-piece-trigger"
                         @click="${this.handleToggleHeaderPieceDropdown}"
                         aria-haspopup="true"
-                        aria-expanded="${this.headerPieceDropdownOpen}">
+                        aria-expanded="${this.headerPieceDropdownOpen}"
+                      >
                         ${this.pieceTitle}
-                        <span class="header-piece-chevron ${this.headerPieceDropdownOpen ? "expanded" : ""}">
+                        <span class="header-piece-chevron ${this
+                            .headerPieceDropdownOpen
+                          ? "expanded"
+                          : ""}">
                           ${this.iconChevronDown()}
                         </span>
                       </button>
