@@ -34,6 +34,7 @@ export interface StorableInstanceConstructor {
 export declare const StorableInstance: StorableInstanceConstructor;
 
 /** Abstract base class for "special primitive" storable types. */
+// deno-lint-ignore no-empty-interface
 export interface SpecialPrimitiveValue {}
 
 export interface SpecialPrimitiveValueConstructor {

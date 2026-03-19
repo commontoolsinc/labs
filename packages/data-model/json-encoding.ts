@@ -1,8 +1,5 @@
 import type { StorableValue } from "./fabric-value.ts";
-import {
-  RECONSTRUCT,
-  type StorableInstance,
-} from "./storable-instance.ts";
+import { RECONSTRUCT, type StorableInstance } from "./storable-instance.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,

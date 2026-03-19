@@ -4,7 +4,7 @@ import type { JSONSchema, JSONValue } from "@commontools/api";
 // Canonical definitions of StorableValue and related types now live in
 // `@commontools/data-model/fabric-value`. Re-exported here for backward
 // compatibility -- many files in memory and runner import these from this module.
-// TODO: Migrate consumers to import directly from `@commontools/data-model`.
+// TODO(@danfuzz): Migrate consumers to import directly from `@commontools/data-model`.
 export type {
   StorableArray,
   StorableDatum,
@@ -15,10 +15,7 @@ export type {
 } from "@commontools/data-model/fabric-value";
 
 // Re-import for use in local type definitions within this file.
-import type {
-  StorableDatum,
-  StorableValue,
-} from "@commontools/data-model/fabric-value";
+import type { StorableDatum } from "@commontools/data-model/fabric-value";
 
 export type SchemaPathSelector = {
   path: readonly string[];
