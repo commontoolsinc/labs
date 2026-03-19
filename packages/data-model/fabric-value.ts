@@ -241,7 +241,7 @@ export function setDataModelConfig(
 }
 
 /** Returns the current experimental data model configuration. */
-export function getExperimentalDataModelConfig(): ExperimentalDataModelConfig {
+export function getDataModelConfig(): ExperimentalDataModelConfig {
   return currentConfig;
 }
 

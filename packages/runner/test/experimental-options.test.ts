@@ -5,7 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
   fabricFromNativeValue,
-  getExperimentalDataModelConfig,
+  getDataModelConfig,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
@@ -274,7 +274,7 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      const config = getExperimentalDataModelConfig();
+      const config = getDataModelConfig();
       expect(config.modernDataModel).toBe(true);
 
       await runtime.dispose();
@@ -288,7 +288,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
       });
 
-      const config = getExperimentalDataModelConfig();
+      const config = getDataModelConfig();
       expect(config.modernDataModel).toBe(false);
 
       await runtime.dispose();
@@ -306,12 +306,12 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      expect(getExperimentalDataModelConfig().modernDataModel).toBe(true);
+      expect(getDataModelConfig().modernDataModel).toBe(true);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getExperimentalDataModelConfig().modernDataModel).toBe(false);
+      expect(getDataModelConfig().modernDataModel).toBe(false);
     });
   });
 
