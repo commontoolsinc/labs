@@ -16,7 +16,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+} from "@commontools/data-model/value-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
 

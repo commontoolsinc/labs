@@ -11,7 +11,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+} from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { StorableDatum } from "@commontools/memory/interface";
 import {

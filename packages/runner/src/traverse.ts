@@ -1,4 +1,4 @@
-import { refer } from "@commontools/memory/reference";
+import { refer } from "@commontools/data-model/value-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {

@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as Reference from "merkle-reference";
-import { StorableContentId } from "@commontools/data-model/storable-content-id";
+import { StorableContentId } from "../storable-content-id.ts";
 import {
   contentIdFromJSON,
   fromString,
@@ -13,7 +13,7 @@ import {
   refer,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "../reference.ts";
+} from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);

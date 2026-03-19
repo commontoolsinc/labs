@@ -21,7 +21,7 @@ import {
 import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
-} from "@commontools/memory/reference";
+} from "@commontools/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,

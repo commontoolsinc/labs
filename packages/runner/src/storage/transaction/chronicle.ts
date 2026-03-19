@@ -33,7 +33,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "@commontools/memory/reference";
+import { refer } from "@commontools/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);

@@ -22,7 +22,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { resetStorableValueConfig } from "@commontools/data-model/storable-value";
-import { resetCanonicalHashConfig } from "@commontools/memory/reference";
+import { resetCanonicalHashConfig } from "@commontools/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
 } from "@commontools/data-model/json-encoding-dispatch";
