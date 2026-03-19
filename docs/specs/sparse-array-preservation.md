@@ -102,17 +102,17 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/memory/fabric-value-modern.ts`** — `shallowStorableFromNativeValueRich` and
-  `storableFromNativeValueRich` use `i in arr` checks.
+- **`packages/data-model/fabric-value-modern.ts`** — `shallowFabricFromNativeValueModern` and
+  `fabricFromNativeValueModern` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
 - **`packages/memory/canonical-hash.ts`** — Handles holes in hash computation.
 
-### Value validation (`packages/memory/fabric-value.ts`)
+### Value validation (`packages/data-model/fabric-value.ts`)
 
 `isFabricArray` accepts sparse arrays — holes are valid fabric structure. It
-uses `for` + `i in` because it needs early return.  `toStorableValueLegacy` and
-`toDeepStorableValueInternal` both use `forEach` to preserve holes during
+uses `for` + `i in` because it needs early return.  `fabricFromNativeValueLegacy` and
+`toDeepFabricValueInternal` both use `forEach` to preserve holes during
 conversion.
 
 ### Attestation (`packages/runner/src/storage/transaction/attestation.ts`)
@@ -209,8 +209,8 @@ If you're writing a plain array copy, use or follow `sparseArrayCopy` from
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/memory/test/storable-value-test.ts`** — `isFabricValue` accepts
-  sparse arrays; `fabricFromNativeValue` and `toDeepStorableValue` preserve holes.
+- **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValue` accepts
+  sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue` preserve holes.
 - **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
   through array copies (extension, element set, nested modification).
 - **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
@@ -234,6 +234,6 @@ will fail these assertions.
 
 ## Known limitations
 
-- **`rich-fabric-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
+- **`fabric-value-modern.ts` `HasToJSON` path:** `Object.freeze([...converted])`
   in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
   This is an edge case — `toJSON()` rarely returns sparse arrays.

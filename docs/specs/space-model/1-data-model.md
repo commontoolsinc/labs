@@ -306,7 +306,7 @@ interface FabricInstance {
 }
 
 // Class protocol: "here's how to bring one back"
-interface StorableClass<T extends FabricInstance> {
+interface FabricClass<T extends FabricInstance> {
   [RECONSTRUCT](state: unknown, runtime: Runtime): T;
 }
 ```
@@ -422,7 +422,7 @@ A **serialization context** owns the mapping between classes and tags:
 interface SerializationContext {
   // Maps fabric types to wire format tags
   getTagFor(value: FabricInstance): string;
-  getClassFor(tag: string): StorableClass<FabricInstance>;
+  getClassFor(tag: string): FabricClass<FabricInstance>;
 
   // Format-specific wrapping
   wrap(tag: string, state: unknown): SerializedForm;
@@ -660,7 +660,7 @@ Use cases for `/quote`:
 #### Unknown Type Handling
 
 When a JSON context encounters a `/<type>@<version>` key it doesn't recognize,
-it uses `UnknownValue` (see [Unknown Types](#unknown-types) in the Storable
+it uses `UnknownValue` (see [Unknown Types](#unknown-types) in the Fabric
 Protocol section) to preserve the data for round-tripping.
 
 #### Relationship to Serialization Contexts
