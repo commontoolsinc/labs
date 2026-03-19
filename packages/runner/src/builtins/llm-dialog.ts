@@ -2506,8 +2506,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             },
           );
 
-          // Record suggestion history by calling the recordSuggestion handler
-          // on the default pattern. Tolerant if the handler doesn't exist.
+          // Optionally record to suggestion history via the default pattern's
+          // recordSuggestion handler. This is intentionally best-effort: spaces
+          // whose default pattern doesn't export recordSuggestion simply skip
+          // recording (caught below) rather than failing the suggestion flow.
           if (
             success && cellifiedResult !== undefined &&
             queueName === "suggestions"
