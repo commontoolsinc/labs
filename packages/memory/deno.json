@@ -40,7 +40,6 @@
     "./provider": "./provider.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
-    "./reference": "./reference.ts",
     "./schema": "./schema.ts"
   },
   "imports": {
