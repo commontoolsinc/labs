@@ -166,6 +166,12 @@ export class XHeaderView extends BaseView {
       position: relative;
     }
 
+    :host(.resizing) *,
+    :host(.resizing) *::before,
+    :host(.resizing) *::after {
+      transition: none !important;
+    }
+
     /* Desktop: positioned dropdown */
     @media (min-width: 769px) {
       .menu-backdrop {
@@ -270,7 +276,6 @@ export class XHeaderView extends BaseView {
     .breadcrumb {
       display: flex;
       align-items: center;
-      gap: 6px;
       padding: 4px 16px;
     }
 
@@ -291,6 +296,7 @@ export class XHeaderView extends BaseView {
       color: var(--gray-300, #8a909b);
       letter-spacing: -0.22px;
       white-space: nowrap;
+      margin-left: 6px;
     }
 
     .breadcrumb-chevron {
@@ -301,12 +307,13 @@ export class XHeaderView extends BaseView {
       flex-shrink: 0;
       display: flex;
       align-items: center;
+      margin-left: 8px;
     }
 
     .piece-title-row {
       display: flex;
       align-items: center;
-      gap: 0;
+      gap: 8px;
       padding: 8px 16px;
       cursor: pointer;
       border-radius: 6px;
@@ -518,17 +525,30 @@ export class XHeaderView extends BaseView {
     );
   }
 
+  private _resizeTimer?: ReturnType<typeof setTimeout>;
+
   override connectedCallback(): void {
     super.connectedCallback();
     this._setupFavoritesSubscription();
     this.addEventListener("keydown", this._handleKeyDown);
+    globalThis.addEventListener("resize", this._handleResize);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._cleanupFavoritesSubscription();
     this.removeEventListener("keydown", this._handleKeyDown);
+    globalThis.removeEventListener("resize", this._handleResize);
+    if (this._resizeTimer) clearTimeout(this._resizeTimer);
   }
+
+  private _handleResize = () => {
+    this.classList.add("resizing");
+    if (this._resizeTimer) clearTimeout(this._resizeTimer);
+    this._resizeTimer = setTimeout(() => {
+      this.classList.remove("resizing");
+    }, 150);
+  };
 
   private _handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape" && this.menuOpen) {
