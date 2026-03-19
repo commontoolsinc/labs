@@ -33,7 +33,7 @@ export {
  * `JSONValue` but is specifically intended for use at storage boundaries
  * (values going into or coming out of the database).
  *
- * Note: Once the `richStorableValues` experiment graduates and the rich path
+ * Note: Once the `modernDataModel` experiment graduates and the rich path
  * becomes the default, `FabricValue = FabricDatum | undefined` will be a
  * redundant union (since `FabricDatum` includes `undefined`). The alias is
  * retained for compatibility and readability at call sites.
@@ -52,7 +52,7 @@ export type FabricValue = FabricDatum | undefined;
  * direct members of `FabricDatum` without implementing `FabricInstance`.
  * Native `Date` is converted to `FabricEpochNsec` during conversion.
  *
- * `undefined` is preserved when the `richStorableValues` flag is ON. When the
+ * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
  * object properties are omitted -- matching legacy behavior.
  */
@@ -72,7 +72,7 @@ export type FabricDatum =
   // -- Protocol types (Cell, Stream, UnknownValue, ProblematicValue,
   //    and native wrappers like FabricError at runtime) --
   | FabricInstance
-  // -- Extended primitives (experimental: richStorableValues) --
+  // -- Extended primitives (experimental: modernDataModel) --
   | undefined;
 
 /** An array of storable data. */
@@ -144,11 +144,11 @@ export type FabricNativeObject =
 export interface ExperimentalDataModelConfig {
   /** When `true`, storable value functions use the extended type system
    *  (bigint, Map, Set, Uint8Array, Date, etc.). */
-  richStorableValues: boolean;
+  modernDataModel: boolean;
 }
 
 const defaultConfig: ExperimentalDataModelConfig = {
-  richStorableValues: false,
+  modernDataModel: false,
 };
 
 let currentConfig: ExperimentalDataModelConfig = { ...defaultConfig };
@@ -190,14 +190,14 @@ export function resetDataModelConfig(): void {
  * storable wrappers and deep-freezes via `fabricFromNativeValueModern`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
- *   applies when `richStorableValues` is ON; the legacy path does not
+ *   applies when `modernDataModel` is ON; the legacy path does not
  *   freeze.
  */
 export function fabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValue {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? fabricFromNativeValueModern(value, freeze)
     : fabricFromNativeValueLegacy(value);
 }
@@ -210,14 +210,14 @@ export function fabricFromNativeValue(
  * `nativeFromFabricValueModern`.
  *
  * @param frozen - When `true` (default), deep-freezes the result. Only
- *   applies when `richStorableValues` is ON; the legacy path is a
+ *   applies when `modernDataModel` is ON; the legacy path is a
  *   passthrough regardless.
  */
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricValue {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? nativeFromFabricValueModern(value, frozen) as FabricValue
     : value;
 }
@@ -270,7 +270,7 @@ export function cloneIfNecessary<T extends FabricValue>(
     );
   }
 
-  return (currentConfig.richStorableValues
+  return (currentConfig.modernDataModel
     ? cloneIfNecessaryRich(value, frozen, deep, force)
     : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
 }
@@ -294,7 +294,7 @@ export function cloneIfNecessary<T extends FabricValue>(
 export function isFabricValue(
   value: unknown,
 ): value is FabricValueLayer {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? isFabricValueModern(value)
     : isFabricValueLegacy(value);
 }
@@ -314,7 +314,7 @@ export function isFabricValue(
 export function canBeStored(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? canBeStoredRich(value)
     : canBeStoredLegacy(value);
 }
@@ -333,7 +333,7 @@ export function canBeStored(
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
- *   object or array. Only applies when `richStorableValues` is ON.
+ *   object or array. Only applies when `modernDataModel` is ON.
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to storable form.
  */
@@ -341,7 +341,7 @@ export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? shallowFabricFromNativeValueModern(value, freeze)
     : shallowFabricFromNativeValueLegacy(value);
 }
@@ -361,7 +361,7 @@ export function shallowFabricFromNativeValue(
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? deepEqual(a, b)
     : JSON.stringify(a) === JSON.stringify(b);
 }

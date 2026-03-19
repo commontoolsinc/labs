@@ -1,9 +1,5 @@
 import type { FabricValue } from "./fabric-value.ts";
-import {
-  DECONSTRUCT,
-  FabricInstance,
-  RECONSTRUCT,
-} from "./fabric-instance.ts";
+import { DECONSTRUCT, FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
 import {
   isFabricInstance,
   type ReconstructionContext,
@@ -433,8 +429,7 @@ function rejectExtraRegExpProperties(regex: RegExp): void {
  * Extra properties beyond the wrapped value are not supported on non-Error
  * wrappers.
  */
-export class FabricUint8Array
-  extends FabricNativeWrapper<Blob | Uint8Array> {
+export class FabricUint8Array extends FabricNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = TAGS.Bytes;
   constructor(readonly bytes: Uint8Array) {
     super();

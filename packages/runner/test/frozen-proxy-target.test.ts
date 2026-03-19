@@ -1,7 +1,7 @@
 /**
  * Tests for the frozen proxy target fix in `query-result-proxy.ts`.
  *
- * When `richStorableValues` is enabled, stored objects are deep-frozen at
+ * When `modernDataModel` is enabled, stored objects are deep-frozen at
  * commit time. After commit, reads in a new transaction return direct
  * references to these frozen objects. The proxy creation function must still
  * wrap them (using an unfrozen stub as the proxy target) so that link
@@ -9,7 +9,7 @@
  *
  * These tests simulate the frozen state by deep-freezing values before writing
  * them to the transaction. This is equivalent to what happens after a commit
- * with richStorableValues enabled, without requiring multi-transaction setups
+ * with modernDataModel enabled, without requiring multi-transaction setups
  * that trigger background sync operations.
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -29,7 +29,7 @@ const space = signer.did();
  * Helper: write a deep-frozen value into a cell via the transaction, then
  * return a NormalizedFullLink for reading it back through the proxy.
  *
- * This simulates the state of data after a commit with richStorableValues
+ * This simulates the state of data after a commit with modernDataModel
  * enabled: the value in the transaction's working copy is deep-frozen.
  */
 function writeFrozenCell(
@@ -56,7 +56,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
         canonicalHashing: true,
       },
     });
@@ -80,7 +80,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     targetCell.set({ answer: 42 });
 
     // Set up a cell whose value contains a sigil link to the target.
-    // Write it deep-frozen to simulate post-commit state with richStorableValues.
+    // Write it deep-frozen to simulate post-commit state with modernDataModel.
     const sourceLink = writeFrozenCell(
       runtime,
       tx,
@@ -123,7 +123,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
         canonicalHashing: true,
       },
     });
@@ -417,14 +417,14 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
   });
 });
 
-describe("frozen proxy target: legacy behavior with richStorableValues OFF", () => {
+describe("frozen proxy target: legacy behavior with modernDataModel OFF", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    // No experimental flags -- richStorableValues defaults to false.
+    // No experimental flags -- modernDataModel defaults to false.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
@@ -438,7 +438,7 @@ describe("frozen proxy target: legacy behavior with richStorableValues OFF", () 
     await storageManager?.close();
   });
 
-  it("returns frozen objects raw when richStorableValues is OFF", () => {
+  it("returns frozen objects raw when modernDataModel is OFF", () => {
     const link = writeFrozenCell(runtime, tx, "legacy-frozen-raw", {
       a: 1,
       b: 2,
@@ -455,7 +455,7 @@ describe("frozen proxy target: legacy behavior with richStorableValues OFF", () 
       false,
     );
 
-    // With richStorableValues OFF, frozen objects should be returned as-is
+    // With modernDataModel OFF, frozen objects should be returned as-is
     // (the original "frozen = terminal" behavior).
     expect(result).toBe(rawValue);
   });

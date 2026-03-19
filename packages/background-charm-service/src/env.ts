@@ -27,10 +27,10 @@ const envSchema = z.object({
   // Boolean(), which treats any non-empty string as truthy -- so setting an
   // env var to "false" would incorrectly enable the flag. The other boolean
   // env vars in this file have the same latent bug.
-  EXPERIMENTAL_RICH_STORABLE_VALUES: z.string().default("false").transform((
+  EXPERIMENTAL_MODERN_DATA_MODEL: z.string().default("false").transform((
     v,
   ) => v === "true"),
-  EXPERIMENTAL_STORABLE_PROTOCOL: z.string().default("false").transform((
+  EXPERIMENTAL_DATA_MODEL_PROTOCOL: z.string().default("false").transform((
     v,
   ) => v === "true"),
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((

@@ -5,14 +5,14 @@ import { isFabricInstance } from "../fabric-protocol.ts";
 import type { ReconstructionContext } from "../fabric-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
-  isConvertibleNativeInstance,
-  nativeFromFabricValueModern,
-  nativeValueFromFabricValue,
   FabricError,
   FabricMap,
   FabricNativeWrapper,
   FabricSet,
   FabricUint8Array,
+  isConvertibleNativeInstance,
+  nativeFromFabricValueModern,
+  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {

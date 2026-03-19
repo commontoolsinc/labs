@@ -18,8 +18,8 @@ export function absPath(relpath: string, cwd = Deno.cwd()): string {
 export function experimentalOptionsFromEnv(): ExperimentalOptions {
   const read = (name: string) => Deno.env.get(name) === "true";
   const opts: ExperimentalOptions = {
-    richStorableValues: read("EXPERIMENTAL_RICH_STORABLE_VALUES"),
-    storableProtocol: read("EXPERIMENTAL_STORABLE_PROTOCOL"),
+    modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
+    dataModelProtocol: read("EXPERIMENTAL_DATA_MODEL_PROTOCOL"),
     unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
     canonicalHashing: read("EXPERIMENTAL_CANONICAL_HASHING"),
   };

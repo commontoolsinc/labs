@@ -28,7 +28,7 @@
 experiments on both servers:
 ```bash
 EXPERIMENTAL_CANONICAL_HASHING=true \
-EXPERIMENTAL_RICH_STORABLE_VALUES=true \
+EXPERIMENTAL_MODERN_DATA_MODEL=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
 The same env vars must also be set when running `ct` CLI commands against the

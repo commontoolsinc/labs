@@ -11,11 +11,11 @@ import { ProblematicValue } from "../problematic-value.ts";
 import { ExplicitTagValue } from "../explicit-tag-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import {
-  nativeFromFabricValueModern,
-  nativeValueFromFabricValue,
   FabricError,
   FabricMap,
   FabricSet,
+  nativeFromFabricValueModern,
+  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
@@ -536,7 +536,7 @@ describe("json encoding", () => {
 
   describe("Date -> FabricEpochNsec conversion", () => {
     it("converts Date(0) to FabricEpochNsec(0n)", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       try {
         const date = new Date(0);
         const result = shallowFabricFromNativeValue(
@@ -550,7 +550,7 @@ describe("json encoding", () => {
     });
 
     it("converts Date to nanoseconds (msec * 1_000_000)", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       try {
         const date = new Date("2024-01-01T00:00:00.000Z");
         const result = shallowFabricFromNativeValue(
@@ -565,7 +565,7 @@ describe("json encoding", () => {
     });
 
     it("converts negative Date to negative nanoseconds", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       try {
         const date = new Date(-86400000); // -1 day
         const result = shallowFabricFromNativeValue(
@@ -1765,7 +1765,7 @@ describe("json encoding", () => {
 
   describe("canBeStored", () => {
     beforeEach(() => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
     });
     afterEach(() => {
       resetDataModelConfig();

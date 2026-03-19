@@ -95,7 +95,7 @@ describe("FabricEpochDays (protocol)", () => {
 
 describe("SpecialPrimitiveValue (storable-value integration)", () => {
   it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
-    setDataModelConfig({ richStorableValues: true });
+    setDataModelConfig({ modernDataModel: true });
     try {
       const nsec = new FabricEpochNsec(123n);
       const days = new FabricEpochDays(456n);

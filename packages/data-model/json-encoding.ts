@@ -1,9 +1,9 @@
 import type { FabricValue } from "./fabric-value.ts";
 import { type FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
 import {
+  type FabricClass,
   type ReconstructionContext,
   type SerializationContext,
-  type FabricClass,
 } from "./fabric-protocol.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { deepFreeze } from "./deep-freeze.ts";

@@ -138,7 +138,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        // When richStorableValues is ON, stored objects are deep-frozen by
+        // When modernDataModel is ON, stored objects are deep-frozen by
         // fabricFromNativeValueModern(). Shallow-clone before mutation to avoid
         // TypeError on frozen objects. force defaults to true (always clone)
         // because the value may be the transaction's working copy, which

@@ -32,8 +32,8 @@ const runtime = new Runtime({
     address: new URL("/api/storage/memory", env.API_URL),
   }),
   experimental: {
-    richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
-    storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
+    modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
+    dataModelProtocol: env.EXPERIMENTAL_DATA_MODEL_PROTOCOL,
     unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
     canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
   },

@@ -9,9 +9,9 @@ import { isFabricInstance } from "./fabric-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import { FabricEpochNsec } from "./fabric-epoch.ts";
 import {
-  isConvertibleNativeInstance,
   FabricError,
   FabricRegExp,
+  isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
@@ -33,9 +33,9 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * `FabricValue`, returns it as-is (identity optimization).
  *
  * This function is self-contained (does not delegate back to `shallowFabricFromNativeValue`)
- * to avoid circular dispatch when the `richStorableValues` flag is ON.
+ * to avoid circular dispatch when the `modernDataModel` flag is ON.
  *
- * Used when the `richStorableValues` flag is ON.
+ * Used when the `modernDataModel` flag is ON.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
@@ -212,7 +212,7 @@ const PROCESSING = Symbol("PROCESSING");
  * input is already a deep-frozen `FabricValue`, returns it as-is (identity
  * optimization).
  *
- * Used when the `richStorableValues` flag is ON.
+ * Used when the `modernDataModel` flag is ON.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), deep-freezes the result tree.
@@ -460,10 +460,10 @@ function convertErrorInternals(
  * types (null, boolean, number, string, plain objects, dense arrays).
  *
  * MUST be self-contained (inline base-type checks, does NOT delegate back to
- * `isFabricValue()`) to avoid circular dispatch when the `richStorableValues`
+ * `isFabricValue()`) to avoid circular dispatch when the `modernDataModel`
  * flag is ON. See session 2 notes about the stack overflow this caused.
  *
- * Used when the `richStorableValues` flag is ON.
+ * Used when the `modernDataModel` flag is ON.
  */
 export function isFabricValueModern(
   value: unknown,

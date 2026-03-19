@@ -1558,7 +1558,7 @@ The module also re-exports flag-dispatched type-check functions
  * via `storableFromNativeValueRich`.
  */
 export function storableFromNativeValue(value: unknown, freeze?: boolean): StorableValue {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? storableFromNativeValueRich(value, freeze)
     : storableFromNativeValueLegacy(value);
 }
@@ -1569,7 +1569,7 @@ export function storableFromNativeValue(value: unknown, freeze?: boolean): Stora
  * Flag ON (rich): unwraps storable wrappers via `nativeFromStorableValueRich`.
  */
 export function nativeFromStorableValue(value: StorableValue, frozen?: boolean): StorableValue {
-  return currentConfig.richStorableValues
+  return currentConfig.modernDataModel
     ? nativeFromStorableValueRich(value, frozen) as StorableValue
     : value;
 }

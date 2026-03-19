@@ -5,10 +5,10 @@ import { isFabricInstance } from "../fabric-protocol.ts";
 import type { ReconstructionContext } from "../fabric-protocol.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import {
-  isConvertibleNativeInstance,
-  nativeValueFromFabricValue,
   FabricNativeWrapper,
   FabricRegExp,
+  isConvertibleNativeInstance,
+  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
 import {
   canBeStored,
@@ -222,7 +222,7 @@ describe("FabricRegExp", () => {
 
   describe("shallowFabricFromNativeValue (rich path)", () => {
     it("converts RegExp to FabricRegExp", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       try {
         const result = shallowFabricFromNativeValue(/abc/gi);
         expect(result).toBeInstanceOf(FabricRegExp);
@@ -234,7 +234,7 @@ describe("FabricRegExp", () => {
     });
 
     it("rejects RegExp with extra enumerable properties", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       try {
         const re = /abc/;
         (re as unknown as Record<string, unknown>).custom = 1;
@@ -297,7 +297,7 @@ describe("FabricRegExp", () => {
 
   describe("canBeStored", () => {
     beforeEach(() => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
     });
     afterEach(() => {
       resetDataModelConfig();

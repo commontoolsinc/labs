@@ -12,8 +12,8 @@ export type InitializationData = {
   toolshedUrl: string;
   rawIdentity: KeyPairRaw;
   experimental?: {
-    richStorableValues?: boolean;
-    storableProtocol?: boolean;
+    modernDataModel?: boolean;
+    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
 };

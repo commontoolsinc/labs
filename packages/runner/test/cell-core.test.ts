@@ -736,7 +736,7 @@ describe("Cell utility functions", () => {
     });
 
     it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
-      // Even with `richStorableValues === false`, `cloneIfNecessary()` _will_
+      // Even with `modernDataModel === false`, `cloneIfNecessary()` _will_
       // make a clone of a frozen value to get a mutable result.
       const cell = runtime.getCell<{ items: number[] }>(
         space,
@@ -752,8 +752,8 @@ describe("Cell utility functions", () => {
   });
 });
 
-// Separate top-level describe with richStorableValues enabled for frozen-ness.
-describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
+// Separate top-level describe with modernDataModel enabled for frozen-ness.
+describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -764,7 +764,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
         canonicalHashing: true,
       },
     });

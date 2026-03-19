@@ -1,7 +1,7 @@
 /**
  * Contract tests for frozen-object safety.
  *
- * When `richStorableValues` is ON, `fabricFromNativeValueModern()` deep-freezes all
+ * When `modernDataModel` is ON, `fabricFromNativeValueModern()` deep-freezes all
  * stored objects at commit time. Code paths that read these frozen objects from
  * storage must clone before mutating.
  *
@@ -47,7 +47,7 @@ describe("frozen-object safety contracts", () => {
         apiUrl: new URL(import.meta.url),
         storageManager,
         experimental: {
-          richStorableValues: true,
+          modernDataModel: true,
           canonicalHashing: true,
         },
       });
@@ -138,7 +138,7 @@ describe("frozen-object safety contracts", () => {
 
   describe("setupInternal deep-copies frozen previousInternal", () => {
     // setupInternal uses Object.assign({}, deepCopy(defaults), deepCopy(initial),
-    // previousInternal) to merge internal state. When richStorableValues is ON,
+    // previousInternal) to merge internal state. When modernDataModel is ON,
     // previousInternal (read from storage) may be deep-frozen. Object.assign
     // copies properties shallowly, so frozen nested references propagate into
     // the mutable result. Deep-copying previousInternal ensures the merged

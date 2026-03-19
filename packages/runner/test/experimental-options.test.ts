@@ -4,12 +4,12 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
+  fabricFromNativeValue,
   getExperimentalDataModelConfig,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-  fabricFromNativeValue,
 } from "@commontools/data-model/fabric-value";
 import { FabricError } from "@commontools/data-model/fabric-native-instances";
 import {
@@ -24,7 +24,7 @@ const signer = await Identity.fromPassphrase("test experimental");
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
  * Runtime construction/disposal correctly propagates flags to the ambient
  * storable-value config, and that `shallowFabricFromNativeValue`/`fabricFromNativeValue`
- * respect the `richStorableValues` gate.
+ * respect the `modernDataModel` gate.
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
@@ -40,8 +40,8 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
       });
       expect(runtime.experimental).toEqual({
-        richStorableValues: false,
-        storableProtocol: false,
+        modernDataModel: false,
+        dataModelProtocol: false,
         unifiedJsonEncoding: false,
         canonicalHashing: false,
       });
@@ -55,13 +55,13 @@ describe("ExperimentalOptions", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          richStorableValues: true,
+          modernDataModel: true,
           canonicalHashing: true,
         },
       });
       expect(runtime.experimental).toEqual({
-        richStorableValues: true,
-        storableProtocol: false,
+        modernDataModel: true,
+        dataModelProtocol: false,
         unifiedJsonEncoding: false,
         canonicalHashing: true,
       });
@@ -70,9 +70,9 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("shallowFabricFromNativeValue with richStorableValues flag", () => {
+  describe("shallowFabricFromNativeValue with modernDataModel flag", () => {
     it("works normally when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       expect(shallowFabricFromNativeValue("hello")).toBe("hello");
       expect(shallowFabricFromNativeValue(42)).toBe(42);
       expect(shallowFabricFromNativeValue(null)).toBe(null);
@@ -81,7 +81,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts Error to @Error object when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toEqual({
@@ -95,13 +95,13 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts undefined in arrays to null when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       const result = shallowFabricFromNativeValue([1, undefined, 3]);
       expect(result).toEqual([1, null, 3]);
     });
 
     it("wraps Error in FabricError when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toBeInstanceOf(FabricError);
@@ -109,7 +109,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       const arr = [1, undefined, 3];
       const result = shallowFabricFromNativeValue(arr);
       expect(result).toEqual(arr);
@@ -117,7 +117,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       resetDataModelConfig();
       const err = new Error("test");
       const result = shallowFabricFromNativeValue(err);
@@ -125,15 +125,15 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("fabricFromNativeValue with richStorableValues flag", () => {
+  describe("fabricFromNativeValue with modernDataModel flag", () => {
     it("works normally when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       expect(fabricFromNativeValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
       expect(fabricFromNativeValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
     it("converts nested Error to @Error object when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       const err = new Error("nested");
       const result = fabricFromNativeValue({ data: err });
       expect(result).toEqual({
@@ -149,13 +149,13 @@ describe("ExperimentalOptions", () => {
     });
 
     it("omits undefined-valued object properties when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, c: 3 });
     });
 
     it("wraps nested Error in FabricError when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       const err = new Error("nested");
       const result = fabricFromNativeValue({ data: err }) as Record<
         string,
@@ -166,14 +166,14 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, b: undefined, c: 3 });
       expect(Object.hasOwn(result as object, "b")).toBe(true);
     });
 
     it("wraps Error in array in FabricError when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       const err = new Error("in array");
       const result = fabricFromNativeValue([1, err, 3]) as unknown[];
       expect(result[1]).toBeInstanceOf(FabricError);
@@ -181,7 +181,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves sparse array holes when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       const result = fabricFromNativeValue(sparse) as unknown[];
@@ -192,14 +192,14 @@ describe("ExperimentalOptions", () => {
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       resetDataModelConfig();
       const result = fabricFromNativeValue({ a: 1, b: undefined });
       expect(result).toEqual({ a: 1 });
     });
 
     it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       // An object whose toJSON() returns undefined. In the rich path, undefined
       // is a valid FabricValue, so this gets stored in the converted map as
       // `undefined`. The bug (before the has() fix) would treat a subsequent
@@ -221,43 +221,43 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("isFabricValue with richStorableValues flag", () => {
+  describe("isFabricValue with modernDataModel flag", () => {
     it("rejects Error when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("rejects [undefined] when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       expect(isFabricValue([undefined])).toBe(false);
     });
 
     it("rejects Error even when flag is ON (needs conversion to FabricError)", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("accepts [undefined] when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       expect(isFabricValue([undefined])).toBe(true);
     });
 
     it("accepts sparse arrays when flag is ON", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("accepts sparse arrays when flag is OFF", () => {
-      setDataModelConfig({ richStorableValues: false });
+      setDataModelConfig({ modernDataModel: false });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
       resetDataModelConfig();
       expect(isFabricValue(new Error("test"))).toBe(false);
       expect(isFabricValue([undefined])).toBe(false);
@@ -265,19 +265,19 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("Runtime sets and resets global config", () => {
-    it("constructing Runtime with richStorableValues sets global config", async () => {
+    it("constructing Runtime with modernDataModel sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          richStorableValues: true,
+          modernDataModel: true,
           canonicalHashing: true,
         },
       });
 
       const config = getExperimentalDataModelConfig();
-      expect(config.richStorableValues).toBe(true);
+      expect(config.modernDataModel).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -291,7 +291,7 @@ describe("ExperimentalOptions", () => {
       });
 
       const config = getExperimentalDataModelConfig();
-      expect(config.richStorableValues).toBe(false);
+      expect(config.modernDataModel).toBe(false);
 
       await runtime.dispose();
       await sm.close();
@@ -303,17 +303,17 @@ describe("ExperimentalOptions", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          richStorableValues: true,
+          modernDataModel: true,
           canonicalHashing: true,
         },
       });
 
-      expect(getExperimentalDataModelConfig().richStorableValues).toBe(true);
+      expect(getExperimentalDataModelConfig().modernDataModel).toBe(true);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getExperimentalDataModelConfig().richStorableValues).toBe(false);
+      expect(getExperimentalDataModelConfig().modernDataModel).toBe(false);
     });
   });
 

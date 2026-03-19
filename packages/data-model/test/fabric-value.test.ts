@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  fabricFromNativeValue,
   isArrayIndexPropertyName,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-  fabricFromNativeValue,
 } from "../fabric-value.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 
 describe("storable-value", () => {
-  // Explicitly pin richStorableValues off so the legacy-path tests (below the
+  // Explicitly pin modernDataModel off so the legacy-path tests (below the
   // rich-path section) exercise flag-off behavior regardless of the ambient
   // default. The rich-path describe blocks override this in their own
   // beforeEach.
   beforeEach(() => {
-    setDataModelConfig({ richStorableValues: false });
+    setDataModelConfig({ modernDataModel: false });
   });
   afterEach(() => {
     resetDataModelConfig();
@@ -700,9 +700,7 @@ describe("storable-value", () => {
       });
 
       it("throws for deeply nested non-storable value", () => {
-        expect(() =>
-          fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } })
-        )
+        expect(() => fabricFromNativeValue({ a: { b: { c: Symbol("deep") } } }))
           .toThrow("Cannot store symbol");
       });
     });
@@ -937,7 +935,7 @@ describe("storable-value", () => {
 
   describe("freeze parameter (rich path)", () => {
     beforeEach(() => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
     });
 
     afterEach(() => {
@@ -1236,7 +1234,7 @@ describe("storable-value", () => {
 
   describe("Error internals deep conversion (rich path)", () => {
     beforeEach(() => {
-      setDataModelConfig({ richStorableValues: true });
+      setDataModelConfig({ modernDataModel: true });
     });
     afterEach(() => {
       resetDataModelConfig();

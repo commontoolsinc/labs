@@ -105,8 +105,8 @@ export interface InitializationData {
   timeoutMs?: number;
   // Experimental space-model feature flags.
   experimental?: {
-    richStorableValues?: boolean;
-    storableProtocol?: boolean;
+    modernDataModel?: boolean;
+    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
   // Content hash of the worker bundle, used for compilation cache

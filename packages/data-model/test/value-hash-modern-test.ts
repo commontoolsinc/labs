@@ -7,10 +7,7 @@ import {
 import { canonicalHash as canonicalHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import {
-  FabricError,
-  FabricUint8Array,
-} from "../fabric-native-instances.ts";
+import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");

@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { ExperimentalOptions, RuntimeOptions } from "@commontools/runner";
 
-const VALIDATION_MSG = "ExperimentalOptions: `richStorableValues` requires";
+const VALIDATION_MSG = "ExperimentalOptions: `modernDataModel` requires";
 
 /**
  * Build a minimal RuntimeOptions stub with the given experimental flags.
@@ -38,18 +38,18 @@ async function tryConstruct(
 }
 
 describe("ExperimentalOptions flag cross-validation", () => {
-  it("throws when richStorableValues is true but canonicalHashing is false", async () => {
+  it("throws when modernDataModel is true but canonicalHashing is false", async () => {
     const msg = await tryConstruct({
-      richStorableValues: true,
+      modernDataModel: true,
       canonicalHashing: false,
     });
     expect(msg).toBeDefined();
     expect(msg!).toContain(VALIDATION_MSG);
   });
 
-  it("does not throw when both richStorableValues and canonicalHashing are true", async () => {
+  it("does not throw when both modernDataModel and canonicalHashing are true", async () => {
     const msg = await tryConstruct({
-      richStorableValues: true,
+      modernDataModel: true,
       canonicalHashing: true,
     });
     // May be null (no error) or an unrelated error from the incomplete
@@ -59,9 +59,9 @@ describe("ExperimentalOptions flag cross-validation", () => {
     }
   });
 
-  it("does not throw when canonicalHashing is true but richStorableValues is false", async () => {
+  it("does not throw when canonicalHashing is true but modernDataModel is false", async () => {
     const msg = await tryConstruct({
-      richStorableValues: false,
+      modernDataModel: false,
       canonicalHashing: true,
     });
     if (msg !== null) {

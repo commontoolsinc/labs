@@ -105,15 +105,15 @@ export function createQueryResultProxy<T>(
 
   if (!isRecord(value)) return value;
 
-  // When richStorableValues is OFF, frozen objects are terminal values that
+  // When modernDataModel is OFF, frozen objects are terminal values that
   // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
-  // When richStorableValues is ON, frozen objects may contain link structures
+  // When modernDataModel is ON, frozen objects may contain link structures
   // that need resolution, so we fall through to proxy-wrap them below.
-  if (Object.isFrozen(value) && !runtime.experimental.richStorableValues) {
+  if (Object.isFrozen(value) && !runtime.experimental.modernDataModel) {
     return value as T;
   }
 
-  // When richStorableValues is enabled, stored objects are deep-frozen during
+  // When modernDataModel is enabled, stored objects are deep-frozen during
   // storage normalization (fabricFromNativeValueModern). A frozen proxy target
   // would force every property access through the invariant guard (ECMAScript
   // 10.5.8: a [[Get]] trap on a non-configurable, non-writable data property

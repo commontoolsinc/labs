@@ -25,8 +25,8 @@ export interface WorkerOptions {
   identity: Identity;
   timeoutMs?: number;
   experimental?: {
-    richStorableValues?: boolean;
-    storableProtocol?: boolean;
+    modernDataModel?: boolean;
+    dataModelProtocol?: boolean;
     unifiedJsonEncoding?: boolean;
   };
 }

@@ -9,8 +9,8 @@ affecting users who haven't opted in.
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `richStorableValues` | `EXPERIMENTAL_RICH_STORABLE_VALUES` | Enables the new storable value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `StorableInstance`). |
-| `storableProtocol` | `EXPERIMENTAL_STORABLE_PROTOCOL` | Enables the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
+| `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new storable value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `StorableInstance`). |
+| `dataModelProtocol` | `EXPERIMENTAL_DATA_MODEL_PROTOCOL` | Enables the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all storable values. |
 | `canonicalHashing` | `EXPERIMENTAL_CANONICAL_HASHING` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
 
@@ -25,11 +25,11 @@ and when **running the server** (for server-side flags):
 
 ```bash
 # Enable a single flag (build + run)
-EXPERIMENTAL_RICH_STORABLE_VALUES=true deno task dev
+EXPERIMENTAL_MODERN_DATA_MODEL=true deno task dev
 
 # Enable multiple flags
-EXPERIMENTAL_RICH_STORABLE_VALUES=true \
-EXPERIMENTAL_STORABLE_PROTOCOL=true \
+EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_DATA_MODEL_PROTOCOL=true \
 deno task dev
 ```
 
@@ -58,7 +58,7 @@ directly to `new Runtime({ experimental: { ... } })`.
 ```
 Server Process (Deno)
   |
-  +-- ENV: EXPERIMENTAL_RICH_STORABLE_VALUES=true
+  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
@@ -74,10 +74,10 @@ via the IPC protocol:
 ```
 Build Time (shell)
   |
-  +-- ENV: EXPERIMENTAL_RICH_STORABLE_VALUES=true
+  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
   |
-  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_RICH_STORABLE_VALUES
-  +-- src/lib/env.ts           --> EXPERIMENTAL.richStorableValues = true
+  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_MODERN_DATA_MODEL
+  +-- src/lib/env.ts           --> EXPERIMENTAL.modernDataModel = true
   |
 Browser (Main Thread)
   |
@@ -86,7 +86,7 @@ Browser (Main Thread)
   +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
         |
         | postMessage (IPC)
-        | InitializationData { ..., experimental: { richStorableValues: true } }
+        | InitializationData { ..., experimental: { modernDataModel: true } }
         |
         v
 Browser Web Worker
@@ -94,7 +94,7 @@ Browser Web Worker
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
               +-- setStorableValueConfig(...)
-              |    +-- currentConfig.richStorableValues = true
+              |    +-- currentConfig.modernDataModel = true
               |         +-- toStorableValue() checks currentConfig
               +-- setCanonicalHashConfig(...)
                    +-- canonicalHashingEnabled = true
@@ -137,7 +137,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: richStorableValues, unifiedJsonEncoding, canonicalHashing
+Experimental flags enabled: modernDataModel, unifiedJsonEncoding, canonicalHashing
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -158,7 +158,7 @@ deno test --allow-ffi --allow-env --allow-read test/experimental-options.test.ts
 
 These tests verify that `Runtime` construction correctly sets and resets the
 ambient config, and that `toStorableValue()` dispatches based on the
-`richStorableValues` flag.
+`modernDataModel` flag.
 
 ## Implementation Details
 

@@ -95,9 +95,9 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
  */
 export interface ExperimentalOptions {
   /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
-  richStorableValues?: boolean;
+  modernDataModel?: boolean;
   /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
-  storableProtocol?: boolean;
+  dataModelProtocol?: boolean;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
@@ -210,19 +210,19 @@ export class Runtime {
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
-      richStorableValues: false,
-      storableProtocol: false,
+      modernDataModel: false,
+      dataModelProtocol: false,
       unifiedJsonEncoding: false,
       canonicalHashing: false,
       ...options.experimental,
     };
 
     if (
-      this.experimental.richStorableValues &&
+      this.experimental.modernDataModel &&
       !this.experimental.canonicalHashing
     ) {
       throw new Error(
-        "ExperimentalOptions: `richStorableValues` requires " +
+        "ExperimentalOptions: `modernDataModel` requires " +
           "`canonicalHashing` to be enabled",
       );
     }

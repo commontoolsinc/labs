@@ -2,8 +2,8 @@ declare global {
   var $ENVIRONMENT: string | undefined;
   var $API_URL: string | undefined;
   var $COMMIT_SHA: string | undefined;
-  var $EXPERIMENTAL_RICH_STORABLE_VALUES: string | undefined;
-  var $EXPERIMENTAL_STORABLE_PROTOCOL: string | undefined;
+  var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
+  var $EXPERIMENTAL_DATA_MODEL_PROTOCOL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
   var $EXPERIMENTAL_CANONICAL_HASHING: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
@@ -21,8 +21,8 @@ export const COMMIT_SHA: string | undefined = $COMMIT_SHA;
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
-  richStorableValues: $EXPERIMENTAL_RICH_STORABLE_VALUES === "true",
-  storableProtocol: $EXPERIMENTAL_STORABLE_PROTOCOL === "true",
+  modernDataModel: $EXPERIMENTAL_MODERN_DATA_MODEL === "true",
+  dataModelProtocol: $EXPERIMENTAL_DATA_MODEL_PROTOCOL === "true",
   unifiedJsonEncoding: $EXPERIMENTAL_UNIFIED_JSON_ENCODING === "true",
   canonicalHashing: $EXPERIMENTAL_CANONICAL_HASHING === "true",
 };
