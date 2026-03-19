@@ -5,11 +5,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
-import { StorableContentId } from "@commontools/data-model/storable-content-id";
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "@commontools/data-model/storable-epoch";
+import { StorableContentId } from "../storable-content-id.ts";
+import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import {
   StorableError,
   StorableUint8Array,

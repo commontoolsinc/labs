@@ -5,7 +5,7 @@ import {
   bigintToMinimalTwosComplement,
   fromBase64url,
   toUnpaddedBase64url,
-} from "@commontools/data-model/bigint-encoding";
+} from "../bigint-encoding.ts";
 
 // ============================================================================
 // bigintToMinimalTwosComplement

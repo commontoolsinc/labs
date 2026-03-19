@@ -1,16 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  DECONSTRUCT,
-  RECONSTRUCT,
-} from "@commontools/data-model/storable-instance";
-import { isStorableInstance } from "@commontools/data-model/storable-protocol";
-import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
+import { DECONSTRUCT, RECONSTRUCT } from "../storable-instance.ts";
+import { isStorableInstance } from "../storable-protocol.ts";
+import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../fabric-value.ts";
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-} from "@commontools/data-model/storable-epoch";
+import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import {
   isConvertibleNativeInstance,
   nativeFromStorableValueRich,
@@ -31,7 +25,7 @@ import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "@commontools/data-model/type-tags";
+} from "../type-tags.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {

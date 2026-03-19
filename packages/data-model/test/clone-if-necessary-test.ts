@@ -6,7 +6,7 @@ import {
   setStorableValueConfig,
 } from "../storable-value.ts";
 import type { StorableValue } from "../fabric-value.ts";
-import { StorableEpochNsec } from "@commontools/data-model/storable-epoch";
+import { StorableEpochNsec } from "../storable-epoch.ts";
 import { StorableError } from "../storable-native-instances.ts";
 
 // ============================================================================

@@ -6,7 +6,7 @@ import {
   setJsonEncodingConfig,
   valueFromJson,
 } from "../json-encoding-dispatch.ts";
-import type { ReconstructionContext } from "@commontools/data-model/storable-protocol";
+import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../fabric-value.ts";
 
 /** Mock runtime for deserialization calls. */
