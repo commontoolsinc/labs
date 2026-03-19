@@ -1,5 +1,5 @@
 import { hashOf } from "@commontools/data-model/value-hash";
-import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
+import { fabricFromNativeValue } from "@commontools/data-model/fabric-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";

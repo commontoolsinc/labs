@@ -3,7 +3,7 @@ import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
-import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
+import { isArrayIndexPropertyName } from "@commontools/data-model/fabric-value";
 import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
 import { decodeJsonPointer } from "./link-types.ts";
 

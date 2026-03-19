@@ -4,7 +4,7 @@ import {
   cloneIfNecessary,
   resetDataModelConfig,
   setDataModelConfig,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import { FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";

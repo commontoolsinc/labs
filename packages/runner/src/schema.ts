@@ -5,11 +5,11 @@ import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
-import type {
-  FabricDatum,
-  FabricValue,
+import {
+  cloneIfNecessary,
+  type FabricDatum,
+  type FabricValue,
 } from "@commontools/data-model/fabric-value";
-import { cloneIfNecessary } from "@commontools/data-model/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";

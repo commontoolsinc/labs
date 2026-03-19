@@ -7,7 +7,7 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 
 describe("FabricEpochNsec", () => {
   it("wraps a bigint value", () => {

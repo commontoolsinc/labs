@@ -1,10 +1,10 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
-import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
-import type {
-  FabricDatum,
-  FabricObject,
-  FabricValue,
+import {
+  type FabricDatum,
+  type FabricObject,
+  type FabricValue,
+  isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {
   IAttestation,

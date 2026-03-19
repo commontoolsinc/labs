@@ -15,7 +15,7 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,

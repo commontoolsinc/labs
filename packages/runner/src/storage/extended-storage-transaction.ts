@@ -1,9 +1,11 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import type {
-  FabricDatum,
-  FabricObject,
-  FabricValue,
+import {
+  cloneIfNecessary,
+  type FabricDatum,
+  type FabricObject,
+  type FabricValue,
+  isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {
   CommitError,
@@ -29,10 +31,6 @@ import type {
 import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
-import {
-  cloneIfNecessary,
-  isArrayIndexPropertyName,
-} from "@commontools/data-model/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,

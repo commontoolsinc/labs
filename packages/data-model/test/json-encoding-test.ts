@@ -23,7 +23,7 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {

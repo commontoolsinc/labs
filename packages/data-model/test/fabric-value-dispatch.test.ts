@@ -5,7 +5,7 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   fabricFromNativeValue,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 

@@ -6,11 +6,11 @@ import {
 } from "@commontools/utils/types";
 import {
   cloneIfNecessary,
+  type FabricValue,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
-} from "@commontools/data-model/storable-value";
+} from "@commontools/data-model/fabric-value";
 import type { MemorySpace } from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {

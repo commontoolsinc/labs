@@ -1,6 +1,10 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
+import {
+  type FabricDatum,
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commontools/data-model/fabric-value";
 import type {
   Assertion,
   IAttestation,
@@ -17,10 +21,6 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import type {
-  FabricDatum,
-  FabricValue,
-} from "@commontools/data-model/fabric-value";
 import * as Address from "./address.ts";
 import {
   attest,

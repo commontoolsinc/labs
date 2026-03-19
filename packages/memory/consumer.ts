@@ -66,7 +66,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { fabricFromNativeValue } from "@commontools/data-model/storable-value";
+import { fabricFromNativeValue } from "@commontools/data-model/fabric-value";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";

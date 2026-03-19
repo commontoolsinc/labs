@@ -7,7 +7,7 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
   fabricFromNativeValue,
-} from "../storable-value.ts";
+} from "../fabric-value.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 
 describe("storable-value", () => {

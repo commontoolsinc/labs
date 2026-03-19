@@ -10,7 +10,7 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
   fabricFromNativeValue,
-} from "@commontools/data-model/storable-value";
+} from "@commontools/data-model/fabric-value";
 import { FabricError } from "@commontools/data-model/fabric-native-instances";
 import {
   hashOf,

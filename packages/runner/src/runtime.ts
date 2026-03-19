@@ -17,7 +17,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/storable-value";
+} from "@commontools/data-model/fabric-value";
 import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,

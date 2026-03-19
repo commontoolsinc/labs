@@ -7,12 +7,12 @@ import type {
   SchemaPathSelector,
   Unit,
 } from "@commontools/memory/interface";
-import type {
-  FabricDatum,
-  FabricValue,
+import {
+  type FabricDatum,
+  type FabricValue,
+  isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { isArrayIndexPropertyName } from "@commontools/data-model/storable-value";
 // TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
 // but rollup has issues
 import {
