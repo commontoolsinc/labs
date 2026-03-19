@@ -12,7 +12,11 @@ import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 import type { AnalyzeFn } from "./opaque-ref/types.ts";
-import type { ExpressionContainerKind } from "./expression-site-types.ts";
+import type {
+  ExpressionContainerKind,
+  ExpressionSiteHelperBoundaryKind,
+  ExpressionSitePolicyInfo,
+} from "./expression-site-types.ts";
 
 interface RewriteExpressionSiteParams {
   readonly expression: ts.Expression;
@@ -147,6 +151,48 @@ function isArrayMethodOwnedExpressionSite(
   return callKind?.kind === "array-method";
 }
 
+const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
+  "ifElse",
+  "when",
+  "unless",
+  "builder",
+  "derive",
+  "pattern-tool",
+]);
+
+function getHelperBoundaryKind(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ExpressionSiteHelperBoundaryKind | undefined {
+  let current: ts.Node | undefined = expression;
+
+  while (current) {
+    if (current !== expression && ts.isFunctionLike(current)) {
+      return undefined;
+    }
+
+    const parent: ts.Node | undefined = current.parent;
+    if (
+      parent &&
+      ts.isCallExpression(parent) &&
+      ts.isExpression(current) &&
+      parent.arguments.includes(current)
+    ) {
+      const callKind = detectCallKind(parent, context.checker)?.kind;
+      if (
+        callKind &&
+        HELPER_BOUNDARY_KINDS.has(callKind as ExpressionSiteHelperBoundaryKind)
+      ) {
+        return callKind as ExpressionSiteHelperBoundaryKind;
+      }
+    }
+
+    current = parent;
+  }
+
+  return undefined;
+}
+
 function isDeferredJsxArrayMethodExpression(
   expression: ts.Expression,
   context: TransformationContext,
@@ -178,47 +224,67 @@ function isDeferredJsxArrayMethodExpression(
   return detectCallKind(current, context.checker)?.kind === "array-method";
 }
 
+export function getExpressionSitePolicyInfo(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): ExpressionSitePolicyInfo {
+  const reactiveContext = classifyReactiveContext(
+    expression,
+    context.checker,
+    context,
+  );
+  return {
+    containerKind,
+    reactiveContext,
+    hasAuthoredSourceSite: hasAuthoredSourceSite(expression),
+    withinEventHandlerJsxAttribute: isWithinEventHandlerJsxAttribute(
+      expression,
+      context.checker,
+    ),
+    arrayMethodOwned: isArrayMethodOwnedExpressionSite(expression, context),
+    helperBoundaryKind: getHelperBoundaryKind(expression, context),
+    syntheticComputeOwned: context.isSyntheticComputeOwnedNode(expression),
+    deferredJsxArrayMethod: containerKind === "jsx-expression" &&
+      isDeferredJsxArrayMethodExpression(expression, context, analyze),
+    controlFlowRewriteRoot: isControlFlowRewriteExpression(expression),
+  };
+}
+
 function canRewriteExpressionSite(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  if (!hasAuthoredSourceSite(expression)) {
-    return false;
-  }
-
-  if (isWithinEventHandlerJsxAttribute(expression, context.checker)) {
-    return false;
-  }
-
-  const contextInfo = classifyReactiveContext(
+  const siteInfo = getExpressionSitePolicyInfo(
     expression,
-    context.checker,
+    containerKind,
     context,
+    analyze,
   );
-  if (contextInfo.kind !== "pattern") {
+  if (!siteInfo.hasAuthoredSourceSite) {
     return false;
   }
 
-  if (
-    containerKind !== "jsx-expression" &&
-    !isArrayMethodOwnedExpressionSite(expression, context)
-  ) {
+  if (siteInfo.withinEventHandlerJsxAttribute) {
     return false;
   }
 
-  if (
-    containerKind === "jsx-expression" &&
-    isDeferredJsxArrayMethodExpression(expression, context, analyze)
-  ) {
+  if (siteInfo.reactiveContext.kind !== "pattern") {
     return false;
   }
 
-  if (
-    containerKind !== "jsx-expression" &&
-    !isControlFlowRewriteExpression(expression)
-  ) {
+  if (containerKind !== "jsx-expression" && !siteInfo.arrayMethodOwned) {
+    return false;
+  }
+
+  if (siteInfo.deferredJsxArrayMethod) {
+    return false;
+  }
+
+  if (containerKind !== "jsx-expression" && !siteInfo.controlFlowRewriteRoot) {
     return false;
   }
 
