@@ -30,7 +30,4 @@ export const incrementer = handler({
 } as const satisfies __ctHelpers.JSONSchema, (event: IncrementEvent, state: CounterState) => {
     state.count += event.amount;
 });
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

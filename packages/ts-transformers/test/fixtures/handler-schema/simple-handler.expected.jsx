@@ -31,7 +31,4 @@ const myHandler = handler({
 //   handler<CounterEvent, CounterState>(fn) → handler(eventSchema, contextSchema, fn)
 //   Cell<number> → { type: "number", asCell: true }
 export { myHandler };
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

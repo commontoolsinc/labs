@@ -41,7 +41,4 @@ const logCharmsList = lift({
 //   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
 export default logCharmsList;
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

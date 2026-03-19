@@ -20,7 +20,4 @@ const configSchema = {
 // Verifies: toSchema options object (default, description) is merged into generated schema
 //   toSchema<Config>({default: ..., description: ...}) → schema with "default" and "description" alongside generated properties
 export { configSchema };
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

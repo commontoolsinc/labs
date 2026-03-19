@@ -113,7 +113,4 @@ export default pattern({
     const results = processWithType<string>(state.emails, state.prompt);
     return { results };
 });
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

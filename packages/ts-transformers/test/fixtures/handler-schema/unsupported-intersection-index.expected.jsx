@@ -25,7 +25,4 @@ const removeItem = handler({
 //   handler<unknown, ListState & Indexed>() → context: { additionalProperties: true, $comment: "Unsupported intersection..." }
 // Context: negative test -- index signatures cannot be safely merged, so transformer emits a fallback schema
 export { removeItem };
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

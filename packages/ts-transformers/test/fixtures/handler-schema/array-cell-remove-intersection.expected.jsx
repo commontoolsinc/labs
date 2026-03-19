@@ -71,7 +71,4 @@ const removeItemAlias = handler({
 //   Cell<Item[]> → { type: "array", items: { $ref: ... }, asCell: true }
 // Context: inline intersection vs type alias intersection; alias variant loses $defs (items: true)
 export { removeItem, removeItemAlias };
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;

@@ -71,7 +71,4 @@ export default pattern((state) => {
     },
     required: ["wishQuery"]
 } as const satisfies __ctHelpers.JSONSchema);
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+void __ctHelpers;
