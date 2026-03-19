@@ -127,6 +127,35 @@ export function printTypeNode(
   return printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
 }
 
+/**
+ * Extracts the element type node from an array type node.
+ * Handles `T[]` (ArrayTypeNode), `readonly T[]` (TypeOperator wrapping
+ * ArrayTypeNode), and `Array<T>` / `ReadonlyArray<T>` (TypeReferenceNode).
+ */
+function extractArrayItemTypeNode(node: ts.TypeNode): ts.TypeNode | undefined {
+  if (ts.isArrayTypeNode(node)) {
+    return node.elementType;
+  }
+  if (
+    ts.isTypeOperatorNode(node) &&
+    node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+    ts.isArrayTypeNode(node.type)
+  ) {
+    return node.type.elementType;
+  }
+  if (
+    ts.isTypeReferenceNode(node) &&
+    ts.isIdentifier(node.typeName) &&
+    (node.typeName.text === "Array" ||
+      node.typeName.text === "ReadonlyArray") &&
+    node.typeArguments &&
+    node.typeArguments.length > 0
+  ) {
+    return node.typeArguments[0];
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Core type-shrinking
 // ---------------------------------------------------------------------------
@@ -137,6 +166,7 @@ function buildShrunkTypeNodeFromType(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
+  visited?: Set<ts.Type>,
 ): ts.TypeNode | undefined {
   const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
     ts.NodeBuilderFlags.UseStructuralFallback;
@@ -144,6 +174,15 @@ function buildShrunkTypeNodeFromType(
   if (normalized.length === 0) {
     return undefined;
   }
+
+  // Guard against infinite recursion on recursive types (e.g.
+  // MentionablePiece has mentioned: MentionablePiece[]).
+  const visitedSet = visited ?? new Set<ts.Type>();
+  if (visitedSet.has(type)) {
+    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+  visitedSet.add(type);
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
   // breaks runtime schema matching for downstream derives/lifts.
@@ -169,6 +208,43 @@ function buildShrunkTypeNodeFromType(
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
       );
     }
+
+    // Item-level access: paths that aren't array-intrinsic properties (like
+    // `length`) represent property accesses on the array *items* (e.g.
+    // iterating via for-of and accessing `item.notes`).  Recursively shrink
+    // the item type to only the accessed item properties.
+    //
+    // Only apply to proper Array/Tuple types — not all indexable types
+    // (strings are number-indexable but should not be wrapped in T[]).
+    const isProperArray = !!typeChecker.isArrayType?.(type) ||
+      !!typeChecker.isTupleType?.(type);
+    if (isProperArray) {
+      const itemPaths = normalized.filter(
+        (path) =>
+          !(path.length === 1 && path[0] !== undefined &&
+            NON_ITEM_PROPS.has(path[0])),
+      );
+      if (itemPaths.length > 0) {
+        const itemType = checker.getIndexTypeOfType(
+          type,
+          ts.IndexKind.Number,
+        );
+        if (itemType) {
+          const shrunkItem = buildShrunkTypeNodeFromType(
+            itemType,
+            itemPaths,
+            checker,
+            sourceFile,
+            factory,
+            visitedSet,
+          );
+          if (shrunkItem) {
+            return factory.createArrayTypeNode(shrunkItem);
+          }
+        }
+      }
+    }
+
     return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
   }
@@ -193,6 +269,7 @@ function buildShrunkTypeNodeFromType(
         checker,
         sourceFile,
         factory,
+        visitedSet,
       );
       if (!shrunkInner) return undefined;
       // Collect the nullish members to re-append
@@ -261,6 +338,7 @@ function buildShrunkTypeNodeFromType(
       checker,
       sourceFile,
       factory,
+      visitedSet,
     );
     if (!shrunkChild && !hasDirectAccess) {
       // We failed to materialize a deeper path; let caller fall back to
@@ -370,7 +448,27 @@ function buildShrunkTypeNodeFromTypeNode(
           factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
         );
       }
-      // Item access or other paths — keep full array type.
+      // Item-level access — try to shrink the item type node.
+      const itemPaths = normalized.filter(
+        (path) =>
+          !(path.length === 1 && path[0] !== undefined &&
+            NON_ITEM_PROPS.has(path[0])),
+      );
+      if (itemPaths.length > 0) {
+        const itemTypeNode = extractArrayItemTypeNode(node);
+        if (itemTypeNode) {
+          const shrunkItem = buildShrunkTypeNodeFromTypeNode(
+            itemTypeNode,
+            itemPaths,
+            factory,
+            checker,
+          );
+          if (shrunkItem && shrunkItem !== itemTypeNode) {
+            return factory.createArrayTypeNode(shrunkItem);
+          }
+        }
+      }
+      // Fallback — keep full array type.
       return node;
     }
   }

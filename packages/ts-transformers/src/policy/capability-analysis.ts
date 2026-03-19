@@ -6,6 +6,7 @@ import type {
 } from "../core/mod.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { isFallbackOperator } from "../utils/reactive-keys.ts";
 
 type CapabilityAnalyzableFunction =
   | ts.ArrowFunction
@@ -77,6 +78,14 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
+/**
+ * Well-known CommonTools symbol identifiers that can be treated as static
+ * property keys in capability analysis.  When code accesses `obj[NAME]`,
+ * `NAME` is an imported Symbol but its string representation is stable and
+ * known at compile time.
+ */
+const KNOWN_SYMBOL_IDENTIFIERS = new Set(["NAME", "UI", "SELF"]);
+
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -131,6 +140,13 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
       optional ||= !!current.questionDotToken;
       if (isLiteralElement(current.argumentExpression)) {
         path.unshift(getLiteralElementText(current.argumentExpression));
+      } else if (
+        ts.isIdentifier(current.argumentExpression) &&
+        KNOWN_SYMBOL_IDENTIFIERS.has(current.argumentExpression.text)
+      ) {
+        // Well-known CommonTools symbols (NAME, UI, SELF) are stable computed
+        // property keys — treat them as static path segments.
+        path.unshift(current.argumentExpression.text);
       } else {
         dynamic = true;
       }
@@ -467,6 +483,12 @@ export function analyzeFunctionCapabilities(
     // the blanket read if the alias already has a more specific path.
     const aliasesWithSpecificPaths = new Set<string>();
 
+    // Track names that were introduced as for-of loop variables.  These alias
+    // to their iterable expression, but represent *items* of the array, not the
+    // array itself.  When passed to an opaque function (e.g. result.push(nb)),
+    // the opaque argument handler should not mark the iterable root as wildcard.
+    const forOfLoopVars = new Set<string>();
+
     const resolveFromAccess = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
@@ -547,6 +569,17 @@ export function analyzeFunctionCapabilities(
             dynamic: receiverRef.dynamic,
           };
         }
+      }
+
+      // Handle fallback expressions (`x ?? y`, `x || y`).  The left operand
+      // is the primary source; the right is a default that doesn't affect
+      // capability tracking.  This enables resolving patterns like
+      // `nb?.notes ?? []` in for-of loops.
+      if (
+        ts.isBinaryExpression(current) &&
+        isFallbackOperator(current.operatorToken.kind)
+      ) {
+        return resolveSourceRef(current.left);
       }
 
       return undefined;
@@ -979,6 +1012,9 @@ export function analyzeFunctionCapabilities(
 
         // Passing a tracked root object into an opaque helper can conceal
         // indirect traversal/mutation; conservatively disable shrinking.
+        // Exception: for-of loop variables represent array *items*, not the
+        // root array — passing an item to .push() or similar should not mark
+        // the entire iterable as wildcard.
         for (let index = 0; index < node.arguments.length; index++) {
           if (interproceduralHandledArgs.has(index)) {
             continue;
@@ -987,6 +1023,7 @@ export function analyzeFunctionCapabilities(
           if (!argument) continue;
           const unwrappedArgument = unwrapExpression(argument);
           if (!ts.isIdentifier(unwrappedArgument)) continue;
+          if (forOfLoopVars.has(unwrappedArgument.text)) continue;
           const source = resolveSourceRef(unwrappedArgument);
           if (!source) continue;
           if (source.dynamic || source.path.length > 0) continue;
@@ -1048,8 +1085,40 @@ export function analyzeFunctionCapabilities(
         }
       }
 
-      if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      // for-in iterates property names → must read all keys → wildcard.
+      if (ts.isForInStatement(node)) {
         markWildcardFromExpression(node.expression);
+      }
+
+      // for-of iterates array *items*.  Instead of marking the iterable as
+      // wildcard (which prevents all shrinking), alias the loop variable to
+      // the iterable expression.  Property accesses on the loop variable
+      // will generate item-level paths that the type-shrinking code can use
+      // to shrink array item types.
+      //
+      // We manually visit expression + body and return early to skip the
+      // default ts.forEachChild traversal.  This prevents the
+      // VariableDeclaration handler from clearing the alias (for-of
+      // variable declarations have no initializer in the AST).
+      if (ts.isForOfStatement(node)) {
+        const ref = resolveSourceRef(node.expression);
+        if (ref && ts.isVariableDeclarationList(node.initializer)) {
+          const decl = node.initializer.declarations[0];
+          if (decl) {
+            assignBindingAlias(decl.name, ref);
+            if (ts.isIdentifier(decl.name)) {
+              forOfLoopVars.add(decl.name.text);
+            }
+          }
+        }
+        // Visit only the loop body — NOT the iterable expression.
+        // Visiting the expression would cause the identifier handler to
+        // register a direct (empty-path) read on the iterable, which tells
+        // the shrinking code "the whole value is used" and prevents
+        // item-level shrinking.  The loop variable's property accesses
+        // already capture the meaningful reads through the alias.
+        visit(node.statement);
+        return;
       }
 
       ts.forEachChild(node, visit);
