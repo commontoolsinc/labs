@@ -111,6 +111,12 @@ export class XHeaderView extends BaseView {
       line-height: 16px;
       color: var(--gray-300, #8a909b);
       white-space: nowrap;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .header-breadcrumbs .header-space:hover {
+      color: var(--gray-800, #2c3138);
     }
 
     .header-breadcrumbs .header-separator {
@@ -529,13 +535,7 @@ export class XHeaderView extends BaseView {
       e.preventDefault();
       this.menuOpen = false;
       this.pieceListExpanded = false;
-      // Return focus to the trigger button
-      this.updateComplete.then(() => {
-        const trigger = this.renderRoot.querySelector<HTMLElement>(
-          ".nav-picker",
-        );
-        trigger?.focus();
-      });
+      this._focusTrigger();
     }
   };
 
@@ -609,10 +609,29 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
+  private _handleSpaceClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.spaceName) {
+      navigate({ spaceName: this.spaceName });
+    } else if (this.spaceDid) {
+      navigate({ spaceDid: this.spaceDid });
+    }
+  }
+
   private handleLogoClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = true;
+    this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLElement>(".menu-close")?.focus();
+    });
+  }
+
+  private _focusTrigger() {
+    this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLElement>(".nav-picker")?.focus();
+    });
   }
 
   private handleCloseMenu(e: Event) {
@@ -620,11 +639,13 @@ export class XHeaderView extends BaseView {
     e.stopPropagation();
     this.menuOpen = false;
     this.pieceListExpanded = false;
+    this._focusTrigger();
   }
 
   private handleBackdropClick() {
     this.menuOpen = false;
     this.pieceListExpanded = false;
+    this._focusTrigger();
   }
 
   private handleTogglePieceList(e: Event) {
@@ -879,7 +900,10 @@ export class XHeaderView extends BaseView {
           </button>
           <div class="header-breadcrumbs">
             ${this._hasSpace ? html`
-              <span class="header-space">${this._spaceDisplayName}</span>
+              <a class="header-space"
+                href="${this.spaceName ? `/${this.spaceName}` : `/${this.spaceDid ?? ""}`}"
+                @click="${this._handleSpaceClick}"
+              >${this._spaceDisplayName}</a>
               ${this.pieceTitle ? html`
                 <span class="header-separator">/</span>
                 <span class="header-piece-name">${this.pieceTitle}</span>
