@@ -30,6 +30,9 @@ import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import DailyJournal from "../notes/daily-journal.tsx";
 import PieceGrid from "./piece-grid.tsx";
+import SuggestionHistory, {
+  type SuggestionHistoryEntry,
+} from "./suggestion-history.tsx";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -183,6 +186,14 @@ const trackRecent = handler<
   recentPieces.set(updated);
 });
 
+const recordSuggestion = handler<
+  SuggestionHistoryEntry,
+  { suggestionHistory: Writable<SuggestionHistoryEntry[]> }
+>(({ result, messages, timestamp }, { suggestionHistory }) => {
+  const current = suggestionHistory.get() ?? [];
+  suggestionHistory.set([...current, { result, messages, timestamp }]);
+});
+
 /** Read current do list items */
 const readDoList = pattern<
   { items: Array<{ title: string; done: boolean; indent: number }> },
@@ -207,6 +218,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
   const allPieces = Writable.of<MentionablePiece[]>([]);
   const recentPieces = Writable.of<MentionablePiece[]>([]);
+  const suggestionHistory = Writable.of<SuggestionHistoryEntry[]>([]);
+  const suggestionHistoryViewer = SuggestionHistory({});
 
   // Dropdown menu state
   const menuOpen = Writable.of(false);
@@ -339,6 +352,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             Graph
+          </ct-cell-link>
+          <ct-cell-link
+            $cell={suggestionHistoryViewer}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            History
           </ct-cell-link>
 
           <div slot="end">
@@ -522,10 +547,12 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported data
     allPieces,
     recentPieces,
+    suggestionHistory,
 
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
+    recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,
   };
 });

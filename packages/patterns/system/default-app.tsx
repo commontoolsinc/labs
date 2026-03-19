@@ -359,7 +359,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported data
     allPieces,
     recentPieces,
-
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),

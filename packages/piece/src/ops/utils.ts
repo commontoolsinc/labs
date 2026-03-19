@@ -37,30 +37,29 @@ export function resolveCellPath<T>(
   cell: Cell<T>,
   path: CellPath,
 ): unknown {
-  let currentValue = cell.get() as unknown;
+  let currentCell = cell as Cell<unknown>;
+
   for (const segment of path) {
-    if (currentValue == null) {
-      throw new Error(
-        `Cannot access path "${
-          path.join("/")
-        }" - encountered null/undefined at "${segment}"`,
-      );
-    }
-    if (typeof currentValue !== "object") {
+    const currentValue = currentCell.get() as unknown;
+    if (currentValue != null && typeof currentValue !== "object") {
       throw new Error(
         `Cannot access path "${
           path.join("/")
         }" - encountered non-object at "${segment}"`,
       );
     }
-    if (!(segment in currentValue)) {
-      throw new Error(
-        `Cannot access path "${
-          path.join("/")
-        }" - property "${segment}" not found`,
-      );
-    }
-    currentValue = (currentValue as Record<string, unknown>)[segment];
+    currentCell = currentCell.key(segment as keyof unknown) as Cell<unknown>;
   }
-  return currentValue;
+
+  const resolvedValue = currentCell.get();
+  if (path.length > 0 && resolvedValue === undefined) {
+    const segment = path[path.length - 1];
+    throw new Error(
+      `Cannot access path "${
+        path.join("/")
+      }" - property "${segment}" not found`,
+    );
+  }
+
+  return resolvedValue;
 }

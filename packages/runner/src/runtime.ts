@@ -143,6 +143,18 @@ export const spaceCellSchema: JSONSchema = toDeepFrozenSchema(
             },
           },
           defaultAppUrl: { type: "string" },
+          suggestionHistory: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                result: { type: "object", asCell: true },
+                messages: { type: "array" },
+                timestamp: { type: "string" },
+              },
+            },
+          },
+          recordSuggestion: { asStream: true },
         },
         asCell: true,
       },

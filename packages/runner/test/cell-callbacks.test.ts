@@ -1227,6 +1227,65 @@ describe("Cell success callbacks", () => {
       expect(schemaCell.schema).toEqual(schemaWeWant);
     });
 
+    it("should recover callable child schemas from linked result metadata", () => {
+      const resultCell = runtime.getCell(space, "linked-result", undefined, tx);
+      const patternCell = runtime.getCell(
+        space,
+        "linked-pattern",
+        undefined,
+        tx,
+      );
+      resultCell.setSourceCell(patternCell);
+
+      const toolSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "object",
+            properties: {
+              argumentSchema: { type: "object" },
+              resultSchema: { type: "object" },
+              nodes: { type: "array", items: { type: "object" } },
+            },
+            asCell: true,
+          },
+          extraParams: {
+            type: "object",
+            properties: {
+              source: { type: "string" },
+            },
+          },
+        },
+      };
+      const resultSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          search: toolSchema,
+        },
+      };
+
+      const linkWithSchema = resultCell
+        .asSchema(resultSchema)
+        .getAsLink({ includeSchema: true });
+      patternCell.set({ resultRef: linkWithSchema });
+
+      const searchCell = resultCell.key("search");
+      expect(searchCell.schema).toBeUndefined();
+      const resolvedSchema = searchCell.asSchemaFromLinks()
+        .schema as JSONSchema;
+      expect(resolvedSchema).toBeDefined();
+      expect((resolvedSchema as any).type).toBe("object");
+      expect(
+        (resolvedSchema as any).properties?.extraParams?.properties?.source,
+      )
+        .toEqual({ type: "string" });
+      expect((resolvedSchema as any).properties?.pattern?.type).toBe("object");
+      expect(
+        (resolvedSchema as any).properties?.pattern?.properties?.nodes?.type,
+      )
+        .toBe("array");
+    });
+
     it("should return undefined schema if neither present nor in pattern", () => {
       const c = runtime.getCell(space, "no-schema", undefined, tx);
       const schemaCell = c.asSchemaFromLinks();

@@ -1044,6 +1044,73 @@ describe("generateObject with tools", () => {
     });
   });
 
+  it("should run fixture-style patternTool bindings with help field and bound source", async () => {
+    const searchTool = pattern(
+      ({ query, help, source }: {
+        query: string;
+        help: string;
+        source: string;
+      }) => {
+        return {
+          query,
+          help,
+          source,
+          summary: str`${source}:${query}:${help}`,
+        };
+      },
+      {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+          source: { type: "string" },
+        },
+        required: ["query", "help", "source"],
+      } as const satisfies JSONSchema,
+      {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          help: { type: "string" },
+          source: { type: "string" },
+          summary: { type: "string" },
+        },
+        required: ["query", "help", "source", "summary"],
+      } as const satisfies JSONSchema,
+    );
+
+    const tool = patternTool(searchTool, {
+      source: "bound-source",
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "pattern-tool-bound-source-test",
+      searchTool.resultSchema,
+      tx,
+    );
+
+    runtime.run(
+      tx,
+      tool.pattern,
+      {
+        query: "milk",
+        help: "literal-help",
+        ...tool.extraParams,
+      },
+      resultCell,
+    );
+    tx.commit();
+
+    await runtime.idle();
+
+    expect(resultCell.get()).toEqual({
+      query: "milk",
+      help: "literal-help",
+      source: "bound-source",
+      summary: "bound-source:milk:literal-help",
+    });
+  });
+
   it("should return a cell when LLM returns a link object", async () => {
     const presentResultCell = runtime.getCell(
       space,

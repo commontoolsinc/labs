@@ -4,15 +4,18 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
+import type { Cell } from "@commontools/runner";
 import { FsTree } from "./tree.ts";
 import {
-  buildJsonTree,
+  buildCallableScript,
+  type CallableKind,
+  classifyCallableEntry,
   isHandlerCell,
-  isSigilLink,
-  isStreamValue,
-} from "./tree-builder.ts";
+} from "./callables.ts";
+import { parseMountedCallablePath } from "./callable-path.ts";
+import { buildJsonTree, isSigilLink } from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
-import { type PieceController, PiecesController } from "@commontools/piece/ops";
+import type { PieceController, PiecesController } from "@commontools/piece/ops";
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
 // import { loadManager } from "../cli/lib/piece.ts";
@@ -66,13 +69,15 @@ export class CellBridge {
   private syncing: Set<string> = new Set();
   /** Flag: re-run sync after current pass completes. */
   private syncAgain: Set<string> = new Set();
+  private execCli: string;
 
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
   private statusIno: bigint | null = null;
 
-  constructor(tree: FsTree) {
+  constructor(tree: FsTree, execCli = "") {
     this.tree = tree;
+    this.execCli = execCli;
   }
 
   init(config: {
@@ -243,37 +248,46 @@ export class CellBridge {
   /** Send a value to a handler (stream) cell. */
   async sendToHandler(ino: bigint, value: unknown): Promise<void> {
     const node = this.tree.getNode(ino);
-    if (!node || node.kind !== "handler") throw new Error("Not a handler node");
-
-    // Walk up to collect path segments
-    const segments: string[] = [];
-    let current = ino;
-    while (current !== this.tree.rootIno) {
-      const name = this.tree.getNameForIno(current);
-      if (name === undefined) throw new Error("Cannot resolve handler path");
-      segments.unshift(name);
-      const parentIno = this.tree.parents.get(current);
-      if (parentIno === undefined) {
-        throw new Error("Cannot resolve handler path");
-      }
-      current = parentIno;
+    if (
+      !node || node.kind !== "callable" || node.callableKind !== "handler"
+    ) {
+      throw new Error("Not a handler node");
     }
 
-    // segments: [spaceName, "pieces", pieceName, cellProp, "key.handler"]
-    if (segments.length < 5 || segments[1] !== "pieces") {
+    const parsed = parseMountedCallablePath(this.tree.getPath(ino));
+    if (!parsed || parsed.callableKind !== "handler") {
       throw new Error("Invalid handler path");
     }
 
-    const spaceName = segments[0];
-    const pieceName = segments[2];
+    const space = this.spaces.get(parsed.spaceName);
+    if (!space) throw new Error(`Space "${parsed.spaceName}" not found`);
 
-    const space = this.spaces.get(spaceName);
-    if (!space) throw new Error(`Space "${spaceName}" not found`);
+    const piece = this.resolvePieceController(space, parsed);
+    if (!piece) throw new Error(`Piece "${parsed.rootName}" not found`);
 
-    const piece = space.pieceControllers.get(pieceName);
-    if (!piece) throw new Error(`Piece "${pieceName}" not found`);
+    await piece[parsed.cellProp].set(value, [parsed.cellKey]);
+  }
 
-    await piece[node.cellProp].set(value, [node.cellKey]);
+  private resolvePieceController(
+    space: SpaceState,
+    parsed: ReturnType<typeof parseMountedCallablePath>,
+  ): PieceController | undefined {
+    if (!parsed) return undefined;
+
+    if (parsed.rootKind === "pieces") {
+      return space.pieceControllers.get(parsed.rootName);
+    }
+
+    const targetEntity = parsed.rootName.startsWith("of:")
+      ? parsed.rootName
+      : `of:${parsed.rootName}`;
+    for (const piece of space.pieceControllers.values()) {
+      if (piece.id === parsed.rootName || piece.id === targetEntity) {
+        return piece;
+      }
+    }
+
+    return undefined;
   }
 
   /**
@@ -383,6 +397,7 @@ export class CellBridge {
     spaceName: string,
     manager: PieceManager,
   ): Promise<SpaceState> {
+    const { PiecesController } = await import("@commontools/piece/ops");
     const pieces = new PiecesController(manager);
 
     // Create space directory structure
@@ -661,6 +676,154 @@ export class CellBridge {
     );
   }
 
+  private discoverCallableEntries(
+    rootCell: Cell<unknown>,
+    value: unknown,
+  ): {
+    callables: Array<{ key: string; callableKind: CallableKind }>;
+    skipEntry: (value: unknown) => boolean;
+    classifyEntry: (key: string, value: unknown) => CallableKind | null;
+  } {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return {
+        callables: [],
+        skipEntry: () => false,
+        classifyEntry: () => null,
+      };
+    }
+
+    const callableValues = new WeakSet<object>();
+    const callableKinds = new Map<string, CallableKind>();
+    const callables: Array<{ key: string; callableKind: CallableKind }> = [];
+    for (
+      const [key, candidate] of Object.entries(
+        value as Record<string, unknown>,
+      )
+    ) {
+      const childCell = rootCell.key(key).asSchemaFromLinks();
+      let resolvedCandidate = candidate;
+      try {
+        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ??
+          candidate;
+      } catch {
+        resolvedCandidate = candidate;
+      }
+
+      let callableKind = classifyCallableEntry(candidate, childCell.schema) ??
+        classifyCallableEntry(resolvedCandidate, childCell.schema);
+
+      if (!callableKind) {
+        try {
+          const pattern = childCell.key("pattern").getRaw?.() ??
+            childCell.key("pattern").get?.();
+          const extraParams = childCell.key("extraParams").get?.();
+          if (pattern !== undefined && extraParams !== undefined) {
+            callableKind = "tool";
+          }
+        } catch {
+          // Not a pattern tool-shaped child cell.
+        }
+      }
+
+      if (!callableKind) continue;
+
+      callables.push({ key, callableKind });
+      callableKinds.set(key, callableKind);
+      if (typeof candidate === "object" && candidate !== null) {
+        callableValues.add(candidate);
+      }
+    }
+
+    return {
+      callables,
+      skipEntry: (candidate: unknown) =>
+        typeof candidate === "object" && candidate !== null &&
+        callableValues.has(candidate),
+      classifyEntry: (key: string, candidate: unknown) =>
+        typeof candidate === "object" && candidate !== null &&
+          callableValues.has(candidate)
+          ? callableKinds.get(key) ?? null
+          : null,
+    };
+  }
+
+  private materializeTreeValue(
+    rootCell: Cell<unknown>,
+    value: unknown,
+  ): unknown {
+    if (
+      value !== undefined && value !== null &&
+      (typeof value !== "object" || Array.isArray(value))
+    ) {
+      return value;
+    }
+
+    const schema = rootCell.asSchemaFromLinks().schema as
+      | Record<
+        string,
+        unknown
+      >
+      | undefined;
+    const properties = schema?.properties as
+      | Record<string, unknown>
+      | undefined;
+    if (!properties || Array.isArray(properties)) {
+      return value;
+    }
+
+    const materialized: Record<string, unknown> =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>) }
+        : {};
+    for (const key of Object.keys(properties)) {
+      const childCell = rootCell.key(key).asSchemaFromLinks();
+      let childValue: unknown;
+      try {
+        childValue = childCell.getRaw?.();
+        if (childValue === undefined) {
+          childValue = childCell.get?.();
+        }
+      } catch {
+        childValue = undefined;
+      }
+
+      const callableKind =
+        classifyCallableEntry(childValue, childCell.schema) ??
+          classifyCallableEntry(childCell, childCell.schema);
+
+      if (callableKind) {
+        if (!(key in materialized)) {
+          materialized[key] = childValue ?? childCell;
+        }
+        continue;
+      }
+
+      if (childValue !== undefined && !(key in materialized)) {
+        materialized[key] = childValue;
+      }
+    }
+
+    return Object.keys(materialized).length > 0 ? materialized : value;
+  }
+
+  private addCallableFiles(
+    propIno: bigint,
+    callables: Array<{ key: string; callableKind: CallableKind }>,
+    cellProp: "input" | "result",
+  ): void {
+    const script = buildCallableScript(this.execCli);
+    for (const { key, callableKind } of callables) {
+      this.tree.addCallable(
+        propIno,
+        `${key}.${callableKind}`,
+        callableKind,
+        key,
+        cellProp,
+        script,
+      );
+    }
+  }
+
   /**
    * Subscribe to input and result cell changes for a piece.
    * On change, rebuilds the affected subtree and invalidates kernel cache.
@@ -673,7 +836,6 @@ export class CellBridge {
   ): Promise<Cancel[]> {
     const cancels: Cancel[] = [];
     const resolveLink = this.makeLinkResolver(spaceName);
-    const skipEntry = (val: unknown) => isHandlerCell(val);
 
     const subscribeProp = async (
       propName: "input" | "result",
@@ -703,18 +865,25 @@ export class CellBridge {
               }
 
               // Rebuild
-              if (newValue !== undefined && newValue !== null) {
+              const treeValue = this.materializeTreeValue(cell, newValue);
+              if (treeValue !== undefined && treeValue !== null) {
+                const { callables, classifyEntry, skipEntry } = this
+                  .discoverCallableEntries(
+                    cell,
+                    treeValue,
+                  );
                 const propIno = buildJsonTree(
                   this.tree,
                   pieceIno,
                   propName,
-                  newValue,
+                  treeValue,
                   undefined,
                   resolveLink,
                   0,
                   skipEntry,
+                  classifyEntry,
                 );
-                this.addHandlerFiles(propIno, newValue, propName);
+                this.addCallableFiles(propIno, callables, propName);
               }
 
               // Invalidate kernel cache
@@ -834,12 +1003,20 @@ export class CellBridge {
     );
 
     const resolveLink = this.makeLinkResolver(spaceName);
-    const skipEntry = (val: unknown) => isHandlerCell(val);
 
     try {
       // Input data
-      const input = await piece.input.get();
+      const inputCell = await piece.input.getCell();
+      const input = this.materializeTreeValue(
+        inputCell,
+        await piece.input.get(),
+      );
       if (input !== undefined && input !== null) {
+        const { callables, classifyEntry, skipEntry } = this
+          .discoverCallableEntries(
+            inputCell,
+            input,
+          );
         const inputIno = buildJsonTree(
           this.tree,
           pieceIno,
@@ -849,13 +1026,23 @@ export class CellBridge {
           resolveLink,
           0,
           skipEntry,
+          classifyEntry,
         );
-        this.addHandlerFiles(inputIno, input, "input");
+        this.addCallableFiles(inputIno, callables, "input");
       }
 
       // Result data
-      const result = await piece.result.get();
+      const resultCell = await piece.result.getCell();
+      const result = this.materializeTreeValue(
+        resultCell,
+        await piece.result.get(),
+      );
       if (result !== undefined && result !== null) {
+        const { callables, classifyEntry, skipEntry } = this
+          .discoverCallableEntries(
+            resultCell,
+            result,
+          );
         const resultIno = buildJsonTree(
           this.tree,
           pieceIno,
@@ -865,8 +1052,9 @@ export class CellBridge {
           resolveLink,
           0,
           skipEntry,
+          classifyEntry,
         );
-        this.addHandlerFiles(resultIno, result, "result");
+        this.addCallableFiles(resultIno, callables, "result");
       }
     } catch (e) {
       console.error(`Error loading piece "${name}": ${e}`);
@@ -874,25 +1062,5 @@ export class CellBridge {
     }
 
     return pieceIno;
-  }
-
-  /**
-   * Add .handler files for stream values and handler sigil links.
-   * Called from both loadPieceTree() and subscription rebuilds.
-   */
-  private addHandlerFiles(
-    propIno: bigint,
-    value: unknown,
-    cellProp: "input" | "result",
-  ): void {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      return;
-    }
-    const obj = value as Record<string, unknown>;
-    for (const [key, val] of Object.entries(obj)) {
-      if (isStreamValue(val) || isHandlerCell(val)) {
-        this.tree.addHandler(propIno, `${key}.handler`, key, cellProp);
-      }
-    }
   }
 }

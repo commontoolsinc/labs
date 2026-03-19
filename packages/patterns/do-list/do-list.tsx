@@ -364,13 +364,14 @@ const CompletedItemCard = pattern<
 export default pattern<DoListInput, DoListOutput>(({ items }) => {
   // Computed values
   const itemCount = computed(() => items.get().length);
-  const activeItems = computed(() => items.get().filter((i) => !i.done));
-  const completedItems = computed(() => items.get().filter((i) => i.done));
+  const activeItems = computed(() => items.get().filter((i) => i && !i.done));
+  const completedItems = computed(() => items.get().filter((i) => i && i.done));
   const hasCompleted = computed(() => completedItems.length > 0);
   const hasNoItems = computed(() => activeItems.length === 0);
 
   const summary = computed(() => {
     return items.get()
+      .filter((item) => item)
       .map((item) => `${item.done ? "✓" : "○"} ${item.title}`)
       .join(", ");
   });

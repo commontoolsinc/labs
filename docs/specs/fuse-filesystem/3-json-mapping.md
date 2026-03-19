@@ -77,6 +77,28 @@ the full JSON representation of that subtree. This is essential for:
 4. Writing to a `.json` file replaces the entire subtree with the parsed
    JSON value.
 
+### Callable Sigils In Aggregate JSON
+
+Top-level callable children under `input/` and `result/` are compacted in
+aggregate `.json` views instead of exposing their internal runtime structure.
+
+- Mounted handlers become `{"\/handler":"<name>"}`
+- Mounted pattern tools become `{"\/tool":"<name>"}`
+
+Example:
+
+```json
+{
+  "title": "My Todos",
+  "addItem": {"/handler":"addItem"},
+  "search": {"/tool":"search"}
+}
+```
+
+This keeps `result.json`, `input.json`, and nested `.json` siblings stable and
+human-readable while the real callable entry remains available as
+`addItem.handler` or `search.tool`.
+
 ### Example
 
 ```
@@ -272,11 +294,27 @@ alternative to `ln -s` for programmatic use:
 echo '{"/":{\"link@1\":{\"id\":\"of:ba4j...\"}}}' > result/related.json
 ```
 
-### Stream Markers
+### Callable Markers
 
-Stream cells (`{ $stream: true }`) appear as write-only `.handler` files
-alongside their sibling fields in `result/` (e.g., `result/addItem.handler`).
-Reading them returns empty content. Writing sends an event.
+Top-level callable children under `input/` and `result/` are surfaced as
+synthetic files and are replaced with explicit sigils in the aggregate `.json`
+siblings for those directories:
+
+```json
+{
+  "addItem": { "/handler": "addItem" },
+  "search": { "/tool": "search" }
+}
+```
+
+- `{"\/handler":"name"}` means the mounted filesystem exposes `name.handler`
+- `{"\/tool":"name"}` means the mounted filesystem exposes `name.tool`
+- only top-level callable children are rewritten this way; nested ordinary data
+  is serialized as-is
+
+Mounted callable files are readable. Their content starts with a stable
+shebang whose first line is `#!... exec`, so `ct exec <mounted-callable-file>`
+can resolve the backing callable schema and execute it.
 
 ---
 

@@ -28,6 +28,7 @@ import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
+import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
@@ -2506,6 +2507,33 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               );
             },
           );
+
+          // Optionally record to suggestion history via the default pattern's
+          // recordSuggestion handler. This is intentionally best-effort: spaces
+          // whose default pattern doesn't export recordSuggestion simply skip
+          // recording (caught below) rather than failing the suggestion flow.
+          if (
+            success && cellifiedResult !== undefined &&
+            queueName === "suggestions"
+          ) {
+            try {
+              const spaceCell = runtime.getCell(space, space, spaceCellSchema);
+              const handler = spaceCell
+                .key("defaultPattern")
+                .key("recordSuggestion");
+              handler.send({
+                result: (cellifiedResult as any)?.cell ?? cellifiedResult,
+                messages: messagesCell.get() ?? [],
+                timestamp: new Date().toISOString(),
+              });
+            } catch (e) {
+              logger.warn(
+                "llm",
+                "Failed to record suggestion history entry",
+                e,
+              );
+            }
+          }
 
           if (success) {
             logger.info("llm", "Continuing conversation after tool calls...");

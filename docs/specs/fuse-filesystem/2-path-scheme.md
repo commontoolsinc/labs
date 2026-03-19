@@ -30,10 +30,13 @@ The mount root contains spaces. Each space contains pieces and entities.
         input.json                    # Full input cell as JSON
         input/                        # Input cell fields as directory tree
           <field>/...
+        input/*.handler              # Top-level mounted handlers
+        input/*.tool                 # Top-level mounted pattern tools
         result.json                   # Full result cell as JSON
         result/                       # Result cell fields as directory tree
           <field>/...
-        result/*.handler               # Stream cells (write-only, .handler suffix)
+        result/*.handler             # Top-level mounted handlers
+        result/*.tool                # Top-level mounted pattern tools
         meta.json                     # Read-only piece metadata
     entities/                         # Raw entity view (advanced)
       <entity-id>/
@@ -132,10 +135,16 @@ home/pieces/todo-app/
         text          # ...
         done          # ...
     count             # file containing: 3
-    addItem.handler   # write-only: echo '{"text":"new"}' > addItem.handler
-    removeItem.handler # write-only
+    addItem.handler   # readable+writable mounted handler
+    search.tool       # readable mounted pattern tool
   meta.json           # {"id": "of:ba4j...", "patternName": "todo-app", ...}
 ```
+
+Only top-level callable children under `input/` and `result/` are surfaced as
+`*.handler` and `*.tool`. These callable files are readable; the first line is
+a stable `ct exec` shebang, and the same paths are valid under both
+`pieces/<piece-name>/...` and `entities/<piece-id>/...`. Tool internals such as
+`pattern/` and `extraParams/` do not appear as ordinary mounted directories.
 
 ## Name Resolution
 
@@ -166,6 +175,8 @@ use or when piece names are ambiguous:
 entities/
   of:ba4jcbvpq3k5soo.../
     .json             # Full entity value
+    input/addItem.handler
+    result/search.tool
     items/
       0/
         text          # Leaf value
@@ -173,6 +184,16 @@ entities/
 
 Entity IDs are truncated in the directory listing but can be accessed by prefix
 match (the filesystem resolves the shortest unambiguous prefix).
+
+Mounted callable paths accepted by `ct exec` are limited to the top-level
+callable forms:
+
+```text
+<space>/pieces/<piece-dir>/<input|result>/<name>.handler
+<space>/pieces/<piece-dir>/<input|result>/<name>.tool
+<space>/entities/<entity-id>/<input|result>/<name>.handler
+<space>/entities/<entity-id>/<input|result>/<name>.tool
+```
 
 ## Path Encoding
 

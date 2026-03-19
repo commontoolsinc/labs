@@ -1,0 +1,217 @@
+import { PiecesController } from "@commontools/piece/ops";
+import { dirname, join, relative, resolve } from "@std/path";
+import {
+  type MountedCallablePath,
+  parseMountedCallablePath,
+} from "../../fuse/callable-path.ts";
+import { callableCommandSpec, executeResolvedCallable } from "./callable.ts";
+import {
+  type ExecCommandSpec,
+  normalizeCallableInputForExecution,
+  type ParsedExecArgs,
+  parseExecArgs,
+  renderExecHelp,
+  renderExecHelpJson,
+} from "./exec-schema.ts";
+import {
+  canonicalizeMountLookupPath,
+  findMountForPath,
+  type MountStateEntry,
+} from "./fuse.ts";
+import { loadManager, type SpaceConfig } from "./piece.ts";
+
+export interface MountedPieceMeta {
+  id: string;
+  entityId?: string;
+  name?: string;
+  patternName?: string;
+}
+
+export interface ResolvedMountedCallableFile {
+  absPath: string;
+  callablePath: MountedCallablePath;
+  callableCell: any;
+  commandSpec: ExecCommandSpec;
+  manager: any;
+  mount: { entry: MountStateEntry; path: string };
+  piece: any;
+  pieceId: string;
+  pieceMeta: MountedPieceMeta;
+}
+
+export interface ExecDependencies {
+  stateDir?: string;
+  loadManager?: (config: SpaceConfig) => Promise<any>;
+  loadPiece?: (manager: any, pieceId: string) => Promise<any>;
+  timeoutMs?: number;
+  uuid?: () => string;
+  waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
+  invocationStyle?: "ct" | "direct";
+  readJsonInput?: () => Promise<unknown>;
+}
+
+export interface ExecutedMountedCallableFile {
+  helpText?: string;
+  outputText?: string;
+  parsed: ParsedExecArgs;
+  resolved: ResolvedMountedCallableFile;
+}
+
+async function defaultLoadPiece(manager: any, pieceId: string) {
+  return await new PiecesController(manager).get(pieceId, true);
+}
+
+async function readMountedPieceMeta(
+  absFilePath: string,
+): Promise<MountedPieceMeta> {
+  const metaPath = join(dirname(dirname(absFilePath)), "meta.json");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await Deno.readTextFile(metaPath));
+  } catch {
+    throw new Error(`Mounted piece metadata not found for ${absFilePath}`);
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Mounted piece metadata is invalid for ${absFilePath}`);
+  }
+
+  const meta = parsed as Record<string, unknown>;
+  if (typeof meta.id !== "string" || meta.id.length === 0) {
+    throw new Error(`Mounted piece metadata missing id for ${absFilePath}`);
+  }
+
+  return {
+    id: meta.id,
+    entityId: typeof meta.entityId === "string" ? meta.entityId : undefined,
+    name: typeof meta.name === "string" ? meta.name : undefined,
+    patternName: typeof meta.patternName === "string"
+      ? meta.patternName
+      : undefined,
+  };
+}
+
+async function assertMountedCallableFileExists(absPath: string): Promise<void> {
+  let stat: Deno.FileInfo;
+  try {
+    stat = await Deno.stat(absPath);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new Error(`Mounted callable file not found: ${absPath}`);
+    }
+    throw error;
+  }
+
+  if (!stat.isFile) {
+    throw new Error(`Mounted callable file not found: ${absPath}`);
+  }
+}
+
+async function defaultReadJsonInput(): Promise<unknown> {
+  const text = await new Response(Deno.stdin.readable).text();
+  if (text.trim().length === 0) {
+    throw new Error("Expected JSON on stdin for --json");
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON on stdin for --json");
+  }
+}
+
+export async function resolveMountedCallableFile(
+  filePath: string,
+  deps: ExecDependencies = {},
+): Promise<ResolvedMountedCallableFile> {
+  const absPath = resolve(filePath);
+  const mount = await findMountForPath(absPath, deps.stateDir);
+  if (!mount) {
+    throw new Error(
+      `Path is not within a mounted ct fuse filesystem: ${absPath}`,
+    );
+  }
+
+  const relativePath = relative(
+    await canonicalizeMountLookupPath(mount.entry.mountpoint),
+    await canonicalizeMountLookupPath(absPath),
+  );
+  const callablePath = parseMountedCallablePath(relativePath);
+  if (!callablePath) {
+    throw new Error(`Path is not a mounted callable file: ${absPath}`);
+  }
+
+  await assertMountedCallableFileExists(absPath);
+  const pieceMeta = await readMountedPieceMeta(absPath);
+  const manager = await (deps.loadManager ?? loadManager)({
+    apiUrl: mount.entry.apiUrl,
+    identity: mount.entry.identity,
+    space: callablePath.spaceName,
+  });
+  const piece = await (deps.loadPiece ?? defaultLoadPiece)(
+    manager,
+    pieceMeta.id,
+  );
+  const rootCell = await piece[callablePath.cellProp].getCell();
+  const callableCell = rootCell.key(callablePath.cellKey).asSchemaFromLinks();
+
+  return {
+    absPath,
+    callablePath,
+    callableCell,
+    commandSpec: callableCommandSpec(callableCell, callablePath.callableKind),
+    manager,
+    mount,
+    piece,
+    pieceId: pieceMeta.id,
+    pieceMeta,
+  };
+}
+
+export async function executeMountedCallableFile(
+  filePath: string,
+  rawArgs: string[],
+  deps: ExecDependencies = {},
+): Promise<ExecutedMountedCallableFile> {
+  const resolved = await resolveMountedCallableFile(filePath, deps);
+  const parsed = parseExecArgs(resolved.commandSpec, rawArgs);
+  const invocationStyle = deps.invocationStyle ??
+    (Deno.env.get("CT_EXEC_SHEBANG") === "1" ? "direct" : "ct");
+
+  if (parsed.showHelp) {
+    return {
+      helpText: parsed.showHelpJson
+        ? renderExecHelpJson(resolved.commandSpec)
+        : renderExecHelp(filePath, resolved.commandSpec, {
+          invocationStyle,
+        }),
+      parsed,
+      resolved,
+    };
+  }
+
+  const input = parsed.readJsonFromStdin
+    ? await (deps.readJsonInput ?? defaultReadJsonInput)()
+    : parsed.input;
+  const executed = await executeResolvedCallable(
+    {
+      callableCell: resolved.callableCell,
+      callableKind: resolved.callablePath.callableKind,
+      cellKey: resolved.callablePath.cellKey,
+      cellProp: resolved.callablePath.cellProp,
+      manager: resolved.manager,
+      piece: resolved.piece,
+      space: resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
+    },
+    parsed.usedJsonInput
+      ? input
+      : normalizeCallableInputForExecution(resolved.commandSpec, input),
+    deps,
+  );
+
+  return {
+    outputText: executed.outputText,
+    parsed,
+    resolved,
+  };
+}

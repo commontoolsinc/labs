@@ -27,6 +27,7 @@ import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
+import SuggestionHistory from "./suggestion-history.tsx";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 const triggerGeneration = handler<
@@ -117,6 +118,8 @@ export default pattern<
     entries: SummaryIndexEntry[];
   }>({ query: "#summaryIndex" }).result!;
 
+  const suggestionHistory = SuggestionHistory({});
+
   const patternIndexUrl = wish<{ url: Writable<string> }>({
     query: "#pattern-index",
   });
@@ -155,6 +158,7 @@ export default pattern<
 Your textual responses are invisible to the user — they can only see the presented result.
 
 Strategy:
+0. Before generating anything new, call searchHistory to check if a similar result was already created. If a match is found, presentResult with it directly.
 1. If the request is ambiguous or you need user preferences, call askUserQuestion first. After calling it, STOP — the user's answer will arrive as the next message. Then resume from step 2 with that context.
 2. Review the available patterns listed above to find the best match for the user's request.
 3. Search the space for existing relevant content using searchSpace.
@@ -188,6 +192,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,
       }),
+      searchHistory: suggestionHistory.search,
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
       askUserQuestion: {

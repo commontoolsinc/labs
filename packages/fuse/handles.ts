@@ -6,7 +6,9 @@ export interface HandleState {
   ino: bigint;
   flags: number;
   dirty: boolean;
+  flushing: boolean;
   buffer: Uint8Array;
+  version: number;
 }
 
 export class HandleMap {
@@ -21,7 +23,9 @@ export class HandleMap {
       ino,
       flags,
       dirty: false,
+      flushing: false,
       buffer: isWritable ? new Uint8Array(content ?? []) : new Uint8Array(0),
+      version: 0,
     });
     return fh;
   }
@@ -52,6 +56,7 @@ export class HandleMap {
     }
     state.buffer.set(data, offset);
     state.dirty = true;
+    state.version++;
     return true;
   }
 
@@ -67,6 +72,7 @@ export class HandleMap {
           state.buffer = newBuf;
         }
         state.dirty = true;
+        state.version++;
       }
     }
   }
@@ -84,6 +90,7 @@ export class HandleMap {
       state.buffer = newBuf;
     }
     state.dirty = true;
+    state.version++;
     return true;
   }
 }

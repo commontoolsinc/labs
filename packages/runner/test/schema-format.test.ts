@@ -281,3 +281,53 @@ Deno.test("schemaToTypeString handles nested PatternToolResult in object", () =>
   assert(result.includes("translate?:"), "should have translate property");
   assert(result.includes("void"), "handlers should return void");
 });
+
+Deno.test("schemaToTypeString formats fixture-style PatternToolResult without leaking internals", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      search: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "object",
+            properties: {
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                  help: { type: "string" },
+                  source: { type: "string" },
+                },
+              },
+              resultSchema: {
+                type: "object",
+                properties: {
+                  summary: { type: "string" },
+                },
+              },
+              nodes: { type: "array", items: { type: "object" } },
+            },
+            asCell: true,
+          },
+          extraParams: {
+            type: "object",
+            properties: {
+              source: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const result = schemaToTypeString(schema);
+
+  assert(result.includes("search?:"), "should include the tool key");
+  assert(result.includes("source"), "should describe the bound extraParams");
+  assert(!/\bpattern\??:/.test(result), "pattern internals should stay hidden");
+  assert(
+    !/\bextraParams\??:/.test(result),
+    "extraParams internals should stay hidden",
+  );
+});

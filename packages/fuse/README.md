@@ -2,7 +2,8 @@
 
 Mount Common Tools spaces as a FUSE filesystem. Pieces appear as directories
 with their cell data exploded into files and subdirectories — browse with `ls`,
-read with `cat`, write with `echo`, and link pieces together with `ln -s`.
+read with `cat`, write with `echo`, execute mounted callables with `ct exec`,
+and link pieces together with `ln -s`.
 
 ## Prerequisites
 
@@ -43,9 +44,12 @@ ct fuse unmount /tmp/ct
               text                    # file: Walk dog
               done                    # file: true
           items.json                  # [{"text":"Buy milk","done":false}, ...]
-          addItem.handler             # write-only stream cell
+          addItem.handler             # executable+writable mounted handler
+          search.tool                 # executable mounted pattern tool
         input.json                    # full input cell as JSON
         input/                        # exploded input tree
+          submit.handler              # handlers/tools can exist under input too
+          search.tool
         meta.json                     # piece ID, entity, pattern name
       .index.json                     # piece name → entity ID mapping
     entities/                         # access cells by entity ID
@@ -65,7 +69,9 @@ ct fuse unmount /tmp/ct
 | `array`   | Directory    | `0`, `1`, ... entries     |
 
 Every directory also has a `.json` sibling (e.g., `result/items.json`) that
-returns the subtree as JSON.
+returns the subtree as JSON. Top-level callable children under `input/` and
+`result/` are replaced in these aggregate files with explicit sigils:
+`{"/handler":"name"}` and `{"/tool":"name"}`.
 
 ## Walkthrough
 
@@ -96,6 +102,15 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 # View piece metadata
 cat home/pieces/todo-app/meta.json
 # => {"id":"of:ba4j...","entityId":"ba4j...","patternName":"todo-app"}
+
+# Mounted callables are executable and start with a ct exec shebang
+head -n1 home/pieces/todo-app/result/addItem.handler
+head -n1 home/pieces/todo-app/result/search.tool
+
+# Aggregate JSON hides callable internals behind explicit sigils
+cat home/pieces/todo-app/result.json | jq '.addItem, .search'
+# => {"/handler":"addItem"}
+# => {"/tool":"search"}
 ```
 
 ### Writing
@@ -114,6 +129,22 @@ echo '{"title":"Fresh","items":[],"count":0}' > home/pieces/todo-app/result.json
 
 # Invoke a stream handler (fire-and-forget)
 echo '{"text":"Buy oat milk"}' > home/pieces/todo-app/result/addItem.handler
+
+# Execute the same mounted handler with schema-derived CLI flags
+ct exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
+
+# Run a mounted pattern tool (tool input flags come from the pattern schema)
+ct exec home/pieces/todo-app/result/search.tool --query "oat milk"
+
+# Or execute either mounted callable directly through its shebang shim
+home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
+home/pieces/todo-app/result/search.tool --query "oat milk"
+
+# Top-level help describes the mounted callable instead of invoking it
+ct exec home/pieces/todo-app/result/search.tool --help
+
+# The same callable paths also exist under entities/<piece-id>/
+ct exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
 
 ### Creating and Deleting
@@ -182,9 +213,15 @@ ct fuse unmount /tmp/ct
 
 # With explicit connection settings
 ct fuse mount /tmp/ct --api-url http://localhost:8000 --identity ./my.key
+
+# Show callable help from the mounted schema
+ct exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
 ```
 
 Environment variables `CT_API_URL` and `CT_IDENTITY` are also supported.
+
+Handlers remain writable through the mounted `.handler` file. Both mounted
+`.handler` and `.tool` files can be executed directly or via `ct exec`.
 
 ## Architecture
 

@@ -1,14 +1,7 @@
 import { createSession, isDID, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import {
-  isStream,
-  Runtime,
-  RuntimeProgram,
-  type Stream,
-  UI,
-  VNode,
-} from "@commontools/runner";
+import { Runtime, RuntimeProgram, UI, VNode } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { extractUserCode, pieceId, PieceManager } from "@commontools/piece";
 import { PiecesController } from "@commontools/piece/ops";
@@ -16,7 +9,23 @@ import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
 import { isRecord } from "@commontools/utils/types";
+import { isHandlerCell } from "../../fuse/callables.ts";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
+import {
+  callableCommandSpec,
+  type CallableExecutionDeps,
+  type CallableResolution,
+  detectCallableKind,
+  executeResolvedCallable,
+} from "./callable.ts";
+import {
+  type ExecCommandSpec,
+  normalizeCallableInputForExecution,
+  type ParsedExecArgs,
+  parseExecArgs,
+  renderExecHelpJson,
+  renderPieceCallHelp,
+} from "./exec-schema.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -32,6 +41,24 @@ export interface SpaceConfig {
 
 export interface PieceConfig extends SpaceConfig {
   piece: string;
+}
+
+export interface ResolvedPieceCallable extends CallableResolution {
+  commandSpec: ExecCommandSpec;
+}
+
+export interface PieceCallableDependencies extends CallableExecutionDeps {
+  helpCommandPrefix?: string;
+  loadManager?: (config: SpaceConfig) => Promise<any>;
+  loadPiece?: (manager: any, pieceId: string) => Promise<any>;
+  readJsonInput?: () => Promise<unknown>;
+}
+
+export interface ExecutedPieceCallable {
+  helpText?: string;
+  outputText?: string;
+  parsed: ParsedExecArgs;
+  resolved: ResolvedPieceCallable;
 }
 
 async function makeSession(config: SpaceConfig): Promise<Session> {
@@ -233,6 +260,232 @@ export async function applyPieceInput(
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
   await piece.setInput(input);
+}
+
+async function defaultReadJsonInput(): Promise<unknown> {
+  const text = await new Response(Deno.stdin.readable).text();
+  if (text.trim().length === 0) {
+    throw new Error("Expected JSON on stdin for --json");
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON on stdin for --json");
+  }
+}
+
+function getCallableValue(rootValue: unknown, callableName: string): unknown {
+  if (
+    typeof rootValue !== "object" || rootValue === null ||
+    Array.isArray(rootValue)
+  ) {
+    return undefined;
+  }
+  return (rootValue as Record<string, unknown>)[callableName];
+}
+
+async function tryResolvePieceCallableAt(
+  piece: any,
+  manager: any,
+  space: string,
+  callableName: string,
+  cellProp: "input" | "result",
+): Promise<ResolvedPieceCallable | null> {
+  const rootCell = await piece[cellProp].getCell();
+  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const callableKind = detectCallableKind(
+    getCallableValue(rootCell.get?.(), callableName),
+    callableCell,
+  );
+  if (!callableKind) {
+    return null;
+  }
+
+  return {
+    callableCell,
+    callableKind,
+    cellKey: callableName,
+    cellProp,
+    commandSpec: callableCommandSpec(callableCell, callableKind),
+    manager,
+    piece,
+    space,
+  };
+}
+
+async function tryResolvePieceHandler(
+  piece: any,
+  manager: any,
+  space: string,
+  callableName: string,
+): Promise<ResolvedPieceCallable | null> {
+  const pieceCell = piece.getCell?.();
+  if (!pieceCell) {
+    return null;
+  }
+
+  const streamRoot = pieceCell.asSchema({
+    type: "object",
+    properties: {
+      [callableName]: { asStream: true },
+    },
+    required: [callableName],
+  });
+  if (!isHandlerCell(streamRoot.key(callableName))) {
+    return null;
+  }
+
+  const rootCell = await piece.result.getCell();
+  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  return {
+    callableCell,
+    callableKind: "handler",
+    cellKey: callableName,
+    cellProp: "result",
+    commandSpec: callableCommandSpec(callableCell, "handler"),
+    manager,
+    piece,
+    space,
+  };
+}
+
+async function tryResolveLivePieceToolCallable(
+  piece: any,
+  manager: any,
+  space: string,
+  callableName: string,
+): Promise<any | null> {
+  if (
+    typeof piece.getPattern !== "function" ||
+    typeof piece.input?.get !== "function"
+  ) {
+    return null;
+  }
+
+  const pattern = await piece.getPattern();
+  const input = await piece.input.get();
+  const tx = manager.runtime.edit();
+  const liveResult = manager.runtime.getCell(
+    space,
+    crypto.randomUUID(),
+    pattern?.resultSchema,
+    tx,
+  );
+  manager.runtime.run(tx, pattern, input, liveResult);
+  await tx.commit();
+  await manager.runtime.idle();
+
+  const callableCell = liveResult.key(callableName).asSchemaFromLinks();
+  const callableKind = detectCallableKind(
+    getCallableValue(liveResult.get?.(), callableName),
+    callableCell,
+  );
+  return callableKind === "tool" ? callableCell : null;
+}
+
+async function resolvePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  deps: PieceCallableDependencies = {},
+): Promise<ResolvedPieceCallable> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = new PiecesController(manager);
+
+  if (!deps.loadPiece) {
+    try {
+      await pieces.ensureDefaultPattern();
+    } catch (error) {
+      console.warn(
+        `Warning: Could not ensure default pattern: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  const piece =
+    await (deps.loadPiece
+      ? deps.loadPiece(manager, config.piece)
+      : pieces.get(config.piece, true));
+  const space = manager.getSpace?.() ?? config.space;
+
+  const resolved = await tryResolvePieceCallableAt(
+    piece,
+    manager,
+    space,
+    callableName,
+    "result",
+  ) ?? await tryResolvePieceCallableAt(
+    piece,
+    manager,
+    space,
+    callableName,
+    "input",
+  ) ?? await tryResolvePieceHandler(piece, manager, space, callableName);
+  if (!resolved) {
+    throw new Error(
+      `Callable "${callableName}" not found on piece ${config.piece}`,
+    );
+  }
+
+  if (resolved.callableKind === "tool") {
+    const liveCallableCell = await tryResolveLivePieceToolCallable(
+      piece,
+      manager,
+      space,
+      callableName,
+    );
+    if (liveCallableCell) {
+      return {
+        ...resolved,
+        callableCell: liveCallableCell,
+        commandSpec: callableCommandSpec(liveCallableCell, "tool"),
+      };
+    }
+  }
+
+  return resolved;
+}
+
+export async function executePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  rawArgs: string[],
+  deps: PieceCallableDependencies = {},
+): Promise<ExecutedPieceCallable> {
+  const resolved = await resolvePieceCallable(config, callableName, deps);
+  const parsed = parseExecArgs(resolved.commandSpec, rawArgs);
+
+  if (parsed.showHelp) {
+    return {
+      helpText: parsed.showHelpJson
+        ? renderExecHelpJson(resolved.commandSpec)
+        : renderPieceCallHelp(
+          deps.helpCommandPrefix ?? `ct piece call ... ${callableName}`,
+          resolved.commandSpec,
+        ),
+      parsed,
+      resolved,
+    };
+  }
+
+  const input = parsed.readJsonFromStdin
+    ? await (deps.readJsonInput ?? defaultReadJsonInput)()
+    : parsed.input;
+  const executed = await executeResolvedCallable(
+    resolved,
+    parsed.usedJsonInput
+      ? input
+      : normalizeCallableInputForExecution(resolved.commandSpec, input),
+    deps,
+  );
+
+  return {
+    outputText: executed.outputText,
+    parsed,
+    resolved,
+  };
 }
 
 export async function linkPieces(
@@ -611,54 +864,18 @@ export async function setCellValue(
 }
 
 /**
- * Calls a handler within a piece by sending an event to its stream.
+ * Calls a named handler within a piece with a decoded JSON payload.
  */
 export async function callPieceHandler<T = any>(
   config: PieceConfig,
   handlerName: string,
   args: T,
 ): Promise<void> {
-  const manager = await loadManager(config);
-  const pieces = new PiecesController(manager);
-
-  // Ensure default pattern exists (best effort)
-  try {
-    await pieces.ensureDefaultPattern();
-  } catch (error) {
-    // Non-fatal, log and continue
-    console.warn(
-      `Warning: Could not ensure default pattern: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  const resolved = await resolvePieceCallable(config, handlerName);
+  if (resolved.callableKind !== "handler") {
+    throw new Error(`Callable "${handlerName}" is not a handler`);
   }
-
-  const piece = await pieces.get(config.piece, true);
-
-  // Get the cell and traverse to the handler using .key()
-  const cell = piece.getCell().asSchema({
-    type: "object",
-    properties: {
-      [handlerName]: { asStream: true },
-    },
-    required: [handlerName],
-  });
-
-  // Manual cast because typescript can't infer this automatically
-  const handlerStream = cell.key(handlerName) as unknown as Stream<T>;
-
-  // The handlerStream should be the actual stream object
-  if (!isStream<T>(handlerStream)) {
-    throw new Error(`Handler "${handlerName}" not found or not a stream`);
-  }
-
-  // Send the event to trigger the handler
-  // Type assertion needed because TypeScript can't verify the conditional type at this generic callsite
-  (handlerStream.send as (event: T) => void)(args);
-
-  // Wait for processing to complete
-  await manager.runtime.idle();
-  await manager.synced();
+  await executeResolvedCallable(resolved, args);
 }
 
 /**

@@ -2,7 +2,7 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyPieceInput,
-  callPieceHandler,
+  executePieceCallable,
   formatViewTree,
   generateSpaceMap,
   getCellValue,
@@ -45,6 +45,47 @@ function hint(message: string, showQuietTip = true) {
   }
 }
 
+function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
+  if (literalArgs.length > 0) {
+    if (literalArgs[0] === "--json") {
+      throw new ValidationError(
+        'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
+      );
+    }
+    return literalArgs;
+  }
+
+  if (tail.length === 0) {
+    return ["--json"];
+  }
+
+  if (tail[0] === "--help") {
+    if (tail.length === 1) {
+      return tail;
+    }
+    if (tail.length === 2 && tail[1] === "--json") {
+      return tail;
+    }
+    throw new ValidationError(
+      'Use "-- --help <value>" to set an input field named "help".',
+    );
+  }
+
+  if (tail[0] === "--json") {
+    throw new ValidationError(
+      'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
+    );
+  }
+
+  if (tail.length > 1) {
+    throw new ValidationError(
+      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    );
+  }
+
+  return ["--json", tail[0]];
+}
+
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
@@ -83,7 +124,7 @@ const pieceDescription = `Interact with pieces running on a server.
 COMMON WORKFLOWS:
   Deploy:    ct piece new ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
   Update:    ct piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
-  Test:      ct piece call --piece <ID> handlerName -i ./claude.key -a http://localhost:8000 -s my-space
+  Test:      ct piece call --piece <ID> callableName -i ./claude.key -a http://localhost:8000 -s my-space
   Inspect:   ct piece inspect --piece <ID> -i ./claude.key -a http://localhost:8000 -s my-space
 ${pieceEnvStatus()}
 TIPS:
@@ -182,7 +223,7 @@ export const piece = new Command()
     hint(`NEXT STEPS:
   → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
   → Update code:     ct piece setsrc --piece ${pieceId} ${main} ...
-  → Test a handler:  ct piece call --piece ${pieceId} <handlerName> ...
+  → Test a callable: ct piece call --piece ${pieceId} <callableName> ...
   → Inspect state:   ct piece inspect --piece ${pieceId} ...`);
   })
   /* piece step */
@@ -267,7 +308,7 @@ export const piece = new Command()
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a handler:  ct piece call --piece ${pieceConfig.piece} <handlerName> ...
+  → Test a callable: ct piece call --piece ${pieceConfig.piece} <callableName> ...
   → Check state:     ct piece inspect --piece ${pieceConfig.piece} ...`);
   })
   /* piece inspect */
@@ -600,7 +641,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     render(map);
   })
   /* piece call */
-  .command("call", "Call a handler within a piece")
+  .command("call", "Invoke a callable within a piece")
   .usage(pieceUsage)
   .example(
     `ct piece call ${EX_ID} ${EX_COMP_PIECE} increment`,
@@ -608,17 +649,34 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
   )
   .example(
     `ct piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
-    `Call the "setName" handler with arguments on piece "${RAW_EX_COMP
+    `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
       .piece!}".`,
   )
+  .example(
+    `ct piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`,
+    `Run the "search" tool using schema-derived flags after "--".`,
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
-  .arguments("<handler:string> [args:string]")
-  .action(async (options, handlerName, argsJson) => {
+  .stopEarly()
+  .arguments("<callable:string> [tail...:string]")
+  .action(async function (options, callableName, ...tail) {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
-    await callPieceHandler(pieceConfig, handlerName, args);
-    render(`Called handler "${handlerName}" on piece ${pieceConfig.piece}`);
+    const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+    const result = await executePieceCallable(
+      pieceConfig,
+      callableName,
+      rawArgs,
+    );
+    if (result.helpText) {
+      render(result.helpText);
+      return;
+    }
+    if (result.outputText) {
+      render(result.outputText);
+      return;
+    }
+    render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
     hint(`NEXT STEPS:
   → Verify state:  ct piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  ct piece inspect --piece ${pieceConfig.piece} ...`);

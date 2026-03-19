@@ -3,11 +3,13 @@ import { resolve } from "@std/path";
 import {
   buildDenoArgs,
   defaultStateDir,
+  ensureExecShim,
   fuseMod,
   isAlive,
-  readAllPidFiles,
-  readPidFile,
-  writePidFile,
+  readAllMountStates,
+  readMountState,
+  removeMountStateFile,
+  writeMountState,
 } from "../lib/fuse.ts";
 
 const fuseDescription = `Mount Common Tools spaces as a FUSE filesystem.
@@ -21,9 +23,12 @@ FILESYSTEM LAYOUT:
       pieces/
         <piece-name>/           # each piece gets a directory
           result/               # exploded JSON tree (dirs, files, symlinks)
-          result/*.handler      # write-only files for stream cells
+          result/*.handler      # executable callables; writing still invokes handlers
+          result/*.tool         # executable tools surfaced as mounted callables
           result.json           # full JSON blob
           input/
+          input/*.handler
+          input/*.tool
           input.json
           meta.json             # piece ID, entity, pattern name
         .index.json             # name-to-entity-ID mapping
@@ -31,13 +36,14 @@ FILESYSTEM LAYOUT:
       space.json                # { did, name }
     .spaces.json                # known space-name -> DID mapping
 
-READING:
+  READING:
   ls <space>/pieces/                     # list pieces
   cat <piece>/result.json                # full cell value as JSON
   cat <piece>/result/title               # single scalar field
   cat <piece>/result/items/0/name        # nested access
+  head -n1 <piece>/result/search.tool    # callable shebang for ct exec
 
-WRITING:
+  WRITING:
   echo '"new title"' > result/title      # write scalar (auto-detects type)
   echo '{"a":1}' > result.json           # replace entire cell
   echo '{"msg":"hi"}' > result/chat.handler  # invoke a stream handler
@@ -46,6 +52,47 @@ WRITING:
   ln -s ../../other-piece/input/foo result/ref  # sigil link
 
 Requires FUSE-T (preferred) or macFUSE on macOS.`;
+
+export async function awaitForegroundMountExit(
+  child: { status: Promise<Deno.CommandStatus> },
+  statePath: string,
+  exit: (code: number) => never | void = Deno.exit,
+): Promise<void> {
+  const status = await child.status;
+  await removeMountStateFile(statePath);
+  exit(status.code);
+}
+
+export async function awaitBackgroundMountStartup(
+  pid: number,
+  statePath: string,
+  deps: {
+    attempts?: number;
+    delayMs?: number;
+    isAlive?: (pid: number) => boolean;
+    removeStateFile?: (path: string) => Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<void> {
+  const attempts = deps.attempts ?? 20;
+  const delayMs = deps.delayMs ?? 50;
+  const isAliveFn = deps.isAlive ?? isAlive;
+  const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
+  const sleep = deps.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  for (let i = 0; i < attempts; i++) {
+    if (!isAliveFn(pid)) {
+      await removeStateFileFn(statePath);
+      throw new Error(
+        "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.",
+      );
+    }
+    if (i < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+}
 
 export const fuse = new Command()
   .name("fuse")
@@ -81,8 +128,20 @@ export const fuse = new Command()
   .action(async (options, mountpoint) => {
     // globalEnv merges CT_API_URL / CT_IDENTITY into options automatically
     const apiUrl = options.apiUrl ?? "";
-    const identity = options.identity ?? "";
+    const identity = options.identity ? resolve(options.identity) : "";
     const absMountpoint = resolve(mountpoint);
+
+    if (identity) {
+      let stat: Deno.FileInfo;
+      try {
+        stat = await Deno.stat(identity);
+      } catch {
+        throw new Error(`Identity file not found: ${identity}`);
+      }
+      if (!stat.isFile) {
+        throw new Error(`Identity file not found: ${identity}`);
+      }
+    }
 
     // Ensure mountpoint exists
     try {
@@ -92,11 +151,14 @@ export const fuse = new Command()
     }
 
     const modPath = fuseMod(import.meta.url);
+    const stateDir = defaultStateDir();
+    const execCli = await ensureExecShim(stateDir, import.meta.url);
     const denoArgs = buildDenoArgs({
       modPath,
       mountpoint: absMountpoint,
       apiUrl,
       identity,
+      execCli,
     });
 
     if (options.background) {
@@ -111,13 +173,24 @@ export const fuse = new Command()
       child.unref();
 
       const pid = child.pid;
-      const stateDir = defaultStateDir();
-      await writePidFile(stateDir, {
-        pid,
-        mountpoint: absMountpoint,
-        apiUrl,
-        startedAt: new Date().toISOString(),
-      });
+      let statePath: string;
+      try {
+        statePath = await writeMountState(stateDir, {
+          pid,
+          mountpoint: absMountpoint,
+          apiUrl,
+          identity,
+          startedAt: new Date().toISOString(),
+        });
+        await awaitBackgroundMountStartup(pid, statePath);
+      } catch (error) {
+        try {
+          Deno.kill(pid, "SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+        throw error;
+      }
 
       console.log(`FUSE mounted in background (PID ${pid})`);
       console.log(`  mountpoint: ${absMountpoint}`);
@@ -133,9 +206,25 @@ export const fuse = new Command()
         stderr: "inherit",
       });
       const child = cmd.spawn();
+      let statePath: string;
+      try {
+        statePath = await writeMountState(stateDir, {
+          pid: child.pid,
+          mountpoint: absMountpoint,
+          apiUrl,
+          identity,
+          startedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        try {
+          Deno.kill(child.pid, "SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+        throw error;
+      }
 
-      const status = await child.status;
-      Deno.exit(status.code);
+      await awaitForegroundMountExit(child, statePath);
     }
   })
   .reset()
@@ -147,7 +236,7 @@ export const fuse = new Command()
   .action(async (_options, mountpoint) => {
     const absMountpoint = resolve(mountpoint);
     const stateDir = defaultStateDir();
-    const pidFile = await readPidFile(stateDir, absMountpoint);
+    const pidFile = await readMountState(stateDir, absMountpoint);
 
     if (pidFile && isAlive(pidFile.entry.pid)) {
       // Verify the PID belongs to a deno/fuse process before killing
@@ -196,11 +285,7 @@ export const fuse = new Command()
 
     // Clean up PID file
     if (pidFile) {
-      try {
-        await Deno.remove(pidFile.path);
-      } catch {
-        // already gone
-      }
+      await removeMountStateFile(pidFile.path);
     }
 
     console.log(`Unmounted ${absMountpoint}`);
@@ -210,7 +295,7 @@ export const fuse = new Command()
   .command("status", "Show active FUSE mounts.")
   .action(async () => {
     const stateDir = defaultStateDir();
-    const entries = await readAllPidFiles(stateDir);
+    const entries = await readAllMountStates(stateDir);
 
     if (entries.length === 0) {
       console.log("No active FUSE mounts.");
@@ -223,11 +308,7 @@ export const fuse = new Command()
       const alive = isAlive(entry.pid);
       if (!alive) {
         // Clean stale entry
-        try {
-          await Deno.remove(path);
-        } catch {
-          // ignore
-        }
+        await removeMountStateFile(path);
         continue;
       }
       rows.push([

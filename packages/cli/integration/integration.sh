@@ -8,6 +8,20 @@ error () {
   >&2 echo $1
   exit 1
 }
+assert_json_eq() {
+  local actual="$1"
+  local expected="$2"
+  local message="$3"
+  local expected_file
+  local actual_file
+  expected_file=$(mktemp)
+  actual_file=$(mktemp)
+  echo "$expected" | jq -S . > "$expected_file"
+  echo "$actual" | jq -S . > "$actual_file"
+  if ! diff -u "$expected_file" "$actual_file" > /dev/null; then
+    error "$message"
+  fi
+}
 replace () {
   if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i ' ' "$1" "$2"
@@ -268,5 +282,53 @@ RESULT=$(ct piece get $SPACE_ARGS --piece $INVENTED_ID value)
 if [ "$RESULT" != "43" ]; then
   error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
 fi
+
+echo "Testing piece call with schema-derived flags and tools..."
+
+CALLABLE_PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
+CALLABLE_PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $CALLABLE_PATTERN_SRC)
+echo "Created callable piece: $CALLABLE_PIECE_ID"
+
+CALL_HELP=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
+echo "$CALL_HELP" | grep -q "ct piece call ... search --help" ||
+  error "Top-level callable help should work without the delimiter"
+echo "$CALL_HELP" | grep -q "ct piece call ... search <json>" ||
+  error "Piece-call help should describe JSON input without --json"
+
+CALL_HELP_JSON=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
+echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
+  error "Top-level --help --json should return the machine-readable schema"
+
+REDUNDANT_JSON_ERR=$(mktemp)
+if ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json > /dev/null 2>"$REDUNDANT_JSON_ERR"; then
+  error "Explicit --json should be rejected on ct piece call"
+fi
+grep -q "reads JSON by default" "$REDUNDANT_JSON_ERR" ||
+  error "Redundant --json should explain that piece call already reads JSON by default"
+
+ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
+RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
+if [ "$RESULT" != '"piece-flags"' ]; then
+  error "Flag-based handler call should update lastMessage, got: $RESULT"
+fi
+
+NO_ARG_HANDLER_ERR=$(mktemp)
+if ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite > /dev/null 2>"$NO_ARG_HANDLER_ERR"; then
+  error "Bare no-arg handler calls should fail without explicit invoke"
+fi
+grep -q "Expected JSON on stdin for --json" "$NO_ARG_HANDLER_ERR" ||
+  error "Bare no-arg handler call should explain that JSON input is required"
+
+ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
+RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+if [ "$RESULT" != "1" ]; then
+  error "Explicit invoke should call a no-input handler, got legacyCount=$RESULT"
+fi
+
+TOOL_RESULT=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)
+assert_json_eq \
+  "$TOOL_RESULT" \
+  '{"query":"tea","help":"","source":"bound-source","summary":"bound-source:tea:"}' \
+  "Flag-based tool call should return the tool result"
 
 echo "Successfully ran integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."

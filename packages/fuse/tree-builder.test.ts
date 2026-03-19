@@ -2,6 +2,11 @@
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
+  buildCallableScript,
+  classifyCallableEntry,
+  isPatternToolValue,
+} from "./callables.ts";
+import {
   buildJsonTree,
   isHandlerCell,
   isSigilLink,
@@ -437,19 +442,89 @@ Deno.test("buildJsonTree - .json sibling replaces streams with handler sigils", 
   assertEquals(parsed.addItem, { "/handler": "addItem" });
 });
 
-Deno.test("FsTree - addHandler creates handler node", () => {
+Deno.test("classifyCallableEntry does not treat ordinary data as a tool when linked schema disagrees", () => {
+  const value = {
+    pattern: "just-data",
+    extraParams: {
+      source: "still-data",
+    },
+  };
+  const schema = {
+    type: "object",
+    properties: {
+      pattern: { type: "string" },
+      extraParams: {
+        type: "object",
+        properties: {
+          source: { type: "string" },
+        },
+      },
+    },
+  } as const;
+
+  assertEquals(classifyCallableEntry(value, schema), null);
+});
+
+Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {
+  const tree = new FsTree();
+  const data = {
+    nested: {
+      config: {
+        pattern: "literal-pattern",
+        extraParams: {
+          mode: "keep",
+        },
+      },
+    },
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const resultIno = tree.lookup(tree.rootIno, "result");
+  if (resultIno === undefined) throw new Error("result dir not found");
+
+  const nestedJson = JSON.parse(getFileContent(tree, resultIno, "nested.json"));
+  assertEquals(nestedJson, {
+    config: {
+      pattern: "literal-pattern",
+      extraParams: {
+        mode: "keep",
+      },
+    },
+  });
+});
+
+Deno.test("buildJsonTree - root .json siblings keep ordinary pattern-shaped objects intact without a classifier", () => {
+  const tree = new FsTree();
+  const data = {
+    pattern: "literal-pattern",
+    extraParams: {
+      mode: "keep",
+    },
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const parsed = JSON.parse(getFileContent(tree, tree.rootIno, "result.json"));
+  assertEquals(parsed, data);
+});
+
+Deno.test("FsTree - addCallable creates callable handler node", () => {
   const tree = new FsTree();
   const dirIno = tree.addDir(tree.rootIno, "result", "object");
-  const handlerIno = tree.addHandler(
+  const handlerIno = tree.addCallable(
     dirIno,
     "addItem.handler",
+    "handler",
     "addItem",
     "result",
+    buildCallableScript("/tmp/ct-exec"),
   );
 
   const node = tree.getNode(handlerIno);
-  assertEquals(node?.kind, "handler");
-  if (node?.kind === "handler") {
+  assertEquals(node?.kind, "callable");
+  if (node?.kind === "callable") {
+    assertEquals(node.callableKind, "handler");
     assertEquals(node.cellKey, "addItem");
     assertEquals(node.cellProp, "result");
   }
@@ -462,8 +537,22 @@ Deno.test("FsTree - handler nodes coexist with regular files", () => {
   const tree = new FsTree();
   const dirIno = tree.addDir(tree.rootIno, "result", "object");
   tree.addFile(dirIno, "count", "3", "number");
-  tree.addHandler(dirIno, "addItem.handler", "addItem", "result");
-  tree.addHandler(dirIno, "reset.handler", "reset", "result");
+  tree.addCallable(
+    dirIno,
+    "addItem.handler",
+    "handler",
+    "addItem",
+    "result",
+    buildCallableScript("/tmp/ct-exec"),
+  );
+  tree.addCallable(
+    dirIno,
+    "reset.handler",
+    "handler",
+    "reset",
+    "result",
+    buildCallableScript("/tmp/ct-exec"),
+  );
 
   const children = tree.getChildren(dirIno);
   const names = children.map(([name]) => name).sort();
@@ -473,12 +562,436 @@ Deno.test("FsTree - handler nodes coexist with regular files", () => {
 Deno.test("FsTree - clear removes handler nodes", () => {
   const tree = new FsTree();
   const dirIno = tree.addDir(tree.rootIno, "result", "object");
-  const handlerIno = tree.addHandler(dirIno, "add.handler", "add", "result");
+  const handlerIno = tree.addCallable(
+    dirIno,
+    "add.handler",
+    "handler",
+    "add",
+    "result",
+    buildCallableScript("/tmp/ct-exec"),
+  );
 
   tree.clear(dirIno);
 
   assertEquals(tree.getNode(handlerIno), undefined);
   assertEquals(tree.lookup(tree.rootIno, "result"), undefined);
+});
+
+Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () => {
+  const tree = new FsTree();
+  const data = {
+    count: 3,
+    search: {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "items" },
+    },
+  };
+
+  const resultIno = buildJsonTree(
+    tree,
+    tree.rootIno,
+    "result",
+    data,
+    undefined,
+    undefined,
+    0,
+    (value) => isPatternToolValue(value),
+  );
+  const script = buildCallableScript("/tmp/ct-exec");
+  const callableIno = tree.addCallable(
+    resultIno,
+    "search.tool",
+    "tool",
+    "search",
+    "result",
+    script,
+  );
+
+  assertEquals(getFileContent(tree, resultIno, "count"), "3");
+  assertEquals(tree.lookup(resultIno, "search"), undefined);
+  assertEquals(tree.lookup(resultIno, "search.tool"), callableIno);
+
+  const callableNode = tree.getNode(callableIno);
+  assertEquals(callableNode?.kind, "callable");
+  if (callableNode?.kind === "callable") {
+    assertEquals(callableNode.callableKind, "tool");
+    assertEquals(callableNode.cellKey, "search");
+    assertEquals(callableNode.cellProp, "result");
+  }
+});
+
+Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils", () => {
+  const tree = new FsTree();
+  const data = {
+    count: 3,
+    addItem: { $stream: true },
+    search: {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "items" },
+    },
+  };
+
+  buildJsonTree(
+    tree,
+    tree.rootIno,
+    "result",
+    data,
+    undefined,
+    undefined,
+    0,
+    (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (_key, value) => {
+      if (isHandlerCell(value) || isStreamValue(value)) return "handler";
+      return isPatternToolValue(value) ? "tool" : null;
+    },
+  );
+
+  const parsed = JSON.parse(getFileContent(tree, tree.rootIno, "result.json"));
+  assertEquals(parsed.count, 3);
+  assertEquals(parsed.addItem, { "/handler": "addItem" });
+  assertEquals(parsed.search, { "/tool": "search" });
+});
+
+Deno.test("callable scripts begin with a ct exec shebang and shell fallback", () => {
+  const tree = new FsTree();
+  const resultIno = tree.addDir(tree.rootIno, "result", "object");
+  const callableIno = tree.addCallable(
+    resultIno,
+    "search.tool",
+    "tool",
+    "search",
+    "result",
+    buildCallableScript("/tmp/ct-exec"),
+  );
+
+  const node = tree.getNode(callableIno);
+  assertEquals(node?.kind, "callable");
+  if (node?.kind === "callable") {
+    const [firstLine, secondLine] = decoder.decode(node.script).split("\n");
+    assertEquals(firstLine.startsWith("#!"), true);
+    assertEquals(firstLine.includes(" exec"), true);
+    assertEquals(secondLine.includes(' exec "$0" "$@"'), true);
+  }
+});
+
+Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces and entities", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree);
+  const calls: Array<{
+    channel: "input" | "result";
+    path: (string | number)[] | undefined;
+    value: unknown;
+  }> = [];
+  const piece = {
+    id: "of:entity-123",
+    input: {
+      set: (value: unknown, path?: (string | number)[]) => {
+        calls.push({ channel: "input", value, path });
+        return Promise.resolve();
+      },
+    },
+    result: {
+      set: (value: unknown, path?: (string | number)[]) => {
+        calls.push({ channel: "result", value, path });
+        return Promise.resolve();
+      },
+    },
+  };
+
+  const spaceIno = tree.addDir(tree.rootIno, "home");
+  const piecesIno = tree.addDir(spaceIno, "pieces");
+  const entitiesIno = tree.addDir(spaceIno, "entities");
+  const pieceIno = tree.addDir(piecesIno, "notes");
+  const pieceResultIno = tree.addDir(pieceIno, "result", "object");
+  const entityIno = tree.addDir(entitiesIno, "entity-123");
+  const entityResultIno = tree.addDir(entityIno, "result", "object");
+  const script = buildCallableScript("/tmp/ct-exec");
+
+  const piecesHandlerIno = tree.addCallable(
+    pieceResultIno,
+    "add.handler",
+    "handler",
+    "add",
+    "result",
+    script,
+  );
+  const entitiesHandlerIno = tree.addCallable(
+    entityResultIno,
+    "add.handler",
+    "handler",
+    "add",
+    "result",
+    script,
+  );
+
+  bridge.spaces.set("home", {
+    manager: {} as never,
+    pieces: {} as never,
+    spaceIno,
+    piecesIno,
+    entitiesIno,
+    pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceControllers: new Map([["notes", piece as never]]),
+    pieceSubs: new Map(),
+    did: "did:key:home",
+    unsubscribes: [],
+    usedNames: new Set(["notes"]),
+  });
+
+  await bridge.sendToHandler(piecesHandlerIno, { count: 1 });
+  await bridge.sendToHandler(entitiesHandlerIno, { count: 2 });
+
+  assertEquals(calls, [
+    { channel: "result", value: { count: 1 }, path: ["add"] },
+    { channel: "result", value: { count: 2 }, path: ["add"] },
+  ]);
+});
+
+Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse result roots", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+
+  interface FakeCell {
+    schema: Record<string, unknown> | undefined;
+    get(): unknown;
+    getRaw(): unknown;
+    asSchemaFromLinks(): FakeCell;
+    key(segment: string): FakeCell;
+    isStream?: () => boolean;
+  }
+
+  function makeCell(
+    value: unknown,
+    schema: Record<string, unknown> | undefined,
+    children: Record<string, FakeCell> = {},
+    options: { isStream?: boolean } = {},
+  ): FakeCell {
+    return {
+      schema,
+      get: () => value,
+      getRaw: () => value,
+      asSchemaFromLinks() {
+        return this;
+      },
+      key(segment: string) {
+        return children[segment] ?? makeCell(undefined, undefined);
+      },
+      isStream: options.isStream ? () => true : undefined,
+    };
+  }
+
+  const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
+  const toolCell = makeCell(
+    {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "bound-source" },
+    },
+    undefined,
+  );
+  const resultCell = makeCell(
+    undefined,
+    {
+      type: "object",
+      properties: {
+        recordMessage: { type: "object" },
+        search: { type: "object" },
+      },
+    },
+    {
+      recordMessage: handlerCell,
+      search: toolCell,
+    },
+  );
+
+  const piece = {
+    id: "of:entity-123",
+    name: () => "Sparse Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "Sparse Fixture" }),
+    input: {
+      getCell: () =>
+        Promise.resolve(
+          makeCell(undefined, { type: "object", properties: {} }),
+        ),
+      get: () => Promise.resolve(undefined),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve(undefined),
+    },
+  };
+
+  interface SparsePiece {
+    id: string;
+    name(): string;
+    getPatternMeta(): Promise<{ patternName: string }>;
+    input: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+    result: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+  }
+
+  type LoadPieceTree = (
+    piece: SparsePiece,
+    parentIno: bigint,
+    name: string,
+    spaceName: string,
+  ) => Promise<bigint>;
+
+  const pieceIno = await (bridge as unknown as {
+    loadPieceTree: LoadPieceTree;
+  }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  assertEquals(
+    tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
+    true,
+  );
+  assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+
+  const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
+  assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
+  assertEquals(resultJson.search, { "/tool": "search" });
+});
+
+Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populated result fields", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+
+  interface FakeCell {
+    schema: Record<string, unknown> | undefined;
+    get(): unknown;
+    getRaw(): unknown;
+    asSchemaFromLinks(): FakeCell;
+    key(segment: string): FakeCell;
+    isStream?: () => boolean;
+  }
+
+  function makeCell(
+    value: unknown,
+    schema: Record<string, unknown> | undefined,
+    children: Record<string, FakeCell> = {},
+    options: { isStream?: boolean } = {},
+  ): FakeCell {
+    return {
+      schema,
+      get: () => value,
+      getRaw: () => value,
+      asSchemaFromLinks() {
+        return this;
+      },
+      key(segment: string) {
+        return children[segment] ?? makeCell(undefined, undefined);
+      },
+      isStream: options.isStream ? () => true : undefined,
+    };
+  }
+
+  const titleCell = makeCell("hello", { type: "string" });
+  const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
+  const toolCell = makeCell(
+    {
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      },
+      extraParams: { source: "bound-source" },
+    },
+    undefined,
+  );
+  const resultCell = makeCell(
+    { title: "hello" },
+    {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        recordMessage: { type: "object" },
+        search: { type: "object" },
+      },
+    },
+    {
+      title: titleCell,
+      recordMessage: handlerCell,
+      search: toolCell,
+    },
+  );
+
+  const piece = {
+    id: "of:entity-123",
+    name: () => "Mixed Fixture",
+    getPatternMeta: () => Promise.resolve({ patternName: "Mixed Fixture" }),
+    input: {
+      getCell: () =>
+        Promise.resolve(
+          makeCell(undefined, { type: "object", properties: {} }),
+        ),
+      get: () => Promise.resolve(undefined),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve({ title: "hello" }),
+    },
+  };
+
+  interface MixedPiece {
+    id: string;
+    name(): string;
+    getPatternMeta(): Promise<{ patternName: string }>;
+    input: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+    result: {
+      getCell(): Promise<FakeCell>;
+      get(): Promise<unknown>;
+    };
+  }
+
+  type LoadPieceTree = (
+    piece: MixedPiece,
+    parentIno: bigint,
+    name: string,
+    spaceName: string,
+  ) => Promise<bigint>;
+
+  const pieceIno = await (bridge as unknown as {
+    loadPieceTree: LoadPieceTree;
+  }).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  assertEquals(getFileContent(tree, resultIno!, "title"), "hello");
+  assertEquals(
+    tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
+    true,
+  );
+  assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+
+  const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
+  assertEquals(resultJson.title, "hello");
+  assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
+  assertEquals(resultJson.search, { "/tool": "search" });
 });
 
 // --- parseSymlinkTarget tests ---
