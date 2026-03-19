@@ -218,7 +218,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
    * Reconstruct a `FabricError` from its essential state. Nested values
    * in `state` have already been reconstructed by the serialization system.
    * Returns a `FabricError` wrapping the reconstructed `Error`; callers
-   * who need the native `Error` use `nativeValueFromFabricValue()`.
+   * who need the native `Error` use `nativeFromFabricValue()`.
    */
   static [RECONSTRUCT](
     state: FabricValue,
@@ -468,76 +468,4 @@ export class FabricUint8Array extends FabricNativeWrapper<Blob | Uint8Array> {
   ): FabricUint8Array {
     throw new Error("FabricUint8Array: not yet implemented");
   }
-}
-
-// ---------------------------------------------------------------------------
-// Unwrapping: FabricValue -> native JS types
-// ---------------------------------------------------------------------------
-
-/**
- * Shallow unwrap: convert a `FabricValue` to a native JS value, with
- * freeze-state adjustment for types that support it.
- *
- * Behavior by value category:
- * - **FabricNativeWrapper** (Error, Map, Set, Uint8Array): delegates to
- *   `toNativeValue(frozen)`, which adjusts freeze state.
- * - **Arrays and plain objects**: freeze state is adjusted to match `frozen`
- *   (shallow copy if needed).
- * - **FabricPrimitive** (EpochNsec, EpochDays, ContentId): pass through
- *   as-is (always frozen by construction).
- * - **Non-native FabricInstance** (Cell, Stream, UnknownValue, etc.):
- *   pass through as-is (freeze state is an internal concern of the wrapper).
- * - **Primitives** (null, undefined, boolean, number, string, bigint):
- *   inherently immutable, pass through unchanged.
- */
-export function nativeValueFromFabricValue(
-  value: FabricValue,
-  frozen = true,
-): unknown {
-  if (value instanceof FabricNativeWrapper) {
-    return value.toNativeValue(frozen);
-  }
-
-  // Special primitives (FabricEpochNsec, FabricEpochDays) are simple
-  // value wrappers -- pass through as-is.
-  if (value instanceof FabricPrimitive) {
-    return value;
-  }
-
-  // Primitives (null, undefined, boolean, number, string, bigint) are
-  // inherently immutable -- no freeze adjustment needed.
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value;
-  }
-
-  // Non-native FabricInstance values (Cell, Stream, UnknownValue, etc.)
-  // pass through unchanged -- spreading would strip their prototype/methods,
-  // and their freeze state is an internal concern of the wrapper.
-  if (value instanceof FabricInstance) return value;
-
-  // For arrays and plain objects: ensure the freeze state matches `frozen`.
-  const isFrozen = Object.isFrozen(value);
-  if (frozen === isFrozen) return value; // already matches
-
-  if (frozen) {
-    // Value is unfrozen but caller wants frozen -> freeze a shallow copy.
-    if (Array.isArray(value)) {
-      const copy = new Array(value.length);
-      for (let i = 0; i < value.length; i++) {
-        if (i in value) copy[i] = value[i];
-      }
-      return Object.freeze(copy);
-    }
-    return Object.freeze({ ...value });
-  }
-
-  // Value is frozen but caller wants unfrozen -> shallow copy.
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) copy[i] = value[i];
-    }
-    return copy;
-  }
-  return { ...(value as Record<string, unknown>) };
 }

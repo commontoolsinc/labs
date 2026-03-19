@@ -11,7 +11,6 @@ import {
   FabricNativeWrapper,
   FabricRegExp,
   isConvertibleNativeInstance,
-  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
 import {
   canBeStored,
@@ -247,31 +246,6 @@ describe("FabricRegExp", () => {
       } finally {
         resetDataModelConfig();
       }
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Unwrapping: nativeValueFromFabricValue
-  // --------------------------------------------------------------------------
-
-  describe("nativeValueFromFabricValue", () => {
-    it("unwraps FabricRegExp to frozen RegExp (default)", () => {
-      const sr = new FabricRegExp(/abc/gi);
-      const result = nativeValueFromFabricValue(sr as FabricValue);
-      expect(result).toBeInstanceOf(RegExp);
-      expect((result as RegExp).source).toBe("abc");
-      expect((result as RegExp).flags).toBe("gi");
-      expect(Object.isFrozen(result)).toBe(true);
-    });
-
-    it("unwraps FabricRegExp to unfrozen RegExp when frozen=false", () => {
-      const sr = new FabricRegExp(/abc/gi);
-      const result = nativeValueFromFabricValue(
-        sr as FabricValue,
-        false,
-      );
-      expect(result).toBeInstanceOf(RegExp);
-      expect(Object.isFrozen(result)).toBe(false);
     });
   });
 
