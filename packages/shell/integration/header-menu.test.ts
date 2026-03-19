@@ -105,24 +105,27 @@ describe("header menu tests", () => {
     });
   });
 
-  it("has correct ARIA attributes on trigger", async () => {
+  it("has correct ARIA attributes", async () => {
     const page = shell.page();
     await loginAndGoto();
 
+    // Trigger should have aria-haspopup and aria-expanded=false when closed
     const trigger = await pierce(page, ".nav-picker");
-
-    const hasPopup = await trigger.evaluate(
-      (el: Element) => el.getAttribute("aria-haspopup"),
+    assertEquals(
+      await trigger.evaluate(
+        (el: Element) => el.getAttribute("aria-haspopup"),
+      ),
+      "true",
     );
-    assertEquals(hasPopup, "true");
-
-    const expanded = await trigger.evaluate(
-      (el: Element) => el.getAttribute("aria-expanded"),
+    assertEquals(
+      await trigger.evaluate(
+        (el: Element) => el.getAttribute("aria-expanded"),
+      ),
+      "false",
     );
-    assertEquals(expanded, "false");
 
-    // Open menu and check expanded state changes
-    await trigger.click();
+    // Open menu — aria-expanded should become true
+    await openMenu(page);
     await waitFor(async () => {
       const el = await pierce(page, ".nav-picker");
       const val = await el.evaluate(
@@ -130,22 +133,15 @@ describe("header menu tests", () => {
       );
       return val === "true";
     });
-  });
 
-  it("menu panel has role=menu and items have role=menuitem", async () => {
-    const page = shell.page();
-    await loginAndGoto();
-
-    await openMenu(page);
-
-    // Check role=menu on panel
+    // Panel should have role=menu
     const panel = await pierce(page, ".menu-panel");
-    const panelRole = await panel.evaluate(
-      (el: Element) => el.getAttribute("role"),
+    assertEquals(
+      await panel.evaluate((el: Element) => el.getAttribute("role")),
+      "menu",
     );
-    assertEquals(panelRole, "menu");
 
-    // Check role=menuitem on items
+    // Should have at least 3 menuitems
     const itemCount = await page.evaluate(() => {
       function findInShadow(
         root: Document | ShadowRoot,
