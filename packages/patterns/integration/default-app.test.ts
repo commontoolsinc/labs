@@ -40,10 +40,10 @@ describe("default-app flow test", () => {
     // Wait for the note page to load by checking for the note title
     console.log("Look for '📝 New Note'...");
     await waitFor(async () => {
-      const link = await page.waitForSelector("#header-piece-link", {
+      const el = await page.waitForSelector(".header-piece-name", {
         strategy: "pierce",
       });
-      const innerText = await link.innerText();
+      const innerText = await el.innerText();
       return innerText === "📝 New Note";
     });
 
