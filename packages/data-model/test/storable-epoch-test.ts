@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { StorableEpochDays, StorableEpochNsec } from "../storable-epoch.ts";
 import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
-import { isStorableInstance } from "@commontools/data-model/storable-protocol";
+import { isStorableInstance } from "../storable-protocol.ts";
 import {
   resetStorableValueConfig,
   setStorableValueConfig,
