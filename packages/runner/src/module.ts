@@ -55,6 +55,10 @@ export class ModuleRegistry {
   }
 
   addModuleByRef(ref: string, module: Module): void {
+    Object.defineProperty(module, "debugName", {
+      value: ref,
+      configurable: true,
+    });
     this.moduleMap.set(ref, module);
   }
 

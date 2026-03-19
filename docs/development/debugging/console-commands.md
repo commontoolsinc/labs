@@ -141,6 +141,10 @@ await commontools.rt.setLoggerLevel("debug")         // all loggers
 await commontools.rt.setLoggerLevel("debug", "runner") // specific logger
 await commontools.rt.setLoggerEnabled(true)            // enable all
 await commontools.rt.setLoggerEnabled(false, "runner") // disable one
+
+// Focus on nested piece/materialization runs
+await commontools.rt.setLoggerEnabled(true, "runner.trigger-flow")
+await commontools.rt.setLoggerLevel("debug", "runner.trigger-flow")
 ```
 
 ## Worker Settle Stats
@@ -422,6 +426,69 @@ This helper:
 - annotates them with shape hints like `ui-result`, `runtime-process-cell`,
   `default-app-or-home-state`, and `index-state`
 
+### watchWrites / getWriteStackTrace
+
+Arm a transaction-level write watcher for exact or prefix-matched logical cell
+paths, then inspect the captured stacks after the interaction.
+
+For accumulation tests, keep the same space across runs instead of creating a
+fresh one each time. In the integration harness, set `SPACE_NAME=...` so note
+creation keeps adding to one existing space.
+
+```javascript
+// Watch all root writes in the current shell space
+await commontools.watchWrites({
+  space: commontools.space,
+  path: [],
+  match: "exact",
+  label: "root writes in current space"
+})
+
+// ... perform the interaction ...
+
+const trace = await commontools.getWriteStackTrace()
+trace.slice(-5)
+```
+
+To watch one specific changed cell from trigger trace:
+
+```javascript
+await commontools.watchWrites({
+  space: "did:key:z6Mkm...",
+  id: "of:baedrei...",
+  path: [],
+  match: "exact",
+  label: "default-app state"
+})
+```
+
+Each recorded entry includes:
+
+- the matched `space`, `entityId`, and logical `path`
+- the match mode and optional label
+- the written value kind
+- the captured JavaScript stack at the transaction write callsite
+
+Interpret repeated root writes in this order:
+
+- `setup:setSourceCell`: initial result-cell to process-cell linkage
+- `setup:setRawUntyped`: initial process-cell or result-cell materialization
+- `raw:setRawUntyped`: raw builtin/helper rewriting a result cell directly
+
+If you want immediate log output instead of post-hoc inspection, enable the
+focused worker logger before replaying the interaction:
+
+```javascript
+await commontools.rt.setLoggerEnabled(true, "storage.write-trace")
+await commontools.rt.setLoggerLevel("warn", "storage.write-trace")
+```
+
+Disable the watcher and clear the buffer by passing an empty matcher list:
+
+```javascript
+await commontools.watchWrites([])
+```
+
 ### Agent-Browser Usage
 
 These utilities work well with `agent-browser eval` for automated debugging:
@@ -472,6 +539,8 @@ agent-browser eval "window._cancel()"
 | `commontools.rt.getSettleStatsHistory()` | Get recent worker settle stats history |
 | `commontools.rt.setTriggerTraceEnabled(on)` | Enable/disable worker trigger tracing |
 | `commontools.rt.getTriggerTrace()` | Get recent worker trigger-trace entries |
+| `commontools.rt.setWriteStackTraceMatchers(matchers)` | Watch matched transaction writes and clear old entries |
+| `commontools.rt.getWriteStackTrace()` | Get recent transaction write stack traces |
 | `commontools.vdom.renders()` | List active renderings |
 | `commontools.vdom.tree(el?)` | Raw VDOM tree object |
 | `commontools.vdom.dump(el?)` | Pretty-print VDOM tree |
@@ -481,6 +550,8 @@ agent-browser eval "window._cancel()"
 | `commontools.readCell(opts?)` | Read piece output cell (async) |
 | `commontools.readArgumentCell(opts?)` | Read piece argument cell (async) |
 | `commontools.subscribeToCell(opts?)` | Subscribe to cell updates, returns cancel fn |
+| `commontools.watchWrites(opts?)` | Arm transaction write-stack tracing for matched writes |
+| `commontools.getWriteStackTrace()` | Read captured transaction write stacks |
 | `commontools.explainTriggerTrace(opts?)` | Group and annotate hot trigger-trace changes |
 | `commontools.space` | Current space DID |
 | `commontools.detectNonIdempotent(ms?)` | Run non-idempotent diagnosis (default 5s) |

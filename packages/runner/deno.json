@@ -14,6 +14,7 @@
     "./schemas": "./src/schemas.ts",
     "./storage/inspector": "./src/storage/inspector.ts",
     "./storage/telemetry": "./src/storage/telemetry.ts",
+    "./storage/write-stack-trace": "./src/storage/write-stack-trace.ts",
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",

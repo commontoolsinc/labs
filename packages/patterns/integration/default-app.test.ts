@@ -4,10 +4,39 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commontools/identity";
 import { assert } from "@std/assert";
 
-const { FRONTEND_URL } = env;
+type BrowserWriteTraceEntry = {
+  recordedAt: number;
+  entityId: string;
+  path: string[];
+  writerActionId?: string;
+  stack?: string;
+};
+
+const { FRONTEND_URL, SPACE_NAME } = env;
 const CAPTURE_TRIGGER_TRACE = (() => {
   try {
     return Deno.env.get("CT_CAPTURE_TRIGGER_TRACE") === "1";
+  } catch {
+    return false;
+  }
+})();
+const CAPTURE_WRITE_TRACE_ORDER = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_WRITE_TRACE_ORDER") === "1";
+  } catch {
+    return false;
+  }
+})();
+const CAPTURE_RUNNER_TRIGGER_LOG = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_RUNNER_TRIGGER_LOG") === "1";
+  } catch {
+    return false;
+  }
+})();
+const CAPTURE_RUNNER_TRIGGER_COUNTS = (() => {
+  try {
+    return Deno.env.get("CT_CAPTURE_RUNNER_TRIGGER_COUNTS") === "1";
   } catch {
     return false;
   }
@@ -18,7 +47,7 @@ describe("default-app flow test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  const spaceName = `test-space-${crypto.randomUUID()}`;
+  const spaceName = SPACE_NAME;
 
   it("should create a note via default app and see it in the space list", async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -36,6 +65,27 @@ describe("default-app flow test", () => {
       console.log("Enable trigger trace...");
       await waitFor(async () => {
         return await armTriggerTrace(page);
+      });
+    }
+
+    if (CAPTURE_WRITE_TRACE_ORDER) {
+      console.log("Enable write trace...");
+      await waitFor(async () => {
+        return await armWriteTrace(page);
+      });
+    }
+
+    if (CAPTURE_RUNNER_TRIGGER_LOG) {
+      console.log("Enable runner trigger-flow logger...");
+      await waitFor(async () => {
+        return await armRunnerTriggerLogger(page);
+      });
+    }
+
+    if (CAPTURE_RUNNER_TRIGGER_COUNTS) {
+      console.log("Reset logger baselines...");
+      await waitFor(async () => {
+        return await resetLoggerBaselines(page);
       });
     }
 
@@ -61,7 +111,40 @@ describe("default-app flow test", () => {
       return innerText?.includes("📝 New Note");
     });
 
-    // Navigate back to the space page via header breadcrumb
+    if (CAPTURE_WRITE_TRACE_ORDER) {
+      const writeTraceSummary = await collectWriteTraceOrderSummary(page);
+      assert(writeTraceSummary, "Expected write trace summary to be available");
+      console.log(
+        "Write trace order summary (create note):",
+        JSON.stringify(writeTraceSummary, null, 2),
+      );
+    }
+
+    if (CAPTURE_RUNNER_TRIGGER_LOG) {
+      const runnerLogs = await collectCapturedConsoleLogs(
+        page,
+        "runner.trigger-flow",
+      );
+      assert(runnerLogs, "Expected runner trigger-flow logs to be available");
+      console.log(
+        "Runner trigger-flow logs (create note):",
+        JSON.stringify(runnerLogs, null, 2),
+      );
+    }
+
+    if (CAPTURE_RUNNER_TRIGGER_COUNTS) {
+      const runnerCounts = await collectRunnerTriggerFlowCounts(page);
+      assert(
+        runnerCounts,
+        "Expected runner trigger-flow counts to be available",
+      );
+      console.log(
+        "Runner trigger-flow counts (create note):",
+        JSON.stringify(runnerCounts, null, 2),
+      );
+    }
+
+    // Navigate back to the space page and wait for new note to appear.
     console.log("Navigate back to space page...");
     await waitFor(async () => {
       const el = await page.waitForSelector(".header-space", {
@@ -104,6 +187,78 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
     if (!rt) return false;
     await rt.setTriggerTraceEnabled(false);
     await rt.setTriggerTraceEnabled(true);
+    return true;
+  });
+}
+
+async function armWriteTrace(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools as {
+      watchWrites?: (options: {
+        space?: string;
+        path?: string[];
+        match?: "exact" | "prefix";
+        label?: string;
+      }) => Promise<unknown>;
+      space?: string;
+    } | undefined;
+    if (!api?.watchWrites) return false;
+    await api.watchWrites({
+      space: api.space,
+      path: [],
+      match: "exact",
+      label: "root writes",
+    });
+    return true;
+  });
+}
+
+async function armRunnerTriggerLogger(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools?.rt;
+    const globalState = globalThis as typeof globalThis & {
+      __ctCapturedConsoleLogs?: Array<{ method: string; text: string }>;
+      __ctConsolePatched?: boolean;
+    };
+    if (!api) return false;
+
+    if (!globalState.__ctConsolePatched) {
+      globalState.__ctCapturedConsoleLogs = [];
+      const methods = ["debug", "info", "warn", "error", "log"] as const;
+      for (const method of methods) {
+        const original = console[method].bind(console);
+        console[method] = (...args: unknown[]) => {
+          const text = args.map((arg) => {
+            if (typeof arg === "string") return arg;
+            try {
+              return JSON.stringify(arg);
+            } catch {
+              return String(arg);
+            }
+          }).join(" ");
+          globalState.__ctCapturedConsoleLogs?.push({ method, text });
+          if ((globalState.__ctCapturedConsoleLogs?.length ?? 0) > 500) {
+            globalState.__ctCapturedConsoleLogs?.splice(0, 100);
+          }
+          return original(...args);
+        };
+      }
+      globalState.__ctConsolePatched = true;
+    } else {
+      globalState.__ctCapturedConsoleLogs = [];
+    }
+
+    await api.setLoggerEnabled(true, "runner.trigger-flow");
+    await api.setLoggerLevel("debug", "runner.trigger-flow");
+    return true;
+  });
+}
+
+async function resetLoggerBaselines(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools?.rt;
+    if (!api) return false;
+    await api.resetLoggerBaselines();
     return true;
   });
 }
@@ -166,6 +321,203 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           count,
           samples: samples.get(actionId) ?? [],
         })),
+    };
+  });
+}
+
+async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools as {
+      getWriteStackTrace?: () => Promise<BrowserWriteTraceEntry[]>;
+      readCell?: (options: { id: string }) => Promise<unknown>;
+    } | undefined;
+    if (!api?.getWriteStackTrace || !api.readCell) return null;
+    const readCell = api.readCell;
+
+    const trace = await api.getWriteStackTrace();
+    const rootTrace = trace
+      .filter((entry) => entry.path.length === 0)
+      .sort((a, b) => a.recordedAt - b.recordedAt);
+
+    function classifyStack(stack?: string): string {
+      if (!stack) return "unknown";
+      if (stack.includes("_CellImpl.setSourceCell")) {
+        return "setup:setSourceCell";
+      }
+      if (
+        stack.includes("_CellImpl.setRawUntyped") &&
+        stack.includes("Runner.setupInternal")
+      ) {
+        const runnerLine = stack.match(/runner\\.ts:(\\d+)/)?.[1];
+        if (runnerLine) {
+          const line = Number(runnerLine);
+          if (line >= 300 && line < 330) {
+            return "setup:processCell.setRawUntyped";
+          }
+          if (line >= 330 && line < 360) {
+            return "setup:resultCell.setRawUntyped";
+          }
+        }
+        return "setup:setRawUntyped";
+      }
+      if (stack.includes("_CellImpl.setRawUntyped")) {
+        return "raw:setRawUntyped";
+      }
+      if (stack.includes("sendValueToBinding")) {
+        return "diff:sendValueToBinding";
+      }
+      if (stack.includes("_CellImpl.push")) {
+        return "diff:Cell.push";
+      }
+      if (stack.includes("_CellImpl.send")) {
+        return "diff:Cell.send";
+      }
+      if (stack.includes("_CellImpl.set")) {
+        return "diff:Cell.set";
+      }
+      if (stack.includes("applyChangeSet")) {
+        return "diff:applyChangeSet";
+      }
+      return "other";
+    }
+
+    function interestingCallPath(stack?: string): string[] {
+      if (!stack) return [];
+      const lines = stack.split("\n").map((line) => line.trim());
+      const interesting = lines.filter((line) =>
+        line.includes("handler:") ||
+        line.includes("raw:") ||
+        line.includes("postRun") ||
+        line.includes("Runner.instantiatePatternNode") ||
+        line.includes("Runner.run") ||
+        line.includes("Runner.setupInternal") ||
+        line.includes("sendValueToBinding") ||
+        line.includes("diffAndUpdate") ||
+        line.includes("applyChangeSet") ||
+        line.includes("_CellImpl.push") ||
+        line.includes("_CellImpl.send") ||
+        line.includes("_CellImpl.setSourceCell") ||
+        line.includes("_CellImpl.setRawUntyped") ||
+        line.includes("_CellImpl.set")
+      );
+      return interesting.slice(0, 8);
+    }
+
+    function summarizeValue(value: unknown): Record<string, unknown> {
+      if (value === undefined) return { kind: "undefined" };
+      if (value === null) return { kind: "null" };
+      if (typeof value === "boolean") return { kind: "boolean", value };
+      if (typeof value === "number") return { kind: "number", value };
+      if (typeof value === "string") {
+        return {
+          kind: "string",
+          preview: value.length > 120 ? `${value.slice(0, 117)}...` : value,
+        };
+      }
+      if (Array.isArray(value)) return { kind: "array", length: value.length };
+      if (typeof value !== "object") return { kind: typeof value };
+
+      const record = value as Record<string, unknown>;
+      const internal = typeof record.internal === "object" && record.internal
+        ? record.internal as Record<string, unknown>
+        : undefined;
+      return {
+        kind: "object",
+        topKeys: Object.keys(record).slice(0, 8),
+        internalKeys: internal ? Object.keys(internal).slice(0, 8) : [],
+      };
+    }
+
+    const groups = new Map<string, typeof rootTrace>();
+    for (const entry of rootTrace) {
+      const existing = groups.get(entry.entityId) ?? [];
+      existing.push(entry);
+      groups.set(entry.entityId, existing);
+    }
+
+    const sequences = await Promise.all(
+      [...groups.entries()]
+        .filter(([, entries]) => entries.length > 1)
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 12)
+        .map(async ([entityId, entries]) => {
+          const currentValue = await readCell({ id: entityId });
+          const firstRecordedAt = entries[0]?.recordedAt ?? 0;
+          return {
+            entityId,
+            count: entries.length,
+            currentValue: summarizeValue(currentValue),
+            sequence: entries.map((entry, index) => ({
+              order: index + 1,
+              dtMs: Number((entry.recordedAt - firstRecordedAt).toFixed(3)),
+              kind: classifyStack(entry.stack),
+              writerActionId: entry.writerActionId,
+              callPath: interestingCallPath(entry.stack),
+            })),
+          };
+        }),
+    );
+
+    return {
+      entryCount: trace.length,
+      rootEntryCount: rootTrace.length,
+      repeatedEntityCount: sequences.length,
+      sequences,
+    };
+  });
+}
+
+async function collectCapturedConsoleLogs(
+  page: Page,
+  substring: string,
+): Promise<unknown> {
+  const logs = await page.evaluate(() => {
+    const globalState = globalThis as typeof globalThis & {
+      __ctCapturedConsoleLogs?: Array<{ method: string; text: string }>;
+    };
+    return globalState.__ctCapturedConsoleLogs ?? [];
+  }) as Array<{ method: string; text: string }>;
+
+  return logs
+    .filter((entry) => entry.text.includes(substring))
+    .slice(-80);
+}
+
+async function collectRunnerTriggerFlowCounts(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commontools?.rt;
+    if (!api) return null;
+
+    const { counts } = await api.getLoggerCounts();
+    const loggerCounts = counts["runner.trigger-flow"];
+    if (!loggerCounts) return null;
+    type CountRow = {
+      total: number;
+      debug: number;
+      info: number;
+      warn: number;
+      error: number;
+    };
+    const keyedCounts = loggerCounts as Record<string, CountRow>;
+
+    const toRows = (prefix: string) =>
+      Object.entries(keyedCounts)
+        .filter(([key]) => key.startsWith(prefix))
+        .sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0))
+        .slice(0, 12)
+        .map(([key, value]) => ({
+          key,
+          total: value.total ?? 0,
+          debug: value.debug ?? 0,
+          info: value.info ?? 0,
+          warn: value.warn ?? 0,
+          error: value.error ?? 0,
+        }));
+
+    return {
+      runnerRun: toRows("runner-run/"),
+      setupInternal: toRows("setup-internal/"),
+      instantiatePatternNode: toRows("instantiate-pattern-node/"),
     };
   });
 }

@@ -27,6 +27,10 @@ import {
   IDBCompilationCache,
 } from "@commontools/runner/compilation-cache";
 import {
+  getWriteStackTrace,
+  setWriteStackTraceMatchers,
+} from "@commontools/runner/storage/write-stack-trace";
+import {
   NameSchema,
   nameSchema,
   rendererVDOMSchema,
@@ -55,6 +59,7 @@ import {
   type GetSettleStatsHistoryRequest,
   type GetSettleStatsRequest,
   type GetTriggerTraceRequest,
+  type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
@@ -80,7 +85,9 @@ import {
   type SettleStatsHistoryResponse,
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
+  type SetWriteStackTraceMatchersRequest,
   type TriggerTraceResponse,
+  type WriteStackTraceResponse,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
@@ -310,24 +317,34 @@ export class RuntimeProcessor {
 
       navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
+        const writeContext = runtime.getWriteDebugContext();
         // Add to the space's piece list here if it's from the
         // same space.
         if (link.space !== space) {
           console.warn("Navigating cross-space, not adding to pieces list.");
         } else {
-          pieceManager!.add([target]);
+          void runtime.withWriteDebugContext(writeContext, () =>
+            pieceManager!.add([target])
+          ).catch((e: unknown) => {
+            console.error(
+              "[RuntimeProcessor] Failed to add navigated piece:",
+              {
+                error: e instanceof Error ? e.message : e,
+              },
+            );
+          });
 
           // Track as recently used (async, fire-and-forget)
-          RuntimeProcessor.trackRecentPiece(pieceManager!, target).catch(
-            (e: unknown) => {
-              console.error(
-                "[RuntimeProcessor] Failed to track recent piece:",
-                {
-                  error: e instanceof Error ? e.message : e,
-                },
-              );
-            },
-          );
+          void runtime.withWriteDebugContext(writeContext, () =>
+            RuntimeProcessor.trackRecentPiece(pieceManager!, target)
+          ).catch((e: unknown) => {
+            console.error(
+              "[RuntimeProcessor] Failed to track recent piece:",
+              {
+                error: e instanceof Error ? e.message : e,
+              },
+            );
+          });
         }
 
         self.postMessage({
@@ -337,7 +354,19 @@ export class RuntimeProcessor {
       },
 
       pieceCreatedCallback: (piece) => {
-        pieceManager?.add([piece]);
+        const writeContext = runtime.getWriteDebugContext();
+        const manager = pieceManager;
+        if (!manager) return;
+        void runtime.withWriteDebugContext(writeContext, () =>
+          manager.add([piece])
+        ).catch((e: unknown) => {
+          console.error(
+            "[RuntimeProcessor] Failed to add created piece:",
+            {
+              error: e instanceof Error ? e.message : e,
+            },
+          );
+        });
       },
 
       errorHandlers: [
@@ -802,6 +831,20 @@ export class RuntimeProcessor {
     this.runtime.scheduler.setTriggerTraceEnabled(request.enabled);
   }
 
+  getWriteStackTrace(
+    _request: GetWriteStackTraceRequest,
+  ): WriteStackTraceResponse {
+    return {
+      trace: getWriteStackTrace(),
+    };
+  }
+
+  setWriteStackTraceMatchers(
+    request: SetWriteStackTraceMatchersRequest,
+  ): void {
+    setWriteStackTraceMatchers(request.matchers);
+  }
+
   async handleRequest(
     request: IPCClientRequest,
   ): Promise<RemoteResponse | void> {
@@ -876,6 +919,10 @@ export class RuntimeProcessor {
         return this.getTriggerTrace(request);
       case RequestType.SetTriggerTraceEnabled:
         return this.setTriggerTraceEnabled(request);
+      case RequestType.GetWriteStackTrace:
+        return this.getWriteStackTrace(request);
+      case RequestType.SetWriteStackTraceMatchers:
+        return this.setWriteStackTraceMatchers(request);
       case RequestType.DetectNonIdempotent:
         return await this.detectNonIdempotent(request);
       case RequestType.VDomEvent:

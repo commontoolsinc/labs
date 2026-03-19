@@ -211,6 +211,7 @@ export class Runtime {
   readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
+  private writeDebugContextStack: string[] = [];
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -432,7 +433,52 @@ export class Runtime {
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
+    const debugActionId = this.getWriteDebugContext();
+    if (debugActionId) {
+      (tx as { debugActionId?: string }).debugActionId = debugActionId;
+    }
     return new ExtendedStorageTransaction(tx);
+  }
+
+  getWriteDebugContext(): string | undefined {
+    return this.writeDebugContextStack.at(-1) ?? this.scheduler.currentActionId;
+  }
+
+  withWriteDebugContext<T>(
+    label: string | undefined,
+    fn: () => T,
+  ): T {
+    if (!label) {
+      return fn();
+    }
+
+    this.writeDebugContextStack.push(label);
+    let popped = false;
+    const pop = () => {
+      if (popped) return;
+      popped = true;
+      const index = this.writeDebugContextStack.lastIndexOf(label);
+      if (index >= 0) {
+        this.writeDebugContextStack.splice(index, 1);
+      }
+    };
+
+    try {
+      const result = fn();
+      if (
+        result &&
+        typeof result === "object" &&
+        "then" in result &&
+        typeof result.then === "function"
+      ) {
+        return Promise.resolve(result).finally(pop) as T;
+      }
+      pop();
+      return result;
+    } catch (error) {
+      pop();
+      throw error;
+    }
   }
 
   /**

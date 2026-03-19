@@ -14,6 +14,8 @@ import type {
   SettleStats,
   SettleStatsHistoryEntry,
   TriggerTraceEntry,
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
 } from "@commontools/runner/shared";
 import { Program } from "@commontools/js-compiler/interface";
 import { CellHandle } from "./cell-handle.ts";
@@ -362,6 +364,30 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getTriggerTrace(): Promise<TriggerTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetTriggerTrace>({
       type: RequestType.GetTriggerTrace,
+    });
+    return res.trace;
+  }
+
+  /**
+   * Configure transaction-level write stack tracing in the worker.
+   * Passing an empty matcher list disables the probe and clears prior entries.
+   */
+  async setWriteStackTraceMatchers(
+    matchers: WriteStackTraceMatcher[],
+  ): Promise<void> {
+    await this.#conn.request<RequestType.SetWriteStackTraceMatchers>({
+      type: RequestType.SetWriteStackTraceMatchers,
+      matchers,
+    });
+  }
+
+  /**
+   * Return recent transaction-level write stack trace entries from the worker.
+   * Entries are ordered oldest first.
+   */
+  async getWriteStackTrace(): Promise<WriteStackTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetWriteStackTrace>({
+      type: RequestType.GetWriteStackTrace,
     });
     return res.trace;
   }

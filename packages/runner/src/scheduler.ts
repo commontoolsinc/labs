@@ -378,6 +378,7 @@ export class Scheduler {
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
+  currentActionId?: string;
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
 
@@ -517,6 +518,8 @@ export class Scheduler {
 
   private getOptionalName(value: unknown): string | undefined {
     if (!isRecord(value)) return undefined;
+    const debugName = value.debugName;
+    if (typeof debugName === "string") return debugName;
     const name = value.name;
     return typeof name === "string" ? name : undefined;
   }
@@ -1009,6 +1012,7 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();
+    (tx.tx as { debugActionId?: string }).debugActionId = actionId;
     const actionStartTime = performance.now();
 
     let result: any;
@@ -1111,12 +1115,14 @@ export class Scheduler {
       try {
         // Track executing action for parent-child relationship tracking
         this.executingAction = action;
+        this.currentActionId = actionId;
         logger.timeStart("scheduler", "run", "action");
         Promise.resolve(action(tx))
           .then((actionResult) => {
             logger.timeEnd("scheduler", "run", "action");
             result = actionResult;
             this.executingAction = null;
+            this.currentActionId = undefined;
             logger.debug("schedule-action-timing", () => {
               const duration = ((performance.now() - actionStartTime) / 1000)
                 .toFixed(3);
@@ -1129,11 +1135,13 @@ export class Scheduler {
           .catch((error) => {
             logger.timeEnd("scheduler", "run", "action");
             this.executingAction = null;
+            this.currentActionId = undefined;
             finalizeAction(error);
           });
       } catch (error) {
         logger.timeEnd("scheduler", "run", "action");
         this.executingAction = null;
+        this.currentActionId = undefined;
         finalizeAction(error);
       }
     });

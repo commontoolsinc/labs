@@ -66,6 +66,55 @@ import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
+const triggerFlowLogger = getLogger("runner.trigger-flow", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
+
+function sanitizeDebugLabel(label?: string): string | undefined {
+  if (!label) return undefined;
+  return label.replace(/^async\s+/, "").trim() || undefined;
+}
+
+function getTxDebugActionId(
+  tx?: IExtendedStorageTransaction,
+): string | undefined {
+  return tx
+    ? (tx.tx as { debugActionId?: string }).debugActionId
+    : undefined;
+}
+
+function describePatternOrModule(
+  patternOrModule: Pattern | Module | undefined,
+): string {
+  if (!patternOrModule) return "undefined";
+  if (isModule(patternOrModule)) {
+    if (
+      patternOrModule.type === "ref" &&
+      typeof patternOrModule.implementation === "string"
+    ) {
+      return `module:ref:${patternOrModule.implementation}`;
+    }
+
+    if (typeof patternOrModule.implementation === "function") {
+      const impl = patternOrModule.implementation as {
+        debugName?: string;
+        src?: string;
+        name?: string;
+      };
+      const name = sanitizeDebugLabel(impl.debugName) ??
+        sanitizeDebugLabel(impl.src) ??
+        sanitizeDebugLabel(impl.name) ??
+        "anonymous";
+      return `module:${patternOrModule.type}:${name}`;
+    }
+
+    return `module:${patternOrModule.type}`;
+  }
+
+  return `pattern:nodes=${patternOrModule.nodes.length}`;
+}
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -234,6 +283,17 @@ export class Runner {
     } else {
       pattern = patternOrModule as Pattern;
     }
+
+    const sourceKey = getTxDebugActionId(tx) ?? "none";
+    triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
+      `[SETUP] source=${sourceKey}`,
+      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `process=${processCell.getAsNormalizedFullLink().id}`,
+      `reusedSource=${sourceCell !== undefined}`,
+      `pattern=${describePatternOrModule(patternOrModule)}`,
+      `previousPatternId=${previousPatternId ?? "none"}`,
+      `nextPatternId=${patternId ?? "none"}`,
+    ]);
 
     patternId ??= this.runtime.patternManager.registerPattern(pattern);
     this.runtime.patternManager.savePattern({
@@ -720,6 +780,14 @@ export class Runner {
     options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
+    const sourceKey = getTxDebugActionId(tx) ?? "none";
+
+    triggerFlowLogger.debug(`runner-run/${sourceKey}`, () => [
+      `[RUN] source=${sourceKey}`,
+      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `pattern=${describePatternOrModule(patternOrModule)}`,
+      `providedTx=${Boolean(providedTx)}`,
+    ]);
 
     const { needsStart, pattern } = this.setupInternal(
       tx,
@@ -1079,22 +1147,26 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    moduleRefName?: string,
   ) {
     if (isModule(module)) {
       switch (module.type) {
-        case "ref":
+        case "ref": {
+          const refName = module.implementation as string;
           this.instantiateNode(
             tx,
             this.runtime.moduleRegistry.getModule(
-              module.implementation as string,
+              refName,
             ),
             inputBindings,
             outputBindings,
             processCell,
             addCancel,
             pattern,
+            refName,
           );
           break;
+        }
         case "javascript":
           this.instantiateJavaScriptNode(
             tx,
@@ -1115,6 +1187,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            moduleRefName,
           );
           break;
         case "passthrough":
@@ -1744,6 +1817,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    moduleRefName?: string,
   ) {
     if (typeof module.implementation !== "function") {
       throw new Error(
@@ -1816,8 +1890,20 @@ export class Runner {
       : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
-    const impl = module.implementation as (...args: unknown[]) => Action;
-    const rawName = `raw:${impl.name || "anonymous"}`;
+    const impl = module.implementation as ((...args: unknown[]) => Action) & {
+      src?: string;
+      name?: string;
+    };
+    const rawTargetName = sanitizeDebugLabel(
+      moduleRefName,
+    ) ??
+      sanitizeDebugLabel(
+      (module as { debugName?: string }).debugName,
+      ) ??
+      sanitizeDebugLabel(impl.src) ??
+      sanitizeDebugLabel(impl.name) ??
+      "anonymous";
+    const rawName = `raw:${rawTargetName}`;
     Object.defineProperty(action, "name", {
       value: rawName,
       configurable: true,
@@ -1933,6 +2019,15 @@ export class Runner {
       );
       sendToBindings = true;
     }
+
+    const sourceKey = getTxDebugActionId(tx) ?? "none";
+    triggerFlowLogger.debug(`instantiate-pattern-node/${sourceKey}`, () => [
+      `[PATTERN-NODE] source=${sourceKey}`,
+      `parent=${processCell.getAsNormalizedFullLink().id}`,
+      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `pattern=${describePatternOrModule(patternImpl)}`,
+      `sendToBindings=${sendToBindings}`,
+    ]);
 
     this.run(tx, patternImpl, inputs, resultCell);
 

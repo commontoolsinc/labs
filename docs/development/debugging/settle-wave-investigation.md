@@ -71,7 +71,10 @@ important work can happen off the main thread.
    `scheduler.trigger-flow` logger to `debug` and look for repeated
    `schedule-trigger`, `schedule-change-trigger`, and
    `schedule-resubscribe-path` patterns.
-7. If the trace and focused logs still leave ambiguity, add or expose more
+7. If nested piece setup or view-materialization looks suspicious, raise
+   `runner.trigger-flow` to see which source action id is driving
+   `Runner.run()`, `setupInternal()`, and `instantiatePatternNode()`.
+8. If the trace and focused logs still leave ambiguity, add or expose more
    instrumentation before guessing at a fix.
 
 ## Reproduction Workflow
@@ -87,6 +90,11 @@ The most useful baseline so far was a simple shell flow:
 5. Return to the space home and confirm the note appears in the list.
 
 For the current investigation the space was `perf-space-mmwj1lw4`.
+
+If you are investigating how settle waves scale with existing content, keep the
+same space across runs. For the integration harness, prefer `SPACE_NAME=...`
+over a random space so repeated note creation lands in the same list and the
+fan-out grows naturally.
 
 ## Trace Workflow
 
@@ -272,6 +280,75 @@ deno test -A packages/patterns/integration/default-app.test.ts
 Use `:5173` here when you need the shell to serve the worktree's current code.
 Keep `API_URL` pointed at Toolshed on `:8000`.
 
+## Transaction-Level Write Stack Tracing
+
+Use transaction-level write tracing when trigger trace has already told you
+which cell is noisy and you need the exact write callsite inside the worker.
+
+This probe is opt-in and bounded. It matches writes by logical cell path, not
+the internal `["value", ...]` storage wrapper path, so root cell writes are
+still watched with `path: []`.
+
+Arm it just before the interaction:
+
+```js
+await commontools.watchWrites({
+  space: commontools.space,
+  path: [],
+  match: "exact",
+  label: "root writes in current space",
+})
+```
+
+Replay the interaction, let it settle, then inspect the captured stacks:
+
+```js
+const trace = await commontools.getWriteStackTrace()
+trace.slice(-5)
+```
+
+For a known hot cell from trigger trace, narrow it to that exact entity:
+
+```js
+await commontools.watchWrites({
+  space: "did:key:z6Mkm...",
+  id: "of:baedrei...",
+  path: [],
+  match: "exact",
+  label: "watched hot cell",
+})
+```
+
+What to look for:
+
+- repeated `_CellImpl.setSourceCell` writes point to source-cell materialization
+  rather than reactive recompute logic
+- `Runner.setupInternal -> _CellImpl.setRawUntyped` usually means initial
+  process-cell or result-cell setup, not a later settle-wave recompute
+- `raw:async -> _CellImpl.setRawUntyped` means a raw builtin or raw helper is
+  directly rewriting a result cell; this is the more interesting repeated write
+  to chase after setup noise is removed
+- `Runner.setupInternal` and `Runner.instantiatePatternNode` mean the write is
+  coming from piece instantiation/setup
+- `diffAndUpdate`, `applyChangeSet`, or pattern handler frames point to runtime
+  state updates after setup, which are usually more interesting optimization
+  targets
+- `raw:async ...worker-runtime.js` is still noisy, so keep the next 1-3 frames
+  after it to find the actual pattern or runtime helper behind it
+
+If you want each match printed immediately, turn on the focused logger first:
+
+```js
+await commontools.rt.setLoggerEnabled(true, "storage.write-trace")
+await commontools.rt.setLoggerLevel("warn", "storage.write-trace")
+```
+
+Disable the watcher and clear the buffer with:
+
+```js
+await commontools.watchWrites([])
+```
+
 ### How To Interpret Logger Deltas
 
 Use the deltas to narrow the problem:
@@ -290,7 +367,9 @@ Use the deltas to narrow the problem:
 ## Selective Debug Logging
 
 Use `scheduler.trigger-flow` first when you only need change-trigger causality.
-Keep full `scheduler` debug logging for deeper settle-loop work.
+Use `runner.trigger-flow` when the problem looks like repeated nested piece
+setup or view-materialization. Keep full `scheduler` debug logging for deeper
+settle-loop work.
 
 Enable the focused trigger logger briefly:
 
@@ -305,12 +384,50 @@ After you capture enough detail, return it to a quieter level:
 await commontools.rt.setLoggerLevel("warn", "scheduler.trigger-flow")
 ```
 
+Enable the focused runner logger when you need to know which source action is
+calling back into `Runner.run()`:
+
+```js
+await commontools.rt.setLoggerEnabled(true, "runner.trigger-flow")
+await commontools.rt.setLoggerLevel("debug", "runner.trigger-flow")
+```
+
+This logger keys counts by source action id, so even without reading every log
+line you can tell whether nested runs are coming from `raw:wish`,
+`raw:navigateTo`, or a handler/computation path.
+
 If you still need settle-loop internals, then raise the broader scheduler logger:
 
 ```js
 await commontools.rt.setLoggerEnabled(true, "scheduler")
 await commontools.rt.setLoggerLevel("debug", "scheduler")
 ```
+
+## Disambiguate `raw:async -> Runner.run`
+
+If a write stack shows:
+
+- `Runner.setupInternal`
+- `Runner.run`
+- `raw:async ...`
+
+do not assume it is navigation.
+
+In the current builtin set, only two raw builtins are async:
+
+- [`navigate-to.ts`](/Users/berni/labs-perf-settle-wave-debugging/packages/runner/src/builtins/navigate-to.ts)
+- [`wish.ts`](/Users/berni/labs-perf-settle-wave-debugging/packages/runner/src/builtins/wish.ts)
+
+The important distinction is:
+
+- `wish` directly calls `runtime.runSynced()`, which flows into
+  `Runner.run()` / `setupInternal()`
+- `navigateTo` does not call `Runner.run()` directly; it hands off to
+  `navigateCallback` and follow-on shell/runtime work
+
+So a direct `raw:async -> Runner.run` stack is currently a strong signal for
+`wish`, while navigation-related churn tends to show up through
+runtime-processor or piece-manager follow-on paths instead.
 
 ### What To Look For In Debug Logs
 
@@ -620,6 +737,57 @@ Interpretation:
 - sink-path actions add a lot of noise, so the next instrumentation pass should
   group low-level writes into fewer semantic classes before we decide what to
   optimize
+
+### Transaction Write-Trace Example
+
+One March 18, 2026 manual run used the new transaction write watcher against
+all root writes in the current space while creating a note from an already-open
+note page:
+
+```js
+await commontools.watchWrites({
+  space: commontools.space,
+  path: [],
+  match: "exact",
+  label: "root writes in current space",
+})
+```
+
+That interaction recorded `30` matched root writes. The dominant stack
+signatures were:
+
+- `Runner.setupInternal -> _CellImpl.setSourceCell` (`5` writes)
+- `Runner.setupInternal -> _CellImpl.setRawUntyped` (`5` writes through one
+  setup branch and `5` through another)
+- `diffAndUpdate -> applyChangeSet -> _CellImpl.set/_CellImpl.send` (`3`
+  writes)
+
+Representative stacks also showed:
+
+- `handler:.../api/patterns/notes/note.tsx:1:23` on one note-page source-cell
+  write
+- `Runner.instantiatePatternNode` on note output and vnode setup writes
+- `raw:async ...worker-runtime.js` above several setup-time root writes
+
+Going one level higher in source terms, those stacks mapped to:
+
+- `handler:...notes/note.tsx -> postRun() -> Runner.run() -> Runner.setupInternal()`
+- `Runner.instantiatePatternNode() -> Runner.run() -> Runner.setupInternal()`
+- `raw:async -> postRun()/sendValueToBinding() -> Runner.run() -> Runner.setupInternal()`
+
+For the smaller diff/write cluster, the deeper paths mapped to:
+
+- `Cell.set()/Cell.send()/Cell.push() -> diffAndUpdate() -> applyChangeSet()`
+- `sendValueToBinding() -> diffAndUpdate() -> applyChangeSet()`
+
+Interpretation:
+
+- many broad root writes are still piece setup/materialization writes, not just
+  repeated reactive recomputes
+- each new cell commonly produces a pair of writes: one source-cell marker and
+  one value write
+- the smaller `diffAndUpdate` cluster is a better candidate for true
+  post-setup churn than the raw setup pairs
 
 ### Source Inspection Notes
 

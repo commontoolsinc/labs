@@ -283,4 +283,41 @@ describe("Pattern Runner - ifElse", () => {
     const result2 = pieceCell.withTx(tx).get();
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
+
+  it("names raw ifElse actions from the builtin ref", async () => {
+    const subscribedActions: Array<{ name?: string; src?: string }> = [];
+    const originalSubscribe = runtime.scheduler.subscribe.bind(
+      runtime.scheduler,
+    );
+    (
+      runtime.scheduler as unknown as {
+        subscribe: typeof originalSubscribe;
+      }
+    ).subscribe = ((action, ...rest) => {
+      subscribedActions.push({
+        name: action.name,
+        src: (action as { src?: string }).src,
+      });
+      return originalSubscribe(action, ...rest);
+    }) as typeof originalSubscribe;
+
+    const ifElsePattern = pattern<{ condition: boolean }>(({ condition }) => ({
+      value: ifElse(condition, "A", "B"),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "ifElse action naming",
+      ifElsePattern.resultSchema,
+      tx,
+    );
+
+    runtime.run(tx, ifElsePattern, { condition: true }, resultCell);
+    await tx.commit();
+
+    expect(subscribedActions).toContainEqual({
+      name: "raw:ifElse",
+      src: "raw:ifElse",
+    });
+  });
 });

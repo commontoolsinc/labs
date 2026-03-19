@@ -5,6 +5,8 @@
  *   - readCell(options?)
  *   - readArgumentCell(options?)
  *   - subscribeToCell(options?)
+ *   - watchWrites(options?)
+ *   - getWriteStackTrace()
  *   - explainTriggerTrace(options?)
  */
 
@@ -13,6 +15,8 @@ import type {
   CellRef,
   RuntimeClient,
   TriggerTraceEntry,
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
 } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
@@ -35,6 +39,13 @@ interface ExplainTriggerTraceOptions {
   rootOnly?: boolean;
   /** Include the full current value in each returned change. Defaults to false. */
   includeCurrentValue?: boolean;
+}
+
+interface WatchWritesOptions extends DebugCellOptions {
+  /** Path matching mode. Defaults to "exact". */
+  match?: "exact" | "prefix";
+  /** Optional label shown in recorded write-trace entries. */
+  label?: string;
 }
 
 export interface DebugValueSummary {
@@ -122,6 +133,21 @@ function buildCellRef(
     path,
     type: "application/json",
   } as CellRef;
+}
+
+function normalizeWriteTraceMatcher(
+  defaultSpace: string,
+  options: WatchWritesOptions,
+): WriteStackTraceMatcher {
+  return {
+    space: (options.space ?? defaultSpace) as DID,
+    entityId: options.id || options.did
+      ? normalizeEntityId(options) as WriteStackTraceMatcher["entityId"]
+      : undefined,
+    path: [...(options.path ?? [])],
+    match: options.match ?? "exact",
+    label: options.label,
+  };
 }
 
 export function summarizeDebugValue(value: unknown): DebugValueSummary {
@@ -397,6 +423,49 @@ export function createDebugUtils(
     return cancel;
   }
 
+  async function watchWrites(
+    options?: WatchWritesOptions | WatchWritesOptions[],
+  ): Promise<WriteStackTraceMatcher[] | undefined> {
+    const rt = getRt();
+    if (!rt) {
+      console.error("[debug] No runtime available");
+      return undefined;
+    }
+
+    const defaultSpace = getSpace() as string | undefined;
+
+    const matcherOptions = options
+      ? (Array.isArray(options) ? options : [options])
+      : [];
+    if (
+      !defaultSpace &&
+      matcherOptions.some((matcher) => !matcher.space)
+    ) {
+      console.error(
+        "[debug] No space available — pass { space } in each matcher",
+      );
+      return undefined;
+    }
+    const matchers = matcherOptions.map((matcher) =>
+      normalizeWriteTraceMatcher(defaultSpace ?? "", matcher)
+    );
+    await rt.setWriteStackTraceMatchers(matchers);
+    console.log("[debug] watchWrites matchers:", matchers);
+    return matchers;
+  }
+
+  async function getWriteStackTrace(): Promise<WriteStackTraceEntry[] | undefined> {
+    const rt = getRt();
+    if (!rt) {
+      console.error("[debug] No runtime available");
+      return undefined;
+    }
+
+    const trace = await rt.getWriteStackTrace();
+    console.log("[debug] getWriteStackTrace:", trace);
+    return trace;
+  }
+
   async function explainTriggerTrace(
     options: ExplainTriggerTraceOptions = {},
   ): Promise<ExplainedTriggerTrace | undefined> {
@@ -439,5 +508,12 @@ export function createDebugUtils(
     return explained;
   }
 
-  return { readCell, readArgumentCell, subscribeToCell, explainTriggerTrace };
+  return {
+    readCell,
+    readArgumentCell,
+    subscribeToCell,
+    watchWrites,
+    getWriteStackTrace,
+    explainTriggerTrace,
+  };
 }

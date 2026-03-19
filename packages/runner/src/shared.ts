@@ -42,3 +42,8 @@ export type {
   TriggerTraceValueKind,
   TriggerTraceValueSummary,
 } from "./scheduler.ts";
+export type {
+  WriteStackTraceEntry,
+  WriteStackTraceMatchMode,
+  WriteStackTraceMatcher,
+} from "./storage/write-stack-trace.ts";

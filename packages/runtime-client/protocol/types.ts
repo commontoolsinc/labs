@@ -7,6 +7,8 @@ import type {
   SettleStats,
   SettleStatsHistoryEntry,
   TriggerTraceEntry,
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
 } from "@commontools/runner/shared";
 import type { DID, KeyPairRaw } from "@commontools/identity";
 import { type Program } from "@commontools/js-compiler/interface";
@@ -51,6 +53,8 @@ export enum RequestType {
   SetSettleStatsEnabled = "runtime:setSettleStatsEnabled",
   GetTriggerTrace = "runtime:getTriggerTrace",
   SetTriggerTraceEnabled = "runtime:setTriggerTraceEnabled",
+  GetWriteStackTrace = "runtime:getWriteStackTrace",
+  SetWriteStackTraceMatchers = "runtime:setWriteStackTraceMatchers",
   DetectNonIdempotent = "runtime:detectNonIdempotent",
 
   // Page operations (main -> worker)
@@ -243,6 +247,15 @@ export interface SetTriggerTraceEnabledRequest extends BaseRequest {
   enabled: boolean;
 }
 
+export interface GetWriteStackTraceRequest extends BaseRequest {
+  type: RequestType.GetWriteStackTrace;
+}
+
+export interface SetWriteStackTraceMatchersRequest extends BaseRequest {
+  type: RequestType.SetWriteStackTraceMatchers;
+  matchers: WriteStackTraceMatcher[];
+}
+
 export interface DetectNonIdempotentRequest extends BaseRequest {
   type: RequestType.DetectNonIdempotent;
   durationMs?: number;
@@ -258,6 +271,10 @@ export interface SettleStatsHistoryResponse {
 
 export interface TriggerTraceResponse {
   trace: TriggerTraceEntry[];
+}
+
+export interface WriteStackTraceResponse {
+  trace: WriteStackTraceEntry[];
 }
 
 export interface DetectNonIdempotentResponse {
@@ -470,6 +487,8 @@ export type IPCClientRequest =
   | SetSettleStatsEnabledRequest
   | GetTriggerTraceRequest
   | SetTriggerTraceEnabledRequest
+  | GetWriteStackTraceRequest
+  | SetWriteStackTraceMatchersRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -602,6 +621,7 @@ export type RemoteResponse =
   | SettleStatsResponse
   | SettleStatsHistoryResponse
   | TriggerTraceResponse
+  | WriteStackTraceResponse
   | PageResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse;
@@ -685,6 +705,14 @@ export type Commands = {
   };
   [RequestType.SetTriggerTraceEnabled]: {
     request: SetTriggerTraceEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetWriteStackTrace]: {
+    request: GetWriteStackTraceRequest;
+    response: WriteStackTraceResponse;
+  };
+  [RequestType.SetWriteStackTraceMatchers]: {
+    request: SetWriteStackTraceMatchersRequest;
     response: EmptyResponse;
   };
   // Cell requests

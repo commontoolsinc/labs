@@ -5,6 +5,10 @@ import {
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import { RequestType } from "../protocol/mod.ts";
+import {
+  recordWriteStackTrace,
+  setWriteStackTraceMatchers,
+} from "@commontools/runner/storage/write-stack-trace";
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -266,6 +270,22 @@ describe("RuntimeProcessor diagnosis helpers", () => {
     }];
     const settleEnabledValues: boolean[] = [];
     const triggerEnabledValues: boolean[] = [];
+    setWriteStackTraceMatchers([{
+      space: "did:key:test",
+      entityId: "of:cell-1",
+      path: [],
+      match: "exact",
+      label: "watched root write",
+    }]);
+    recordWriteStackTrace(
+      {
+        space: "did:key:test",
+        id: "of:cell-1",
+        type: "application/json",
+        path: ["value"],
+      },
+      { ok: true },
+    );
     const processor = {
       runtime: {
         scheduler: {
@@ -305,11 +325,39 @@ describe("RuntimeProcessor diagnosis helpers", () => {
           type: RequestType.GetTriggerTrace,
         },
       );
+    const writeTraceResponse = RuntimeProcessor.prototype.getWriteStackTrace
+      .call(
+        processor,
+        {
+          type: RequestType.GetWriteStackTrace,
+        },
+      );
 
     expect(settleEnabledValues).toEqual([true]);
     expect(triggerEnabledValues).toEqual([true]);
     expect(response).toEqual({ stats: expected });
     expect(historyResponse).toEqual({ history });
     expect(triggerTraceResponse).toEqual({ trace: triggerTrace });
+    expect(writeTraceResponse).toEqual({
+      trace: [{
+        recordedAt: expect.any(Number),
+        space: "did:key:test",
+        entityId: "of:cell-1",
+        path: [],
+        match: "exact",
+        label: "watched root write",
+        result: "ok",
+        valueKind: "object",
+        stack: expect.any(String),
+      }],
+    });
+
+    RuntimeProcessor.prototype.setWriteStackTraceMatchers.call(
+      processor,
+      {
+        type: RequestType.SetWriteStackTraceMatchers,
+        matchers: [],
+      },
+    );
   });
 });

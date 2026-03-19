@@ -25,6 +25,7 @@ import type {
 } from "./interface.ts";
 
 import * as Journal from "./transaction/journal.ts";
+import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
 const logger = getLogger("storage-transaction", {
   enabled: false,
@@ -279,7 +280,13 @@ export const write = (
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    return space.write(memoryAddress, value);
+    const result = space.write(memoryAddress, value);
+    if (!result.error) {
+      recordWriteStackTrace(address, value, {
+        writerActionId: (transaction as { debugActionId?: string }).debugActionId,
+      });
+    }
+    return result;
   }
 };
 
