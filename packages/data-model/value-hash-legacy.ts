@@ -6,7 +6,7 @@
  */
 import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
-import { sha256 } from "./hash-impl.ts";
+import { sha256 } from "./sha256-impl.ts";
 import type { ContentId, DefinedReferent } from "./value-hash.ts";
 
 // ---------------------------------------------------------------------------
