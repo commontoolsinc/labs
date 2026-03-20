@@ -48,6 +48,11 @@ import KbdStory from "../stories/ct-kbd-story.tsx";
 import CopyButtonStory from "../stories/ct-copy-button-story.tsx";
 import TagsStory from "../stories/ct-tags-story.tsx";
 import GridStory from "../stories/ct-grid-story.tsx";
+import VignetteTeamInboxStory from "../stories/vignette-team-inbox-story.tsx";
+import VignetteReleaseConsoleStory from "../stories/vignette-release-console-story.tsx";
+import VignetteSupportDeskStory from "../stories/vignette-support-desk-story.tsx";
+import VignetteTodoListStory from "../stories/vignette-todo-list-story.tsx";
+import VignetteZettelkastenWorkspaceStory from "../stories/vignette-zettelkasten-workspace-story.tsx";
 
 interface StoryRendererInput {
   selected: string;
@@ -163,6 +168,16 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TagsStory({});
         case "grid":
           return GridStory({});
+        case "vignette-team-inbox":
+          return VignetteTeamInboxStory({});
+        case "vignette-todo-list":
+          return VignetteTodoListStory({});
+        case "vignette-release-console":
+          return VignetteReleaseConsoleStory({});
+        case "vignette-support-desk":
+          return VignetteSupportDeskStory({});
+        case "vignette-zettelkasten-workspace":
+          return VignetteZettelkastenWorkspaceStory({});
         default:
           return null;
       }

@@ -30,6 +30,19 @@ interface CatalogInput {
       items: [{ id: "kitchen-sink"; label: "Kitchen Sink" }];
     },
     {
+      name: "Vignettes";
+      items: [
+        { id: "vignette-team-inbox"; label: "Team Inbox" },
+        { id: "vignette-todo-list"; label: "Todo List" },
+        { id: "vignette-release-console"; label: "Release Console" },
+        { id: "vignette-support-desk"; label: "Support Desk" },
+        {
+          id: "vignette-zettelkasten-workspace";
+          label: "Zettelkasten Workspace";
+        },
+      ];
+    },
+    {
       name: "Inputs";
       items: [
         { id: "button"; label: "Button" },
