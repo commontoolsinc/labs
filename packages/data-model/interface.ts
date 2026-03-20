@@ -3,6 +3,10 @@
  * data model. This file is intentionally free of runtime imports from other
  * data-model modules (only `import type` is used) so that it can be imported
  * by any module without creating circular dependencies.
+ *
+ * NOTE: `packages/api/index.ts` mirrors these types (and those from
+ * `fabric-hash.ts`, `fabric-epoch.ts`) for the pattern compiler. Changes
+ * here must be kept in sync with the corresponding declarations there.
  */
 
 // ===========================================================================
