@@ -381,16 +381,20 @@ Version 1 of the allowed domain is a deliberate subset of
 - `number`
 - `string`
 - `bigint`
-- non-stateful `RegExp` values (no `g` or `y` flags, no extra own properties,
-  `lastIndex === 0`)
-- `Map` values whose keys and values are allowed values and which have no extra
-  own properties; authored native `Map` instances are normalized to immutable
-  runtime-owned verified map wrappers before they escape module load
-- `Set` values whose members are allowed values and which have no extra own
-  properties; authored native `Set` instances are normalized to immutable
-  runtime-owned verified set wrappers before they escape module load
+- non-stateful `RegExp` values (no `g` or `y` flags); they are cloned during
+  sanitization, which resets `lastIndex` to zero and drops extra own
+  properties
+- `Map` values whose keys and values are allowed values; authored native `Map`
+  instances are normalized to immutable runtime-owned verified map wrappers
+  before they escape module load, and all keys / values they later return are
+  themselves hardened static data
+- `Set` values whose members are allowed values; authored native `Set`
+  instances are normalized to immutable runtime-owned verified set wrappers
+  before they escape module load, and all members they later return are
+  themselves hardened static data
 - arrays of allowed values
-- plain object records with allowed values
+- plain object records produced by recursively materializing enumerable own
+  string-keyed properties with allowed values
 
 Future widening of this set, including temporal primitives or other richer
 `StorableValue` members, requires an explicit spec revision and validator
@@ -400,17 +404,12 @@ version bump. The v1 verifier MUST NOT silently widen with upstream
 The default rejected domain includes:
 
 - functions
+- symbols
 - `Promise`
-- `Error`
 - `WeakMap` / `WeakSet`
 - `Date`
-- class instances
-- proxies
-- objects with symbol keys
-- objects with accessors
-- sparse arrays
 - cyclic object graphs
-- records with reserved keys such as `__proto__`, `constructor`, or `prototype`
+- stateful `RegExp` values using `g` or `y`
 - platform capability objects
 
 Externally observable module-load side effects are disallowed except for
@@ -428,7 +427,13 @@ For collection values, "validated plain-data result" means the escaping value
 is immutable by construction, not merely `Object.freeze(...)`-ed in place.
 Native `Map` / `Set` instances are copied into verified read-only wrapper
 classes so mutator APIs such as `.set()`, `.add()`, `.delete()`, and `.clear()`
-do not survive module load.
+do not survive module load. Arrays are materialized by numeric index, which
+densifies sparse holes to `undefined`. Ordinary objects are materialized from
+enumerable own string-keyed properties only, so non-enumerable and symbol-keyed
+properties do not survive, and reserved property names such as `"__proto__"`
+stay inert data rather than becoming prototype mutation. This materialization
+may trigger authored getters or proxy traps; only the resulting static data
+survives.
 
 `__ct_data(...)` validates the value that survives module load. It no longer
 attempts to classify the authored third argument beyond wrapper shape and
@@ -1025,6 +1030,7 @@ type ModuleSafeValueV1 =
   | number
   | string
   | bigint
+  | RegExp
   | ModuleSafeValueV1[]
   | { [key: string]: ModuleSafeValueV1 };
 
@@ -1035,21 +1041,24 @@ function assertPlainData(
 
 function freezeVerifiedPlainData<T>(value: T): T {
   assertPlainData(value);
-  return harden(value);
+  return harden(normalizeVerifiedPlainData(value));
 }
 ```
 
-`assertPlainData()` MUST validate structure without triggering user-defined
-behavior. In particular, the checker must:
+`assertPlainData()` and `freezeVerifiedPlainData()` are sanitizing conversion
+steps, not descriptor-safe validators. In particular, the v1 sanitizer:
 
-- inspect own property descriptors before reading property values
-- reject accessor properties without invoking getters
-- reject symbol keys
-- reject any object whose prototype is neither `Object.prototype` nor `null`
-- reject arrays with holes or extra own properties
-- reject cycles in v1
-- reject reserved keys such as `__proto__`, `constructor`, and `prototype`
-- reject any `StorableValue` members outside the approved v1 subset
+- recursively clones arrays by numeric index; sparse holes become `undefined`
+- recursively clones enumerable own string-keyed object properties into plain
+  records using own data properties, so reserved keys such as `"__proto__"`
+  remain inert data rather than prototype writes
+- ignores non-enumerable and symbol-keyed object properties
+- clones non-stateful `RegExp` values
+- converts native `Map` / `Set` instances into immutable runtime-owned wrapper
+  values
+- may trigger authored getters or proxy traps while reading the escaping value
+- rejects cycles and unsupported host objects such as functions, symbols,
+  promises, weak collections, dates, and stateful `RegExp` values
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is

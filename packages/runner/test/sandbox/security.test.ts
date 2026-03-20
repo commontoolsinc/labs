@@ -67,23 +67,31 @@ Deno.test("builder wrappers preserve factory semantics and primitive data wrappe
 });
 
 Deno.test("runtime data wrappers accept frozen-safe RegExp, Map, and Set values", () => {
+  const setMember = { channel: "beta" };
+  const mapKey = { name: "alpha" };
   const matcher = createDataWrapper("main.tsx#003:matcher", [], /^[a-z]+$/i);
   const lookup = createDataWrapper(
     "main.tsx#004:lookup",
     [],
-    new Set(["alpha", "beta"]),
+    new Set(["alpha", setMember]),
   );
   const index = createDataWrapper(
     "main.tsx#005:index",
     [],
-    new Map([["alpha", 1], ["beta", 2]]),
+    new Map<unknown, unknown>([["alpha", 1], [mapKey, { count: 2 }]]),
   );
+  const wrappedSetMember = [...lookup][1] as { channel: string };
+  const wrappedMapKey = [...index.keys()][1] as { name: string };
+  const wrappedMapValue = index.get(wrappedMapKey) as { count: number };
   assertEquals(Object.isFrozen(matcher), true);
   assertEquals(matcher.test("Alpha"), true);
   assertEquals(lookup instanceof VerifiedPlainSet, true);
-  assertEquals(lookup.has("beta"), true);
+  assertEquals(lookup.has("alpha"), true);
   assertEquals(index instanceof VerifiedPlainMap, true);
-  assertEquals(index.get("beta"), 2);
+  assertEquals(index.get("alpha"), 1);
+  assertEquals(Object.isFrozen(wrappedSetMember), true);
+  assertEquals(Object.isFrozen(wrappedMapKey), true);
+  assertEquals(Object.isFrozen(wrappedMapValue), true);
   assertThrows(() =>
     createDataWrapper("main.tsx#006:global-matcher", [], /[a-z]+/g)
   );

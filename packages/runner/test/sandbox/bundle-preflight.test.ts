@@ -183,6 +183,34 @@ Deno.test("SES runtime blocks require-mediated namespace mutation inside __ct_da
   );
 });
 
+Deno.test("SES runtime blocks hidden require-mediated mutation during __ct_data sanitization", () => {
+  const runtime = new SESRuntime();
+  const runtimeExports = {
+    commontools: {
+      __ct_data: createDataWrapper,
+    },
+  };
+  const attackBundle = createTrustedBundle(
+    [
+      `define("util",["exports"],function(exports){exports.answer=1;});`,
+      `define("main",["exports","require"],function(exports,require){/*__CT_TOPLEVEL__:main.tsx:000:value:data*/const value=__ctHelpers.__ct_data("main.tsx#000:value",[],({get answer(){const req = eval("requ" + "ire");const util = req("util");util.answer = 2;return util.answer;}}));exports.default=value;});`,
+      `const main = require("main");`,
+      `const exportMap = Object.create(null);`,
+      `exportMap["main"] = require("main");`,
+      `return { main, exportMap };`,
+    ].join(""),
+  );
+
+  assertThrows(() =>
+    runtime.evaluateBundle(
+      "compile-hidden-require",
+      "hidden-require-eval",
+      { js: attackBundle, filename: "hidden-require-attack.js" } as never,
+      { console, runtimeExports },
+    )
+  );
+});
+
 Deno.test("AMD factory verifier enforces canonical wrappers and dependency policy", async (t) => {
   await t.step("accepts trusted runtime imports and same-bundle locals", () => {
     verifyAMDFactory({

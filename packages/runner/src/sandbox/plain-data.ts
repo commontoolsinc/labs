@@ -1,4 +1,3 @@
-import { isProxy } from "nodeUtilTypes";
 import {
   CT_CAPTURE_IDS,
   CT_IMPLEMENTATION_REF,
@@ -6,20 +5,16 @@ import {
   CT_WRAPPER_KIND,
 } from "./types.ts";
 
-const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-const INTERNAL_SYMBOL_KEYS = new Set([
-  CT_CAPTURE_IDS,
-  CT_IMPLEMENTATION_REF,
-  CT_ITEM_ID,
-  CT_WRAPPER_KIND,
-]);
+type Hardener = <T>(value: T) => T;
 
 export class VerifiedPlainMap<K, V> {
-  #entries: Array<readonly [K, V]>;
+  #entries: ReadonlyArray<readonly [K, V]>;
   #lookup: Map<K, V>;
 
   constructor(entries: Iterable<readonly [K, V]>) {
-    this.#entries = [...entries].map(([key, value]) => [key, value] as const);
+    this.#entries = deepHarden(
+      Array.from(entries, ([key, value]) => [key, value] as const),
+    );
     this.#lookup = new Map(this.#entries as Iterable<[K, V]>);
   }
 
@@ -36,8 +31,8 @@ export class VerifiedPlainMap<K, V> {
   }
 
   *entries(): IterableIterator<[K, V]> {
-    for (const [key, value] of this.#entries) {
-      yield [key, value];
+    for (const entry of this.#entries) {
+      yield entry as [K, V];
     }
   }
 
@@ -71,14 +66,12 @@ export class VerifiedPlainMap<K, V> {
   }
 }
 
-Object.freeze(VerifiedPlainMap.prototype);
-
 export class VerifiedPlainSet<T> {
-  #values: T[];
+  #values: ReadonlyArray<T>;
   #lookup: Set<T>;
 
   constructor(values: Iterable<T>) {
-    this.#values = [...values];
+    this.#values = deepHarden([...values]);
     this.#lookup = new Set(this.#values);
   }
 
@@ -92,7 +85,7 @@ export class VerifiedPlainSet<T> {
 
   *entries(): IterableIterator<[T, T]> {
     for (const value of this.#values) {
-      yield [value, value];
+      yield deepHarden([value, value] as const) as [T, T];
     }
   }
 
@@ -124,187 +117,25 @@ export class VerifiedPlainSet<T> {
   }
 }
 
-Object.freeze(VerifiedPlainSet.prototype);
+deepHarden(VerifiedPlainMap.prototype);
+deepHarden(VerifiedPlainSet.prototype);
 
 export function assertPlainData(value: unknown): void {
-  walkPlainData(value, new Set());
+  normalizeVerifiedPlainData(value);
 }
 
 export function normalizeVerifiedPlainData<T>(value: T): T {
-  return normalizePlainData(value, new Map(), new Set());
+  return toStaticData(value, new Map(), new Set());
 }
 
 export function freezeVerifiedPlainData<T>(value: T): T {
-  const normalized = normalizeVerifiedPlainData(value);
-  return deepFreeze(normalized);
+  return deepHarden(normalizeVerifiedPlainData(value));
 }
 
-function walkPlainData(value: unknown, seen: Set<unknown>): void {
-  if (
-    value === null || value === undefined || typeof value === "boolean" ||
-    typeof value === "number" || typeof value === "string" ||
-    typeof value === "bigint"
-  ) {
-    return;
-  }
-
-  if (typeof value === "function" || typeof value === "symbol") {
-    throw new Error("Unsupported plain-data value");
-  }
-
-  if (typeof value !== "object") {
-    throw new Error("Unsupported plain-data primitive");
-  }
-
-  if (isProxy(value)) {
-    throw new Error("Proxy values are not allowed in verified plain data");
-  }
-
-  if (seen.has(value)) {
-    throw new Error("Cycles are not allowed in verified plain data");
-  }
-  seen.add(value);
-
-  assertAllowedSymbolKeys(value);
-
-  if (Array.isArray(value)) {
-    validatePlainArrayStructure(value);
-    for (let index = 0; index < value.length; index++) {
-      const descriptor = getOwnDescriptorOrThrow(value, String(index));
-      if (!("value" in descriptor)) {
-        throw new Error("Accessors are not allowed in verified plain data");
-      }
-      walkPlainData(descriptor.value, seen);
-    }
-    seen.delete(value);
-    return;
-  }
-
-  if (isVerifiedPlainRegExp(value)) {
-    validatePlainRegExp(value);
-    seen.delete(value);
-    return;
-  }
-
-  if (isVerifiedPlainMap(value)) {
-    validateCollectionOwnProperties(value);
-    for (const [key, entry] of value.entries()) {
-      walkPlainData(key, seen);
-      walkPlainData(entry, seen);
-    }
-    seen.delete(value);
-    return;
-  }
-
-  if (isVerifiedPlainSet(value)) {
-    validateCollectionOwnProperties(value);
-    for (const entry of value.values()) {
-      walkPlainData(entry, seen);
-    }
-    seen.delete(value);
-    return;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error("Only plain object records are allowed");
-  }
-
-  validatePlainObjectKeys(value);
-  for (const key of Object.getOwnPropertyNames(value)) {
-    const descriptor = getOwnDescriptorOrThrow(value, key);
-    if (!("value" in descriptor)) {
-      throw new Error("Accessors are not allowed in verified plain data");
-    }
-    walkPlainData(descriptor.value, seen);
-  }
-
-  seen.delete(value);
-}
-
-function validatePlainArrayStructure(value: unknown[]): void {
-  const ownKeys = Object.getOwnPropertyNames(value);
-  for (const key of ownKeys) {
-    if (key === "length") {
-      continue;
-    }
-    if (!isCanonicalArrayIndexKey(key)) {
-      throw new Error(
-        "Arrays may not have extra own properties in verified plain data",
-      );
-    }
-  }
-  for (let index = 0; index < value.length; index++) {
-    if (!Object.prototype.hasOwnProperty.call(value, index)) {
-      throw new Error("Sparse arrays are not allowed in verified plain data");
-    }
-  }
-}
-
-function isVerifiedPlainRegExp(value: object): value is RegExp {
-  return Object.getPrototypeOf(value) === RegExp.prototype;
-}
-
-function validatePlainRegExp(value: RegExp): void {
-  if (value.global || value.sticky) {
-    throw new Error(
-      "Stateful RegExp values are not allowed in verified plain data",
-    );
-  }
-
-  const ownKeys = Object.getOwnPropertyNames(value);
-  for (const key of ownKeys) {
-    if (key !== "lastIndex") {
-      throw new Error("RegExp values may not have extra own properties");
-    }
-  }
-
-  const descriptor = getOwnDescriptorOrThrow(value, "lastIndex");
-  if (!("value" in descriptor)) {
-    throw new Error("Accessors are not allowed in verified plain data");
-  }
-  if (descriptor.value !== 0) {
-    throw new Error("RegExp lastIndex must be zero in verified plain data");
-  }
-}
-
-function isVerifiedPlainMap(
-  value: object,
-): value is Map<unknown, unknown> | VerifiedPlainMap<unknown, unknown> {
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Map.prototype ||
-    prototype === VerifiedPlainMap.prototype;
-}
-
-function isVerifiedPlainSet(
-  value: object,
-): value is Set<unknown> | VerifiedPlainSet<unknown> {
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Set.prototype ||
-    prototype === VerifiedPlainSet.prototype;
-}
-
-function validateCollectionOwnProperties(value: object): void {
-  const ownKeys = Object.getOwnPropertyNames(value);
-  if (ownKeys.length > 0) {
-    throw new Error("Map and Set values may not have extra own properties");
-  }
-}
-
-function validatePlainObjectKeys(value: object): void {
-  for (const key of Object.getOwnPropertyNames(value)) {
-    if (RESERVED_KEYS.has(key)) {
-      throw new Error(
-        `Reserved key '${key}' is not allowed in verified plain data`,
-      );
-    }
-  }
-}
-
-function normalizePlainData<T>(
+function toStaticData<T>(
   value: T,
   copies: Map<unknown, unknown>,
-  seen: Set<unknown>,
+  active: Set<unknown>,
 ): T {
   if (
     value === null || value === undefined || typeof value === "boolean" ||
@@ -322,104 +153,86 @@ function normalizePlainData<T>(
     throw new Error("Unsupported plain-data primitive");
   }
 
-  if (isProxy(value)) {
-    throw new Error("Proxy values are not allowed in verified plain data");
-  }
-
-  if (value instanceof VerifiedPlainMap || value instanceof VerifiedPlainSet) {
+  if (
+    value instanceof VerifiedPlainMap || value instanceof VerifiedPlainSet ||
+    isVerifiedDataCarrier(value)
+  ) {
     return value;
   }
 
-  if (isVerifiedDataCarrier(value)) {
-    return value;
+  if (active.has(value)) {
+    throw new Error("Cycles are not allowed in verified plain data");
   }
 
   const existing = copies.get(value);
   if (existing) {
     return existing as T;
   }
-
-  if (seen.has(value)) {
-    throw new Error("Cycles are not allowed in verified plain data");
-  }
-  seen.add(value);
-
-  assertAllowedSymbolKeys(value);
+  active.add(value);
 
   try {
     if (Array.isArray(value)) {
-      validatePlainArrayStructure(value);
-      copies.set(value, value);
+      const copy = new Array(value.length);
+      copies.set(value, copy);
       for (let index = 0; index < value.length; index++) {
-        const descriptor = getOwnDescriptorOrThrow(value, String(index));
-        if (!("value" in descriptor)) {
-          throw new Error("Accessors are not allowed in verified plain data");
-        }
-        const normalized = normalizePlainData(descriptor.value, copies, seen);
-        if (normalized !== descriptor.value) {
-          Object.defineProperty(value, String(index), {
-            ...descriptor,
-            value: normalized,
-          });
-        }
+        copy[index] = toStaticData(value[index], copies, active);
       }
-      return value;
+      return copy as T;
     }
 
-    if (isVerifiedPlainRegExp(value)) {
+    if (value instanceof RegExp) {
       validatePlainRegExp(value);
-      copies.set(value, value);
-      return value as T;
+      const copy = new RegExp(value.source, value.flags);
+      copies.set(value, copy);
+      return copy as T;
     }
 
-    if (isVerifiedPlainMap(value)) {
-      validateCollectionOwnProperties(value);
-      const normalized = new VerifiedPlainMap(
+    if (value instanceof Map) {
+      const copy = new VerifiedPlainMap(
         Array.from(value.entries(), ([key, entry]) =>
           [
-            normalizePlainData(key, copies, seen),
-            normalizePlainData(entry, copies, seen),
+            toStaticData(key, copies, active),
+            toStaticData(entry, copies, active),
           ] as const),
       );
-      copies.set(value, normalized);
-      return normalized as T;
+      copies.set(value, copy);
+      return copy as T;
     }
 
-    if (isVerifiedPlainSet(value)) {
-      validateCollectionOwnProperties(value);
-      const normalized = new VerifiedPlainSet(
+    if (value instanceof Set) {
+      const copy = new VerifiedPlainSet(
         Array.from(
           value.values(),
-          (entry) => normalizePlainData(entry, copies, seen),
+          (entry) => toStaticData(entry, copies, active),
         ),
       );
-      copies.set(value, normalized);
-      return normalized as T;
+      copies.set(value, copy);
+      return copy as T;
     }
 
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new Error("Only plain object records are allowed");
+    if (
+      value instanceof Promise || value instanceof WeakMap ||
+      value instanceof WeakSet || value instanceof Date
+    ) {
+      throw new Error("Unsupported host object in verified plain data");
     }
 
-    validatePlainObjectKeys(value);
-    copies.set(value, value);
-    for (const key of Object.getOwnPropertyNames(value)) {
-      const descriptor = getOwnDescriptorOrThrow(value, key);
-      if (!("value" in descriptor)) {
-        throw new Error("Accessors are not allowed in verified plain data");
-      }
-      const normalized = normalizePlainData(descriptor.value, copies, seen);
-      if (normalized !== descriptor.value) {
-        Object.defineProperty(value, key, {
-          ...descriptor,
-          value: normalized,
-        });
-      }
+    const copy: Record<string, unknown> = {};
+    copies.set(value, copy);
+    for (const [key, entry] of Object.entries(value)) {
+      defineSanitizedProperty(copy, key, toStaticData(entry, copies, active));
     }
-    return value;
+    return copy as T;
   } finally {
-    seen.delete(value);
+    active.delete(value);
+  }
+}
+
+function validatePlainRegExp(value: RegExp): void {
+  if (value.global || value.sticky) {
+    throw new Error(
+      "Stateful RegExp values are not allowed in verified plain data",
+    );
   }
 }
 
@@ -431,68 +244,65 @@ function isVerifiedDataCarrier(value: object): boolean {
   return (value as Record<PropertyKey, unknown>)[CT_WRAPPER_KIND] === "data";
 }
 
-function assertAllowedSymbolKeys(value: object): void {
-  const symbolKeys = Object.getOwnPropertySymbols(value);
-  if (symbolKeys.some((symbol) => !INTERNAL_SYMBOL_KEYS.has(symbol))) {
-    throw new Error("Symbol keys are not allowed in verified plain data");
-  }
-}
-
-function isCanonicalArrayIndexKey(key: string): boolean {
-  if (!/^(0|[1-9]\d*)$/.test(key)) {
-    return false;
-  }
-  const index = Number(key);
-  return Number.isInteger(index) && index >= 0 && index <= 0xFFFFFFFE &&
-    String(index) === key;
-}
-
-function getOwnDescriptorOrThrow(
-  value: object,
+function defineSanitizedProperty(
+  target: Record<string, unknown>,
   key: string,
-): PropertyDescriptor {
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor) {
-      throw new Error(`Missing descriptor for '${key}'`);
-    }
-    return descriptor;
-  } catch (error) {
-    throw new Error(
-      `Descriptor introspection failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
-function deepFreeze<T>(value: T): T {
-  if (!value || typeof value !== "object" || Object.isFrozen(value)) {
+function deepHarden<T>(value: T): T {
+  const hardener = getHardener();
+  if (hardener) {
+    return hardener(value);
+  }
+  return deepFreezeFallback(value, new Set());
+}
+
+function getHardener(): Hardener | undefined {
+  return (globalThis as typeof globalThis & { harden?: Hardener }).harden;
+}
+
+function deepFreezeFallback<T>(value: T, seen: Set<unknown>): T {
+  if (
+    value === null || value === undefined ||
+    (typeof value !== "object" && typeof value !== "function") ||
+    Object.isFrozen(value)
+  ) {
     return value;
   }
 
-  if (value instanceof VerifiedPlainMap) {
-    for (const [key, entry] of value.entries()) {
-      deepFreeze(key);
-      deepFreeze(entry);
-    }
-    return Object.freeze(value);
+  if (seen.has(value)) {
+    return value;
   }
+  seen.add(value);
 
-  if (value instanceof VerifiedPlainSet) {
-    for (const entry of value.values()) {
-      deepFreeze(entry);
-    }
-    return Object.freeze(value);
-  }
-
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !("value" in descriptor)) {
+  for (const key of Reflect.ownKeys(value as object)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+    if (!descriptor) {
       continue;
     }
-    deepFreeze(descriptor.value);
+    if ("value" in descriptor) {
+      deepFreezeFallback(descriptor.value, seen);
+    }
+    if (descriptor.get) {
+      deepFreezeFallback(descriptor.get, seen);
+    }
+    if (descriptor.set) {
+      deepFreezeFallback(descriptor.set, seen);
+    }
   }
 
   return Object.freeze(value);
 }
+
+void CT_WRAPPER_KIND;
+void CT_ITEM_ID;
+void CT_IMPLEMENTATION_REF;
+void CT_CAPTURE_IDS;
