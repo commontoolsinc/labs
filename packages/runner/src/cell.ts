@@ -59,7 +59,9 @@ import {
 } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 
-type DerivableElement<T> = [NonNullable<T>] extends [Array<infer U>] ? U : T;
+type DerivableElement<T> = T extends null | undefined ? never
+  : T extends Array<infer U> ? U
+  : T;
 import {
   processDefaultValue,
   resolveSchema,

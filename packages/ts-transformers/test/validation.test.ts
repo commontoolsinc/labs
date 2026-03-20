@@ -1243,6 +1243,29 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "does not report opaque-get on plain array callback params inside pattern",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        const xs = items.map((item) => item.get());
+        return { xs };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.some((error) => error.type === "opaque-get:invalid-call"),
+        false,
+        "plain array callback params should not be treated as reactive values",
+      );
+    },
+  );
+
+  await t.step(
     "errors on .get() called on lifted factory result",
     async () => {
       const source = `/// <cts-enable />

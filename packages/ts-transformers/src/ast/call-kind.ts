@@ -110,6 +110,11 @@ export type CallKind =
   | { kind: "reactive-source"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
+type ReactiveValueOptions = {
+  includeArrayMethodCallbackParameters?: boolean;
+  includePatternParameters?: boolean;
+};
+
 const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
   "builder",
   "cell-factory",
@@ -189,6 +194,7 @@ export function isReactiveValueExpression(
   checker: ts.TypeChecker,
   seenSymbols: Set<ts.Symbol> = new Set(),
   plainValueBoundary?: ts.Node | null,
+  options: ReactiveValueOptions = {},
 ): boolean {
   const boundary = plainValueBoundary === undefined
     ? findPlainValueBoundary(expression, checker)
@@ -208,6 +214,7 @@ export function isReactiveValueExpression(
           checker,
           seenSymbols,
           boundary,
+          options,
         );
       }
     }
@@ -228,6 +235,7 @@ export function isReactiveValueExpression(
       checker,
       seenSymbols,
       boundary,
+      options,
     );
   }
 
@@ -237,18 +245,21 @@ export function isReactiveValueExpression(
       checker,
       seenSymbols,
       boundary,
+      options,
     ) ||
       isReactiveValueExpression(
         target.whenTrue,
         checker,
         seenSymbols,
         boundary,
+        options,
       ) ||
       isReactiveValueExpression(
         target.whenFalse,
         checker,
         seenSymbols,
         boundary,
+        options,
       );
   }
 
@@ -264,12 +275,14 @@ export function isReactiveValueExpression(
       checker,
       seenSymbols,
       boundary,
+      options,
     ) ||
       isReactiveValueExpression(
         target.right,
         checker,
         seenSymbols,
         boundary,
+        options,
       );
   }
 
@@ -283,6 +296,7 @@ export function isReactiveValueExpression(
     checker,
     seenSymbols,
     boundary,
+    options,
   );
 }
 
@@ -807,6 +821,7 @@ function isReactiveValueSymbol(
   checker: ts.TypeChecker,
   seenSymbols: Set<ts.Symbol>,
   plainValueBoundary: ts.Node | undefined,
+  options: ReactiveValueOptions,
 ): boolean {
   if (!symbol || seenSymbols.has(symbol)) {
     return false;
@@ -822,7 +837,7 @@ function isReactiveValueSymbol(
     }
 
     if (ts.isParameter(declaration)) {
-      if (isReactiveParameterDeclaration(declaration, checker)) {
+      if (isReactiveParameterDeclaration(declaration, checker, options)) {
         return true;
       }
       continue;
@@ -830,7 +845,10 @@ function isReactiveValueSymbol(
 
     if (ts.isBindingElement(declaration)) {
       const parameter = getOwningParameterDeclaration(declaration);
-      if (parameter && isReactiveParameterDeclaration(parameter, checker)) {
+      if (
+        parameter &&
+        isReactiveParameterDeclaration(parameter, checker, options)
+      ) {
         return true;
       }
 
@@ -842,6 +860,7 @@ function isReactiveValueSymbol(
           checker,
           seenSymbols,
           plainValueBoundary,
+          options,
         )
       ) {
         return true;
@@ -857,6 +876,7 @@ function isReactiveValueSymbol(
         checker,
         seenSymbols,
         plainValueBoundary,
+        options,
       )
     ) {
       return true;
@@ -869,6 +889,7 @@ function isReactiveValueSymbol(
 function isReactiveParameterDeclaration(
   declaration: ts.ParameterDeclaration,
   checker: ts.TypeChecker,
+  options: ReactiveValueOptions,
 ): boolean {
   const owner = declaration.parent;
   if (
@@ -890,6 +911,7 @@ function isReactiveParameterDeclaration(
 
   const callKind = detectCallKind(current, checker);
   if (
+    options.includePatternParameters !== false &&
     callKind?.kind === "builder" &&
     callKind.builderName === "pattern" &&
     owner.parameters[0] === declaration
@@ -897,7 +919,8 @@ function isReactiveParameterDeclaration(
     return true;
   }
 
-  return callKind?.kind === "array-method";
+  return options.includeArrayMethodCallbackParameters !== false &&
+    callKind?.kind === "array-method";
 }
 
 function findPlainValueBoundary(

@@ -102,6 +102,8 @@ export class OpaqueGetValidationTransformer extends Transformer {
     expr: ts.Expression,
     checker: ts.TypeChecker,
   ): boolean {
-    return isReactiveValueExpression(expr, checker, new Set(), null);
+    return isReactiveValueExpression(expr, checker, new Set(), null, {
+      includeArrayMethodCallbackParameters: false,
+    });
   }
 }

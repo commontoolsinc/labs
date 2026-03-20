@@ -87,6 +87,17 @@ describe("derive type inference", () => {
       expect(sum).toBeDefined();
     });
 
+    it("should distribute derivable element types over unions", () => {
+      const values = Cell.of<number[] | string>();
+
+      const mapped = values.map((value) => {
+        const _typeCheck: number | string = value;
+        return value;
+      });
+
+      expect(mapped).toBeDefined();
+    });
+
     it("should handle nested array types", () => {
       const matrix = Cell.of<number[][]>().getAsOpaqueRefProxy();
 

@@ -690,7 +690,9 @@ export interface IEquatable {
   equalLinks(other: AnyCell<any> | object): boolean;
 }
 
-type DerivableElement<T> = [NonNullable<T>] extends [Array<infer U>] ? U : T;
+type DerivableElement<T> = T extends null | undefined ? never
+  : T extends Array<infer U> ? U
+  : T;
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
