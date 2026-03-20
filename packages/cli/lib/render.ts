@@ -1,4 +1,11 @@
+import { createLLMFriendlyLink, isCell } from "@commontools/runner";
 import { encode } from "@commontools/utils/encoding";
+
+type LinkRenderableCell = {
+  resolveAsCell(): {
+    getAsNormalizedFullLink(): Parameters<typeof createLLMFriendlyLink>[0];
+  };
+};
 
 function stringify(value: unknown): string {
   switch (typeof value) {
@@ -46,7 +53,30 @@ export function render(value: unknown, { json }: { json?: boolean } = {}) {
 
 // Helper function to safely stringify objects with circular references
 export function safeStringify(obj: unknown, maxDepth = 8): string {
+  try {
+    return JSON.stringify(sanitizeForJson(obj, maxDepth), null, 2);
+  } catch (error) {
+    return `<error stringifying object: ${(error as Error)?.message}>`;
+  }
+}
+
+export function sanitizeForJson<TCell extends object = LinkRenderableCell>(
+  obj: unknown,
+  maxDepth = 8,
+  options: {
+    isCellValue?: (value: unknown) => value is TCell;
+    serializeCell?: (value: TCell) => unknown;
+  } = {},
+): unknown {
   const seen = new WeakSet();
+  const isCellValue = options.isCellValue ??
+    ((value: unknown): value is TCell => isCell(value));
+  const serializeCell = options.serializeCell ??
+    ((value: TCell) => ({
+      "@link": createLLMFriendlyLink(
+        (value as LinkRenderableCell).resolveAsCell().getAsNormalizedFullLink(),
+      ),
+    }));
 
   const stringify = (value: unknown, depth = 0): unknown => {
     if (depth > maxDepth) {
@@ -55,6 +85,10 @@ export function safeStringify(obj: unknown, maxDepth = 8): string {
 
     if (value === null || typeof value !== "object") {
       return value;
+    }
+
+    if (isCellValue(value)) {
+      return serializeCell(value);
     }
 
     if (seen.has(value)) {
@@ -75,9 +109,5 @@ export function safeStringify(obj: unknown, maxDepth = 8): string {
     return result;
   };
 
-  try {
-    return JSON.stringify(stringify(obj), null, 2);
-  } catch (error) {
-    return `<error stringifying object: ${(error as Error)?.message}>`;
-  }
+  return stringify(obj);
 }

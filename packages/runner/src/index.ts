@@ -51,6 +51,7 @@ export {
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
+export { createLLMFriendlyLink } from "./link-types.ts";
 export {
   areLinksSame,
   isCellLink as isLink,

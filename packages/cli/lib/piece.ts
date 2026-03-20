@@ -1,7 +1,13 @@
 import { createSession, isDID, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { Runtime, RuntimeProgram, UI, VNode } from "@commontools/runner";
+import {
+  isCell,
+  Runtime,
+  RuntimeProgram,
+  UI,
+  VNode,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { extractUserCode, pieceId, PieceManager } from "@commontools/piece";
 import { PiecesController } from "@commontools/piece/ops";
@@ -841,10 +847,29 @@ export async function getCellValue(
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
   if (options?.input) {
-    return await piece.input.get(path);
+    return unwrapReturnedCells(await piece.input.get(path));
   } else {
-    return await piece.result.get(path);
+    return unwrapReturnedCells(await piece.result.get(path));
   }
+}
+
+export function unwrapReturnedCells(
+  value: unknown,
+  isCellValue: (value: unknown) => value is { get(): unknown } = (
+    value,
+  ): value is { get(): unknown } => isCell(value),
+): unknown {
+  const seen = new Set<unknown>();
+  while (isCellValue(value)) {
+    if (seen.has(value)) {
+      throw new Error(
+        "Encountered a cyclic cell reference while reading the piece value.",
+      );
+    }
+    seen.add(value);
+    value = value.get();
+  }
+  return value;
 }
 
 export async function setCellValue(
