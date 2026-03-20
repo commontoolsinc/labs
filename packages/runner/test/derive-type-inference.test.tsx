@@ -337,7 +337,7 @@ describe("derive type inference", () => {
 
       it("should unwrap destructured objects containing Cell<T>", () => {
         const derived = derive({ profile: profileCell }, ({ profile }) => {
-          const _typeCheck: Cell<UserProfile> = profile;
+          const _typeCheck: UserProfile = profile;
           return profile;
         });
 
@@ -349,7 +349,7 @@ describe("derive type inference", () => {
           { profile: Cell<UserProfile> }
         >;
         const derived = derive(container, ({ profile }) => {
-          const _typeCheck: Cell<UserProfile> = profile;
+          const _typeCheck: UserProfile = profile;
           return profile;
         });
 
