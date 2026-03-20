@@ -85,11 +85,7 @@ export function resolveSchema(
 
   // Return no schema if all it said is that this was a reference or an
   // object without properties.
-  if (!isNontrivialSchema(resolvedSchema)) {
-    return undefined;
-  }
-
-  return resolvedSchema;
+  return isNontrivialSchema(resolvedSchema) ? resolvedSchema : undefined;
 }
 
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
@@ -97,10 +93,7 @@ function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
     return schema;
   }
   const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
-  if (!isNontrivialSchema(restSchema)) {
-    return undefined;
-  }
-  return restSchema;
+  return isNontrivialSchema(restSchema) ? restSchema : undefined;
 }
 
 /**
