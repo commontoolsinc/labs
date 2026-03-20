@@ -3,7 +3,7 @@ import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import type { Page } from "@astral/astral";
+import type { Page } from "@commontools/integration";
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;
