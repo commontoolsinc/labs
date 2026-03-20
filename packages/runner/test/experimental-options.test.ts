@@ -49,9 +49,11 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
+        richStorableValues: undefined,
         unifiedJsonEncoding: false,
         modernHash: false,
         modernSchemaHash: false,
+        canonicalHashing: undefined,
       });
       await runtime.dispose();
       await sm.close();
@@ -71,9 +73,11 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
+        richStorableValues: undefined,
         unifiedJsonEncoding: true,
         modernHash: true,
         modernSchemaHash: true,
+        canonicalHashing: undefined,
       });
       await runtime.dispose();
       await sm.close();
@@ -89,13 +93,45 @@ describe("ExperimentalOptions", () => {
           modernHash: true,
         },
       });
-      // Explicitly-set flags should be honored; unset flags should be
-      // `undefined`.
+      expect(runtime.experimental).toEqual({
+        modernDataModel: true,
+        richStorableValues: undefined,
+        unifiedJsonEncoding: undefined,
+        modernHash: true,
+        modernSchemaHash: undefined,
+        canonicalHashing: undefined,
+      });
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("maps richStorableValues onto modernDataModel when the primary flag is unset", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          richStorableValues: true,
+          modernHash: true,
+        },
+      });
       expect(runtime.experimental.modernDataModel).toBe(true);
+      expect(runtime.experimental.richStorableValues).toBe(true);
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("maps canonicalHashing onto modernHash when the primary flag is unset", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          canonicalHashing: true,
+        },
+      });
       expect(runtime.experimental.modernHash).toBe(true);
-      // unifiedJsonEncoding was not set, so it gets `undefined`.
-      expect("unifiedJsonEncoding" in runtime.experimental).toBe(true);
-      expect(runtime.experimental.unifiedJsonEncoding).toBe(undefined);
+      expect(runtime.experimental.canonicalHashing).toBe(true);
       await runtime.dispose();
       await sm.close();
     });
