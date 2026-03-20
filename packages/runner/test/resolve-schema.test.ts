@@ -39,10 +39,11 @@ describe("resolveSchema", () => {
       expect(resolveSchema(false)).toBe(undefined);
     });
 
-    it("returns the same reference for a non-trivial schema (no $ref)", () => {
+    it("returns an equal-but-frozen schema for a non-trivial schema", () => {
       const schema: JSONSchema = { type: "string" };
       const got = resolveSchema(schema);
-      expect(got).toBe(schema);
+      expect(got).toEqual(schema);
+      expect(Object.isFrozen(got)).toBe(true);
     });
 
     it("preserves asCell in returned schema", () => {

@@ -3,6 +3,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
 import { deepFreeze } from "@commontools/data-model/deep-freeze";
 import { isNontrivialSchema } from "@commontools/data-model/schema-utils";
 import { mergeDefaults } from "../src/schema.ts";
@@ -253,6 +254,35 @@ describe("mergeDefaults", () => {
         .toBe(0);
       expect(expectNontrivial(mergeDefaults({ type: "string" }, "")).default)
         .toBe("");
+    });
+  });
+
+  describe("output is frozen", () => {
+    it("should return a deep-frozen schema", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        default: { a: 1 },
+        properties: { a: { type: "number" } },
+      };
+      const result = mergeDefaults(schema, { a: 2 });
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("should deep-freeze the merged default value", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        default: { nested: { x: 1 } },
+      };
+      const result = expectNontrivial(
+        mergeDefaults(schema, { nested: { x: 2 }, extra: [1] }),
+      );
+      expect(isDeepFrozen(result.default)).toBe(true);
+    });
+
+    it("should deep-freeze even for simple-assignment path", () => {
+      const schema: JSONSchema = { type: "array" };
+      const result = mergeDefaults(schema, [1, 2, 3]);
+      expect(isDeepFrozen(result)).toBe(true);
     });
   });
 
