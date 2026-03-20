@@ -310,10 +310,10 @@ export function mergeDefaults(
     : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
-  const mergedDefault =
-    result.type === "object" && isRecord(result.default) && isRecord(defaultValue)
-      ? { ...result.default, ...defaultValue } as JSONValue
-      : defaultValue as JSONValue;
+  const mergedDefault = result.type === "object" && isRecord(result.default) &&
+      isRecord(defaultValue)
+    ? { ...result.default, ...defaultValue } as JSONValue
+    : defaultValue as JSONValue;
 
   result.default = mergedDefault;
   return result;
