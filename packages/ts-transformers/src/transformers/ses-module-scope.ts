@@ -80,7 +80,8 @@ export class SESModuleScopeHoistTransformer extends Transformer {
         : resolveBuilderCallback(node, checker);
       if (
         !callback || !referencesExternalSymbols(callback, checker) ||
-        usesCellMethodCalls(callback)
+        usesCellMethodCalls(callback) ||
+        usesElementAccess(callback)
       ) {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
@@ -882,6 +883,14 @@ function resolveModuleScopeCallbackReference(
 const CELL_METHOD_NAMES = new Set([
   "get",
   "key",
+  "map",
+  "mapWithPattern",
+  "reduce",
+  "findIndex",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
   "push",
   "send",
   "set",
@@ -905,6 +914,29 @@ function usesCellMethodCalls(
       ts.isPropertyAccessExpression(node.expression) &&
       CELL_METHOD_NAMES.has(node.expression.name.text)
     ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(callback.body);
+  return found;
+}
+
+function usesElementAccess(
+  callback: ts.FunctionLikeDeclarationBase,
+): boolean {
+  if (!callback.body) {
+    return false;
+  }
+
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) {
+      return;
+    }
+    if (ts.isElementAccessExpression(node)) {
       found = true;
       return;
     }

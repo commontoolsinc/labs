@@ -435,6 +435,26 @@ Deno.test("SES module-scope validation", async (t) => {
   );
 
   await t.step(
+    "allows handler proxy overloads with direct callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { handler } from "commontools";
+
+      export const visit = handler(
+        (_event, state: { piece: { id: string } }) => state.piece,
+        { proxy: true },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        sesMode: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
     "allows explicit-schema pattern overloads with module-scope callbacks",
     async () => {
       const source = `/// <cts-enable />

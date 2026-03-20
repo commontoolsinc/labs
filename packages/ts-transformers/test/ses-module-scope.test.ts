@@ -249,6 +249,52 @@ export default pattern<{ enabled: Cell<boolean> }>(({ enabled }) => {
   );
 });
 
+Deno.test("SES module-scope does not hoist callbacks that rely on reactive array methods", async () => {
+  const source = `/// <cts-enable />
+import { Default, Writable, computed, pattern } from "commontools";
+
+export default pattern<{ contacts: Writable<Default<{ name: string }[], []>> }>(({ contacts }) => {
+  const selectItems = computed(() =>
+    contacts.map((contact) => ({ label: contact.name, value: contact.name }))
+  );
+  return { selectItems };
+});
+`;
+
+  const output = await transformSource(source, {
+    types: COMMONTOOLS_TYPES,
+    sesMode: true,
+  });
+
+  assertEquals(
+    output.includes("__ct_hoisted_lift_"),
+    false,
+    "callbacks that call reactive array methods must remain inline",
+  );
+});
+
+Deno.test("SES module-scope does not hoist callbacks that index into reactive captures", async () => {
+  const source = `/// <cts-enable />
+import { Default, Writable, computed, pattern } from "commontools";
+
+export default pattern<{ items: Writable<Default<{ name: string }[], []>> }>(({ items }) => {
+  const hasFirstItem = computed(() => items[0]?.name === "Ada");
+  return { hasFirstItem };
+});
+`;
+
+  const output = await transformSource(source, {
+    types: COMMONTOOLS_TYPES,
+    sesMode: true,
+  });
+
+  assertEquals(
+    output.includes("__ct_hoisted_lift_"),
+    false,
+    "callbacks that index into reactive captures must remain inline",
+  );
+});
+
 Deno.test("SES module-scope does not hoist inline derive callbacks with only nested-scope locals", async () => {
   const source = `/// <cts-enable />
 import { derive, pattern } from "commontools";

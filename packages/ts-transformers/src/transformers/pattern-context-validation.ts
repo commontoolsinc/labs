@@ -541,9 +541,7 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!this.isAtModuleScope(node)) {
       return;
     }
-    const callback = builderName === "pattern"
-      ? node.arguments[0]
-      : node.arguments[node.arguments.length - 1];
+    const callback = getDirectBuilderCallbackArgument(node, builderName);
     if (!callback || isInsideSafeCallbackWrapper(callback, checker, context)) {
       return;
     }
@@ -977,6 +975,46 @@ function resolveBuilderCallbackReference(
     ) {
       return declaration.initializer;
     }
+  }
+  return undefined;
+}
+
+function getDirectBuilderCallbackArgument(
+  node: ts.CallExpression,
+  builderName: "lift" | "handler" | "pattern",
+): ts.Expression | undefined {
+  if (builderName === "pattern") {
+    return node.arguments[0];
+  }
+
+  if (builderName === "handler") {
+    const [firstArg, secondArg, thirdArg] = node.arguments;
+    if (thirdArg) {
+      return thirdArg;
+    }
+    if (firstArg && secondArg && isHandlerProxyOptionsArgument(secondArg)) {
+      return firstArg;
+    }
+  }
+
+  return node.arguments[node.arguments.length - 1];
+}
+
+function isHandlerProxyOptionsArgument(node: ts.Expression): boolean {
+  return ts.isObjectLiteralExpression(node) &&
+    node.properties.some((property) =>
+      ts.isPropertyAssignment(property) &&
+      getPropertyNameText(property.name) === "proxy" &&
+      property.initializer.kind === ts.SyntaxKind.TrueKeyword
+    );
+}
+
+function getPropertyNameText(name: ts.PropertyName): string | undefined {
+  if (
+    ts.isIdentifier(name) || ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text;
   }
   return undefined;
 }

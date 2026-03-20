@@ -595,7 +595,12 @@ describe("Engine compile + evaluate", () => {
             "export function readGlobalSurface() {",
             "  const proxyType = typeof Proxy;",
             "  const fetchType = typeof fetch;",
+            "  const dateType = typeof Date;",
+            "  const dateNowType = typeof Date.now;",
+            "  const epoch = new Date(0).getUTCFullYear();",
+            "  const randomType = typeof Math.random;",
             "  const scType = typeof structuredClone;",
+            "  const cloned = structuredClone({ nested: ['ok'] });",
             "  const evalType = typeof eval;",
             "  const functionType = typeof Function;",
             "  const helperKey = '__ct' + 'Helpers';",
@@ -603,7 +608,7 @@ describe("Engine compile + evaluate", () => {
             "  const helperType = typeof helpers.h;",
             "  const helpersFrozen = Object.isFrozen(helpers);",
             "  const hFrozen = Object.isFrozen(helpers.h);",
-            "  return `${proxyType}:${fetchType}:${scType}:${evalType}:${functionType}:${helperType}:${helpersFrozen}:${hFrozen}`;",
+            "  return `${proxyType}:${fetchType}:${dateType}:${dateNowType}:${epoch}:${randomType}:${scType}:${cloned.nested[0]}:${evalType}:${functionType}:${helperType}:${helpersFrozen}:${hFrozen}`;",
             "}",
             "export default readGlobalSurface;",
           ].join("\n"),
@@ -617,7 +622,7 @@ describe("Engine compile + evaluate", () => {
     expect(main).toBeDefined();
     expect(typeof main!["default"]).toBe("function");
     expect((main!["default"] as () => string)()).toBe(
-      "undefined:undefined:undefined:function:function:function:true:true",
+      "undefined:undefined:function:function:1970:function:function:ok:function:function:function:true:true",
     );
   });
 
