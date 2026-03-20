@@ -74,16 +74,24 @@ const logger = getLogger("storage.v2", {
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
+const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+type CachedTransactionValue =
+  | StorableDatum
+  | typeof UNCACHED_TRANSACTION_VALUE
+  | undefined;
 
 type PendingVersion = {
   localSeq: number;
   value: EntityDocument | undefined;
+  transactionValue: CachedTransactionValue;
 };
 
 type ConfirmedVersion = {
   seq: number;
   hash?: string;
   value: EntityDocument | undefined;
+  transactionValue: CachedTransactionValue;
 };
 
 type DocumentRecord = {
@@ -103,6 +111,35 @@ type PendingCommitRead = {
   path: string[];
   localSeq: number;
   nonRecursive?: boolean;
+};
+
+const pendingVersion = (
+  localSeq: number,
+  value: EntityDocument | undefined,
+): PendingVersion => ({
+  localSeq,
+  value,
+  transactionValue: UNCACHED_TRANSACTION_VALUE,
+});
+
+const confirmedVersion = (
+  seq: number,
+  value: EntityDocument | undefined,
+  hash?: string,
+): ConfirmedVersion => ({
+  seq,
+  value,
+  ...(hash !== undefined ? { hash } : {}),
+  transactionValue: UNCACHED_TRANSACTION_VALUE,
+});
+
+const transactionValueForVersion = (
+  version: PendingVersion | ConfirmedVersion,
+): StorableDatum | undefined => {
+  if (version.transactionValue === UNCACHED_TRANSACTION_VALUE) {
+    version.transactionValue = toTransactionDocumentValue(version.value);
+  }
+  return version.transactionValue;
 };
 
 export interface Options {
@@ -1077,11 +1114,11 @@ class SpaceReplica implements ISpaceReplica {
 
     for (const entity of entities) {
       const record = this.record(entity.id as URI);
-      record.confirmed = {
-        seq: entity.seq,
-        hash: entity.hash,
-        value: entity.document ?? undefined,
-      };
+      record.confirmed = confirmedVersion(
+        entity.seq,
+        entity.document ?? undefined,
+        entity.hash,
+      );
     }
 
     const changes = before.compare(this);
@@ -1099,7 +1136,7 @@ class SpaceReplica implements ISpaceReplica {
     let record = this.#docs.get(id);
     if (!record) {
       record = {
-        confirmed: { seq: 0, value: undefined },
+        confirmed: confirmedVersion(0, undefined),
         pending: [],
       };
       this.#docs.set(id, record);
@@ -1113,7 +1150,7 @@ class SpaceReplica implements ISpaceReplica {
     value: EntityDocument | undefined,
   ): void {
     const record = this.record(id);
-    record.pending.push({ localSeq, value });
+    record.pending.push(pendingVersion(localSeq, value));
   }
 
   private confirmPending(
@@ -1134,11 +1171,11 @@ class SpaceReplica implements ISpaceReplica {
       if (!pending) {
         continue;
       }
-      record.confirmed = {
-        seq: applied.seq,
-        hash: fact?.hash,
-        value: pending.value,
-      };
+      record.confirmed = confirmedVersion(
+        applied.seq,
+        pending.value,
+        fact?.hash,
+      );
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
       );
@@ -1154,8 +1191,15 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private visibleValue(id: URI): StorableDatum | undefined {
-    const document = this.visibleDocument(id);
-    return toTransactionDocumentValue(document);
+    const record = this.#docs.get(id);
+    if (!record) {
+      return undefined;
+    }
+    const pending = record.pending.at(-1);
+    if (pending !== undefined) {
+      return transactionValueForVersion(pending);
+    }
+    return transactionValueForVersion(record.confirmed);
   }
 
   private getState(id: URI): State | undefined {

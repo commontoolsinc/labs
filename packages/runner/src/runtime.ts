@@ -39,7 +39,6 @@ import type {
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
-  IStorageNotification,
   IStorageProvider,
   MemorySpace,
   MemoryVersion,
@@ -261,8 +260,6 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
-  #ambientReadTx?: IExtendedStorageTransaction;
-  #ambientReadSubscription?: IStorageNotification;
 
   constructor(options: RuntimeOptions) {
     const defaultMemoryVersion = getDefaultMemoryVersion();
@@ -328,15 +325,6 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
-    if (this.memoryVersion === "v2") {
-      this.#ambientReadSubscription = {
-        next: () => {
-          this.clearAmbientReadTx();
-          return undefined;
-        },
-      };
-      this.storageManager.subscribe(this.#ambientReadSubscription);
-    }
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
@@ -459,8 +447,6 @@ export class Runtime {
       queue.abortPending();
     }
     this.queues.clear();
-    this.removeAmbientReadSubscription();
-    this.clearAmbientReadTx();
     // Stop all running docs
     this.runner.stopAll();
 
@@ -507,7 +493,6 @@ export class Runtime {
   edit(
     options: { changeGroup?: ChangeGroup } = {},
   ): IExtendedStorageTransaction {
-    this.clearAmbientReadTx();
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
@@ -604,38 +589,13 @@ export class Runtime {
     if (tx?.status().status === "ready") {
       return tx;
     }
-    if (this.memoryVersion !== "v2") {
-      return this.createReadTx();
-    }
-    if (this.#ambientReadTx?.status().status === "ready") {
-      return this.#ambientReadTx;
-    }
-    const ambient = this.createReadTx();
-    this.#ambientReadTx = ambient;
-    return ambient;
+    return this.createReadTx();
   }
 
   private createReadTx(): IExtendedStorageTransaction {
     const tx = this.edit();
     tx.setReadOnly?.("runtime.readTx()");
     return tx;
-  }
-
-  private clearAmbientReadTx(): void {
-    const ambient = this.#ambientReadTx;
-    this.#ambientReadTx = undefined;
-    if (ambient?.status().status === "ready") {
-      ambient.clearReadOnly?.();
-      ambient.abort();
-    }
-  }
-
-  private removeAmbientReadSubscription(): void {
-    if (!this.#ambientReadSubscription) {
-      return;
-    }
-    this.storageManager.unsubscribe?.(this.#ambientReadSubscription);
-    this.#ambientReadSubscription = undefined;
   }
 
   // Cell factory methods

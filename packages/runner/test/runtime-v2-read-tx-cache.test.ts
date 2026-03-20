@@ -1,59 +1,15 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import type { DID } from "@commontools/identity";
 import { Identity } from "@commontools/identity";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { IStorageNotification } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runtime-v2-read-tx-cache");
 const space = signer.did();
 
-class MockStorageManager {
-  readonly id = "mock-storage-manager";
-  readonly as = {
-    did: () => space as DID,
-  };
-  readonly memoryVersion: "v1" | "v2";
-  readonly subscriptions: IStorageNotification[] = [];
-  readonly unsubscribed: IStorageNotification[] = [];
-
-  constructor(memoryVersion: "v1" | "v2") {
-    this.memoryVersion = memoryVersion;
-  }
-
-  open(): never {
-    throw new Error("MockStorageManager.open should not be called");
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  edit(): never {
-    throw new Error("MockStorageManager.edit should not be called");
-  }
-
-  synced(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  addCrossSpacePromise(): void {}
-
-  removeCrossSpacePromise(): void {}
-
-  subscribe(subscription: IStorageNotification): void {
-    this.subscriptions.push(subscription);
-  }
-
-  unsubscribe(subscription: IStorageNotification): void {
-    this.unsubscribed.push(subscription);
-  }
-}
-
-describe("Runtime v2 ambient read transaction", () => {
-  it("reuses a single ambient read transaction for repeated reads", async () => {
+describe("Runtime v2 read transaction fallback", () => {
+  it("creates a fresh read transaction for repeated reads", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -78,7 +34,7 @@ describe("Runtime v2 ambient read transaction", () => {
       const seed = runtime.edit();
       const cell = runtime.getCell(
         space,
-        "runtime-v2-ambient-read-reuse",
+        "runtime-v2-fresh-read-tx",
         { type: "number" } as const,
         seed,
       );
@@ -89,84 +45,10 @@ describe("Runtime v2 ambient read transaction", () => {
       expect(cell.get()).toBe(42);
       expect(cell.get()).toBe(42);
       expect(cell.get()).toBe(42);
-      expect(editCalls - baseline).toBe(1);
+      expect(editCalls - baseline).toBe(3);
     } finally {
       await runtime.dispose();
     }
-  });
-
-  it("invalidates the ambient read transaction after commits", async () => {
-    const storageManager = StorageManager.emulate({
-      as: signer,
-      memoryVersion: "v2",
-    });
-    let editCalls = 0;
-    const instrumented = storageManager as typeof storageManager & {
-      edit: typeof storageManager.edit;
-    };
-    const originalEdit = storageManager.edit.bind(storageManager);
-    instrumented.edit = () => {
-      editCalls += 1;
-      return originalEdit();
-    };
-
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      memoryVersion: "v2",
-    });
-
-    try {
-      const seed = runtime.edit();
-      const cell = runtime.getCell(
-        space,
-        "runtime-v2-ambient-read-invalidate",
-        { type: "number" } as const,
-        seed,
-      );
-      cell.set(1);
-      await seed.commit();
-
-      expect(cell.get()).toBe(1);
-      expect(cell.get()).toBe(1);
-      const afterFirstReads = editCalls;
-
-      const update = runtime.edit();
-      cell.withTx(update).set(2);
-      await update.commit();
-
-      expect(cell.get()).toBe(2);
-      expect(editCalls - afterFirstReads).toBe(2);
-      expect(cell.get()).toBe(2);
-      expect(editCalls - afterFirstReads).toBe(2);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("unsubscribes the ambient v2 notification listener on dispose", async () => {
-    const v1Storage = new MockStorageManager("v1");
-    const v1Runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: v1Storage as any,
-      memoryVersion: "v1",
-    });
-
-    await v1Runtime.dispose();
-    expect(v1Storage.unsubscribed).toHaveLength(0);
-
-    const v2Storage = new MockStorageManager("v2");
-    const v2Runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: v2Storage as any,
-      memoryVersion: "v2",
-    });
-
-    await v2Runtime.dispose();
-    expect(v2Storage.unsubscribed).toHaveLength(1);
-    expect(
-      v2Storage.subscriptions.includes(v2Storage.unsubscribed[0]!),
-    ).toBe(true);
   });
 
   it("uses a fresh read transaction for top-level query result proxy reads when no tx is provided", async () => {
@@ -228,7 +110,7 @@ describe("Runtime v2 ambient read transaction", () => {
     }
   });
 
-  it("returns a read-only fallback ambient read transaction", async () => {
+  it("returns fresh read-only fallback transactions", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -243,24 +125,26 @@ describe("Runtime v2 ambient read transaction", () => {
       const seed = runtime.edit();
       const cell = runtime.getCell(
         space,
-        "runtime-v2-read-only-ambient-read",
+        "runtime-v2-read-only-fallback-read",
         { type: "number" } as const,
         seed,
       );
       cell.set(3);
       await seed.commit();
 
-      const readTx = runtime.readTx();
+      const readTx1 = runtime.readTx();
+      const readTx2 = runtime.readTx();
 
-      expect(cell.withTx(readTx).get()).toBe(3);
-      expect(() => readTx.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4))
+      expect(readTx1).not.toBe(readTx2);
+      expect(cell.withTx(readTx1).get()).toBe(3);
+      expect(cell.withTx(readTx2).get()).toBe(3);
+      expect(() => readTx1.writeValueOrThrow(cell.getAsNormalizedFullLink(), 4))
         .toThrow(/runtime\.edit\(\)/);
-      expect(() => readTx.tx.write(cell.getAsNormalizedFullLink(), 4)).toThrow(
-        /runtime\.edit\(\)/,
-      );
-      expect(() => readTx.abort()).toThrow(/runtime\.edit\(\)/);
-      await expect(readTx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
-      await expect(readTx.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
+      expect(() => readTx1.tx.write(cell.getAsNormalizedFullLink(), 4))
+        .toThrow(/runtime\.edit\(\)/);
+      expect(() => readTx1.abort()).toThrow(/runtime\.edit\(\)/);
+      await expect(readTx1.commit()).rejects.toThrow(/runtime\.edit\(\)/);
+      await expect(readTx1.tx.commit()).rejects.toThrow(/runtime\.edit\(\)/);
     } finally {
       await runtime.dispose();
     }

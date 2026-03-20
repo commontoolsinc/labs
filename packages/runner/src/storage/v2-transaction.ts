@@ -63,11 +63,19 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsPotentialWrite,
 } from "./reactivity-log.ts";
-import { toTransactionDocumentValue } from "./v2-document.ts";
 
 type RootAttestation = IAttestation;
 
-type DocumentEntry = {
+type ReadDocumentEntry = {
+  initial: RootAttestation;
+  seq?: number;
+  validated: boolean;
+  current?: RootAttestation;
+  frozenReads?: Map<string, StorableDatum | undefined>;
+  writeDetails?: Map<string, TransactionWriteDetail>;
+};
+
+type WritableDocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
   seq?: number;
@@ -75,6 +83,8 @@ type DocumentEntry = {
   frozenReads: Map<string, StorableDatum | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
 };
+
+type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 
 type SpaceBranch = {
   replica: ReturnType<IStorageManager["open"]>["replica"];
@@ -144,6 +154,28 @@ const sparseArrayCopy = <T>(array: T[]): T[] => {
     copy[index] = value;
   });
   return copy;
+};
+
+const currentDocument = (doc: DocumentEntry): RootAttestation =>
+  doc.current ?? doc.initial;
+
+const isWritableDocument = (
+  doc: DocumentEntry,
+): doc is WritableDocumentEntry =>
+  doc.current !== undefined &&
+  doc.frozenReads !== undefined &&
+  doc.writeDetails !== undefined;
+
+const ensureWritableDocument = (
+  doc: DocumentEntry,
+): WritableDocumentEntry => {
+  if (isWritableDocument(doc)) {
+    return doc;
+  }
+  doc.current = doc.initial;
+  doc.frozenReads = new Map();
+  doc.writeDetails = new Map();
+  return doc as WritableDocumentEntry;
 };
 
 const createMissingContainer = (
@@ -736,6 +768,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const operations: NativeStorageCommitOperation[] = [];
     for (const [key, doc] of branch.docs.entries()) {
+      if (!isWritableDocument(doc)) {
+        continue;
+      }
       if (doc.writeDetails.size === 0) {
         continue;
       }
@@ -766,6 +801,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       return;
     }
     for (const entry of branch.docs.values()) {
+      if (!isWritableDocument(entry)) {
+        continue;
+      }
       yield* entry.writeDetails.values();
     }
   }
@@ -811,6 +849,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.branch(address.space);
     const { doc } = this.document(branch, address);
+    const current = currentDocument(doc);
     const readMeta = options?.meta ?? EMPTY_META;
     const { space: _, ...memoryAddress } = address;
 
@@ -828,7 +867,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: { address, value: undefined } };
     }
     if (!getExperimentalStorableConfig().richStorableValues) {
-      const inspected = inspectPath(doc.current.value, memoryAddress.path);
+      const inspected = inspectPath(current.value, memoryAddress.path);
       if (
         !address.id.startsWith("data:") &&
         !doc.validated
@@ -837,7 +876,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
       if (inspected.kind === "notFound") {
         return {
-          error: NotFound(doc.current, memoryAddress, inspected.path).from(
+          error: NotFound(current, memoryAddress, inspected.path).from(
             address.space,
           ),
         };
@@ -870,20 +909,21 @@ export class V2StorageTransaction implements IStorageTransaction {
       return {
         ok: {
           address: memoryAddress,
-          value: readPathValue(doc.current.value, memoryAddress.path),
+          value: readPathValue(current.value, memoryAddress.path),
         },
       };
     }
-    if (doc.frozenReads.has(cacheKey)) {
+    const frozenReads = doc.frozenReads;
+    if (frozenReads?.has(cacheKey)) {
       return {
         ok: {
           address: memoryAddress,
-          value: doc.frozenReads.get(cacheKey),
+          value: frozenReads.get(cacheKey),
         },
       };
     }
 
-    const result = readAttestation(doc.current, memoryAddress);
+    const result = readAttestation(current, memoryAddress);
     if (
       !address.id.startsWith("data:") &&
       !doc.validated
@@ -895,7 +935,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const frozenValue = freezeReadValue(result.ok.value);
-    doc.frozenReads.set(cacheKey, frozenValue);
+    (doc.frozenReads ??= new Map()).set(cacheKey, frozenValue);
     return {
       ok: {
         ...result.ok,
@@ -974,9 +1014,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
 
-    const { doc } = this.document(branch, address);
+    const { doc: readDoc } = this.document(branch, address);
+    const doc = ensureWritableDocument(readDoc);
     const current = doc.current;
-    const previous = inspectPath(doc.current.value, address.path);
+    const previous = inspectPath(current.value, address.path);
     if (previous.kind === "ok" && deepEqual(previous.value, value)) {
       return { ok: current };
     }
@@ -1035,11 +1076,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (value === undefined) {
-      return { ok: this.document(this.branch(space), address).doc.current };
+      return {
+        ok: currentDocument(this.document(this.branch(space), address).doc),
+      };
     }
 
     const branch = this.branch(space);
-    const { doc } = this.document(branch, address);
+    const { doc: readDoc } = this.document(branch, address);
+    const doc = ensureWritableDocument(readDoc);
     const errorPath = direct.error.path;
     const lastExistingPath = errorPath.slice(0, -1);
     const remainingPath = address.path.slice(lastExistingPath.length);
@@ -1150,7 +1194,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: {} };
     }
 
-    const { doc } = this.document(branch, writes[0]!.address);
+    const { doc: readDoc } = this.document(branch, writes[0]!.address);
+    const doc = ensureWritableDocument(readDoc);
     const originalRoot = doc.current.value;
     let nextRoot = originalRoot;
     let hasMutableRoot = false;
@@ -1221,7 +1266,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemoryAddress,
     value: StorableDatum | undefined,
     previousValue: StorableDatum | undefined,
-    doc: DocumentEntry,
+    doc: WritableDocumentEntry,
   ): void {
     const writeActivity = {
       space,
@@ -1347,6 +1392,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     const writes: IMemorySpaceAddress[] = [];
     for (const branch of this.#branches.values()) {
       for (const doc of branch.docs.values()) {
+        if (!isWritableDocument(doc)) {
+          continue;
+        }
         for (const detail of doc.writeDetails.values()) {
           writes.push({
             space: detail.address.space,
@@ -1433,11 +1481,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       const seq = this.readSeq(branch, address);
       doc = {
         initial: loaded,
-        current: loaded,
         seq,
         validated: false,
-        frozenReads: new Map(),
-        writeDetails: new Map(),
       };
       branch.docs.set(key, doc);
     }
@@ -1472,17 +1517,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       of: address.id,
       the: address.type,
     });
-    const document = address.type === "application/json" &&
-        "getDocument" in branch.replica &&
-        typeof branch.replica.getDocument === "function"
-      ? branch.replica.getDocument(address.id as URI)
-      : undefined;
 
     return {
       address: { id: address.id, type: address.type, path: [] },
-      value: document === undefined
-        ? state.is
-        : toTransactionDocumentValue(document),
+      value: state.is,
     };
   }
 
@@ -1525,6 +1563,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const facts: any[] = [];
     for (const [key, doc] of branch.docs.entries()) {
+      if (!isWritableDocument(doc)) {
+        continue;
+      }
       if (doc.writeDetails.size === 0) {
         continue;
       }
@@ -1553,7 +1594,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private buildPatchOperation(
     id: URI,
     type: MediaType,
-    doc: DocumentEntry,
+    doc: WritableDocumentEntry,
   ): NativeStorageCommitOperation | null {
     if (doc.initial.value === undefined || doc.current.value === undefined) {
       return null;
