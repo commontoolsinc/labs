@@ -5,7 +5,7 @@ import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 
-const signer = await Identity.fromPassphrase("runtime-v2-read-tx-cache");
+const signer = await Identity.fromPassphrase("runtime-v2-read-tx-fallback");
 const space = signer.did();
 
 describe("Runtime v2 read transaction fallback", () => {
