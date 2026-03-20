@@ -161,7 +161,7 @@ export class PatternBuilder {
       : (returnType || originalCallback.type);
 
     if (ts.isArrowFunction(originalCallback)) {
-      return this.factory.createArrowFunction(
+      const arrow = this.factory.createArrowFunction(
         originalCallback.modifiers,
         originalCallback.typeParameters,
         [destructuredParam],
@@ -169,8 +169,15 @@ export class PatternBuilder {
         originalCallback.equalsGreaterThanToken,
         body,
       );
+      return ts.setOriginalNode(
+        ts.setSourceMapRange(
+          ts.setTextRange(arrow, originalCallback),
+          ts.getSourceMapRange(originalCallback) ?? originalCallback,
+        ),
+        originalCallback,
+      );
     } else {
-      return this.factory.createFunctionExpression(
+      const fn = this.factory.createFunctionExpression(
         originalCallback.modifiers,
         originalCallback.asteriskToken,
         originalCallback.name,
@@ -178,6 +185,13 @@ export class PatternBuilder {
         [destructuredParam],
         typeNode,
         body as ts.Block,
+      );
+      return ts.setOriginalNode(
+        ts.setSourceMapRange(
+          ts.setTextRange(fn, originalCallback),
+          ts.getSourceMapRange(originalCallback) ?? originalCallback,
+        ),
+        originalCallback,
       );
     }
   }
@@ -307,13 +321,20 @@ export class PatternBuilder {
       ? undefined
       : (returnType || originalCallback.type);
 
-    return this.factory.createArrowFunction(
+    const arrow = this.factory.createArrowFunction(
       originalCallback.modifiers,
       originalCallback.typeParameters,
       [eventParameter, paramsParameter, ...additionalParameters],
       typeNode,
       originalCallback.equalsGreaterThanToken,
       body,
+    );
+    return ts.setOriginalNode(
+      ts.setSourceMapRange(
+        ts.setTextRange(arrow, originalCallback),
+        ts.getSourceMapRange(originalCallback) ?? originalCallback,
+      ),
+      originalCallback,
     );
   }
 }

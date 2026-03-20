@@ -39,13 +39,41 @@ export class CTHelpers {
   // helper name e.g. `(__ctHelpers.derive)`.
   getHelperExpr(
     name: string,
+    originalNode?: ts.Node,
   ): ts.PropertyAccessExpression {
     if (!this.sourceHasHelpers()) {
       throw new Error("Source file does not contain helpers.");
     }
-    return this.#factory.createPropertyAccessExpression(
+
+    if (!originalNode) {
+      return this.#factory.createPropertyAccessExpression(
+        this.#helperIdent!,
+        name,
+      );
+    }
+
+    const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
+    const helperIdent = ts.setOriginalNode(
+      ts.setSourceMapRange(
+        ts.setTextRange(
+          this.#factory.createIdentifier(this.#helperIdent!.text),
+          originalNode,
+        ),
+        sourceMapRange,
+      ),
       this.#helperIdent!,
-      name,
+    );
+    const helperName = ts.setSourceMapRange(
+      ts.setTextRange(this.#factory.createIdentifier(name), originalNode),
+      sourceMapRange,
+    );
+    const helperExpr = this.#factory.createPropertyAccessExpression(
+      helperIdent,
+      helperName,
+    );
+    return ts.setSourceMapRange(
+      ts.setTextRange(helperExpr, originalNode),
+      sourceMapRange,
     );
   }
 

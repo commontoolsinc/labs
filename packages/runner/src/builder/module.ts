@@ -22,20 +22,58 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const sourceLocationLogger = getLogger("builder.source-location", {
+  enabled: false,
+  level: "debug",
+  logCountEvery: 0,
+});
+const MAX_SOURCE_LOCATION_FLAGS = 40;
+const sourceLocationFlagIds: string[] = [];
+
+function recordSourceLocationSample(metadata: Record<string, unknown>): void {
+  const id = `sample-${Date.now()}-${sourceLocationFlagIds.length + 1}`;
+  sourceLocationLogger.flag("sample", id, true, metadata);
+  sourceLocationFlagIds.push(id);
+  while (sourceLocationFlagIds.length > MAX_SOURCE_LOCATION_FLAGS) {
+    const oldest = sourceLocationFlagIds.shift();
+    if (oldest) {
+      sourceLocationLogger.flag("sample", oldest, false);
+    }
+  }
+}
+
+interface SourceLocationResult {
+  location: string | null;
+  sample?: Record<string, unknown>;
+}
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    const location = getExternalSourceLocation();
+    const { location, sample } = getExternalSourceLocation();
     if (location) {
       Object.defineProperty(moduleSpec.implementation, "name", {
         value: location,
         configurable: true,
       });
       // Also set .src as backup (name can be finicky)
-      (moduleSpec.implementation as { src?: string }).src = location;
+      (
+        moduleSpec.implementation as {
+          src?: string;
+          sourceLocationSample?: Record<string, unknown>;
+        }
+      ).src = location;
+      if (sample) {
+        (
+          moduleSpec.implementation as {
+            sourceLocationSample?: Record<string, unknown>;
+          }
+        ).sourceLocationSample = sample;
+      }
     }
     // Store function body preview for hover tooltips
     const fnStr = moduleSpec.implementation.toString();
@@ -89,8 +127,11 @@ export function parseStackFrame(
 
   if (!match) return null;
   const [, filePath, lineNum, col] = match;
+  const normalizedFilePath = filePath
+    .replace(/^file:\/\//, "")
+    .replace(/, <anonymous>$/, "");
   return {
-    file: filePath.replace(/^file:\/\//, ""),
+    file: normalizedFilePath,
     line: parseInt(lineNum, 10),
     col: parseInt(col, 10),
   };
@@ -99,37 +140,99 @@ export function parseStackFrame(
 /** Extract the first source location from a stack trace that isn't from this file.
  * If a source map is available, maps the position back to the original source.
  */
-function getExternalSourceLocation(): string | null {
+function getExternalSourceLocation(): SourceLocationResult {
   const stack = new Error().stack;
-  if (!stack) return null;
+  if (!stack) return { location: null };
 
   const lines = stack.split("\n");
+  const parsedFrames = lines
+    .map((line, index) => ({
+      index,
+      raw: line.trim(),
+      frame: parseStackFrame(line),
+    }))
+    .filter((entry) => !!entry.frame);
 
   // Find this file from the first real stack frame
   let thisFile: string | null = null;
-  for (const line of lines) {
-    const frame = parseStackFrame(line);
-    if (frame) {
-      thisFile = frame.file;
+  for (const entry of parsedFrames) {
+    if (entry.frame) {
+      thisFile = entry.frame.file;
       break;
     }
   }
-  if (!thisFile) return null;
+  sourceLocationLogger.debug("sample-stack", () => [{
+    thisFile,
+    parsedFrames: parsedFrames.slice(0, 8).map((entry) => ({
+      index: entry.index,
+      raw: entry.raw,
+      frame: entry.frame,
+    })),
+  }]);
+  if (!thisFile) return { location: null };
 
   // Find first frame not from this file
-  for (const line of lines) {
-    const frame = parseStackFrame(line);
+  for (const entry of parsedFrames) {
+    const frame = entry.frame;
     if (frame && frame.file !== thisFile) {
       // Try to map via source maps if available
       const harness = getTopFrame()?.runtime?.harness;
       const mapped = harness?.mapPosition(frame.file, frame.line, frame.col);
+      const metadata = {
+        raw: entry.raw,
+        frame,
+        mapped: mapped
+          ? {
+            source: mapped.source,
+            line: mapped.line,
+            column: mapped.column,
+            name: mapped.name,
+          }
+          : null,
+        parsedFrames: parsedFrames.slice(0, 8).map((entry) => ({
+          index: entry.index,
+          raw: entry.raw,
+          frame: entry.frame,
+        })),
+      };
+      recordSourceLocationSample(metadata);
+      sourceLocationLogger.debug("sample-candidate", () => [{
+        raw: entry.raw,
+        frame,
+        mapped: mapped
+          ? {
+            source: mapped.source,
+            line: mapped.line,
+            column: mapped.column,
+            name: mapped.name,
+          }
+          : null,
+      }]);
       if (mapped?.source && mapped?.line != null) {
-        return `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+        const mappedBase =
+          `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+        const resolved = mapped.line === 1 && (mapped.column ?? 0) === 23
+          ? `${mappedBase} [via ${frame.file}:${frame.line}:${frame.col}]`
+          : mappedBase;
+        sourceLocationLogger.debug("sample-resolved", () => [{
+          resolution: "mapped",
+          resolved,
+        }]);
+        return { location: resolved, sample: metadata };
       }
-      return `${frame.file}:${frame.line}:${frame.col}`;
+      const resolved = `${frame.file}:${frame.line}:${frame.col}`;
+      sourceLocationLogger.debug("sample-resolved", () => [{
+        resolution: "raw",
+        resolved,
+      }]);
+      return { location: resolved, sample: metadata };
     }
   }
-  return null;
+  sourceLocationLogger.debug("sample-miss", () => [{
+    reason: "no-external-frame",
+    thisFile,
+  }]);
+  return { location: null };
 }
 
 /** Declare a module
@@ -207,14 +310,26 @@ function handlerInternal<E, T>(
 
   // Attach source location and preview to handler function for debugging
   if (typeof handler === "function") {
-    const location = getExternalSourceLocation();
+    const { location, sample } = getExternalSourceLocation();
     if (location) {
       Object.defineProperty(handler, "name", {
         value: location,
         configurable: true,
       });
       // Also set .src as backup (name can be finicky)
-      (handler as { src?: string }).src = location;
+      (
+        handler as {
+          src?: string;
+          sourceLocationSample?: Record<string, unknown>;
+        }
+      ).src = location;
+      if (sample) {
+        (
+          handler as {
+            sourceLocationSample?: Record<string, unknown>;
+          }
+        ).sourceLocationSample = sample;
+      }
     }
     // Store function body preview for hover tooltips
     const fnStr = handler.toString();

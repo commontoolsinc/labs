@@ -520,7 +520,7 @@ export function transformDeriveCall(
   );
 
   // Build the derive call expression
-  const deriveExpr = context.ctHelpers.getHelperExpr("derive");
+  const deriveExpr = context.ctHelpers.getHelperExpr("derive", deriveCall);
 
   const newDeriveCall = factory.createCallExpression(
     deriveExpr,
@@ -529,11 +529,18 @@ export function transformDeriveCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
     [mergedInput, newCallback],
   );
+  const preservedDeriveCall = ts.setOriginalNode(
+    ts.setSourceMapRange(
+      ts.setTextRange(newDeriveCall, deriveCall),
+      ts.getSourceMapRange(deriveCall) ?? deriveCall,
+    ),
+    deriveCall,
+  );
 
   // Register the type of the derive call expression itself
   if (options.typeRegistry) {
     registerDeriveCallType(
-      newDeriveCall,
+      preservedDeriveCall,
       resultTypeNode,
       resultType,
       checker,
@@ -541,5 +548,5 @@ export function transformDeriveCall(
     );
   }
 
-  return newDeriveCall;
+  return preservedDeriveCall;
 }

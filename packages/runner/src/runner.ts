@@ -71,6 +71,11 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
   level: "warn",
   logCountEvery: 0,
 });
+const sourceLocationLogger = getLogger("runner.source-location", {
+  enabled: false,
+  level: "debug",
+  logCountEvery: 0,
+});
 
 function sanitizeDebugLabel(label?: string): string | undefined {
   if (!label) return undefined;
@@ -1260,7 +1265,18 @@ export class Runner {
     }
 
     // Prefer .src (backup) over .name since name can be finicky
-    const name = (fn as { src?: string; name?: string }).src || fn.name;
+    const namedFn = fn as {
+      src?: string;
+      name?: string;
+      sourceLocationSample?: Record<string, unknown>;
+    };
+    const name = namedFn.src || fn.name;
+    if (name && namedFn.sourceLocationSample) {
+      sourceLocationLogger.flag("sample", name, true, {
+        name,
+        ...namedFn.sourceLocationSample,
+      });
+    }
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);

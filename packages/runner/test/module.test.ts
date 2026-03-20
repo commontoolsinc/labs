@@ -6,6 +6,7 @@ import {
   type Frame,
   isModule,
   isOpaqueRef,
+  isPattern,
   type JSONSchema,
   type Module,
   type OpaqueRef as _OpaqueRef,
@@ -331,6 +332,37 @@ describe("module", () => {
       // derive calls lift internally, should still track the original function
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
+
+    it("maps computed callsites through the CTS pipeline", async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "export default pattern<{ items: boolean[] }>(({ items }) => {",
+        "  const visible = computed(() => items.filter(Boolean));",
+        "  return { visible };",
+        "});",
+      ].join("\n");
+      const program = {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: source }],
+      };
+
+      const { id, jsScript } = await runtime.harness.compile(program);
+      const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+      const patternFn = main?.default;
+
+      expect(isPattern(patternFn)).toBe(true);
+
+      const computedNode = (patternFn as any).nodes.find((node: any) =>
+        typeof node?.module?.implementation === "function" &&
+        typeof node.module.implementation.preview === "string" &&
+        node.module.implementation.preview.includes(".filter(Boolean)")
+      );
+
+      expect(computedNode).toBeDefined();
+      expect(computedNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
+      expect(computedNode.module.implementation.src).not.toContain("main.tsx:1:23");
+    });
   });
 
   describe("parseStackFrame", () => {
@@ -394,6 +426,17 @@ describe("module", () => {
       expect(result).toEqual({
         file: "ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js",
         line: 52,
+        col: 52,
+      });
+    });
+
+    it("parses Deno eval stack frames with anonymous suffix", () => {
+      const line =
+        "    at Object.eval [as factory] (recipe-abc.js, <anonymous>:4:52)";
+      const result = parseStackFrame(line);
+      expect(result).toEqual({
+        file: "recipe-abc.js",
+        line: 4,
         col: 52,
       });
     });
