@@ -1,4 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
@@ -142,7 +143,7 @@ export function createJsonSchema(
   example: any,
   addDefaults = false,
   runtime?: Runtime,
-): JSONSchemaObjMutable {
+): JSONSchema {
   const seen = new Map<string, JSONSchemaObjMutable>();
 
   function analyzeType(value: any): JSONSchema {
@@ -220,7 +221,7 @@ export function createJsonSchema(
     return schema;
   }
 
-  return analyzeType(example) as JSONSchemaObjMutable;
+  return toDeepFrozenSchema(analyzeType(example), true);
 }
 
 export function moduleToJSON(module: Module) {
