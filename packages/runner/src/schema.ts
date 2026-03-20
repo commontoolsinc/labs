@@ -305,25 +305,25 @@ export function mergeDefaults(
   schema: JSONSchema | undefined,
   defaultValue: Readonly<FabricDatum>,
 ): JSONSchema {
-  const result: JSONSchemaMutable = {
-    ...(isRecord(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
-  };
+  const result = isNontrivialSchema(schema)
+    ? structuredClone(schema) as JSONSchemaMutable
+    : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
-  if (
-    result.type === "object" &&
-    isRecord(result.default) &&
-    isRecord(defaultValue)
-  ) {
-    result.default = {
-      ...result.default,
-      ...defaultValue,
-    } as JSONValue;
-  } else result.default = defaultValue as JSONValue;
+  const mergedDefault =
+    result.type === "object" && isRecord(result.default) && isRecord(defaultValue)
+      ? { ...result.default, ...defaultValue } as JSONValue
+      : defaultValue as JSONValue;
 
+  result.default = mergedDefault;
   return result;
 }
 
+/**
+ * This adds appropriate properties to a given `value` to give it an associated
+ * cell, if possible. This only takes any action if `value` is an object type
+ * and isn't itself a cell-related thing.
+ */
 function annotateWithBackToCellSymbols(
   value: any,
   runtime: Runtime,
