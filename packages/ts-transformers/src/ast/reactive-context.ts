@@ -146,6 +146,28 @@ function isWithinJsxExpression(node: ts.Node): boolean {
   return false;
 }
 
+function callbackContainsJsx(
+  func: ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  let found = false;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isJsxElement(node) ||
+      ts.isJsxFragment(node) ||
+      ts.isJsxSelfClosingElement(node)
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(func.body);
+  return found;
+}
+
 function isNamedCallbackCall(
   call: ts.CallExpression,
   name: string,
@@ -275,7 +297,27 @@ export function classifyReactiveContext(
           }
 
           if (callKind?.kind === "array-method") {
-            // Non-transformed map callbacks inherit the parent context.
+            // Nested plain callbacks inside JSX (for example, a string-mapping
+            // callback inside a render expression) should run in compute
+            // context so early JSX rewrites do not derive-wrap plain element
+            // parameters before later structural lowering runs.
+            //
+            // Callbacks that themselves render JSX still inherit the parent
+            // pattern context; those are the ones that the later mapWithPattern
+            // lowering is expected to own.
+            if (
+              (inJsxExpression || isWithinJsxExpression(current)) &&
+              !callbackContainsJsx(current)
+            ) {
+              return {
+                kind: "compute",
+                owner: "jsx-callback",
+                inJsxExpression,
+              };
+            }
+
+            // Outside JSX, non-transformed array callbacks inherit the parent
+            // context until a later pass decides whether to lower the method.
             current = current.parent;
             continue;
           }
