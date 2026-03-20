@@ -1660,6 +1660,54 @@ Deno.test("Standalone Function Validation", async (t) => {
   );
 
   await t.step(
+    "errors on .map() on Writable parameter inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      import { Writable } from "commontools";
+
+      const helper = (items: Writable<string[]>) => {
+        return items.map((item) => item);
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertEquals(
+        errors[0]!.message.includes(".map()"),
+        true,
+        "Error should mention .map()",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on .map() on Cell parameter inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      import { Cell } from "commontools";
+
+      const helper = (items: Cell<string[]>) => {
+        return items.map((item) => item);
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertEquals(
+        errors[0]!.message.includes(".map()"),
+        true,
+        "Error should mention .map()",
+      );
+    },
+  );
+
+  await t.step(
     "allows reactive operations in functions passed to patternTool()",
     async () => {
       const source = `/// <cts-enable />

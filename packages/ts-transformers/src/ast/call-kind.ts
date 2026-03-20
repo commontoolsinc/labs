@@ -27,6 +27,7 @@
  * classified as CommonTools calls.
  */
 import ts from "typescript";
+import { getCellKind } from "@commontools/schema-generator/cell-brand";
 
 import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
 
@@ -837,13 +838,20 @@ function isReactiveValueSymbol(
     }
 
     if (ts.isParameter(declaration)) {
-      if (isReactiveParameterDeclaration(declaration, checker, options)) {
+      if (
+        hasReactiveWrapperType(declaration.name, checker) ||
+        isReactiveParameterDeclaration(declaration, checker, options)
+      ) {
         return true;
       }
       continue;
     }
 
     if (ts.isBindingElement(declaration)) {
+      if (hasReactiveWrapperType(declaration.name, checker)) {
+        return true;
+      }
+
       const parameter = getOwningParameterDeclaration(declaration);
       if (
         parameter &&
@@ -921,6 +929,16 @@ function isReactiveParameterDeclaration(
 
   return options.includeArrayMethodCallbackParameters !== false &&
     callKind?.kind === "array-method";
+}
+
+function hasReactiveWrapperType(
+  name: ts.BindingName,
+  checker: ts.TypeChecker,
+): boolean {
+  const type = checker.getTypeAtLocation(name);
+  const cellKind = getCellKind(type, checker);
+  return cellKind === "cell" || cellKind === "stream" ||
+    cellKind === "opaque";
 }
 
 function findPlainValueBoundary(
