@@ -2,9 +2,12 @@ import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   DEFAULT_BRANCH,
+  encodeWireEntityDocument,
   toBlobMetadataId,
+  toDocumentPath,
   toEntityDocument,
   toSourceLink,
+  toWireEntityDocument,
 } from "../v2.ts";
 import {
   applyCommit,
@@ -118,7 +121,11 @@ Deno.test("memory v2 engine persists set and delete commits", async () => {
       commit: {
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
-        operations: [{ op: "set", id: "entity:1", value: document }],
+        operations: [{
+          op: "set",
+          id: "entity:1",
+          value: encodeWireEntityDocument(document),
+        }],
       },
     });
 
@@ -290,7 +297,7 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
         operations: [{
           op: "set",
           id: "of:piece:1",
-          value: toEntityDocument(undefined, toSourceLink("process:1")),
+          value: toWireEntityDocument(undefined, toSourceLink("process:1")),
         }],
       },
     });
@@ -331,7 +338,7 @@ Deno.test("memory v2 engine allows multiple commits to reuse the same invocation
         operations: [{
           op: "set",
           id: "entity:1",
-          value: toEntityDocument({ hello: "world" }),
+          value: toWireEntityDocument({ hello: "world" }),
         }],
       },
     });
@@ -346,7 +353,7 @@ Deno.test("memory v2 engine allows multiple commits to reuse the same invocation
         operations: [{
           op: "set",
           id: "entity:2",
-          value: toEntityDocument({ hello: "again" }),
+          value: toWireEntityDocument({ hello: "again" }),
         }],
       },
     });
@@ -393,7 +400,11 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
       commit: {
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
-        operations: [{ op: "set", id: "entity:patch", value: original }],
+        operations: [{
+          op: "set",
+          id: "entity:patch",
+          value: encodeWireEntityDocument(original),
+        }],
       },
     });
 
@@ -411,11 +422,11 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
           op: "patch",
           id: "entity:patch",
           patches: [
-            { op: "replace", path: "/profile/name", value: "Bob" },
-            { op: "add", path: "/profile/title", value: "Dr" },
+            { op: "replace", path: "/value/profile/name", value: "Bob" },
+            { op: "add", path: "/value/profile/title", value: "Dr" },
             {
               op: "splice",
-              path: "/tags",
+              path: "/value/tags",
               index: 1,
               remove: 0,
               add: ["two", "three"],
@@ -453,11 +464,11 @@ Deno.test("memory v2 engine replays patch facts for current and point-in-time re
       "SELECT data FROM value WHERE hash = ?",
     ).get([patchFact?.value_ref]) as { data: string } | undefined;
     assertEquals(JSON.parse(patchValue?.data ?? "null"), [
-      { op: "replace", path: "/profile/name", value: "Bob" },
-      { op: "add", path: "/profile/title", value: "Dr" },
+      { op: "replace", path: "/value/profile/name", value: "Bob" },
+      { op: "add", path: "/value/profile/title", value: "Dr" },
       {
         op: "splice",
-        path: "/tags",
+        path: "/value/tags",
         index: 1,
         remove: 0,
         add: ["two", "three"],
@@ -497,7 +508,11 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
       commit: {
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
-        operations: [{ op: "set", id: "entity:snapshot", value: original }],
+        operations: [{
+          op: "set",
+          id: "entity:snapshot",
+          value: encodeWireEntityDocument(original),
+        }],
       },
     });
 
@@ -516,7 +531,7 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
           id: "entity:snapshot",
           patches: [{
             op: "splice",
-            path: "/tags",
+            path: "/value/tags",
             index: 1,
             remove: 0,
             add: ["two"],
@@ -540,7 +555,7 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
           id: "entity:snapshot",
           patches: [{
             op: "splice",
-            path: "/tags",
+            path: "/value/tags",
             index: 2,
             remove: 0,
             add: ["three"],
@@ -587,7 +602,7 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
           id: "entity:snapshot",
           patches: [{
             op: "splice",
-            path: "/tags",
+            path: "/value/tags",
             index: 3,
             remove: 0,
             add: ["four"],
@@ -643,7 +658,7 @@ Deno.test("memory v2 engine compacts old snapshots beyond retention", async () =
         operations: [{
           op: "set",
           id: "entity:snapshot-retention",
-          value: toEntityDocument({ tags: ["one"] }),
+          value: toWireEntityDocument({ tags: ["one"] }),
         }],
       },
     });
@@ -669,7 +684,7 @@ Deno.test("memory v2 engine compacts old snapshots beyond retention", async () =
             id: "entity:snapshot-retention",
             patches: [{
               op: "splice",
-              path: "/tags",
+              path: "/value/tags",
               index: localSeq - 1,
               remove: 0,
               add: [value],
@@ -771,7 +786,7 @@ Deno.test("memory v2 blob metadata remains ordinary entity state separate from b
         operations: [{
           op: "set",
           id: metadataId,
-          value: toEntityDocument({
+          value: toWireEntityDocument({
             blob: blob.hash,
             label: "profile-photo",
           }),
@@ -792,7 +807,7 @@ Deno.test("memory v2 blob metadata remains ordinary entity state separate from b
         operations: [{
           op: "set",
           id: "entity:attachment",
-          value: toEntityDocument({
+          value: toWireEntityDocument({
             attachment: { "/": blob.hash },
           }),
         }],
@@ -883,13 +898,17 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
       commit: {
         localSeq: 1,
         reads: {
-          confirmed: [{ id: "entity:source", path: [], seq: 0 }],
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            seq: 0,
+          }],
           pending: [],
         },
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toEntityDocument({ count: 1 }),
+          value: toWireEntityDocument({ count: 1 }),
         }],
       },
     });
@@ -904,13 +923,17 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
       commit: {
         localSeq: 1,
         reads: {
-          confirmed: [{ id: "entity:source", path: [], seq: 1 }],
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            seq: 1,
+          }],
           pending: [],
         },
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toEntityDocument({ count: 2 }),
+          value: toWireEntityDocument({ count: 2 }),
         }],
       },
     });
@@ -927,13 +950,17 @@ Deno.test("memory v2 engine rejects commits with stale confirmed reads", async (
           commit: {
             localSeq: 2,
             reads: {
-              confirmed: [{ id: "entity:source", path: [], seq: 1 }],
+              confirmed: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                seq: 1,
+              }],
               pending: [],
             },
             operations: [{
               op: "set",
               id: "entity:target",
-              value: toEntityDocument({ copied: true }),
+              value: toWireEntityDocument({ copied: true }),
             }],
           },
         }),
@@ -980,18 +1007,16 @@ Deno.test("memory v2 engine preserves root objects with value siblings", async (
         operations: [{
           op: "set",
           id: "entity:value-siblings",
-          value: {
-            value: "hello",
+          value: toWireEntityDocument("hello", undefined, {
             other: "data",
-          } as any,
+          }),
         }],
       },
     });
 
     assertEquals(
       read(engine, { id: "entity:value-siblings" }),
-      toEntityDocument({
-        value: "hello",
+      toEntityDocument("hello", undefined, {
         other: "data",
       }),
     );
@@ -1024,13 +1049,17 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
       commit: {
         localSeq: 1,
         reads: {
-          confirmed: [{ id: "entity:source", path: [], seq: 0 }],
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            seq: 0,
+          }],
           pending: [],
         },
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toEntityDocument({
+          value: toWireEntityDocument({
             profile: { name: "Alice" },
             settings: { theme: "light" },
           }),
@@ -1048,7 +1077,11 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
       commit: {
         localSeq: 1,
         reads: {
-          confirmed: [{ id: "entity:source", path: ["settings"], seq: 1 }],
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "settings"]),
+            seq: 1,
+          }],
           pending: [],
         },
         operations: [{
@@ -1056,7 +1089,7 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
           id: "entity:source",
           patches: [{
             op: "replace",
-            path: "/settings/theme",
+            path: "/value/settings/theme",
             value: "dark",
           }],
         }],
@@ -1075,7 +1108,7 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
         reads: {
           confirmed: [{
             id: "entity:source",
-            path: ["profile", "name"],
+            path: toDocumentPath(["value", "profile", "name"]),
             seq: 1,
           }],
           pending: [],
@@ -1083,7 +1116,7 @@ Deno.test("memory v2 engine allows non-overlapping confirmed reads to commit", a
         operations: [{
           op: "set",
           id: "entity:target",
-          value: toEntityDocument({ derivedFromName: true }),
+          value: toWireEntityDocument({ derivedFromName: true }),
         }],
       },
     });
@@ -1125,7 +1158,7 @@ Deno.test("memory v2 engine resolves pending reads by session localSeq", async (
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toEntityDocument({ count: 1 }),
+          value: toWireEntityDocument({ count: 1 }),
         }],
       },
     });
@@ -1141,12 +1174,16 @@ Deno.test("memory v2 engine resolves pending reads by session localSeq", async (
         localSeq: 2,
         reads: {
           confirmed: [],
-          pending: [{ id: "entity:source", path: [], localSeq: 1 }],
+          pending: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            localSeq: 1,
+          }],
         },
         operations: [{
           op: "set",
           id: "entity:target",
-          value: toEntityDocument({ derived: true }),
+          value: toWireEntityDocument({ derived: true }),
         }],
       },
     });
@@ -1180,12 +1217,16 @@ Deno.test("memory v2 engine resolves pending reads by session localSeq", async (
             localSeq: 3,
             reads: {
               confirmed: [],
-              pending: [{ id: "entity:source", path: [], localSeq: 99 }],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: 99,
+              }],
             },
             operations: [{
               op: "set",
               id: "entity:broken",
-              value: toEntityDocument({ ok: false }),
+              value: toWireEntityDocument({ ok: false }),
             }],
           },
         }),
@@ -1226,7 +1267,7 @@ Deno.test("memory v2 engine rejects pending reads when later commits touch the r
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toEntityDocument({ foo: 0, bar: 0 }),
+          value: toWireEntityDocument({ foo: 0, bar: 0 }),
         }],
       },
     });
@@ -1241,13 +1282,17 @@ Deno.test("memory v2 engine rejects pending reads when later commits touch the r
       commit: {
         localSeq: 2,
         reads: {
-          confirmed: [{ id: "entity:source", path: ["foo"], seq: 1 }],
+          confirmed: [{
+            id: "entity:source",
+            path: toDocumentPath(["value", "foo"]),
+            seq: 1,
+          }],
           pending: [],
         },
         operations: [{
           op: "patch",
           id: "entity:source",
-          patches: [{ op: "replace", path: "/foo", value: 1 }],
+          patches: [{ op: "replace", path: "/value/foo", value: 1 }],
         }],
       },
     });
@@ -1266,7 +1311,7 @@ Deno.test("memory v2 engine rejects pending reads when later commits touch the r
         operations: [{
           op: "patch",
           id: "entity:source",
-          patches: [{ op: "replace", path: "/bar", value: 1 }],
+          patches: [{ op: "replace", path: "/value/bar", value: 1 }],
         }],
       },
     });
@@ -1285,12 +1330,16 @@ Deno.test("memory v2 engine rejects pending reads when later commits touch the r
             localSeq: 3,
             reads: {
               confirmed: [],
-              pending: [{ id: "entity:source", path: ["bar"], localSeq: 2 }],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath(["value", "bar"]),
+                localSeq: 2,
+              }],
             },
             operations: [{
               op: "set",
               id: "entity:target",
-              value: toEntityDocument({ derived: true }),
+              value: toWireEntityDocument({ derived: true }),
             }],
           },
         }),
@@ -1309,36 +1358,40 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
   const cases = [
     {
       name: "parent read conflicts with child replace",
-      readPath: ["profile"],
-      remotePatches: [{ op: "replace", path: "/profile/name", value: "Bob" }],
+      readPath: ["value", "profile"],
+      remotePatches: [{
+        op: "replace",
+        path: "/value/profile/name",
+        value: "Bob",
+      }],
       expectConflict: true,
     },
     {
       name: "sibling read survives unrelated replace",
-      readPath: ["profile", "name"],
+      readPath: ["value", "profile", "name"],
       remotePatches: [{
         op: "replace",
-        path: "/settings/theme",
+        path: "/value/settings/theme",
         value: "dark",
       }],
       expectConflict: false,
     },
     {
       name: "child read conflicts when parent is replaced",
-      readPath: ["profile", "name"],
+      readPath: ["value", "profile", "name"],
       remotePatches: [{
         op: "replace",
-        path: "/profile",
+        path: "/value/profile",
         value: { name: "Bob", title: "Dr" },
       }],
       expectConflict: true,
     },
     {
       name: "array element read conflicts with splice",
-      readPath: ["items", "0"],
+      readPath: ["value", "items", "0"],
       remotePatches: [{
         op: "splice",
-        path: "/items",
+        path: "/value/items",
         index: 0,
         remove: 0,
         add: ["zero"],
@@ -1347,14 +1400,18 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
     },
     {
       name: "sibling branch read survives unrelated add",
-      readPath: ["settings"],
-      remotePatches: [{ op: "add", path: "/profile/title", value: "Dr" }],
+      readPath: ["value", "settings"],
+      remotePatches: [{
+        op: "add",
+        path: "/value/profile/title",
+        value: "Dr",
+      }],
       expectConflict: false,
     },
     {
       name: "escaped pointer read conflicts with matching replace",
-      readPath: ["a/b"],
-      remotePatches: [{ op: "replace", path: "/a~1b", value: 2 }],
+      readPath: ["value", "a/b"],
+      remotePatches: [{ op: "replace", path: "/value/a~1b", value: 2 }],
       expectConflict: true,
     },
   ] as const;
@@ -1384,7 +1441,7 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
           operations: [{
             op: "set",
             id: "entity:source",
-            value: toEntityDocument({
+            value: toWireEntityDocument({
               profile: { name: "Alice" },
               settings: { theme: "light" },
               items: ["one"],
@@ -1425,7 +1482,7 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
             reads: {
               confirmed: [{
                 id: "entity:source",
-                path: testCase.readPath,
+                path: toDocumentPath(testCase.readPath),
                 seq: 1,
               }],
               pending: [],
@@ -1433,7 +1490,7 @@ Deno.test("memory v2 engine enforces the confirmed-read overlap matrix", async (
             operations: [{
               op: "set",
               id: "entity:derived",
-              value: toEntityDocument({ case: testCase.name }),
+              value: toWireEntityDocument({ case: testCase.name }),
             }],
           },
         });
@@ -1482,7 +1539,7 @@ Deno.test("memory v2 engine reconstructs point-in-time state across delete bound
         operations: [{
           op: "set",
           id: "entity:timeline",
-          value: toEntityDocument({
+          value: toWireEntityDocument({
             phase: "one",
             data: { start: true },
           }),
@@ -1500,7 +1557,7 @@ Deno.test("memory v2 engine reconstructs point-in-time state across delete bound
         operations: [{
           op: "patch",
           id: "entity:timeline",
-          patches: [{ op: "add", path: "/data/step", value: 2 }],
+          patches: [{ op: "add", path: "/value/data/step", value: 2 }],
         }],
       },
     });
@@ -1526,7 +1583,7 @@ Deno.test("memory v2 engine reconstructs point-in-time state across delete bound
         operations: [{
           op: "set",
           id: "entity:timeline",
-          value: toEntityDocument({
+          value: toWireEntityDocument({
             phase: "two",
             data: { restart: true },
           }),
@@ -1544,7 +1601,7 @@ Deno.test("memory v2 engine reconstructs point-in-time state across delete bound
         operations: [{
           op: "patch",
           id: "entity:timeline",
-          patches: [{ op: "add", path: "/data/final", value: 5 }],
+          patches: [{ op: "add", path: "/value/data/final", value: 5 }],
         }],
       },
     });
@@ -1604,7 +1661,7 @@ Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt 
         operations: [{
           op: "set",
           id: "entity:snapshot-delete",
-          value: toEntityDocument({ before: { kept: true } }),
+          value: toWireEntityDocument({ before: { kept: true } }),
         }],
       },
     });
@@ -1619,7 +1676,7 @@ Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt 
         operations: [{
           op: "patch",
           id: "entity:snapshot-delete",
-          patches: [{ op: "add", path: "/before/count", value: 2 }],
+          patches: [{ op: "add", path: "/value/before/count", value: 2 }],
         }],
       },
     });
@@ -1645,7 +1702,7 @@ Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt 
         operations: [{
           op: "set",
           id: "entity:snapshot-delete",
-          value: toEntityDocument({ after: { rebuilt: true } }),
+          value: toWireEntityDocument({ after: { rebuilt: true } }),
         }],
       },
     });
@@ -1660,7 +1717,7 @@ Deno.test("memory v2 engine snapshots do not leak pre-delete state into rebuilt 
         operations: [{
           op: "patch",
           id: "entity:snapshot-delete",
-          patches: [{ op: "add", path: "/after/final", value: 5 }],
+          patches: [{ op: "add", path: "/value/after/final", value: 5 }],
         }],
       },
     });

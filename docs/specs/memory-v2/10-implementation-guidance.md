@@ -399,7 +399,7 @@ Pending reads use **local commit indices** (not hashes):
 ```typescript
 interface PendingRead {
   id: EntityId;
-  path: readonly string[]; // Relative to EntityDocument.value; [] = root
+  path: readonly string[]; // Full-document path; payload reads live under ["value", ...]
   localSeq: number; // Client-side commit sequence number
 }
 ```
@@ -471,7 +471,7 @@ interface ConfirmedRead {
 interface ConfirmedRead {
   id: EntityId;
   branch?: BranchId; // Defaults to commit.branch; merge proposals set this when needed
-  path: readonly string[]; // Relative to EntityDocument.value; [] = root
+  path: readonly string[]; // Full-document path; payload reads live under ["value", ...]
   seq: number; // Per-space global version counter
 }
 ```
@@ -1329,13 +1329,26 @@ interface IStorageTransaction {
 }
 ```
 
-`journal.activity()`, `journal.novelty(space)`, and `journal.history(space)`
-should remain only as compatibility fallbacks for legacy code and tests. They
-must not dictate the internal structure of the v2 transaction core.
+Native v2 should not preserve `journal.activity()`, `journal.novelty(space)`,
+or `journal.history(space)` as first-class internal products. They must not
+dictate the structure of the v2 transaction core.
+
+Current direction:
+
+- Native v2 exports direct hooks (`getReactivityLog()`, `getReadActivities()`,
+  `getWriteDetails(space)`, `getNativeCommit(space)`).
+- Generic helpers and wrappers should probe those direct hooks first.
+- If native v2 code falls back to `journal.activity()`, that should be treated
+  as a bug and may throw loudly rather than silently reconstructing a v1-shaped
+  activity stream.
+- If an older compatibility caller still needs a journal-shaped view, build that
+  outside the native v2 hot path instead of storing extra v1-only bookkeeping in
+  the transaction core.
 
 Implementation guidance:
 
-- `txToReactivityLog()` should probe `getReactivityLog()` first.
+- `txToReactivityLog()` should probe `getReactivityLog()` first and not rebuild
+  v2 scheduler state from `journal.activity()` when the direct hook exists.
 - Conflict tracking should probe `getReadActivities()` first.
 - Human-facing transaction summaries/debug views should probe
   `getWriteDetails(space)` first.
@@ -1395,7 +1408,7 @@ current codebase, the meaningful compatibility surface is much smaller:
 - write summaries and some debugging helpers want `getWriteDetails(space)`
 
 By contrast, the old `journal.novelty()` / `journal.history()` surface is now
-mostly a compatibility fallback for:
+mostly a compatibility concern for:
 
 - storage inspection helpers
 - transaction summaries
@@ -1406,12 +1419,13 @@ That means a cleaner v2 refactor can safely prefer:
 1. direct `getReactivityLog()`
 2. direct `getReadActivities()`
 3. direct `getWriteDetails(space)`
-4. a thin adapter journal only when an older caller still demands it
+4. a thin adapter journal only outside the native v2 hot path when an older
+   caller still demands it
 
 If a caller only needs a reactivity log, do not rebuild it by walking
-`journal.activity()` unless the direct hook is truly unavailable. Likewise, if a
-future v2-only caller wants a summary object, consider a direct summary/export
-hook instead of teaching it about v1 journal internals.
+`journal.activity()`. Native v2 should treat that fallback as unsupported.
+Likewise, if a future v2-only caller wants a summary object, consider a direct
+summary/export hook instead of teaching it about v1 journal internals.
 
 ---
 
@@ -1422,8 +1436,9 @@ subtle bugs:
 
 ### Raw `IStorageTransaction`
 
-Raw transaction reads and writes operate on the **stored document envelope**.
-For JSON entities that means the top level may contain siblings such as:
+Raw transaction reads and writes operate on the **full stored document**.
+For JSON entities that means the top level may contain payload plus metadata
+siblings such as:
 
 ```json
 {
@@ -1432,11 +1447,29 @@ For JSON entities that means the top level may contain siblings such as:
 }
 ```
 
+At this layer:
+
+- patch paths are rooted at the whole document
+- confirmed/pending read tracking uses whole-document paths
+- top-level fields such as `value`, `source`, and future metadata are patched
+  uniformly by the storage/engine layer
+- `source` is still query/server-special for lineage, but the lower patch engine
+  does not treat it as a different path class
+
 Examples:
 
 - Write the entire stored document: path `[]`, value `{ value: {...} }`
 - Read the user-visible payload: path `["value"]`
 - Read lineage metadata: path `["source"]`
+- Patch a payload field: path `/value/profile/name`
+- Patch metadata directly: path `/source`
+
+The current runner split is intentional:
+
+- **Document paths** are full-document rooted.
+- **Value paths** are relative to the payload under `.value`.
+- Query/schema traversal remains value-relative and applies the implied
+  `["value", ...]` prefix internally.
 
 ### `IExtendedStorageTransaction`
 
@@ -1446,22 +1479,46 @@ The extended wrapper exists to preserve runner-facing convenience methods:
 - `writeValueOrThrow(address, value)` prepends `["value"]`
 - nested writes create missing parents when needed
 
+This is where cell-facing payload semantics live. The lower storage layer should
+remain dumb about whether a top-level field is "payload" or "metadata"; the
+wrapper and traversal/query helpers are what narrow ordinary cell reads/writes to
+`.value`.
+
 This means a raw v2 transaction test is **not** interchangeable with an
 extended transaction test.
 
 Important consequences:
 
 - A raw nested write to `["value", ...path]` will fail on a missing document
-  unless the caller first creates the document or writes the whole envelope.
+  unless the caller first creates the document or writes the whole document.
 - The extended wrapper is the compatibility layer that provides parent
   creation for nested value writes.
+- Native v2 protocol/storage callers must pass explicit full documents for `set`
+  operations. The old raw-payload-or-envelope ambiguity is gone.
+- Legacy fact/session boundaries may still wrap old payload-shaped inputs into
+  `{ value: ... }`, but that compatibility shim should stay at those outer
+  boundaries only.
 - Benchmarks or tests that write plain payloads at raw path `[]` are measuring
-  envelope-level storage behavior, not the user-facing `writeValueOrThrow()`
-  contract. If you want root-level no-op equality on the main runtime path,
-  compare extended writes against extended writes, or compare raw envelopes
-  against raw envelopes.
+  the wrong contract now. If you want user-facing semantics, compare extended
+  payload writes against extended payload writes. If you want storage-core
+  semantics, compare explicit full-document writes against explicit
+  full-document writes.
 - Scheduler-facing reactivity logs should strip the leading `"value"` segment
   before exposing paths to the rest of the runtime.
+
+### Whole-Document Codec Boundary
+
+The v2 document bridge should encode/decode the **whole document once** at the
+network/sqlite boundaries rather than serializing fields independently.
+
+Preferred shape:
+
+- In-memory transaction/storage state uses decoded `EntityDocument`.
+- Websocket/sqlite boundaries use JSON-shaped `WireEntityDocument`.
+- `jsonFromValue()` / `valueFromJson()` run once per whole document at those
+  boundaries.
+- Avoid per-field `JSON.parse(jsonFromValue(...))` /
+  `valueFromJson(JSON.stringify(...))` loops inside the runner hot path.
 
 When writing v2-native tests, decide explicitly which layer is under test:
 

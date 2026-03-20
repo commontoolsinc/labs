@@ -15,7 +15,12 @@ import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-st
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import type { MemorySpace, StorableDatum, URI } from "../interface.ts";
-import type { EntitySnapshot, GraphQuery, Reference } from "../v2.ts";
+import {
+  encodeWireEntityDocument,
+  type EntitySnapshot,
+  type GraphQuery,
+  type Reference,
+} from "../v2.ts";
 import * as Engine from "./engine.ts";
 
 type QueryDocKey = `${string}/${string}/${string}`;
@@ -149,7 +154,11 @@ export const queryGraph = (
         id,
         seq: detail?.seq ?? state?.seq ?? 0,
         hash: detail?.hash ?? state?.hash,
-        document: detail?.document ?? state?.document ?? null,
+        document: detail?.document === undefined
+          ? state?.document === null || state?.document === undefined
+            ? null
+            : encodeWireEntityDocument(state.document)
+          : encodeWireEntityDocument(detail.document),
       } satisfies EntitySnapshot;
     })
     .sort((left, right) => left.id.localeCompare(right.id));

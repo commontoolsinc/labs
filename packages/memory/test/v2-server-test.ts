@@ -1,9 +1,4 @@
-import {
-  assertEquals,
-  assertExists,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
@@ -232,7 +227,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and queries graph
   await server.close();
 });
 
-Deno.test("memory v2 server retries a failed engine open once the store path exists", async () => {
+Deno.test("memory v2 server creates a missing engine path on first open", async () => {
   const root = await Deno.makeTempDir();
   const store = new URL("./missing/", toFileUrl(`${root}/`));
   const server = new Server({ store });
@@ -250,26 +245,15 @@ Deno.test("memory v2 server retries a failed engine open once the store path exi
       protocol: MEMORY_V2_PROTOCOL,
     });
 
-    await assertRejects(() =>
-      connection.receive(JSON.stringify({
-        type: "session.open",
-        requestId: "open-1",
-        space,
-        session: {},
-      }))
-    );
-
-    await Deno.mkdir(new URL("./engine/", store), { recursive: true });
-
     await connection.receive(JSON.stringify({
       type: "session.open",
-      requestId: "open-2",
+      requestId: "open-1",
       space,
       session: {},
     }));
 
     const reopened = assertResponse(shiftMessage(messages));
-    assertEquals(reopened.requestId, "open-2");
+    assertEquals(reopened.requestId, "open-1");
     assertExists(reopened.ok);
   } finally {
     await server.close().catch(() => undefined);

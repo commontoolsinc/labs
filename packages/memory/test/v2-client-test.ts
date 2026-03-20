@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server } from "../v2/server.ts";
-import { MEMORY_V2_PROTOCOL } from "../v2.ts";
+import { MEMORY_V2_PROTOCOL, toDocumentPath } from "../v2.ts";
 import { connect, loopback, type Transport } from "../v2/client.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
@@ -608,7 +608,7 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
         confirmed: [],
         pending: [{
           id: "of:doc:1",
-          path: ["value"],
+          path: toDocumentPath(["value"]),
           localSeq: 1,
         }],
       },

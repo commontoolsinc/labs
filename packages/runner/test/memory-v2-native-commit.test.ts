@@ -118,7 +118,7 @@ Deno.test("memory v2 transactions emit patch drafts for safe object-path writes"
         value: { value: { profile: { name: "Grace", title: "Dr" } } },
         patches: [{
           op: "replace",
-          path: "/profile/name",
+          path: "/value/profile/name",
           value: "Grace",
         }],
       }],
@@ -165,7 +165,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
         },
         patches: [{
           op: "add",
-          path: "/profile/subtitle",
+          path: "/value/profile/subtitle",
           value: "Analyst",
         }],
       }],
@@ -191,7 +191,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
         value: { value: { profile: { name: "Ada", subtitle: "Analyst" } } },
         patches: [{
           op: "remove",
-          path: "/profile/title",
+          path: "/value/profile/title",
         }],
       }],
     }]);
@@ -236,7 +236,7 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array element
         value: { value: { tags: ["zero", "two"] } },
         patches: [{
           op: "replace",
-          path: "/tags",
+          path: "/value/tags",
           value: ["zero", "two"],
         }],
       }],
@@ -296,7 +296,7 @@ Deno.test("memory v2 transactions drop same-tx add-then-remove paths from patch 
         value: { value: { profile: { name: "Grace" } } },
         patches: [{
           op: "replace",
-          path: "/profile/name",
+          path: "/value/profile/name",
           value: "Grace",
         }],
       }],
@@ -539,12 +539,12 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         patches: [
           {
             op: "replace",
-            path: "/profile/name",
+            path: "/value/profile/name",
             value: "Grace",
           },
           {
             op: "replace",
-            path: "/profile/title",
+            path: "/value/profile/title",
             value: "Professor",
           },
         ],
@@ -591,7 +591,7 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array length 
         value: { value: { tags: ["one"] } },
         patches: [{
           op: "replace",
-          path: "/tags",
+          path: "/value/tags",
           value: ["one"],
         }],
       }],
@@ -651,7 +651,7 @@ Deno.test("memory v2 writeBatch collapses array element and length writes to the
         value: { value: { tags: ["zero"] } },
         patches: [{
           op: "replace",
-          path: "/tags",
+          path: "/value/tags",
           value: ["zero"],
         }],
       }],

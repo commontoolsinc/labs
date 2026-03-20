@@ -13,10 +13,12 @@ import {
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import {
-  type EntityDocument,
+  type DocumentPath,
   type EntitySnapshot,
   type GraphQueryResult,
   type PatchOp,
+  toDocumentPath,
+  type WireEntityDocument,
 } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
@@ -83,14 +85,14 @@ type CachedTransactionValue =
 
 type PendingVersion = {
   localSeq: number;
-  value: EntityDocument | undefined;
+  value: WireEntityDocument | undefined;
   transactionValue: CachedTransactionValue;
 };
 
 type ConfirmedVersion = {
   seq: number;
   hash?: string;
-  value: EntityDocument | undefined;
+  value: WireEntityDocument | undefined;
   transactionValue: CachedTransactionValue;
 };
 
@@ -101,21 +103,21 @@ type DocumentRecord = {
 
 type ConfirmedCommitRead = {
   id: URI;
-  path: string[];
+  path: DocumentPath;
   seq: number;
   nonRecursive?: boolean;
 };
 
 type PendingCommitRead = {
   id: URI;
-  path: string[];
+  path: DocumentPath;
   localSeq: number;
   nonRecursive?: boolean;
 };
 
 const pendingVersion = (
   localSeq: number,
-  value: EntityDocument | undefined,
+  value: WireEntityDocument | undefined,
 ): PendingVersion => ({
   localSeq,
   value,
@@ -124,7 +126,7 @@ const pendingVersion = (
 
 const confirmedVersion = (
   seq: number,
-  value: EntityDocument | undefined,
+  value: WireEntityDocument | undefined,
   hash?: string,
 ): ConfirmedVersion => ({
   seq,
@@ -278,10 +280,9 @@ const compactCommitReads = <
   });
 };
 
-const toCommitReadPath = (path: readonly (string | number)[]): string[] => {
-  const segments = path.map(String);
-  return segments[0] === "value" ? segments.slice(1) : segments;
-};
+const toCommitReadPath = (
+  path: readonly (string | number)[],
+): DocumentPath => toDocumentPath(path.map(String));
 
 class WebSocketTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
@@ -781,7 +782,7 @@ class SpaceReplica implements ISpaceReplica {
       : toStorageValueFromStoredDocument(document);
   }
 
-  getDocument(uri: URI): EntityDocument | undefined {
+  getDocument(uri: URI): WireEntityDocument | undefined {
     return this.visibleDocument(uri);
   }
 
@@ -853,9 +854,9 @@ class SpaceReplica implements ISpaceReplica {
           : {
             op: "set" as const,
             id: fact.of as URI,
-            value: toMemoryV2DocumentFromTransactionValue(
-              fact.is as StorableDatum,
-            ),
+            value: toStoredDocumentFromStorageValue({
+              value: fact.is as StorableValue,
+            }),
           }
       );
 
@@ -945,8 +946,8 @@ class SpaceReplica implements ISpaceReplica {
 
   private async commitOperations(
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
+      | { op: "set"; id: URI; value: WireEntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: WireEntityDocument }
       | { op: "delete"; id: URI }
     >,
     source?: IStorageTransaction,
@@ -1012,8 +1013,8 @@ class SpaceReplica implements ISpaceReplica {
   private async pushCommit(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
+      | { op: "set"; id: URI; value: WireEntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: WireEntityDocument }
       | { op: "delete"; id: URI }
     >,
     commit: any,
@@ -1147,7 +1148,7 @@ class SpaceReplica implements ISpaceReplica {
   private applyPending(
     id: URI,
     localSeq: number,
-    value: EntityDocument | undefined,
+    value: WireEntityDocument | undefined,
   ): void {
     const record = this.record(id);
     record.pending.push(pendingVersion(localSeq, value));
@@ -1156,8 +1157,8 @@ class SpaceReplica implements ISpaceReplica {
   private confirmPending(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
+      | { op: "set"; id: URI; value: WireEntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: WireEntityDocument }
       | { op: "delete"; id: URI }
     >,
     applied: AppliedCommit,
@@ -1218,7 +1219,7 @@ class SpaceReplica implements ISpaceReplica {
     } as State;
   }
 
-  private visibleDocument(id: URI): EntityDocument | undefined {
+  private visibleDocument(id: URI): WireEntityDocument | undefined {
     const record = this.#docs.get(id);
     if (!record) {
       return undefined;
@@ -1274,10 +1275,10 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
 
 const toStoredDocumentFromStorageValue = (
   value: StorageValue,
-): EntityDocument => toMemoryV2DocumentFromStorageValue(value);
+): WireEntityDocument => toMemoryV2DocumentFromStorageValue(value);
 
 const toStorageValueFromStoredDocument = (
-  document: EntityDocument,
+  document: WireEntityDocument,
 ): StorageValue | undefined => fromMemoryV2Document(document);
 
 const toConnectionError = (error: unknown): IConnectionError =>

@@ -3,10 +3,10 @@ import {
   DEFAULT_BRANCH,
   isSourceLink,
   MEMORY_V2_PROTOCOL,
-  normalizeEntityDocument,
   toDocumentPath,
   toEntityDocument,
   toSourceLink,
+  toWireEntityDocument,
 } from "../v2.ts";
 
 Deno.test("memory v2 exports the phase-1 protocol constants", () => {
@@ -14,23 +14,22 @@ Deno.test("memory v2 exports the phase-1 protocol constants", () => {
   assertEquals(DEFAULT_BRANCH, "");
 });
 
-Deno.test("memory v2 wraps entity values in the expected document envelope", () => {
+Deno.test("memory v2 builds explicit in-memory documents", () => {
   const source = toSourceLink("abc123");
   assertEquals(
     toEntityDocument({ hello: "world" }, source),
     {
-      $ctDocument: "common-tools/document@1",
       value: { hello: "world" },
       source,
     },
   );
 });
 
-Deno.test("memory v2 re-roots query paths under the value field", () => {
-  assertEquals(toDocumentPath([]), ["value"]);
+Deno.test("memory v2 document paths are explicit full-document paths", () => {
+  assertEquals(toDocumentPath([]), toDocumentPath([]));
   assertEquals(
-    toDocumentPath(["items", "0", "title"]),
-    ["value", "items", "0", "title"],
+    toDocumentPath(["value", "items", "0", "title"]),
+    toDocumentPath(["value", "items", "0", "title"]),
   );
 });
 
@@ -40,13 +39,12 @@ Deno.test("memory v2 recognizes short source links", () => {
   assertFalse(isSourceLink({}));
 });
 
-Deno.test("memory v2 normalizes legacy document envelopes", () => {
+Deno.test("memory v2 builds explicit wire documents", () => {
   assertEquals(
-    normalizeEntityDocument({
-      value: { hello: "world" },
+    toWireEntityDocument({
+      hello: "world",
     }),
     {
-      $ctDocument: "common-tools/document@1",
       value: { hello: "world" },
     },
   );

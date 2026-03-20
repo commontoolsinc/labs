@@ -14,6 +14,7 @@ import {
   type Blob,
   type ClientCommit,
   type ClientMessage,
+  encodeWireEntityDocument,
   type EntitySnapshot,
   type GraphQuery,
   type GraphQueryRequest,
@@ -1371,7 +1372,7 @@ const getOrLoadEntitySnapshot = (
     id,
     seq: state?.seq ?? 0,
     hash: state?.hash,
-    document: state?.document ?? null,
+    document: state?.document ? encodeWireEntityDocument(state.document) : null,
   };
   cache.set(key, snapshot);
   return snapshot;

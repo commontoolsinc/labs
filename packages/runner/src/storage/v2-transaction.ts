@@ -1600,12 +1600,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       return null;
     }
 
-    const initialPayload = readPathValue(doc.initial.value, ["value"]);
-    const currentPayload = readPathValue(doc.current.value, ["value"]);
-
     const details = [...doc.writeDetails.values()];
-    const relativePaths = details.map((detail) => detail.address.path.slice(1));
-    if (relativePaths.some((path) => path.length === 0)) {
+    if (details.some((detail) => detail.address.path.length === 0)) {
       return null;
     }
 
@@ -1615,19 +1611,18 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousValue: JSONValue | undefined;
     }>();
     for (const detail of details) {
-      const relativePath = detail.address.path.slice(1);
       const arrayPatchPath = resolveArrayPatchPath(
-        initialPayload,
-        currentPayload,
-        relativePath,
+        doc.initial.value,
+        doc.current.value,
+        detail.address.path,
       );
-      const patchPath = arrayPatchPath ?? relativePath;
+      const patchPath = arrayPatchPath ?? detail.address.path;
       const value = readPathValue(
-        currentPayload,
+        doc.current.value,
         patchPath,
       ) as JSONValue | undefined;
       const previousValue = readPathValue(
-        initialPayload,
+        doc.initial.value,
         patchPath,
       ) as JSONValue | undefined;
 

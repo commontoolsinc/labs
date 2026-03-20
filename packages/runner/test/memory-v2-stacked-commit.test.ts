@@ -452,7 +452,7 @@ const createHarness = () => {
             op: "set",
             id: operation.id,
             type: DOCUMENT_MIME,
-            value: operation.value,
+            value: { value: operation.value },
           }
       ),
     }, source);
@@ -493,7 +493,7 @@ const sourceFromReads = (
     space,
     id: read.id,
     type: DOCUMENT_MIME,
-    path: read.path ?? [],
+    path: ["value", ...(read.path ?? [])],
     ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
     meta: read.seq === undefined ? {} : { seq: read.seq },
   }));

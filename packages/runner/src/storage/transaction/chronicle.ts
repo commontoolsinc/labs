@@ -42,10 +42,6 @@ import {
 import { refer } from "@commonfabric/memory/reference";
 import * as Edit from "./edit.ts";
 
-const isStoredDocumentEnvelope = (
-  value: StorableValue | undefined,
-): boolean => isEntityDocument(value);
-
 const isEmptyRecord = (
   value: StorableValue | undefined,
 ): value is Record<string, never> =>
@@ -55,33 +51,9 @@ const isEmptyRecord = (
   !Array.isArray(value) &&
   Object.keys(value).length === 0;
 
-const toStoredDocumentEnvelope = (
-  loaded: StorableValue,
-  merged: StorableValue | undefined,
-): StorableValue | undefined => {
-  const {
-    [ENTITY_DOCUMENT_MARKER_KEY]: _marker,
-    value: _value,
-    ...metadata
-  } = loaded as Record<string, StorableDatum>;
-
-  if (merged === undefined) {
-    return Object.keys(metadata).length === 0 ? undefined : {
-      [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
-      ...metadata,
-    } as StorableValue;
-  }
-
-  return {
-    [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
-    ...metadata,
-    value: merged,
-  } as StorableValue;
-};
-
 const alignRootWriteWithLoadedShape = (
   type: string,
-  loaded: StorableValue | undefined,
+  _loaded: StorableValue | undefined,
   merged: StorableValue | undefined,
   options: {
     isV2JsonRoot: boolean;
@@ -93,11 +65,7 @@ const alignRootWriteWithLoadedShape = (
   if (options.isV2JsonRoot) {
     return isEmptyRecord(merged) ? undefined : merged;
   }
-  if (!isStoredDocumentEnvelope(loaded) || isStoredDocumentEnvelope(merged)) {
-    return merged;
-  }
-
-  return toStoredDocumentEnvelope(loaded, merged);
+  return merged;
 };
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);

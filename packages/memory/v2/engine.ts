@@ -8,17 +8,18 @@ import {
   type Blob,
   type BranchName,
   type ClientCommit,
+  decodeWireEntityDocument,
   DEFAULT_BRANCH,
   EMPTY_VALUE_REF,
+  encodeWireEntityDocument,
   type EntityDocument,
   type EntityId,
-  getEntityDocumentMetadata,
-  normalizeEntityDocument,
+  isWireEntityDocument,
   type Operation,
   type PatchOp,
   type Reference,
   type SessionId,
-  toEntityDocument,
+  type WireEntityDocument,
 } from "../v2.ts";
 
 const PRAGMAS = `
@@ -627,9 +628,7 @@ export const readState = (
   let document: EntityDocument | null;
   switch (row.fact_type) {
     case "set":
-      document = normalizeEntityDocument(
-        JSON.parse(row.data ?? "null") as JSONValue,
-      );
+      document = decodeStoredDocument(row.data);
       break;
     case "delete":
       document = null;
@@ -1030,17 +1029,23 @@ const writeOperation = (
 
   switch (operation.op) {
     case "set": {
-      const value = normalizeEntityDocument(operation.value);
-      const valueRef = toReference(value);
+      if (!isWireEntityDocument(operation.value)) {
+        throw new Error(
+          "memory v2 set operations require explicit document objects",
+        );
+      }
+      const value = decodeWireEntityDocument(operation.value);
+      const stored = encodeWireEntityDocument(value);
+      const valueRef = toReference(stored);
       engine.statements.insertValue.run({
         hash: valueRef,
-        data: JSON.stringify(value),
+        data: JSON.stringify(stored),
       });
 
       const hash = toReference({
         type: "set",
         id: operation.id,
-        value,
+        value: stored,
         parent: parentRef,
       });
 
@@ -1149,15 +1154,11 @@ const reconstructPatchedDocument = (
   let document = emptyEntityDocument();
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
-    document = normalizeEntityDocument(
-      JSON.parse(snapshotRow.data ?? "null") as JSONValue,
-    );
+    document = decodeStoredDocument(snapshotRow.data);
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     if (baseRow.fact_type === "set") {
-      document = normalizeEntityDocument(
-        JSON.parse(baseRow.data ?? "null") as JSONValue,
-      );
+      document = decodeStoredDocument(baseRow.data);
     }
   }
 
@@ -1229,10 +1230,11 @@ const maybeMaterializeSnapshot = (
     return;
   }
 
-  const valueRef = toReference(state.document);
+  const stored = encodeWireEntityDocument(state.document);
+  const valueRef = toReference(stored);
   engine.statements.insertValue.run({
     hash: valueRef,
-    data: JSON.stringify(state.document),
+    data: JSON.stringify(stored),
   });
   engine.statements.insertSnapshot.run({
     id,
@@ -1283,13 +1285,17 @@ const applyPatchDocument = (
   document: EntityDocument,
   patches: PatchOp[],
 ): EntityDocument =>
-  toEntityDocument(
-    applyPatch(document.value ?? {}, patches),
-    document.source,
-    getEntityDocumentMetadata(document),
-  );
+  applyPatch(document as JSONValue, patches) as EntityDocument;
 
-const emptyEntityDocument = (): EntityDocument => toEntityDocument({});
+const emptyEntityDocument = (): EntityDocument => ({});
+
+const decodeStoredDocument = (data: string | null): EntityDocument => {
+  const parsed = JSON.parse(data ?? "null") as unknown;
+  if (!isWireEntityDocument(parsed)) {
+    throw new Error("memory v2 stored documents must be plain object roots");
+  }
+  return decodeWireEntityDocument(parsed as WireEntityDocument);
+};
 
 export const hashBlobBytes = (value: Uint8Array): Reference => {
   return fromDigest(sha256(value)).toString() as Reference;

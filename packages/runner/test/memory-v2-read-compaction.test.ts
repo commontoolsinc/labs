@@ -58,7 +58,7 @@ Deno.test("memory v2 compacts descendant confirmed reads under a recursive ances
 
   assertEquals(reads.pending, []);
   assertEquals(reads.confirmed.length, 1);
-  assertEquals(reads.confirmed[0].path, []);
+  assertEquals(reads.confirmed[0].path, ["value"]);
 
   await runtime.dispose();
   await storage.close();
@@ -105,8 +105,8 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
       JSON.stringify(left).localeCompare(JSON.stringify(right))
     ),
     [
-      [],
-      ["section0", "field0"],
+      ["value"],
+      ["value", "section0", "field0"],
     ].toSorted((left, right) =>
       JSON.stringify(left).localeCompare(JSON.stringify(right))
     ),

@@ -1,11 +1,15 @@
-import type { JSONValue, SchemaPathSelector } from "./interface.ts";
+import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
+import type {
+  JSONValue,
+  SchemaPathSelector,
+  StorableDatum,
+} from "./interface.ts";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
 export const EMPTY_VALUE_REF = "__empty__" as const;
-export const ENTITY_DOCUMENT_MARKER_KEY = "$ctDocument" as const;
-export const ENTITY_DOCUMENT_MARKER_VALUE = "common-tools/document@1" as const;
 
 export type EntityId = string;
 export type BranchName = string;
@@ -14,19 +18,28 @@ export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
-export type ReadPath = readonly string[];
+export type DocumentPath = readonly string[] & {
+  readonly __memoryV2DocumentPath: unique symbol;
+};
+export type ReadPath = DocumentPath;
 
 export interface SourceLink {
   "/": string;
 }
 
-export type EntityDocumentField = JSONValue | SourceLink | undefined;
+export type EntityDocumentField = StorableDatum | SourceLink | undefined;
+export type WireEntityDocumentField = JSONValue | SourceLink | undefined;
 
 export interface EntityDocument {
-  [ENTITY_DOCUMENT_MARKER_KEY]: typeof ENTITY_DOCUMENT_MARKER_VALUE;
-  value?: JSONValue;
+  value?: StorableDatum;
   source?: SourceLink;
   [key: string]: EntityDocumentField;
+}
+
+export interface WireEntityDocument {
+  value?: JSONValue;
+  source?: SourceLink;
+  [key: string]: WireEntityDocumentField;
 }
 
 export interface Blob {
@@ -52,7 +65,7 @@ export type PatchOp =
 export interface SetOperation {
   op: "set";
   id: EntityId;
-  value: JSONValue | EntityDocument;
+  value: WireEntityDocument;
 }
 
 export interface PatchOperation {
@@ -154,7 +167,7 @@ export interface EntitySnapshot {
   id: EntityId;
   seq: number;
   hash?: Reference;
-  document: EntityDocument | null;
+  document: WireEntityDocument | null;
 }
 
 export interface GraphQueryResult {
@@ -237,7 +250,21 @@ export type ServerMessage =
   | ResponseMessage<unknown>
   | GraphUpdateMessage;
 
+const memoryV2ReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new Error(
+      "getCell is not available at the memory/v2 boundary",
+    );
+  },
+};
+
+const isDocumentRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
 export const toSourceLink = (id: string): SourceLink => ({ "/": id });
+
+export const toDocumentPath = (path: readonly string[]): DocumentPath =>
+  path as DocumentPath;
 
 export const toBlobMetadataId = (hash: Reference): EntityId =>
   `urn:blob-meta:${hash}`;
@@ -253,12 +280,11 @@ export const isSourceLink = (value: unknown): value is SourceLink => {
 };
 
 export const toEntityDocument = (
-  value: JSONValue | undefined,
+  value: StorableDatum | undefined,
   source?: SourceLink,
   metadata: Record<string, EntityDocumentField> = {},
 ): EntityDocument => {
   const document: Record<string, EntityDocumentField> = {
-    [ENTITY_DOCUMENT_MARKER_KEY]: ENTITY_DOCUMENT_MARKER_VALUE,
     ...metadata,
     ...(source !== undefined ? { source } : {}),
   };
@@ -268,65 +294,70 @@ export const toEntityDocument = (
   return document as EntityDocument;
 };
 
+export const toWireEntityDocument = (
+  value: JSONValue | undefined,
+  source?: SourceLink,
+  metadata: Record<string, WireEntityDocumentField> = {},
+): WireEntityDocument => {
+  const document: Record<string, WireEntityDocumentField> = {
+    ...metadata,
+    ...(source !== undefined ? { source } : {}),
+  };
+  if (value !== undefined) {
+    document.value = value;
+  }
+  return document as WireEntityDocument;
+};
+
+export const isWireEntityDocument = (
+  value: unknown,
+): value is WireEntityDocument => isDocumentRecord(value);
+
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  return (value as Record<string, unknown>)[ENTITY_DOCUMENT_MARKER_KEY] ===
-    ENTITY_DOCUMENT_MARKER_VALUE;
-};
-
-const isLegacyEntityDocument = (
-  value: unknown,
-): value is {
-  value?: JSONValue;
-  source?: SourceLink;
-} => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const keys = Object.keys(candidate);
-  if (
-    keys.length === 0 ||
-    !keys.every((key) => key === "value" || key === "source")
-  ) {
-    return false;
-  }
-
-  return Object.hasOwn(candidate, "value") ||
-    (
-      Object.hasOwn(candidate, "source") &&
-      isSourceLink(candidate.source)
-    );
-};
+): value is EntityDocument => isDocumentRecord(value);
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,
 ): Record<string, EntityDocumentField> => {
   const {
-    [ENTITY_DOCUMENT_MARKER_KEY]: _marker,
     value: _value,
     ...metadata
   } = document;
   return metadata;
 };
 
-export const normalizeEntityDocument = (
-  value: JSONValue | EntityDocument,
-): EntityDocument => {
-  if (isEntityDocument(value)) {
-    return value;
-  }
-
-  if (isLegacyEntityDocument(value)) {
-    return toEntityDocument(value.value, value.source);
-  }
-
-  return toEntityDocument(value);
+export const getWireEntityDocumentMetadata = (
+  document: WireEntityDocument,
+): Record<string, WireEntityDocumentField> => {
+  const {
+    value: _value,
+    ...metadata
+  } = document;
+  return metadata;
 };
 
-export const toDocumentPath = (path: ReadPath): string[] => ["value", ...path];
+export const encodeWireEntityDocument = (
+  document: EntityDocument,
+): WireEntityDocument => {
+  const encoded = JSON.parse(
+    jsonFromValue(document as unknown as StorableDatum),
+  ) as JSONValue;
+  if (!isDocumentRecord(encoded)) {
+    throw new Error("memory v2 documents must encode to plain object roots");
+  }
+  return encoded as WireEntityDocument;
+};
+
+export const decodeWireEntityDocument = (
+  document: WireEntityDocument,
+): EntityDocument => {
+  const decoded = valueFromJson(
+    JSON.stringify(document),
+    memoryV2ReconstructionContext,
+  );
+  if (!isDocumentRecord(decoded)) {
+    throw new Error("memory v2 documents must decode to plain object roots");
+  }
+  return decoded as EntityDocument;
+};
