@@ -117,7 +117,6 @@ export type {
   Pattern,
   PatternFactory,
   PatternFunction,
-  PatternInput,
   Props,
   RenderNode,
   RequireDefaults,

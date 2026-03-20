@@ -12,7 +12,6 @@ import {
   type OpaqueRef,
   type Pattern,
   type PatternFactory,
-  type PatternInput,
   type RequireDefaults,
   type SchemaWithoutCell,
   SELF,
@@ -56,14 +55,14 @@ import {
 // Function-only overloads (most common)
 export function pattern<T>(
   fn: (
-    input: PatternInput<T> & {
+    input: RequireDefaults<T> & {
       [SELF]: unknown;
     },
   ) => any,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: PatternInput<T> & { [SELF]: R },
+    input: RequireDefaults<T> & { [SELF]: R },
   ) => Opaque<R>,
 ): PatternFactory<T, R>;
 // Function + schemas overloads
@@ -95,7 +94,7 @@ export function pattern<S extends JSONSchema, RS extends JSONSchema>(
 // Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
 export function pattern<T>(
   fn: (
-    input: PatternInput<T> & {
+    input: RequireDefaults<T> & {
       [SELF]: unknown;
     },
   ) => any,
@@ -104,7 +103,7 @@ export function pattern<T>(
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: PatternInput<T> & { [SELF]: R },
+    input: RequireDefaults<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
@@ -112,7 +111,7 @@ export function pattern<T, R>(
 // Implementation signature
 export function pattern<T, R>(
   fn: (
-    input: PatternInput<T> & { [SELF]: R },
+    input: RequireDefaults<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
@@ -139,7 +138,7 @@ export function pattern<T, R>(
   let result;
   try {
     const outputs = fn!(
-      inputs as PatternInput<T> & { [SELF]: R },
+      inputs as RequireDefaults<T> & { [SELF]: R },
     );
 
     applyInputIfcToOutput(inputs, outputs);
@@ -159,7 +158,7 @@ export function pattern<T, R>(
 // Same as above, but assumes the caller manages the frame
 export function patternFromFrame<T, R>(
   fn: (
-    input: PatternInput<T> & { [SELF]: R },
+    input: RequireDefaults<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
@@ -176,7 +175,7 @@ export function patternFromFrame<T, R>(
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
   const outputs = fn(
-    inputs as PatternInput<T> & { [SELF]: R },
+    inputs as RequireDefaults<T> & { [SELF]: R },
   );
   return factoryFromPattern<T, R>(
     argumentSchema,

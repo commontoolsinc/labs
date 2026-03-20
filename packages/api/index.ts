@@ -964,21 +964,6 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  */
 export type OpaqueRef<T> = T;
 
-/**
- * Pattern callback inputs are plain structural data by default.
- *
- * Explicitly capability-typed pattern inputs such as `Writable<T>` or
- * `Cell<T>` keep their top-level cell surface, but nested properties are not
- * re-proxied through the type system.
- */
-export type PatternInput<T> = IsAny<T> extends true ? T
-  : [T] extends [AnyBrandedCell<any> | undefined]
-    ? Exclude<T, undefined> | Extract<T, undefined>
-  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [readonly unknown[]] ? T
-  : [T] extends [object] ? RequireDefaults<T>
-  : T;
-
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells
 // ============================================================================
@@ -1517,21 +1502,21 @@ export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
-      input: PatternInput<T> & { [SELF]: R },
+      input: RequireDefaults<T> & { [SELF]: R },
     ) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
-      input: PatternInput<T> & { [SELF]: unknown },
+      input: RequireDefaults<T> & { [SELF]: unknown },
     ) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
-      input: PatternInput<T> & { [SELF]: unknown },
+      input: RequireDefaults<T> & { [SELF]: unknown },
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1540,7 +1525,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: PatternInput<T> & { [SELF]: R },
+      input: RequireDefaults<T> & { [SELF]: R },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1562,7 +1547,7 @@ export type PatternToolFunction = <
 >(
   fnOrPattern:
     | ((
-      input: PatternInput<T> & { [SELF]: unknown },
+      input: RequireDefaults<T> & { [SELF]: unknown },
     ) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
