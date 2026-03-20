@@ -75,7 +75,7 @@ import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commontools/data-model/json-encoding-dispatch";
+} from "@commontools/data-model/json-encoding";
 import type { ReconstructionContext } from "@commontools/data-model/fabric-value";
 export type * from "./interface.ts";
 

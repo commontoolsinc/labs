@@ -5,7 +5,7 @@ import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
   valueFromJson,
-} from "../json-encoding-dispatch.ts";
+} from "../json-encoding.ts";
 import type { ReconstructionContext } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 
@@ -30,7 +30,7 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 // Tests
 // ============================================================================
 
-describe("json-encoding-dispatch", () => {
+describe("json-encoding", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
     resetJsonEncodingConfig();

@@ -25,7 +25,7 @@ import {
 import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
-} from "@commontools/data-model/json-encoding-dispatch";
+} from "@commontools/data-model/json-encoding";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
