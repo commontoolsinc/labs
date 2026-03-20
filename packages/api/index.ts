@@ -11,12 +11,16 @@
 //
 // Pattern-visible declarations for the fabric value type system. Canonical
 // implementations live in data-model submodule files (interface.ts,
-// fabric-value.ts, etc.) — these inline declarations mirror the public surface
-// so the pattern compiler can resolve them without relative imports.
+// fabric-hash.ts, fabric-epoch.ts, etc.) — these inline declarations mirror
+// the public surface so the pattern compiler can resolve them without relative
+// imports.
 //
 // SYNC NOTE: These declarations must stay in sync with the canonical
 // definitions in the submodule files. If they drift, pattern type-checking
 // will diverge from runtime behavior.
+//
+// Every concrete FabricPrimitive subclass must have an instanceof-capable
+// declaration here (interface + constructor + declare-const with `new`).
 
 /**
  * Abstract base class for values that participate in the fabric protocol.
