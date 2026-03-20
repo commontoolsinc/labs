@@ -21,7 +21,6 @@ export {
 
 import type {
   ExperimentalDataModelConfig,
-  FabricInstance,
   FabricNativeObject,
   FabricValue,
   FabricValueLayer,
