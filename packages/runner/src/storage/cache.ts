@@ -473,12 +473,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         } else {
           const newSchemaRefs = new Set<string>();
           ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
-          const newSchemaObj = typeof newSchema === "object" &&
-              newSchema !== null
-            ? newSchema
-            : undefined;
-          const sortedSubSchemaObj = typeof sortedSubSchema === "object" &&
-              sortedSubSchema !== null
+          const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
+          const sortedSubSchemaObj = isRecord(sortedSubSchema)
             ? sortedSubSchema
             : undefined;
           // If we don't use any $refs, we can compare these without $defs
@@ -2507,7 +2503,7 @@ const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
   const value = change?.is;
-  if (value !== null && value !== undefined && isObject(value)) {
+  if (isRecord(value)) {
     const labels = (value as { labels?: unknown }).labels;
     if (labels !== undefined) {
       return { ifc: labels } as JSONSchema;

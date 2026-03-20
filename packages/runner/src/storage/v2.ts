@@ -568,7 +568,7 @@ export class StorageManager implements IStorageManager {
     }
 
     if (Array.isArray(value)) {
-      const schemaObj = typeof schema === "object" && schema !== null
+      const schemaObj = isRecord(schema)
         ? schema as { items?: JSONSchema }
         : undefined;
       const itemSchema = schemaObj?.items
