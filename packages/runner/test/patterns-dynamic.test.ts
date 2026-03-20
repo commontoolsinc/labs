@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type OpaqueCell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -49,6 +49,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+
+  function asOpaqueCell<T>(value: T): OpaqueCell<T> {
+    return value as OpaqueCell<T>;
+  }
 
   function unaryNumberListOpPattern(
     // deno-lint-ignore no-explicit-any
@@ -296,7 +300,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
       };
     });
 
@@ -364,7 +368,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
       };
     });
 
@@ -431,7 +435,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
       };
     });
 
@@ -469,7 +473,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
       };
     });
 
@@ -523,7 +527,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: asOpaqueCell(values).filterWithPattern(isEvenPattern as any, {}),
       };
     });
 
@@ -553,7 +557,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asOpaqueCell(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -622,7 +629,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asOpaqueCell(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -717,7 +727,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asOpaqueCell(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -752,7 +765,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: asOpaqueCell(values).filterWithPattern(isEvenPattern as any, {}),
       };
     });
 
@@ -786,7 +799,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asOpaqueCell(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -842,7 +858,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asOpaqueCell(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -881,7 +900,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -914,7 +936,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(expandPattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(expandPattern as any, {}),
       };
     });
 
@@ -973,7 +995,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1064,7 +1089,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(maybeExpandPattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          maybeExpandPattern as any,
+          {},
+        ),
       };
     });
 
@@ -1099,7 +1127,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(expandOrPassthroughPattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          expandOrPassthroughPattern as any,
+          {},
+        ),
       };
     });
 
@@ -1133,7 +1164,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1172,7 +1206,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1231,7 +1268,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
+        evens: asOpaqueCell(values).filterWithPattern(isEvenPattern as any, {}),
       };
     });
 
@@ -1270,7 +1307,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asOpaqueCell(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 

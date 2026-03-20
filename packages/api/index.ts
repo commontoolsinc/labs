@@ -768,23 +768,6 @@ export interface IDerivable<T> {
   ): OpaqueRef<S[]>;
 }
 
-declare global {
-  interface Array<T> {
-    mapWithPattern<S>(
-      op: PatternFactory<T, S>,
-      params: Record<string, any>,
-    ): S[];
-    filterWithPattern<S>(
-      op: PatternFactory<T, S>,
-      params: Record<string, any>,
-    ): T[];
-    flatMapWithPattern<S>(
-      op: PatternFactory<T, S[]>,
-      params: Record<string, any>,
-    ): S[];
-  }
-}
-
 export interface IOpaquable<T> {
   /** deprecated */
   setSchema(schema: JSONSchema): void;

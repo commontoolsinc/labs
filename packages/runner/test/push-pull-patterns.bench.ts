@@ -14,7 +14,7 @@ import {
   type TimingStats,
 } from "@commontools/utils/logger";
 import { createBuilder } from "../src/builder/factory.ts";
-import type { Cell, JSONSchema } from "../src/builder/types.ts";
+import type { Cell, JSONSchema, OpaqueCell } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("bench push pull patterns");
@@ -182,6 +182,10 @@ type BenchTimingSummary = {
 };
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
+
+function asOpaqueCell<T>(value: T): OpaqueCell<T> {
+  return value as OpaqueCell<T>;
+}
 
 function benchOptions(group: string, baseline: boolean) {
   return {
@@ -484,7 +488,7 @@ async function setupMapScenario(
   const mapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
     }),
     numberListInputSchema,
     mappedResultSchema,
@@ -532,7 +536,10 @@ async function setupFilterScenario(
   const filterPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: asOpaqueCell(values).filterWithPattern(
+        filterPatternFn as any,
+        {},
+      ),
     }),
     numberListInputSchema,
     filteredResultSchema,
@@ -580,7 +587,10 @@ async function setupFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: asOpaqueCell(values).flatMapWithPattern(
+        flatMapPatternFn as any,
+        {},
+      ),
     }),
     numberListInputSchema,
     flatMappedResultSchema,
@@ -624,7 +634,7 @@ async function setupObjectMapScenario(
   const mapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: asOpaqueCell(values).mapWithPattern(doublePattern as any, {}),
     }),
     numberObjectListInputSchema,
     mappedResultSchema,
@@ -673,7 +683,10 @@ async function setupObjectFilterScenario(
   const filterPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: asOpaqueCell(values).filterWithPattern(
+        filterPatternFn as any,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     filteredResultSchema,
@@ -722,7 +735,10 @@ async function setupObjectFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: asOpaqueCell(values).flatMapWithPattern(
+        flatMapPatternFn as any,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     flatMappedResultSchema,
