@@ -1,7 +1,6 @@
 import {
   DECONSTRUCT,
   FabricInstance,
-  FabricPrimitive,
   type FabricValue,
   RECONSTRUCT,
   type ReconstructionContext,
