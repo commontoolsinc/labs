@@ -124,4 +124,3 @@ async function findNoteInList(page: Page): Promise<boolean> {
     return false;
   }
 }
-

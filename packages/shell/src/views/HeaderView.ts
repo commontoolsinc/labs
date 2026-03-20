@@ -896,6 +896,8 @@ export class XHeaderView extends BaseView {
     return this.rt ? "connected" : "disconnected";
   }
 
+  // TODO(@robdodson): We're pulling these icons in directly from Figma but @sophiexie
+  // and I should chat to see if we want to build out a dedicated icon library.
   // SVG icon templates
   private iconChevronDown() {
     return html`
