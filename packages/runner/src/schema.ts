@@ -309,7 +309,8 @@ export function processDefaultValue(
   return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx, synced);
 }
 
-function mergeDefaults(
+/** @internal Exported for testing only. */
+export function mergeDefaults(
   schema: JSONSchema | undefined,
   defaultValue: Readonly<FabricDatum>,
 ): JSONSchema {
