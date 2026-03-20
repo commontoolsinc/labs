@@ -24,7 +24,7 @@ export const RECENT_WINDOW = 3;
 export const RECENT_THRESHOLD = 2;
 
 /** Standard deviations above the median to flag a regression. */
-export const STDDEV_FACTOR = 2;
+export const STDDEV_FACTOR = 3;
 
 /** Multiplier on the median as an alternative threshold. */
 export const MEDIAN_MULTIPLIER = 2;
