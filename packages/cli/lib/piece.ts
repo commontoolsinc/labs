@@ -299,14 +299,22 @@ async function tryResolvePieceCallableAt(
   cellProp: "input" | "result",
 ): Promise<ResolvedPieceCallable | null> {
   const rootCell = await piece[cellProp].getCell();
-  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const directCallableCell = rootCell.key(callableName);
+  const resolvedCallableCell = directCallableCell.asSchemaFromLinks();
+  const callableValue = getCallableValue(rootCell.get?.(), callableName);
   const callableKind = detectCallableKind(
-    getCallableValue(rootCell.get?.(), callableName),
-    callableCell,
+    callableValue,
+    directCallableCell,
+  ) ?? detectCallableKind(
+    callableValue,
+    resolvedCallableCell,
   );
   if (!callableKind) {
     return null;
   }
+  const callableCell = callableKind === "handler"
+    ? directCallableCell
+    : resolvedCallableCell;
 
   return {
     callableCell,
@@ -343,7 +351,7 @@ async function tryResolvePieceHandler(
   }
 
   const rootCell = await piece.result.getCell();
-  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const callableCell = rootCell.key(callableName);
   return {
     callableCell,
     callableKind: "handler",

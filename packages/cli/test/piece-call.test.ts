@@ -165,6 +165,88 @@ describe("executePieceCallable", () => {
     );
     expect(result.helpText).not.toContain("ct exec");
   });
+
+  it("preserves direct handler schemas when resolved stream cells collapse to true", async () => {
+    const handlerSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+      required: ["message"],
+      asStream: true,
+    };
+
+    const resolvedHandlerCell = {
+      schema: true,
+      get: () => ({ $stream: true }),
+      getRaw: () => ({ $stream: true }),
+      isStream: () => true,
+      asSchemaFromLinks: () => resolvedHandlerCell,
+    };
+    const directHandlerCell = {
+      schema: handlerSchema,
+      get: () => ({
+        "/": {
+          "link@1": {
+            path: ["internal", "recordMessage"],
+            id: "of:handler",
+          },
+        },
+      }),
+      getRaw: () => ({ $stream: true }),
+      isStream: () => true,
+      asSchemaFromLinks: () => resolvedHandlerCell,
+    };
+    const rootCell = {
+      get: () => ({
+        recordMessage: {
+          "/": {
+            "link@1": {
+              path: ["internal", "recordMessage"],
+              id: "of:handler",
+            },
+          },
+        },
+      }),
+      key: (key: string) =>
+        key === "recordMessage" ? directHandlerCell : createMockCell({}, {
+          type: "object",
+        }),
+    };
+    const piece = {
+      result: {
+        getCell: () => Promise.resolve(rootCell),
+        set: () => Promise.resolve(),
+      },
+      input: {
+        getCell: () => Promise.resolve(createMockCell({}, { type: "object" })),
+        set: () => Promise.resolve(),
+      },
+    };
+    const manager = {
+      getSpace: () => "home",
+    };
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "recordMessage",
+      ["--help", "--json"],
+      {
+        loadManager: () => Promise.resolve(manager),
+        loadPiece: () => Promise.resolve(piece),
+      },
+    );
+
+    expect(JSON.parse(result.helpText!)).toEqual({
+      callableKind: "handler",
+      inputSchema: handlerSchema,
+    });
+  });
 });
 
 function createPieceCallableHarness(options: {
