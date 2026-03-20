@@ -1064,37 +1064,6 @@ export type Opaque<T> =
     : T);
 
 /**
- * Helper type to extract the innermost Cell type from any number of OpaqueRef wrappers.
- * UnwrapOpaqueRefLayers<Cell<T>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<Cell<T>>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<OpaqueRef<Cell<T>>>> = Cell<T>
- *
- * Support for nested OpaqueRef layers is limited to 4 levels.
- */
-type UnwrapOpaqueRefLayers4<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers3<U>
-  : T;
-
-type UnwrapOpaqueRefLayers3<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers2<U>
-  : T;
-
-type UnwrapOpaqueRefLayers2<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers1<U>
-  : T;
-
-type UnwrapOpaqueRefLayers1<T> = T extends OpaqueRef<infer U> ? U
-  : T;
-
-/**
- * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
- * wrapped in any number of OpaqueRef layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
- */
-type AnyCellWrappedInOpaqueRef<T> = UnwrapOpaqueRefLayers4<T> extends
-  BrandedCell<any, "cell"> ? UnwrapOpaqueRefLayers4<T>
-  : never;
-
-/**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
  * UnwrapCell<AnyBrandedCell<{ a: AnyBrandedCell<number> }>> = { a: AnyBrandedCell<number> }
@@ -1663,51 +1632,32 @@ export type ActionFunction = {
   <T>(fn: (event: T) => void): Stream<T>;
 };
 
+type FixedTupleInput<T extends readonly unknown[]> =
+  & readonly [...T]
+  & (number extends T["length"] ? never : unknown);
+
 /**
  * DeriveFunction creates a reactive computation that transforms input values.
  *
- * Special overload ordering is critical for correct type inference:
- *
- * 1. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
- *    - Required because TypeScript infers boolean cells as a union of literal types
- *    - Without this, the callback would get `true | false` instead of `boolean`
- * 2. Cell preservation overload: Keeps Cell types wrapped consistently
- *    - Prevents unwrapping of Cell<T> to T, maintaining consistent behavior
- *    - Whether Cell is passed directly or nested in objects, it stays wrapped
- *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
- * 3. Generic overload: Handles all other cases, unwrapping Opaque types
+ * The callback input effectively mirrors what you'd write for lift():
+ * cells/default brands are stripped from the supplied input shape before the
+ * callback sees it.
  *
  * Note: Schema-based overload is available when importing from "commontools/schema"
  *
  * @deprecated Use compute() instead
  */
 export interface DeriveFunction {
-  // Overload 1: Boolean literal union -> boolean
-  // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
-  // Without this, callback gets (input: true | false) instead of (input: boolean)
-  <In extends boolean, Out>(
-    input: OpaqueRef<true> | OpaqueRef<false>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 2: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
-  // Ensures consistent behavior: Cell<T> stays Cell<T> whether passed directly or in objects
-  // Handles: Cell<T>, OpaqueRef<Cell<T>>, OpaqueRef<OpaqueRef<Cell<T>>>, etc.
-  <In, Out>(
-    input: AnyCellWrappedInOpaqueRef<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 3: Preserve tuple literals passed directly to derive()
   <const In extends readonly unknown[], Out>(
-    input: In,
-    f: (input: DeriveCallbackInput<In>) => Out,
+    input: FixedTupleInput<In>,
+    f: (
+      input: { -readonly [K in keyof In]: StripDefaultBrand<StripCell<In[K]>> },
+    ) => Out,
   ): OpaqueRef<Out>;
 
-  // Overload 4: Generic fallback - unwraps all Opaque types
   <In, Out>(
     input: In,
-    f: (input: DeriveCallbackInput<In>) => Out,
+    f: (input: StripDefaultBrand<StripCell<In>>) => Out,
   ): OpaqueRef<Out>;
 }
 
@@ -1890,50 +1840,6 @@ export type StripDefaultBrand<T> = Exclude<
   T,
   { readonly [DEFAULT_MARKER]: any }
 >;
-
-type DeriveArrayInput<T extends readonly unknown[]> = IsAny<T[number]> extends
-  true ? any
-  : number extends T["length"] ? Array<DerivePropertyValue<T[number]>>
-  : { -readonly [K in keyof T]: DerivePropertyValue<T[K]> };
-
-export type DeriveTupleInput<T extends readonly unknown[]> =
-  & readonly [...T]
-  & (number extends T["length"] ? never : unknown);
-
-type DeriveValue<T> = IsAny<T> extends true ? T
-  : [T] extends [AnyBrandedCell<any> | undefined] ?
-      | DeriveRootValueInner<StripDefaultBrand<Exclude<T, undefined>>>
-      | Extract<T, undefined>
-  : DeriveRootValueInner<StripDefaultBrand<T>>;
-
-type DeriveRootValueInner<T> = [T] extends [Stream<any>] ? T
-  : [T] extends [OpaqueCell<infer U>] ? DerivePropertyValue<U>
-  : [T] extends [AnyBrandedCell<infer U>]
-    ? [U] extends
-      [readonly unknown[] | ArrayBuffer | ArrayBufferView | URL | Date]
-      ? DerivePropertyValue<U>
-    : [U] extends [object] ? T
-    : DerivePropertyValue<U>
-  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [readonly unknown[]] ? DeriveArrayInput<T>
-  : [T] extends [object] ? { [K in keyof T]: DerivePropertyValue<T[K]> }
-  : T;
-
-type DerivePropertyValue<T> = IsAny<T> extends true ? T
-  : [T] extends [OpaqueCell<any> | undefined] ?
-      | DerivePropertyValueInner<StripDefaultBrand<Exclude<T, undefined>>>
-      | Extract<T, undefined>
-  : DerivePropertyValueInner<StripDefaultBrand<T>>;
-
-type DerivePropertyValueInner<T> = [T] extends [Stream<any>] ? T
-  : [T] extends [OpaqueCell<infer U>] ? DerivePropertyValue<U>
-  : [T] extends [AnyBrandedCell<infer U>] ? DerivePropertyValue<U>
-  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [readonly unknown[]] ? DeriveArrayInput<T>
-  : [T] extends [object] ? { [K in keyof T]: DerivePropertyValue<T[K]> }
-  : T;
-
-export type DeriveCallbackInput<T> = DeriveValue<T>;
 
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required

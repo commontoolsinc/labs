@@ -1,5 +1,4 @@
 import type {
-  DeriveCallbackInput,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -13,6 +12,7 @@ import type {
   SchemaWithoutCell,
   Stream,
   StripCell,
+  StripDefaultBrand,
   toJSON,
 } from "./types.ts";
 import { opaqueRef, stream } from "./opaque-ref.ts";
@@ -23,6 +23,10 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
+
+type FixedTupleInput<T extends readonly unknown[]> =
+  & readonly [...T]
+  & (number extends T["length"] ? never : unknown);
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -309,12 +313,14 @@ export function derive<
   ) => Schema<ResultSchema>,
 ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 export function derive<const In extends readonly unknown[], Out>(
-  input: In,
-  f: (input: DeriveCallbackInput<In>) => Out,
+  input: FixedTupleInput<In>,
+  f: (
+    input: { -readonly [K in keyof In]: StripDefaultBrand<StripCell<In[K]>> },
+  ) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(
   input: In,
-  f: (input: DeriveCallbackInput<In>) => Out,
+  f: (input: StripDefaultBrand<StripCell<In>>) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
   if (args.length === 4) {
@@ -333,7 +339,7 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 
   const [input, f] = args as [
     In,
-    (input: DeriveCallbackInput<In>) => Out,
+    (input: StripDefaultBrand<StripCell<In>>) => Out,
   ];
   return lift(f as (input: any) => Out)(input as any);
 }

@@ -62,7 +62,7 @@ export default pattern<
           }}
         >
           <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
-            Feed Items: {derive(items, (items) => items.get().length)}
+            Feed Items: {derive(items, (items) => items.length)}
           </h2>
 
           <ct-hstack gap="1">

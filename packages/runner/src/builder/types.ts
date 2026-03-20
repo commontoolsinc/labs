@@ -92,8 +92,6 @@ export type {
   Cell,
   CellKind,
   CellTypeConstructor,
-  DeriveCallbackInput,
-  DeriveTupleInput,
   Handler,
   HandlerFactory,
   HKT,

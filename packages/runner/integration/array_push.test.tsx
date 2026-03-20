@@ -101,7 +101,7 @@ export default pattern(
         <div>
           <h3>Array Push Test</h3>
           <p>
-            Array length: {derive(my_numbers_array, (arr) => arr.get().length)}
+            Array length: {derive(my_numbers_array, (arr) => arr.length)}
           </p>
           <p>
             <ul>

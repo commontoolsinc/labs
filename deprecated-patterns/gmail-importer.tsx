@@ -816,7 +816,7 @@ export default pattern<{
     const emails = cell<Confidential<Email[]>>([]);
 
     derive(emails, (emails) => {
-      console.log("emails", emails.get().length);
+      console.log("emails", emails.length);
     });
 
     return {
@@ -850,8 +850,7 @@ export default pattern<{
           </div>
 
           <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-            Imported email count: {derive(emails, (emails) =>
-              emails.get().length)}
+            Imported email count: {derive(emails, (emails) => emails.length)}
           </h3>
 
           <div style={{ fontSize: "14px", color: "#666" }}>

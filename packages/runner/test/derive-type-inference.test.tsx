@@ -325,21 +325,21 @@ describe("derive type inference", () => {
       const profileCell = Cell.of<UserProfile>();
       profileCell.set({ name: "Ada", active: true });
 
-      it("should unwrap Cell.of<T> inputs directly", () => {
+      it("should strip direct Cell.of<T> inputs to values", () => {
         const result = derive(profileCell, (profile) => {
-          const _typeCheck: Cell<UserProfile> = profile;
-          return profile === profile ? 1 : 0;
+          const _typeCheck: UserProfile = profile;
+          return profile.active ? 1 : 0;
         });
 
         expect(result).toBeDefined();
       });
 
-      it("should unwrap OpaqueRef<Cell<T>> inputs", () => {
+      it("should strip OpaqueRef<Cell<T>> inputs to values", () => {
         const profileCellRef = profileCell as unknown as OpaqueRef<
           Cell<UserProfile>
         >;
         const isActive = derive(profileCellRef, (profile) => {
-          const _typeCheck: Cell<UserProfile> = profile;
+          const _typeCheck: UserProfile = profile;
           return profile;
         });
 
@@ -398,15 +398,15 @@ describe("derive type inference", () => {
       expect(derived).toBeDefined();
     });
 
-    it("should honor explicit Cell<T> inputs", () => {
+    it("should strip explicit Cell<T> wrapper inputs to values", () => {
       type ExplicitInput = { role: "user"; text: string };
       const explicitCell = Cell.of<Cell<ExplicitInput>>().getAsOpaqueRefProxy();
 
       const derived = derive(
         explicitCell,
-        (value: Cell<ExplicitInput>) => {
-          const _typeCheck: Cell<ExplicitInput> = value;
-          return value.get().text.length;
+        (value: ExplicitInput) => {
+          const _typeCheck: ExplicitInput = value;
+          return value.text.length;
         },
       );
 

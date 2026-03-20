@@ -583,7 +583,7 @@ export default pattern(
     const calendars = cell<Calendar[]>([]);
 
     derive(events, (events) => {
-      console.log("events", events.get().length);
+      console.log("events", events.length);
     });
 
     return {
@@ -596,8 +596,7 @@ export default pattern(
             {auth?.user?.email}
           </h2>
           <h2 style="font-size: 20px; font-weight: bold;">
-            Imported event count: {derive(events, (events) =>
-              events.get().length)}
+            Imported event count: {derive(events, (events) => events.length)}
           </h2>
 
           <h2>
