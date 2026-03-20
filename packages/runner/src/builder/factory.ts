@@ -55,6 +55,7 @@ import {
   FabricEpochDays,
   FabricEpochNsec,
 } from "@commontools/data-model/fabric-epoch";
+import { FabricHash } from "@commontools/data-model/fabric-hash";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -161,6 +162,7 @@ export const createBuilder = (): {
       FabricPrimitive,
       FabricEpochNsec,
       FabricEpochDays,
+      FabricHash,
     },
     exportsCallback,
   };

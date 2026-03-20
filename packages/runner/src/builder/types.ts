@@ -311,6 +311,7 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commontools/data-model/fabric-epoch").FabricEpochNsec;
   FabricEpochDays:
     typeof import("@commontools/data-model/fabric-epoch").FabricEpochDays;
+  FabricHash: typeof import("@commontools/data-model/fabric-hash").FabricHash;
 }
 
 // Runtime interface needed by createCell

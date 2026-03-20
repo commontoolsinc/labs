@@ -31,7 +31,9 @@ export interface FabricInstanceConstructor {
   prototype: FabricInstance;
 }
 
-export declare const FabricInstance: FabricInstanceConstructor;
+export declare const FabricInstance:
+  & FabricInstanceConstructor
+  & (abstract new (...args: any) => FabricInstance);
 
 /** Abstract base class for fabric primitive types. */
 // deno-lint-ignore no-empty-interface
@@ -41,7 +43,9 @@ export interface FabricPrimitiveConstructor {
   prototype: FabricPrimitive;
 }
 
-export declare const FabricPrimitive: FabricPrimitiveConstructor;
+export declare const FabricPrimitive:
+  & FabricPrimitiveConstructor
+  & (abstract new (...args: any) => FabricPrimitive);
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch.
@@ -72,6 +76,26 @@ export interface FabricEpochDaysConstructor {
 }
 
 export declare const FabricEpochDays: FabricEpochDaysConstructor;
+
+/**
+ * A content-addressed identifier: a hash digest paired with an algorithm tag.
+ * Extends `FabricPrimitive` -- treated like a primitive in the fabric type
+ * system (always frozen, passes through conversion unchanged).
+ */
+export interface FabricHash extends FabricPrimitive {
+  readonly hash: Uint8Array;
+  readonly algorithmTag: string;
+  readonly bytes: Uint8Array;
+  toString(): string;
+  toJSON(): { "/": string };
+}
+
+export interface FabricHashConstructor {
+  new (hash: Uint8Array, algorithmTag: string): FabricHash;
+  prototype: FabricHash;
+}
+
+export declare const FabricHash: FabricHashConstructor;
 
 /**
  * A value that can be stored in the storage layer. Similar to `JSONValue` but
