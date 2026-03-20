@@ -8,11 +8,19 @@ import { Task } from "@lit/task";
 import { type CellHandle } from "@commontools/runtime-client";
 import type { FavoriteEntry } from "@commontools/home-schemas";
 import "../components/Flex.ts";
-
-interface PieceItem {
-  id: string;
-  name: string;
-}
+import "../components/PieceList.ts";
+import { type PieceItem } from "../components/PieceList.ts";
+import {
+  iconArrowLeft,
+  iconBug,
+  iconChevronDown,
+  iconChevronRight,
+  iconClose,
+  iconFolder,
+  iconLink,
+  iconLogOut,
+  iconStar,
+} from "../components/icons.ts";
 
 type ConnectionStatus =
   | "connecting"
@@ -398,55 +406,6 @@ export class XHeaderView extends BaseView {
       transform: rotate(180deg);
     }
 
-    /* Piece list */
-    .piece-list {
-      display: flex;
-      flex-direction: column;
-      padding: 0.25rem 0;
-      margin-left: 1rem;
-      max-height: 15rem;
-      overflow-y: auto;
-    }
-
-    .piece-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.375rem 1rem;
-      border: none;
-      border-radius: 6px;
-      background: none;
-      cursor: pointer;
-      font-weight: 400;
-      font-size: 0.8125rem;
-      line-height: 1.25rem;
-      color: var(--gray-300, #8a909b);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: left;
-      width: 100%;
-      flex-shrink: 0;
-    }
-
-    .piece-item:hover {
-      background: rgba(0, 0, 0, 0.03);
-      color: inherit;
-    }
-
-    .piece-item.active {
-      color: inherit;
-    }
-
-    .piece-item.active::before {
-      content: "";
-      width: 0.375rem;
-      height: 0.375rem;
-      border-radius: 50%;
-      background: var(--accent-blue, #4979fa);
-      flex-shrink: 0;
-    }
-
     /* Menu items */
     .menu-rows {
       display: flex;
@@ -782,18 +741,9 @@ export class XHeaderView extends BaseView {
     }
   };
 
-  /**
-   * Delegated click handler for piece list items. Uses data-piece-id
-   * attribute to identify the target piece, avoiding per-item closures.
-   */
-  private handlePieceClick(e: Event) {
-    const target = (e.target as HTMLElement).closest<HTMLElement>(
-      "[data-piece-id]",
-    );
-    if (!target) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const pieceId = target.dataset.pieceId!;
+  /** Handle piece selection from either the mobile or desktop piece list. */
+  private handlePieceSelected(e: Event) {
+    const { id: pieceId } = (e as CustomEvent<PieceItem>).detail;
     this.menuOpen = false;
     this.pieceListExpanded = false;
     this.headerPieceDropdownOpen = false;
@@ -896,212 +846,6 @@ export class XHeaderView extends BaseView {
     return this.rt ? "connected" : "disconnected";
   }
 
-  // TODO(@robdodson): We're pulling these icons in directly from Figma but @sophiexie
-  // and I should chat to see if we want to build out a dedicated icon library.
-  // SVG icon templates
-  private iconChevronDown() {
-    return html`
-      <svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M2.5 4L6 7.5L9.5 4"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconClose() {
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M6 6L18 18M18 6L6 18"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconFolder() {
-    return html`
-      <svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M1.5 2.5V9.5C1.5 10.0523 1.94772 10.5 2.5 10.5H9.5C10.0523 10.5 10.5 10.0523 10.5 9.5V4.5C10.5 3.94772 10.0523 3.5 9.5 3.5H6L4.5 1.5H2.5C1.94772 1.5 1.5 1.94772 1.5 2.5Z"
-          stroke="currentColor"
-          stroke-width="1"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconChevronRight() {
-    return html`
-      <svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M4.5 2.5L8 6L4.5 9.5"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconArrowLeft() {
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M19 12H5M5 12L12 19M5 12L12 5"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconStar(filled = false) {
-    return html`
-      <svg viewBox="0 0 24 24" fill="${filled
-        ? "currentColor"
-        : "none"}" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconLink() {
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M10 13C10.4295 13.5741 10.9774 14.0491 11.6066 14.3929C12.2357 14.7367 12.9315 14.9411 13.6467 14.9923C14.3618 15.0435 15.0796 14.9403 15.7513 14.6897C16.4231 14.4392 17.0331 14.0471 17.54 13.54L20.54 10.54C21.4508 9.59695 21.9548 8.33394 21.9434 7.02296C21.932 5.71198 21.4061 4.45791 20.479 3.53087C19.552 2.60383 18.2979 2.07799 16.987 2.0666C15.676 2.0552 14.413 2.55918 13.47 3.47L11.75 5.18"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M14 11C13.5705 10.4259 13.0226 9.95083 12.3934 9.60706C11.7642 9.26329 11.0685 9.05886 10.3533 9.00765C9.63819 8.95643 8.92037 9.05963 8.24861 9.3102C7.57685 9.56077 6.96684 9.95284 6.46 10.46L3.46 13.46C2.54918 14.403 2.0452 15.666 2.0566 16.977C2.068 18.288 2.59383 19.542 3.52087 20.4691C4.44791 21.3961 5.70198 21.922 7.01296 21.9334C8.32394 21.9448 9.58694 21.4408 10.53 20.53L12.24 18.82"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconBug() {
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M8 2L6 4M16 2L18 4"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M3 12H6M18 12H21"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M3 18H6M18 18H21"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M12 20C9.79086 20 8 17.3137 8 14V10C8 7.79086 9.79086 6 12 6C14.2091 6 16 7.79086 16 10V14C16 17.3137 14.2091 20 12 20Z"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M8 10H16"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  private iconLogOut() {
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M16 17L21 12L16 7"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <path
-          d="M21 12H9"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-    `;
-  }
-
-  /** Render the piece list, shared between the mobile menu and desktop dropdown. */
-  private renderPieceList() {
-    const pieces = this._pieces.value ?? [];
-    if (pieces.length === 0) {
-      return html`
-        <div class="piece-list">
-          <span class="breadcrumb-text">No pieces found</span>
-        </div>
-      `;
-    }
-    return html`
-      <div class="piece-list" @click="${this.handlePieceClick}">
-        ${pieces.map((piece) =>
-          html`
-            <button
-              class="piece-item ${piece.id === this.pieceId ? "active" : ""}"
-              data-piece-id="${piece.id}"
-            >
-              ${piece.name}
-            </button>
-          `
-        )}
-      </div>
-    `;
-  }
-
   override render() {
     const connectionStatus = this.getConnectionStatus();
     const connectionColor = getConnectionColor(connectionStatus);
@@ -1123,7 +867,7 @@ export class XHeaderView extends BaseView {
                 .width="${24}"
                 .height="${24}"
               ></ct-logo>
-              <span class="chevron-down">${this.iconChevronDown()}</span>
+              <span class="chevron-down">${iconChevronDown()}</span>
             </span>
           </button>
           <div class="header-breadcrumbs">
@@ -1148,13 +892,17 @@ export class XHeaderView extends BaseView {
                             .headerPieceDropdownOpen
                           ? "expanded"
                           : ""}">
-                          ${this.iconChevronDown()}
+                          ${iconChevronDown()}
                         </span>
                       </button>
                       ${this.headerPieceDropdownOpen
                         ? html`
                           <div class="header-piece-dropdown">
-                            ${this.renderPieceList()}
+                            <x-piece-list
+                              .pieces="${this._pieces.value ?? []}"
+                              .activePieceId="${this.pieceId}"
+                              @piece-selected="${this.handlePieceSelected}"
+                            ></x-piece-list>
                           </div>
                         `
                         : nothing}
@@ -1173,17 +921,17 @@ export class XHeaderView extends BaseView {
           <div class="menu-inner">
             <button class="menu-close" @click="${this
               .handleCloseMenu}" aria-label="Close menu">
-              <span class="menu-close-icon">${this.iconClose()}</span>
+              <span class="menu-close-icon">${iconClose()}</span>
             </button>
             <div class="menu-title">
               ${this._hasSpace
                 ? html`
                   <div class="breadcrumb">
-                    <span class="breadcrumb-icon">${this.iconFolder()}</span>
+                    <span class="breadcrumb-icon">${iconFolder()}</span>
                     <span class="breadcrumb-text">${this
                       ._spaceDisplayName}</span>
                     <span class="breadcrumb-chevron">
-                      ${this.iconChevronRight()}
+                      ${iconChevronRight()}
                     </span>
                   </div>
                 `
@@ -1199,16 +947,24 @@ export class XHeaderView extends BaseView {
                 <span class="piece-title-chevron ${this.pieceListExpanded
                   ? "expanded"
                   : ""}">
-                  ${this.iconChevronDown()}
+                  ${iconChevronDown()}
                 </span>
               </button>
-              ${this.pieceListExpanded ? this.renderPieceList() : nothing}
+              ${this.pieceListExpanded
+                ? html`
+                  <x-piece-list
+                    .pieces="${this._pieces.value ?? []}"
+                    .activePieceId="${this.pieceId}"
+                    @piece-selected="${this.handlePieceSelected}"
+                  ></x-piece-list>
+                `
+                : nothing}
             </div>
 
             <div class="menu-rows">
               <button class="menu-item" role="menuitem" @click="${this
                 .handleNavigateUp}">
-                <span class="menu-item-icon">${this.iconArrowLeft()}</span>
+                <span class="menu-item-icon">${iconArrowLeft()}</span>
                 <span class="menu-item-label">${this._navigateUpLabel}</span>
               </button>
 
@@ -1218,7 +974,7 @@ export class XHeaderView extends BaseView {
                 ? html`
                   <button class="menu-item" role="menuitem" @click="${this
                     .handleToggleFavorite}">
-                    <span class="menu-item-icon">${this.iconStar(
+                    <span class="menu-item-icon">${iconStar(
                       isFavorite,
                     )}</span>
                     <span class="menu-item-label">${isFavorite
@@ -1230,13 +986,13 @@ export class XHeaderView extends BaseView {
 
               <button class="menu-item" role="menuitem" @click="${this
                 .handleCopyLink}">
-                <span class="menu-item-icon">${this.iconLink()}</span>
+                <span class="menu-item-icon">${iconLink()}</span>
                 <span class="menu-item-label">Copy link</span>
               </button>
 
               <button class="menu-item" role="menuitem" @click="${this
                 .handleDebuggerToggleClick}">
-                <span class="menu-item-icon">${this.iconBug()}</span>
+                <span class="menu-item-icon">${iconBug()}</span>
                 <span class="menu-item-label">Toggle debug mode</span>
               </button>
 
@@ -1244,7 +1000,7 @@ export class XHeaderView extends BaseView {
 
               <button class="menu-item" role="menuitem" @click="${this
                 .handleAuthClick}">
-                <span class="menu-item-icon">${this.iconLogOut()}</span>
+                <span class="menu-item-icon">${iconLogOut()}</span>
                 <span class="menu-item-label">Sign out</span>
               </button>
             </div>
