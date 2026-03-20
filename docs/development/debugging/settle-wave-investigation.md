@@ -12,37 +12,8 @@ The goal is to answer four questions quickly:
 3. Which interaction or write kicked off the fan-out wave?
 4. What should be instrumented next if the existing logs are not enough?
 
-## Session TODO
-
-- [x] Capture initial traces for account creation reload and note creation.
-- [x] Confirm whether the worker, not the renderer main thread, dominates the
-  observed busy time.
-- [x] Sample worker logger baselines during a `Notes -> New Note` wave.
-- [x] Identify the current mismatch between non-idempotent detection docs and
-  runtime behavior.
-- [x] Expose worker settle stats over IPC so `execute()` waves can be measured
-  directly.
-- [x] Switch `detectNonIdempotent()` to the timed diagnosis path so console and
-  debugger results include real `duration` and `busyTime`.
-- [x] Re-run the note flow with settle stats enabled and capture per-pass
-  `workSetSize`, `orderSize`, and `actionsRun`.
-- [x] Keep a short history or ring buffer of settle stats so the interesting
-  wave is not overwritten by the next empty `execute()`.
-- [x] Group the noisiest repeated actions by action id and source location.
-- [x] Expose exact action-run tracing over IPC so one interaction can be
-  summarized by actual executed action ids instead of inferred settle counts.
-- [x] Expose structured trigger traces with compact change summaries and
-  per-action scheduling decisions.
-- [x] Add a dedicated `scheduler.trigger-flow` logger so change-trigger logs can
-  be enabled without turning on all scheduler debug output.
-- [x] Make the default-app integration flow optionally print grouped
-  trigger-trace summaries under `-A`.
-- [x] Compare three note-creation runs in the same space and separate
-  first-run startup noise from actions that truly grow with note count.
-- [ ] Collapse the current trigger-trace sink noise down to the minimal semantic
-  writes that should matter for one new note.
-- [ ] Check whether note and space-home subscriptions can be narrowed to reduce
-  repeated scheduling, not just `schedule-resubscribe-path` churn.
+The sections below walk through a reusable workflow first, then keep the
+current settle-wave investigation as a worked example.
 
 ## When To Use This Guide
 
