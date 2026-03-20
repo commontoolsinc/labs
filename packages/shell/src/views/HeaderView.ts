@@ -822,15 +822,19 @@ export class XHeaderView extends BaseView {
   /**
    * Toggle the current piece's favorite status. Uses optimistic UI —
    * updates local state immediately, then syncs with the server.
-   * Rolls back local state on error.
+   * Rolls back local state on error. Guarded against double-clicks
+   * with _isFavoriteLoading to prevent conflicting requests.
    */
+  private _isFavoriteLoading = false;
+
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.rt || !this.pieceId) return;
+    if (!this.rt || !this.pieceId || this._isFavoriteLoading) return;
 
     const currentlyFavorite = this._isFavorite();
     this._localIsFavorite = !currentlyFavorite;
+    this._isFavoriteLoading = true;
 
     try {
       if (currentlyFavorite) {
@@ -845,6 +849,8 @@ export class XHeaderView extends BaseView {
     } catch (err) {
       console.error("[HeaderView] Error toggling favorite:", err);
       this._localIsFavorite = undefined;
+    } finally {
+      this._isFavoriteLoading = false;
     }
   }
 
