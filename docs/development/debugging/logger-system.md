@@ -84,6 +84,9 @@ For scheduler churn debugging, prefer targeted loggers before raising the whole
 - `runner.wish-flow` for `wish()` query resolution, hashtag-search branches,
   and whether a call stays on the direct fast path or launches a suggestion
   pattern
+- `builder.source-location` for the raw stack frame chosen by
+  `getExternalSourceLocation()` and the source-mapped location that became a
+  function/action label
 - `scheduler` for broader settle-loop, debounce, cycle, and execution details
 
 Because logger messages are lazily evaluated, expensive callback payloads only

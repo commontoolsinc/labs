@@ -1,4 +1,5 @@
 import type {
+  ActionRunTraceEntry,
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
@@ -51,6 +52,8 @@ export enum RequestType {
   GetSettleStats = "runtime:getSettleStats",
   GetSettleStatsHistory = "runtime:getSettleStatsHistory",
   SetSettleStatsEnabled = "runtime:setSettleStatsEnabled",
+  GetActionRunTrace = "runtime:getActionRunTrace",
+  SetActionRunTraceEnabled = "runtime:setActionRunTraceEnabled",
   GetTriggerTrace = "runtime:getTriggerTrace",
   SetTriggerTraceEnabled = "runtime:setTriggerTraceEnabled",
   GetWriteStackTrace = "runtime:getWriteStackTrace",
@@ -238,6 +241,15 @@ export interface GetSettleStatsHistoryRequest extends BaseRequest {
   type: RequestType.GetSettleStatsHistory;
 }
 
+export interface GetActionRunTraceRequest extends BaseRequest {
+  type: RequestType.GetActionRunTrace;
+}
+
+export interface SetActionRunTraceEnabledRequest extends BaseRequest {
+  type: RequestType.SetActionRunTraceEnabled;
+  enabled: boolean;
+}
+
 export interface GetTriggerTraceRequest extends BaseRequest {
   type: RequestType.GetTriggerTrace;
 }
@@ -267,6 +279,10 @@ export interface SettleStatsResponse {
 
 export interface SettleStatsHistoryResponse {
   history: SettleStatsHistoryEntry[];
+}
+
+export interface ActionRunTraceResponse {
+  trace: ActionRunTraceEntry[];
 }
 
 export interface TriggerTraceResponse {
@@ -485,6 +501,8 @@ export type IPCClientRequest =
   | GetSettleStatsRequest
   | GetSettleStatsHistoryRequest
   | SetSettleStatsEnabledRequest
+  | GetActionRunTraceRequest
+  | SetActionRunTraceEnabledRequest
   | GetTriggerTraceRequest
   | SetTriggerTraceEnabledRequest
   | GetWriteStackTraceRequest
@@ -620,6 +638,7 @@ export type RemoteResponse =
   | LoggerCountsResponse
   | SettleStatsResponse
   | SettleStatsHistoryResponse
+  | ActionRunTraceResponse
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
@@ -697,6 +716,14 @@ export type Commands = {
   };
   [RequestType.SetSettleStatsEnabled]: {
     request: SetSettleStatsEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetActionRunTrace]: {
+    request: GetActionRunTraceRequest;
+    response: ActionRunTraceResponse;
+  };
+  [RequestType.SetActionRunTraceEnabled]: {
+    request: SetActionRunTraceEnabledRequest;
     response: EmptyResponse;
   };
   [RequestType.GetTriggerTrace]: {

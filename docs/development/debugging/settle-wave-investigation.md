@@ -29,12 +29,16 @@ The goal is to answer four questions quickly:
 - [x] Keep a short history or ring buffer of settle stats so the interesting
   wave is not overwritten by the next empty `execute()`.
 - [x] Group the noisiest repeated actions by action id and source location.
+- [x] Expose exact action-run tracing over IPC so one interaction can be
+  summarized by actual executed action ids instead of inferred settle counts.
 - [x] Expose structured trigger traces with compact change summaries and
   per-action scheduling decisions.
 - [x] Add a dedicated `scheduler.trigger-flow` logger so change-trigger logs can
   be enabled without turning on all scheduler debug output.
 - [x] Make the default-app integration flow optionally print grouped
   trigger-trace summaries under `-A`.
+- [x] Compare three note-creation runs in the same space and separate
+  first-run startup noise from actions that truly grow with note count.
 - [ ] Collapse the current trigger-trace sink noise down to the minimal semantic
   writes that should matter for one new note.
 - [ ] Check whether note and space-home subscriptions can be narrowed to reduce
@@ -67,14 +71,16 @@ important work can happen off the main thread.
    `worker-reconciler`.
 5. If you need to know exactly which storage change re-scheduled which action,
    enable trigger tracing and inspect `commontools.rt.getTriggerTrace()`.
-6. If the wave is still unclear, temporarily raise the
+6. If you need to know which actions actually ran during one interaction,
+   enable exact action-run tracing and compare repeated runs in the same space.
+7. If the wave is still unclear, temporarily raise the
    `scheduler.trigger-flow` logger to `debug` and look for repeated
    `schedule-trigger`, `schedule-change-trigger`, and
    `schedule-resubscribe-path` patterns.
-7. If nested piece setup or view-materialization looks suspicious, raise
+8. If nested piece setup or view-materialization looks suspicious, raise
    `runner.trigger-flow` to see which source action id is driving
    `Runner.run()`, `setupInternal()`, and `instantiatePatternNode()`.
-8. If the trace and focused logs still leave ambiguity, add or expose more
+9. If the trace and focused logs still leave ambiguity, add or expose more
    instrumentation before guessing at a fix.
 
 ## Reproduction Workflow
@@ -265,6 +271,65 @@ for (const entry of trace) {
   .sort((a, b) => b[1] - a[1])
   .slice(0, 10)
 ```
+
+### Capture Exact Action Runs
+
+Use exact action-run tracing when the question becomes "which actions really ran
+during this interaction?" rather than "which actions were merely scheduled?"
+
+This is especially useful when:
+
+- settle stats show repeated waves but you need the exact action ids inside them
+- trigger trace is noisy because one root write schedules many sinks
+- you want to compare note 1 versus note 2 versus note 3 in the same space
+
+Reset the ring buffer just before the interaction:
+
+```js
+await commontools.rt.setActionRunTraceEnabled(false)
+await commontools.rt.setActionRunTraceEnabled(true)
+```
+
+Replay the interaction, wait for the worker to go idle, then inspect the trace:
+
+```js
+await commontools.rt.idle()
+const trace = await commontools.rt.getActionRunTrace()
+trace.slice(-10)
+```
+
+To group the exact runs by action id:
+
+```js
+const trace = await commontools.rt.getActionRunTrace()
+const counts = new Map()
+
+for (const entry of trace) {
+  const row = counts.get(entry.actionId) ?? {
+    actionType: entry.actionType,
+    count: 0,
+    totalDurationMs: 0,
+  }
+  row.count += 1
+  row.totalDurationMs += entry.durationMs
+  counts.set(entry.actionId, row)
+}
+
+[...counts.entries()]
+  .map(([actionId, row]) => ({
+    actionId,
+    actionType: row.actionType,
+    count: row.count,
+    totalDurationMs: Number(row.totalDurationMs.toFixed(1)),
+  }))
+  .sort((a, b) => b.count - a.count || b.totalDurationMs - a.totalDurationMs)
+  .slice(0, 20)
+```
+
+For scaling work, keep the same space across runs and compare later notes
+against each other, not only against note 1. The first run often includes
+navigation, mount, and reader-materialization noise that is absent once the
+space is already warm.
 
 If you need a scripted browser reproduction instead of manual console work, the
 default-app integration flow now supports this:
@@ -799,6 +864,140 @@ Interpretation:
 - sink-path actions add a lot of noise, so the next instrumentation pass should
   group low-level writes into fewer semantic classes before we decide what to
   optimize
+
+### Fixed-Space Action-Run Example
+
+One March 19, 2026 run used the new exact action-run trace in the default-app
+integration flow while creating three notes in the same `SPACE_NAME`:
+
+```sh
+HEADLESS=true \
+API_URL=http://localhost:8000 \
+FRONTEND_URL=http://localhost:5173 \
+SPACE_NAME=settle-wave-order-space \
+CT_CAPTURE_ACTION_RUN_SERIES=3 \
+deno test -A packages/patterns/integration/default-app.test.ts
+```
+
+Per-note totals were:
+
+- note 1: `240` action runs, `104` unique actions, `179` computations, `61`
+  effects
+- note 2: `118` action runs, `53` unique actions, `86` computations, `32`
+  effects
+- note 3: `76` action runs, `40` unique actions, `62` computations, `14`
+  effects
+
+The first run was still dominated by startup/navigation work. The steadier
+signal was the monotonic growth in one note computation source:
+
+- `api/patterns/notes/note.tsx:284:32`: `3 -> 4 -> 5`
+- `api/patterns/system/default-app.tsx:224:25`: `3 -> 2 -> 1`
+- `api/patterns/system/default-app.tsx:235:25`: `3 -> 2 -> 1`
+- `api/patterns/system/piece-grid.tsx:21:19`: `7 -> 5 -> 3`
+- `raw:wish`: `10 -> 9 -> 11`
+
+Line `284` in `note.tsx` is the `containingNotebooks` computed:
+
+```tsx
+const containingNotebooks = computed(() => {
+  if (!menuOpen.get()) return [];
+  // ...
+});
+```
+
+With instance-level action-run metadata enabled, the pattern became clearer:
+
+- on note 1, only the newly created note instance ran this computed, `3` times
+- on note 2, the new note instance ran it `3` times and the previous note
+  instance reran it once, for `4` total
+- on note 3, the new note instance ran it `3` times and the two existing note
+  instances reran it once each, for `5` total
+
+The hottest concrete instances in that run were:
+
+- note 2 instance:
+  `.../of:baedreiefd3q4pzla2cg2pyv2toduazdy7gkcxgrwk2oexctrctlgcfc52y/internal/__#15`
+  with counts `0 -> 3 -> 1`
+- note 3 instance:
+  `.../of:baedreifk35ul5pe6s3v7b4xswiqtpuq2hdcw2wkj7ag2k6pwfwsygpgl2i/internal/__#15`
+  with counts `0 -> 0 -> 3`
+
+Interpretation:
+
+- creating a note does not just run work for the newly created note
+- one existing note instance is revisited for each previously existing note in
+  the warm space
+- the scaling signal now points at note-instance revisits, not just abstract
+  source-level fan-out
+- the most likely driver is rematerialization or re-evaluation of existing note
+  views as the home-page piece list grows
+
+If you want the same view locally, make sure exact action-run tracing includes
+instance targets. The useful bucket is the `noteActionInstancesIncreasedOnLaterRuns`
+section printed by the integration harness, not only the top-level
+`increasedOnLaterRuns` action ids.
+
+### Fresh-Tab Home-Load Example
+
+One March 20, 2026 run sampled initial load in a real Chrome browser by opening
+the same space in a fresh tab after `0`, `1`, `2`, and `3` notes. This was
+more reliable than the Astral integration harness for cross-tab persistence.
+
+The measurement snippet was:
+
+```js
+await commontools.rt.idle()
+const { timing } = await commontools.rt.getLoggerCounts()
+const graph = await commontools.rt.getGraphSnapshot()
+
+return {
+  loadDurationMs: performance.now(),
+  execute: timing.scheduler?.["scheduler/execute"]?.totalTime ?? 0,
+  settle: timing.scheduler?.["scheduler/execute/settle"]?.totalTime ?? 0,
+  graph,
+}
+```
+
+The measured series for one warm space was:
+
+- `0` notes: `14914.6 ms` to idle, `149` graph nodes, `50` action runs,
+  `scheduler/execute = 160.3 ms`, `settle = 143.8 ms`
+- `1` note: `13149.6 ms` to idle, `260` graph nodes, `70` action runs,
+  `scheduler/execute = 532.3 ms`, `settle = 499.5 ms`
+- `2` notes: `15484.6 ms` to idle, `314` graph nodes, `80` action runs,
+  `scheduler/execute = 638.6 ms`, `settle = 598.3 ms`
+- `3` notes: `12904.1 ms` to idle, `368` graph nodes, `90` action runs,
+  `scheduler/execute = 1068.7 ms`, `settle = 1019.3 ms`
+
+The wall-clock tab load time was noisy, but the worker-side scheduler totals
+were not: `execute()` and `settle` both grew sharply with note count, and the
+graph size grew almost linearly after the first note.
+
+The hottest load actions in that series were:
+
+- `raw:map`: run count `10 -> 21 -> 25 -> 29`
+- `api/patterns/system/default-app.tsx:308:39`: `0 -> 2 -> 4 -> 6`
+- `api/patterns/system/piece-grid.tsx:21:19`: constant `2` runs, but total
+  time `0.9 -> 5.5 -> 9.4 -> 17.0 ms`
+- `raw:wish`: stayed at `3` runs, but total time was high and noisy:
+  `78.7 -> 204.4 -> 140.0 -> 393.5 ms`
+
+The line at `default-app.tsx:308` is the per-piece `isNotebook` computed inside
+the home-page `visiblePieces.map(...)` table render, and `piece-grid.tsx:21` is
+the `filtered = computed(() => pieces.filter(...))` list pass for the grid
+preview. Those are not startup-only actions. They are real home-load work that
+scales with the number of rendered pieces.
+
+Interpretation:
+
+- yes, there is a real initial-load storm even at `0` notes
+- the very large first create-note run was partly this existing home-load cost,
+  not only note-creation work
+- after notes exist, fresh home loads get more expensive in the worker even
+  when the user is only opening the space, not creating anything
+- the main growth signals are home-page list/grid computations and their
+  downstream effects, not just the per-note `containingNotebooks` revisit
 
 ### Transaction Write-Trace Example
 

@@ -7,6 +7,7 @@
 
 import type { DID, Identity } from "@commontools/identity";
 import type {
+  ActionRunTraceEntry,
   JSONSchema,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
@@ -344,6 +345,28 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.GetSettleStatsHistory,
     });
     return res.history;
+  }
+
+  /**
+   * Return recent exact action-run history captured from worker scheduler runs.
+   * Entries are ordered oldest first.
+   */
+  async getActionRunTrace(): Promise<ActionRunTraceEntry[]> {
+    const res = await this.#conn.request<RequestType.GetActionRunTrace>({
+      type: RequestType.GetActionRunTrace,
+    });
+    return res.trace;
+  }
+
+  /**
+   * Enable or disable collection of exact action-run history in the worker scheduler.
+   * When disabled, the current action-run history buffer is cleared.
+   */
+  async setActionRunTraceEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetActionRunTraceEnabled>({
+      type: RequestType.SetActionRunTraceEnabled,
+      enabled,
+    });
   }
 
   /**

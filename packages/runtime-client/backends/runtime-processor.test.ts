@@ -203,7 +203,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
     const processor = {
       runtime: {
         scheduler: {
-          runDiagnosis: async (durationMs?: number) => {
+          runDiagnosis: (durationMs?: number) => {
             receivedDuration = durationMs;
             return expected;
           },
@@ -240,6 +240,23 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       recordedAt: 1234.5,
       stats: expected,
     }];
+    const actionTrace = [{
+      recordedAt: 2234.5,
+      actionId: "action:compute",
+      actionType: "computation" as const,
+      parentActionId: "action:parent",
+      durationMs: 3.5,
+      declaredWrites: [{
+        space: "did:key:test",
+        entityId: "cell-2",
+        path: [],
+      }],
+      actualWrites: [{
+        space: "did:key:test",
+        entityId: "cell-2",
+        path: [],
+      }],
+    }];
     const triggerTrace = [{
       recordedAt: 2345.6,
       notificationType: "commit",
@@ -269,6 +286,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       }],
     }];
     const settleEnabledValues: boolean[] = [];
+    const actionRunEnabledValues: boolean[] = [];
     const triggerEnabledValues: boolean[] = [];
     setWriteStackTraceMatchers([{
       space: "did:key:test",
@@ -294,6 +312,10 @@ describe("RuntimeProcessor diagnosis helpers", () => {
           },
           getSettleStats: () => expected,
           getSettleStatsHistory: () => history,
+          setActionRunTraceEnabled: (enabled: boolean) => {
+            actionRunEnabledValues.push(enabled);
+          },
+          getActionRunTrace: () => actionTrace,
           setTriggerTraceEnabled: (enabled: boolean) => {
             triggerEnabledValues.push(enabled);
           },
@@ -304,6 +326,10 @@ describe("RuntimeProcessor diagnosis helpers", () => {
 
     RuntimeProcessor.prototype.setSettleStatsEnabled.call(processor, {
       type: RequestType.SetSettleStatsEnabled,
+      enabled: true,
+    });
+    RuntimeProcessor.prototype.setActionRunTraceEnabled.call(processor, {
+      type: RequestType.SetActionRunTraceEnabled,
       enabled: true,
     });
     RuntimeProcessor.prototype.setTriggerTraceEnabled.call(processor, {
@@ -317,6 +343,10 @@ describe("RuntimeProcessor diagnosis helpers", () => {
     const historyResponse = RuntimeProcessor.prototype.getSettleStatsHistory
       .call(processor, {
         type: RequestType.GetSettleStatsHistory,
+      });
+    const actionTraceResponse = RuntimeProcessor.prototype.getActionRunTrace
+      .call(processor, {
+        type: RequestType.GetActionRunTrace,
       });
     const triggerTraceResponse = RuntimeProcessor.prototype.getTriggerTrace
       .call(
@@ -334,9 +364,11 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       );
 
     expect(settleEnabledValues).toEqual([true]);
+    expect(actionRunEnabledValues).toEqual([true]);
     expect(triggerEnabledValues).toEqual([true]);
     expect(response).toEqual({ stats: expected });
     expect(historyResponse).toEqual({ history });
+    expect(actionTraceResponse).toEqual({ trace: actionTrace });
     expect(triggerTraceResponse).toEqual({ trace: triggerTrace });
     expect(writeTraceResponse).toEqual({
       trace: [{

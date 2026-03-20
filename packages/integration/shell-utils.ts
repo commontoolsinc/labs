@@ -83,6 +83,13 @@ export class ShellIntegration {
     return this.#page!;
   }
 
+  async newPage(url?: string): Promise<Page> {
+    this.checkIsOk();
+    const page = await this.#browser!.newPage(url);
+    this.#attachPage(page);
+    return page;
+  }
+
   async state(): Promise<AppState | undefined> {
     this.checkIsOk();
     const page = this.page();
@@ -168,19 +175,7 @@ export class ShellIntegration {
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
-    this.#page.addEventListener("console", (e: ConsoleEvent) => {
-      if (e.detail.type === "error") {
-        this.#errorLogs.push(e.detail.text);
-      }
-      if (this.#config.pipeConsole) {
-        pipeConsole(e);
-      }
-    });
-    this.#page.addEventListener("dialog", dismissDialogs);
-    this.#page.addEventListener("pageerror", (e: PageErrorEvent) => {
-      console.error("Browser Page Error:", e.detail.message);
-      this.#exceptions.push(e.detail.message);
-    });
+    this.#attachPage(this.#page);
   };
 
   #beforeEach = () => {
@@ -205,5 +200,21 @@ export class ShellIntegration {
 
   private checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
+  }
+
+  #attachPage(page: Page) {
+    page.addEventListener("console", (e: ConsoleEvent) => {
+      if (e.detail.type === "error") {
+        this.#errorLogs.push(e.detail.text);
+      }
+      if (this.#config.pipeConsole) {
+        pipeConsole(e);
+      }
+    });
+    page.addEventListener("dialog", dismissDialogs);
+    page.addEventListener("pageerror", (e: PageErrorEvent) => {
+      console.error("Browser Page Error:", e.detail.message);
+      this.#exceptions.push(e.detail.message);
+    });
   }
 }

@@ -149,6 +149,10 @@ await commontools.rt.setLoggerLevel("debug", "runner.trigger-flow")
 // Focus on wish() branch choice and query resolution
 await commontools.rt.setLoggerEnabled(true, "runner.wish-flow")
 await commontools.rt.setLoggerLevel("debug", "runner.wish-flow")
+
+// See which raw stack frame was sampled for action/module labels
+await commontools.rt.setLoggerEnabled(true, "builder.source-location")
+await commontools.rt.setLoggerLevel("debug", "builder.source-location")
 ```
 
 ## Worker Settle Stats
@@ -220,6 +224,64 @@ globalThis.__settlePoll = setInterval(() => {
 
 clearInterval(globalThis.__settlePoll)
 globalThis.__settleSamples
+```
+
+## Worker Action Run Trace
+
+Capture the exact action ids that actually ran during one interaction:
+
+```javascript
+// Reset and enable exact action-run tracing
+await commontools.rt.setActionRunTraceEnabled(false)
+await commontools.rt.setActionRunTraceEnabled(true)
+
+// ... perform the interaction ...
+
+await commontools.rt.idle()
+const trace = await commontools.rt.getActionRunTrace()
+trace.slice(-10)
+```
+
+Each trace entry contains:
+
+- `recordedAt`
+- `actionId`
+- `actionType` (`"computation"` or `"effect"`)
+- `parentActionId` when the scheduler knows the caller
+- `durationMs`
+
+To group by exact action id:
+
+```javascript
+const trace = await commontools.rt.getActionRunTrace()
+const counts = new Map()
+
+for (const entry of trace) {
+  const row = counts.get(entry.actionId) ?? {
+    actionType: entry.actionType,
+    count: 0,
+    totalDurationMs: 0,
+  }
+  row.count += 1
+  row.totalDurationMs += entry.durationMs
+  counts.set(entry.actionId, row)
+}
+
+[...counts.entries()]
+  .map(([actionId, row]) => ({
+    actionId,
+    actionType: row.actionType,
+    count: row.count,
+    totalDurationMs: Number(row.totalDurationMs.toFixed(1)),
+  }))
+  .sort((a, b) => b.count - a.count || b.totalDurationMs - a.totalDurationMs)
+  .slice(0, 20)
+```
+
+To disable tracing and clear the ring buffer:
+
+```javascript
+await commontools.rt.setActionRunTraceEnabled(false)
 ```
 
 ## Worker Trigger Trace
@@ -541,6 +603,8 @@ agent-browser eval "window._cancel()"
 | `commontools.rt.setSettleStatsEnabled(on)` | Enable/disable worker settle stats |
 | `commontools.rt.getSettleStats()` | Get the last worker settle stats payload |
 | `commontools.rt.getSettleStatsHistory()` | Get recent worker settle stats history |
+| `commontools.rt.setActionRunTraceEnabled(on)` | Enable/disable exact action-run tracing |
+| `commontools.rt.getActionRunTrace()` | Get recent exact action-run entries |
 | `commontools.rt.setTriggerTraceEnabled(on)` | Enable/disable worker trigger tracing |
 | `commontools.rt.getTriggerTrace()` | Get recent worker trigger-trace entries |
 | `commontools.rt.setWriteStackTraceMatchers(matchers)` | Watch matched transaction writes and clear old entries |

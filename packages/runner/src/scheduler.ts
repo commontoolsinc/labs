@@ -186,6 +186,22 @@ export interface SettleStatsHistoryEntry {
   stats: SettleStats;
 }
 
+export interface ActionRunTraceEntry {
+  recordedAt: number;
+  actionId: string;
+  actionType: "effect" | "computation";
+  parentActionId?: string;
+  durationMs: number;
+  declaredWrites: ActionRunTraceAddress[];
+  actualWrites: ActionRunTraceAddress[];
+}
+
+export interface ActionRunTraceAddress {
+  space: MemorySpace;
+  entityId: URI;
+  path: string[];
+}
+
 export type TriggerTraceValueKind =
   | "undefined"
   | "null"
@@ -244,6 +260,7 @@ export interface TriggerTraceEntry {
 const MAX_ITERATIONS_PER_RUN = 100;
 const MAX_SETTLE_STATS_HISTORY = 20;
 const MAX_TRIGGER_TRACE_HISTORY = 400;
+const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
 const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
@@ -254,6 +271,16 @@ const AUTO_DEBOUNCE_DELAY_MS = 100;
 const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
 const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
 const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
+
+function toActionRunTraceAddress(
+  address: IMemorySpaceAddress,
+): ActionRunTraceAddress {
+  return {
+    space: address.space,
+    entityId: address.id,
+    path: address.path.map((part) => String(part)),
+  };
+}
 
 export class Scheduler {
   private eventQueue: {
@@ -372,6 +399,8 @@ export class Scheduler {
   private collectSettleStats = false;
   private lastSettleStats: SettleStats | null = null;
   private settleStatsHistory: SettleStatsHistoryEntry[] = [];
+  private collectActionRunTrace = false;
+  private actionRunTrace: ActionRunTraceEntry[] = [];
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
 
@@ -1083,6 +1112,32 @@ export class Scheduler {
             `Writes: ${log.writes.length}`,
             `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
+
+          if (this.collectActionRunTrace) {
+            const parentAction = this.actionParent.get(action);
+            const declaredWrites = (this.mightWrite.get(action) ?? []).map(
+              toActionRunTraceAddress,
+            );
+            const actualWrites = sortAndCompactPaths(log.writes).map(
+              toActionRunTraceAddress,
+            );
+            this.actionRunTrace.push({
+              recordedAt: performance.now(),
+              actionId,
+              actionType: this.isEffectAction.get(action)
+                ? "effect"
+                : "computation",
+              parentActionId: parentAction
+                ? this.getActionId(parentAction)
+                : undefined,
+              durationMs: elapsed,
+              declaredWrites,
+              actualWrites,
+            });
+            if (this.actionRunTrace.length > MAX_ACTION_RUN_TRACE_HISTORY) {
+              this.actionRunTrace.shift();
+            }
+          }
 
           // Diagnosis capture: record read/write values for idempotency checking
           if (this.diagnosisEnabled) {
@@ -2662,6 +2717,24 @@ export class Scheduler {
    */
   getSettleStatsHistory(): SettleStatsHistoryEntry[] {
     return [...this.settleStatsHistory];
+  }
+
+  /**
+   * Enables or disables collection of exact action-run history.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setActionRunTraceEnabled(enabled: boolean): void {
+    this.collectActionRunTrace = enabled;
+    if (!enabled) {
+      this.actionRunTrace = [];
+    }
+  }
+
+  /**
+   * Returns recent exact action-run history, oldest first.
+   */
+  getActionRunTrace(): ActionRunTraceEntry[] {
+    return [...this.actionRunTrace];
   }
 
   /**

@@ -52,6 +52,7 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type GetActionRunTraceRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
@@ -80,9 +81,11 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
+  type SetActionRunTraceEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
+  type ActionRunTraceResponse,
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
@@ -817,6 +820,20 @@ export class RuntimeProcessor {
     this.runtime.scheduler.setSettleStatsEnabled(request.enabled);
   }
 
+  getActionRunTrace(
+    _request: GetActionRunTraceRequest,
+  ): ActionRunTraceResponse {
+    return {
+      trace: this.runtime.scheduler.getActionRunTrace(),
+    };
+  }
+
+  setActionRunTraceEnabled(
+    request: SetActionRunTraceEnabledRequest,
+  ): void {
+    this.runtime.scheduler.setActionRunTraceEnabled(request.enabled);
+  }
+
   getTriggerTrace(
     _request: GetTriggerTraceRequest,
   ): TriggerTraceResponse {
@@ -915,6 +932,10 @@ export class RuntimeProcessor {
         return this.getSettleStatsHistory(request);
       case RequestType.SetSettleStatsEnabled:
         return this.setSettleStatsEnabled(request);
+      case RequestType.GetActionRunTrace:
+        return this.getActionRunTrace(request);
+      case RequestType.SetActionRunTraceEnabled:
+        return this.setActionRunTraceEnabled(request);
       case RequestType.GetTriggerTrace:
         return this.getTriggerTrace(request);
       case RequestType.SetTriggerTraceEnabled:

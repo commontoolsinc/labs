@@ -33,6 +33,7 @@ export type {
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 export type {
+  ActionRunTraceEntry,
   SettleIterationStats,
   SettleStats,
   SettleStatsHistoryEntry,
