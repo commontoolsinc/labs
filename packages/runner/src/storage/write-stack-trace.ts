@@ -170,6 +170,7 @@ export function recordWriteStackTrace(
   value: unknown,
   options: WriteStackTraceOptions = {},
 ): void {
+  if (writeTraceStates.size === 0) return;
   const state = writeTraceStates.get(getWriteTraceScopeId(options.scopeId));
   if (!state || state.matchers.length === 0) return;
 
