@@ -5,8 +5,21 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolveSchema } from "../src/schema.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
+
+/** Narrow a JSONSchema | undefined to JSONSchemaObj or fail the test. */
+function expectNontrivial(
+  schema: JSONSchema | undefined,
+): JSONSchemaObj {
+  if (!isNontrivialSchema(schema)) {
+    throw new Error("expected a nontrivial schema object");
+  }
+  return schema;
+}
 
 describe("resolveSchema", () => {
   describe("basic behavior", () => {
@@ -34,14 +47,14 @@ describe("resolveSchema", () => {
 
     it("preserves asCell in returned schema", () => {
       const schema: JSONSchema = { type: "string", asCell: true };
-      const result = resolveSchema(schema);
-      expect((result as any).asCell).toBe(true);
+      const result = expectNontrivial(resolveSchema(schema));
+      expect(result.asCell).toBe(true);
     });
 
     it("preserves asStream in returned schema", () => {
       const schema: JSONSchema = { type: "string", asStream: true };
-      const result = resolveSchema(schema);
-      expect((result as any).asStream).toBe(true);
+      const result = expectNontrivial(resolveSchema(schema));
+      expect(result.asStream).toBe(true);
     });
   });
 

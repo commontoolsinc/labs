@@ -4,8 +4,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { deepFreeze } from "@commontools/data-model/deep-freeze";
+import { isNontrivialSchema } from "@commontools/data-model/schema-utils";
 import { mergeDefaults } from "../src/schema.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+
+/** Narrow a JSONSchema to JSONSchemaObj or fail the test. */
+function expectNontrivial(schema: JSONSchema): JSONSchemaObj {
+  if (!isNontrivialSchema(schema)) {
+    throw new Error("expected a nontrivial schema object");
+  }
+  return schema;
+}
 
 describe("mergeDefaults", () => {
   describe("object-merge path", () => {
@@ -14,9 +23,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { a: 1, b: 2 },
       };
-      const result = mergeDefaults(schema, { b: 99, c: 3 });
-      expect(typeof result).toBe("object");
-      expect((result as any).default).toEqual({ a: 1, b: 99, c: 3 });
+      const result = expectNontrivial(mergeDefaults(schema, { b: 99, c: 3 }));
+      expect(result.default).toEqual({ a: 1, b: 99, c: 3 });
     });
 
     it("should let defaultValue keys override schema.default keys", () => {
@@ -24,8 +32,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { name: "old", count: 0 },
       };
-      const result = mergeDefaults(schema, { name: "new" });
-      expect((result as any).default).toEqual({ name: "new", count: 0 });
+      const result = expectNontrivial(mergeDefaults(schema, { name: "new" }));
+      expect(result.default).toEqual({ name: "new", count: 0 });
     });
   });
 
@@ -35,8 +43,8 @@ describe("mergeDefaults", () => {
         type: "array",
         default: [1, 2, 3],
       };
-      const result = mergeDefaults(schema, [4, 5]);
-      expect((result as any).default).toEqual([4, 5]);
+      const result = expectNontrivial(mergeDefaults(schema, [4, 5]));
+      expect(result.default).toEqual([4, 5]);
     });
 
     it("should replace entirely for string-type schemas", () => {
@@ -44,14 +52,14 @@ describe("mergeDefaults", () => {
         type: "string",
         default: "old",
       };
-      const result = mergeDefaults(schema, "new");
-      expect((result as any).default).toBe("new");
+      const result = expectNontrivial(mergeDefaults(schema, "new"));
+      expect(result.default).toBe("new");
     });
 
     it("should replace entirely when schema has no type", () => {
       const schema: JSONSchema = { default: "old" };
-      const result = mergeDefaults(schema, "replacement");
-      expect((result as any).default).toBe("replacement");
+      const result = expectNontrivial(mergeDefaults(schema, "replacement"));
+      expect(result.default).toBe("replacement");
     });
   });
 
@@ -61,8 +69,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { a: 1 },
       };
-      const result = mergeDefaults(schema, null);
-      expect((result as any).default).toBe(null);
+      const result = expectNontrivial(mergeDefaults(schema, null));
+      expect(result.default).toBe(null);
     });
 
     it("should spread-merge when defaultValue is an array (arrays pass isRecord)", () => {
@@ -72,8 +80,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { a: 1 },
       };
-      const result = mergeDefaults(schema, [1, 2, 3]);
-      expect((result as any).default).toEqual({
+      const result = expectNontrivial(mergeDefaults(schema, [1, 2, 3]));
+      expect(result.default).toEqual({
         "0": 1,
         "1": 2,
         "2": 3,
@@ -86,8 +94,10 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { a: 1 },
       };
-      const result = mergeDefaults(schema, "not an object");
-      expect((result as any).default).toBe("not an object");
+      const result = expectNontrivial(
+        mergeDefaults(schema, "not an object"),
+      );
+      expect(result.default).toBe("not an object");
     });
   });
 
@@ -100,9 +110,11 @@ describe("mergeDefaults", () => {
       }) as JSONSchema;
       expect(Object.isFrozen(schema)).toBe(true);
 
-      const result = mergeDefaults(schema, { x: 42, y: 7 });
-      expect((result as any).type).toBe("object");
-      expect((result as any).default).toEqual({ x: 42, y: 7 });
+      const result = expectNontrivial(
+        mergeDefaults(schema, { x: 42, y: 7 }),
+      );
+      expect(result.type).toBe("object");
+      expect(result.default).toEqual({ x: 42, y: 7 });
     });
 
     it("should work correctly with a deep-frozen non-object schema", () => {
@@ -111,8 +123,8 @@ describe("mergeDefaults", () => {
         default: "frozen",
       }) as JSONSchema;
 
-      const result = mergeDefaults(schema, "thawed");
-      expect((result as any).default).toBe("thawed");
+      const result = expectNontrivial(mergeDefaults(schema, "thawed"));
+      expect(result.default).toBe("thawed");
     });
   });
 
@@ -123,12 +135,13 @@ describe("mergeDefaults", () => {
         default: { a: 1, b: 2 },
         properties: { a: { type: "number" } },
       };
-      const originalDefault = (original as any).default;
+      const originalObj = expectNontrivial(original);
+      const originalDefault = originalObj.default;
 
       mergeDefaults(original, { b: 99 });
 
-      expect((original as any).default).toBe(originalDefault);
-      expect((original as any).default).toEqual({ a: 1, b: 2 });
+      expect(originalObj.default).toBe(originalDefault);
+      expect(originalObj.default).toEqual({ a: 1, b: 2 });
     });
 
     it("should return a new object (not the same reference)", () => {
@@ -146,14 +159,16 @@ describe("mergeDefaults", () => {
         required: ["a"],
         default: { a: 1 },
       };
-      const result = mergeDefaults(schema, { a: 2, b: "hi" });
-      expect((result as any).type).toBe("object");
-      expect((result as any).properties).toEqual({
+      const result = expectNontrivial(
+        mergeDefaults(schema, { a: 2, b: "hi" }),
+      );
+      expect(result.type).toBe("object");
+      expect(result.properties).toEqual({
         a: { type: "number" },
         b: { type: "string" },
       });
-      expect((result as any).required).toEqual(["a"]);
-      expect((result as any).default).toEqual({ a: 2, b: "hi" });
+      expect(result.required).toEqual(["a"]);
+      expect(result.default).toEqual({ a: 2, b: "hi" });
     });
 
     it("should carry forward $defs through cloning", () => {
@@ -162,8 +177,8 @@ describe("mergeDefaults", () => {
         $defs: { Foo: { type: "string" } },
         default: { x: 1 },
       };
-      const result = mergeDefaults(schema, { x: 2 });
-      expect((result as any).$defs).toEqual({ Foo: { type: "string" } });
+      const result = expectNontrivial(mergeDefaults(schema, { x: 2 }));
+      expect(result.$defs).toEqual({ Foo: { type: "string" } });
     });
   });
 
@@ -173,10 +188,10 @@ describe("mergeDefaults", () => {
         type: "object",
         properties: { a: { type: "number" } },
       };
-      const result = mergeDefaults(schema, { a: 42 });
+      const result = expectNontrivial(mergeDefaults(schema, { a: 42 }));
       // No existing default to merge with, so isRecord(result.default) is
       // false on the first pass — falls through to simple assignment.
-      expect((result as any).default).toEqual({ a: 42 });
+      expect(result.default).toEqual({ a: 42 });
     });
 
     it("should assign defaultValue directly when schema.default is undefined", () => {
@@ -184,8 +199,10 @@ describe("mergeDefaults", () => {
         type: "object",
         default: undefined,
       };
-      const result = mergeDefaults(schema, { key: "val" });
-      expect((result as any).default).toEqual({ key: "val" });
+      const result = expectNontrivial(
+        mergeDefaults(schema, { key: "val" }),
+      );
+      expect(result.default).toEqual({ key: "val" });
     });
   });
 
@@ -195,8 +212,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { a: 1 },
       };
-      const result = mergeDefaults(schema, {});
-      expect((result as any).default).toEqual({ a: 1 });
+      const result = expectNontrivial(mergeDefaults(schema, {}));
+      expect(result.default).toEqual({ a: 1 });
     });
 
     it("should handle non-empty defaultValue merged into empty default", () => {
@@ -204,8 +221,8 @@ describe("mergeDefaults", () => {
         type: "object",
         default: {},
       };
-      const result = mergeDefaults(schema, { a: 1 });
-      expect((result as any).default).toEqual({ a: 1 });
+      const result = expectNontrivial(mergeDefaults(schema, { a: 1 }));
+      expect(result.default).toEqual({ a: 1 });
     });
 
     it("should handle both empty", () => {
@@ -213,44 +230,46 @@ describe("mergeDefaults", () => {
         type: "object",
         default: {},
       };
-      const result = mergeDefaults(schema, {});
-      expect((result as any).default).toEqual({});
+      const result = expectNontrivial(mergeDefaults(schema, {}));
+      expect(result.default).toEqual({});
     });
   });
 
   describe("primitive defaultValues", () => {
     it("should handle numeric defaultValue", () => {
       const schema: JSONSchema = { type: "number" };
-      const result = mergeDefaults(schema, 42);
-      expect((result as any).default).toBe(42);
+      const result = expectNontrivial(mergeDefaults(schema, 42));
+      expect(result.default).toBe(42);
     });
 
     it("should handle boolean defaultValue", () => {
       const schema: JSONSchema = { type: "boolean" };
-      const result = mergeDefaults(schema, true);
-      expect((result as any).default).toBe(true);
+      const result = expectNontrivial(mergeDefaults(schema, true));
+      expect(result.default).toBe(true);
     });
 
     it("should handle zero and empty string", () => {
-      expect((mergeDefaults({ type: "number" }, 0) as any).default).toBe(0);
-      expect((mergeDefaults({ type: "string" }, "") as any).default).toBe("");
+      expect(expectNontrivial(mergeDefaults({ type: "number" }, 0)).default)
+        .toBe(0);
+      expect(expectNontrivial(mergeDefaults({ type: "string" }, "")).default)
+        .toBe("");
     });
   });
 
   describe("edge cases", () => {
     it("should handle undefined schema", () => {
-      const result = mergeDefaults(undefined, { a: 1 });
-      expect((result as any).default).toEqual({ a: 1 });
+      const result = expectNontrivial(mergeDefaults(undefined, { a: 1 }));
+      expect(result.default).toEqual({ a: 1 });
     });
 
     it("should handle boolean true schema (pass-through)", () => {
-      const result = mergeDefaults(true, "value");
-      expect((result as any).default).toBe("value");
+      const result = expectNontrivial(mergeDefaults(true, "value"));
+      expect(result.default).toBe("value");
     });
 
     it("should handle boolean false schema (pass-through)", () => {
-      const result = mergeDefaults(false, "value");
-      expect((result as any).default).toBe("value");
+      const result = expectNontrivial(mergeDefaults(false, "value"));
+      expect(result.default).toBe("value");
     });
 
     it("should handle deeply nested defaultValue on object schema", () => {
@@ -258,9 +277,11 @@ describe("mergeDefaults", () => {
         type: "object",
         default: { nested: { deep: 1 } },
       };
-      const result = mergeDefaults(schema, { nested: { deep: 2, extra: 3 } });
+      const result = expectNontrivial(
+        mergeDefaults(schema, { nested: { deep: 2, extra: 3 } }),
+      );
       // Spread is shallow — nested object is replaced, not deep-merged.
-      expect((result as any).default).toEqual({
+      expect(result.default).toEqual({
         nested: { deep: 2, extra: 3 },
       });
     });
