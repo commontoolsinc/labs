@@ -596,6 +596,7 @@ export class XHeaderView extends BaseView {
     if (changedProperties.has("rt")) {
       this._serverFavorites = [];
       this._localIsFavorite = undefined;
+      this._piecesCache = undefined;
       this._setupFavoritesSubscription();
     }
     if (changedProperties.has("pieceId")) {
@@ -604,14 +605,23 @@ export class XHeaderView extends BaseView {
   }
 
   /**
-   * Lazily fetch all pieces in the current space. Only runs when a piece
-   * list is actually expanded (mobile menu or desktop breadcrumb dropdown).
+   * Eagerly fetch all pieces in the current space as soon as the
+   * runtime is available. Results are cached until the runtime changes
+   * (e.g. navigating to a different space). This ensures the piece list
+   * is ready by the time the user opens a dropdown.
    * Fetches are parallelized with Promise.allSettled; pieces that fail
    * to resolve are silently skipped.
    */
+  private _piecesCache: PieceItem[] | undefined;
+
   private _pieces = new Task(this, {
-    task: async ([rt, expanded]): Promise<PieceItem[]> => {
-      if (!rt || !expanded) return [];
+    task: async ([rt]): Promise<PieceItem[]> => {
+      if (!rt) {
+        this._piecesCache = undefined;
+        return [];
+      }
+      if (this._piecesCache) return this._piecesCache;
+
       await rt.synced();
       const piecesListCell = await rt.getPiecesListCell();
       await piecesListCell.sync();
@@ -635,18 +645,15 @@ export class XHeaderView extends BaseView {
         }),
       );
 
-      return results
+      this._piecesCache = results
         .filter(
           (r): r is PromiseFulfilledResult<PieceItem> =>
             r.status === "fulfilled",
         )
         .map((r) => r.value);
+      return this._piecesCache;
     },
-    args: () =>
-      [
-        this.rt,
-        this.pieceListExpanded || this.headerPieceDropdownOpen,
-      ] as const,
+    args: () => [this.rt] as const,
   });
 
   /** Clear the keystore and identity, logging the user out. */
