@@ -1,9 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
-import type {
-  IMemorySpaceAddress,
-  MemorySpace,
-  URI,
-} from "./interface.ts";
+import type { IMemorySpaceAddress, MemorySpace, URI } from "./interface.ts";
 
 export type WriteStackTraceMatchMode = "exact" | "prefix";
 
@@ -37,6 +33,12 @@ export interface WriteStackTraceEntry {
   stack?: string;
 }
 
+export interface WriteStackTraceOptions {
+  errorName?: string;
+  scopeId?: string;
+  writerActionId?: string;
+}
+
 const writeTraceLogger = getLogger("storage.write-trace", {
   enabled: false,
   level: "warn",
@@ -44,13 +46,35 @@ const writeTraceLogger = getLogger("storage.write-trace", {
 });
 
 const MAX_WRITE_STACK_TRACE_HISTORY = 400;
+const DEFAULT_WRITE_TRACE_SCOPE = "__default__";
 
 type NormalizedWriteStackTraceMatcher =
   & Required<Pick<WriteStackTraceMatcher, "match" | "path">>
   & Omit<WriteStackTraceMatcher, "match" | "path">;
 
-let writeTraceMatchers: NormalizedWriteStackTraceMatcher[] = [];
-let writeStackTrace: WriteStackTraceEntry[] = [];
+type WriteStackTraceState = {
+  matchers: NormalizedWriteStackTraceMatcher[];
+  trace: WriteStackTraceEntry[];
+};
+
+const writeTraceStates = new Map<string, WriteStackTraceState>();
+
+function getWriteTraceScopeId(scopeId?: string): string {
+  return scopeId ?? DEFAULT_WRITE_TRACE_SCOPE;
+}
+
+function getWriteTraceState(scopeId?: string): WriteStackTraceState {
+  const normalizedScopeId = getWriteTraceScopeId(scopeId);
+  let state = writeTraceStates.get(normalizedScopeId);
+  if (!state) {
+    state = {
+      matchers: [],
+      trace: [],
+    };
+    writeTraceStates.set(normalizedScopeId, state);
+  }
+  return state;
+}
 
 function normalizeLogicalPath(address: IMemorySpaceAddress): string[] {
   if (
@@ -121,27 +145,36 @@ function captureStack(): string | undefined {
 
 export function setWriteStackTraceMatchers(
   matchers: WriteStackTraceMatcher[],
+  options: { scopeId?: string } = {},
 ): void {
-  writeTraceMatchers = matchers.map(normalizeMatcher);
-  writeStackTrace = [];
+  const normalizedScopeId = getWriteTraceScopeId(options.scopeId);
+  if (matchers.length === 0) {
+    writeTraceStates.delete(normalizedScopeId);
+    return;
+  }
+
+  const state = getWriteTraceState(normalizedScopeId);
+  state.matchers = matchers.map(normalizeMatcher);
+  state.trace = [];
 }
 
-export function getWriteStackTrace(): WriteStackTraceEntry[] {
-  return [...writeStackTrace];
+export function getWriteStackTrace(
+  options: { scopeId?: string } = {},
+): WriteStackTraceEntry[] {
+  const state = writeTraceStates.get(getWriteTraceScopeId(options.scopeId));
+  return state ? [...state.trace] : [];
 }
 
 export function recordWriteStackTrace(
   address: IMemorySpaceAddress,
   value: unknown,
-  options: {
-    errorName?: string;
-    writerActionId?: string;
-  } = {},
+  options: WriteStackTraceOptions = {},
 ): void {
-  if (writeTraceMatchers.length === 0) return;
+  const state = writeTraceStates.get(getWriteTraceScopeId(options.scopeId));
+  if (!state || state.matchers.length === 0) return;
 
   const logicalPath = normalizeLogicalPath(address);
-  for (const matcher of writeTraceMatchers) {
+  for (const matcher of state.matchers) {
     if (!matchWriteTrace(matcher, address, logicalPath)) continue;
 
     const entry: WriteStackTraceEntry = {
@@ -149,7 +182,9 @@ export function recordWriteStackTrace(
       space: address.space,
       entityId: address.id,
       path: [...logicalPath],
-      ...(options.writerActionId ? { writerActionId: options.writerActionId } : {}),
+      ...(options.writerActionId
+        ? { writerActionId: options.writerActionId }
+        : {}),
       match: matcher.match,
       label: matcher.label,
       result: options.errorName ? "error" : "ok",
@@ -157,17 +192,20 @@ export function recordWriteStackTrace(
       valueKind: getValueKind(value),
       stack: captureStack(),
     };
-    writeStackTrace.push(entry);
-    if (writeStackTrace.length > MAX_WRITE_STACK_TRACE_HISTORY) {
-      writeStackTrace.shift();
+    state.trace.push(entry);
+    if (state.trace.length > MAX_WRITE_STACK_TRACE_HISTORY) {
+      state.trace.shift();
     }
 
-    writeTraceLogger.warn("write-stack-trace-match", () => [
-      `Matched ${matcher.label ?? "write watch"}`,
-      `${entry.space}/${entry.entityId}/${entry.path.join("/")}`,
-      entry.writerActionId ? `Writer: ${entry.writerActionId}` : undefined,
-      `Result: ${entry.result}${entry.errorName ? ` (${entry.errorName})` : ""}`,
-      entry.stack ?? "(no stack available)",
-    ].filter(Boolean));
+    writeTraceLogger.warn("write-stack-trace-match", () =>
+      [
+        `Matched ${matcher.label ?? "write watch"}`,
+        `${entry.space}/${entry.entityId}/${entry.path.join("/")}`,
+        entry.writerActionId ? `Writer: ${entry.writerActionId}` : undefined,
+        `Result: ${entry.result}${
+          entry.errorName ? ` (${entry.errorName})` : ""
+        }`,
+        entry.stack ?? "(no stack available)",
+      ].filter(Boolean));
   }
 }

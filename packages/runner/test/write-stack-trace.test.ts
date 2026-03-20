@@ -3,10 +3,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import {
-  getWriteStackTrace,
-  setWriteStackTraceMatchers,
-} from "../src/storage/write-stack-trace.ts";
 
 const signer = await Identity.fromPassphrase("write stack trace test operator");
 const space = signer.did();
@@ -21,17 +17,17 @@ describe("write stack trace", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    setWriteStackTraceMatchers([]);
+    runtime.setWriteStackTraceMatchers([]);
   });
 
   afterEach(async () => {
-    setWriteStackTraceMatchers([]);
+    runtime.setWriteStackTraceMatchers([]);
     await runtime.dispose();
     await storageManager.close();
   });
 
   it("captures stacks for matched logical write paths", () => {
-    setWriteStackTraceMatchers([{
+    runtime.setWriteStackTraceMatchers([{
       space,
       entityId: "doc:root",
       path: [],
@@ -58,7 +54,7 @@ describe("write stack trace", () => {
 
     performMatchedWrite();
 
-    expect(getWriteStackTrace()).toEqual([{
+    expect(runtime.getWriteStackTrace()).toEqual([{
       recordedAt: expect.any(Number),
       space,
       entityId: "doc:root",
@@ -72,7 +68,7 @@ describe("write stack trace", () => {
   });
 
   it("propagates write debug context across async runtime edits", async () => {
-    setWriteStackTraceMatchers([{
+    runtime.setWriteStackTraceMatchers([{
       space,
       entityId: "doc:async",
       path: [],
@@ -98,7 +94,7 @@ describe("write stack trace", () => {
       }
     });
 
-    expect(getWriteStackTrace()).toEqual([{
+    expect(runtime.getWriteStackTrace()).toEqual([{
       recordedAt: expect.any(Number),
       space,
       entityId: "doc:async",
@@ -110,5 +106,171 @@ describe("write stack trace", () => {
       valueKind: "object",
       stack: expect.stringContaining("writeValueOrThrow"),
     }]);
+  });
+
+  it("keeps write debug context isolated across overlapping async work", async () => {
+    runtime.setWriteStackTraceMatchers([
+      {
+        space,
+        entityId: "doc:first",
+        path: [],
+        match: "exact",
+        label: "first write",
+      },
+      {
+        space,
+        entityId: "doc:second",
+        path: [],
+        match: "exact",
+        label: "second write",
+      },
+    ]);
+
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+
+    const firstWrite = runtime.withWriteDebugContext("raw:first", async () => {
+      await firstGate;
+      const tx = runtime.edit();
+      try {
+        tx.writeValueOrThrow(
+          {
+            space,
+            id: "doc:first",
+            type: "application/json",
+            path: [],
+          },
+          { title: "First" },
+        );
+      } finally {
+        tx.abort();
+      }
+    });
+
+    const secondWrite = runtime.withWriteDebugContext(
+      "raw:second",
+      async () => {
+        await secondGate;
+        const tx = runtime.edit();
+        try {
+          tx.writeValueOrThrow(
+            {
+              space,
+              id: "doc:second",
+              type: "application/json",
+              path: [],
+            },
+            { title: "Second" },
+          );
+        } finally {
+          tx.abort();
+        }
+      },
+    );
+
+    releaseFirst();
+    await firstWrite;
+    releaseSecond();
+    await secondWrite;
+
+    expect(runtime.getWriteStackTrace()).toEqual([
+      {
+        recordedAt: expect.any(Number),
+        space,
+        entityId: "doc:first",
+        path: [],
+        writerActionId: "raw:first",
+        match: "exact",
+        label: "first write",
+        result: "ok",
+        valueKind: "object",
+        stack: expect.stringContaining("writeValueOrThrow"),
+      },
+      {
+        recordedAt: expect.any(Number),
+        space,
+        entityId: "doc:second",
+        path: [],
+        writerActionId: "raw:second",
+        match: "exact",
+        label: "second write",
+        result: "ok",
+        valueKind: "object",
+        stack: expect.stringContaining("writeValueOrThrow"),
+      },
+    ]);
+  });
+
+  it("keeps write trace state isolated per runtime", async () => {
+    const secondStorageManager = StorageManager.emulate({ as: signer });
+    const secondRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: secondStorageManager,
+    });
+
+    try {
+      runtime.setWriteStackTraceMatchers([{
+        space,
+        entityId: "doc:primary",
+        path: [],
+        match: "exact",
+        label: "primary write",
+      }]);
+      secondRuntime.setWriteStackTraceMatchers([{
+        space,
+        entityId: "doc:secondary",
+        path: [],
+        match: "exact",
+        label: "secondary write",
+      }]);
+
+      const firstTx = runtime.edit();
+      try {
+        firstTx.writeValueOrThrow(
+          {
+            space,
+            id: "doc:primary",
+            type: "application/json",
+            path: [],
+          },
+          { title: "Primary" },
+        );
+      } finally {
+        firstTx.abort();
+      }
+
+      const secondTx = secondRuntime.edit();
+      try {
+        secondTx.writeValueOrThrow(
+          {
+            space,
+            id: "doc:secondary",
+            type: "application/json",
+            path: [],
+          },
+          { title: "Secondary" },
+        );
+      } finally {
+        secondTx.abort();
+      }
+
+      expect(runtime.getWriteStackTrace().map((entry) => entry.entityId))
+        .toEqual([
+          "doc:primary",
+        ]);
+      expect(
+        secondRuntime.getWriteStackTrace().map((entry) => entry.entityId),
+      ).toEqual(["doc:secondary"]);
+    } finally {
+      secondRuntime.setWriteStackTraceMatchers([]);
+      await secondRuntime.dispose();
+      await secondStorageManager.close();
+    }
   });
 });

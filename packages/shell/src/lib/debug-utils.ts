@@ -454,7 +454,9 @@ export function createDebugUtils(
     return matchers;
   }
 
-  async function getWriteStackTrace(): Promise<WriteStackTraceEntry[] | undefined> {
+  async function getWriteStackTrace(): Promise<
+    WriteStackTraceEntry[] | undefined
+  > {
     const rt = getRt();
     if (!rt) {
       console.error("[debug] No runtime available");

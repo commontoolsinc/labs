@@ -693,10 +693,19 @@ export class Scheduler {
     ) {
       return;
     }
+    const previousChangeGroup = this.actionChangeGroups.get(action);
+    const actionId = this.getActionId(action);
+    if (
+      previousChangeGroup !== undefined &&
+      this.changeGroupToActionId.get(previousChangeGroup) === actionId
+    ) {
+      this.changeGroupToActionId.delete(previousChangeGroup);
+    }
     if (options.changeGroup === undefined) {
       this.actionChangeGroups.delete(action);
     } else {
       this.actionChangeGroups.set(action, options.changeGroup);
+      this.changeGroupToActionId.set(options.changeGroup, actionId);
     }
   }
 
@@ -977,11 +986,25 @@ export class Scheduler {
     }
   }
 
-  unsubscribe(action: Action): void {
+  unsubscribe(
+    action: Action,
+    options: { preserveChangeGroup?: boolean } = {},
+  ): void {
+    const { preserveChangeGroup = false } = options;
     this.cancels.get(action)?.();
     this.cancels.delete(action);
     this.dependencies.delete(action);
-    this.actionChangeGroups.delete(action);
+    if (!preserveChangeGroup) {
+      const changeGroup = this.actionChangeGroups.get(action);
+      const actionId = this.getActionId(action);
+      if (
+        changeGroup !== undefined &&
+        this.changeGroupToActionId.get(changeGroup) === actionId
+      ) {
+        this.changeGroupToActionId.delete(changeGroup);
+      }
+      this.actionChangeGroups.delete(action);
+    }
     this.pending.delete(action);
     const dependencies = this.reverseDependencies.get(action);
     if (dependencies) {
@@ -1040,7 +1063,9 @@ export class Scheduler {
 
     if (this.runningPromise) await this.runningPromise;
 
-    const tx = this.runtime.edit();
+    const tx = this.runtime.edit({
+      changeGroup: this.actionChangeGroups.get(action),
+    });
     (tx.tx as { debugActionId?: string }).debugActionId = actionId;
     const actionStartTime = performance.now();
 
@@ -1142,12 +1167,6 @@ export class Scheduler {
           // Diagnosis capture: record read/write values for idempotency checking
           if (this.diagnosisEnabled) {
             this.captureDiagnosisRecord(actionId, action, tx, log);
-
-            // Map the action's changeGroup to its ID for causal tracking
-            const cg = this.actionChangeGroups.get(action);
-            if (cg) {
-              this.changeGroupToActionId.set(cg, actionId);
-            }
           }
 
           // Inline idempotency re-run: when the mode is on, every
@@ -2793,7 +2812,6 @@ export class Scheduler {
     this.diagnosisHistory.clear();
     this.diagnosisNonIdempotent = [];
     this.causalEdges = [];
-    this.changeGroupToActionId = new Map();
 
     this.diagnosisTimeout = setTimeout(() => {
       this.stopDiagnosis();
@@ -2827,7 +2845,6 @@ export class Scheduler {
     // Clean up
     this.diagnosisHistory.clear();
     this.causalEdges = [];
-    this.changeGroupToActionId = new Map();
 
     // Resolve the promise if someone is waiting
     if (this.diagnosisResolve) {
@@ -3553,7 +3570,7 @@ export class Scheduler {
         if (this.pullMode) {
           this.clearDirty(fn);
         }
-        this.unsubscribe(fn);
+        this.unsubscribe(fn, { preserveChangeGroup: true });
 
         this.filterStats.executed++;
         iterActionsRun++;

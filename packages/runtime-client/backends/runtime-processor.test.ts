@@ -5,10 +5,6 @@ import {
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import { RequestType } from "../protocol/mod.ts";
-import {
-  recordWriteStackTrace,
-  setWriteStackTraceMatchers,
-} from "@commontools/runner/storage/write-stack-trace";
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -288,22 +284,18 @@ describe("RuntimeProcessor diagnosis helpers", () => {
     const settleEnabledValues: boolean[] = [];
     const actionRunEnabledValues: boolean[] = [];
     const triggerEnabledValues: boolean[] = [];
-    setWriteStackTraceMatchers([{
+    const writeTraceMatchers: unknown[] = [];
+    const writeTrace = [{
+      recordedAt: 2456.7,
       space: "did:key:test",
       entityId: "of:cell-1",
       path: [],
-      match: "exact",
+      match: "exact" as const,
       label: "watched root write",
-    }]);
-    recordWriteStackTrace(
-      {
-        space: "did:key:test",
-        id: "of:cell-1",
-        type: "application/json",
-        path: ["value"],
-      },
-      { ok: true },
-    );
+      result: "ok" as const,
+      valueKind: "object" as const,
+      stack: "Error\n  at writeValueOrThrow",
+    }];
     const processor = {
       runtime: {
         scheduler: {
@@ -320,6 +312,10 @@ describe("RuntimeProcessor diagnosis helpers", () => {
             triggerEnabledValues.push(enabled);
           },
           getTriggerTrace: () => triggerTrace,
+        },
+        getWriteStackTrace: () => writeTrace,
+        setWriteStackTraceMatchers: (matchers: unknown[]) => {
+          writeTraceMatchers.push(matchers);
         },
       },
     } as unknown as RuntimeProcessor;
@@ -371,17 +367,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
     expect(actionTraceResponse).toEqual({ trace: actionTrace });
     expect(triggerTraceResponse).toEqual({ trace: triggerTrace });
     expect(writeTraceResponse).toEqual({
-      trace: [{
-        recordedAt: expect.any(Number),
-        space: "did:key:test",
-        entityId: "of:cell-1",
-        path: [],
-        match: "exact",
-        label: "watched root write",
-        result: "ok",
-        valueKind: "object",
-        stack: expect.any(String),
-      }],
+      trace: writeTrace,
     });
 
     RuntimeProcessor.prototype.setWriteStackTraceMatchers.call(
@@ -391,5 +377,6 @@ describe("RuntimeProcessor diagnosis helpers", () => {
         matchers: [],
       },
     );
+    expect(writeTraceMatchers).toEqual([[]]);
   });
 });

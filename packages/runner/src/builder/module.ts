@@ -209,8 +209,9 @@ function getExternalSourceLocation(): SourceLocationResult {
           : null,
       }]);
       if (mapped?.source && mapped?.line != null) {
-        const mappedBase =
-          `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+        const mappedBase = `${mapped.source}:${mapped.line}:${
+          mapped.column ?? 0
+        }`;
         const resolved = mapped.line === 1 && (mapped.column ?? 0) === 23
           ? `${mappedBase} [via ${frame.file}:${frame.line}:${frame.col}]`
           : mappedBase;

@@ -112,6 +112,11 @@ Capture two traces when possible:
 The first tells you whether startup or persisted hydration is causing a wave.
 The second tells you whether a specific write or navigation fans out.
 
+For large spaces, do not trust a single reload sample. Repeat the same reload
+`3-5` times at a fixed note count and compare medians. In this investigation
+the graph shape was stable while individual worker timings varied a lot from
+run to run.
+
 ### What To Inspect In Chrome DevTools
 
 For each trace:
@@ -485,76 +490,59 @@ await commontools.rt.setLoggerEnabled(true, "scheduler")
 await commontools.rt.setLoggerLevel("debug", "scheduler")
 ```
 
-## Disambiguate `raw:async -> Runner.run`
+## Disambiguate Async Raw Actions
 
 If a write stack shows:
 
 - `Runner.setupInternal`
 - `Runner.run`
-- `raw:async ...`
+- `raw:<name>` or an async raw frame
 
-do not assume it is navigation.
+do not jump straight to a product-level conclusion. First split the path into
+one of these categories:
 
-In the current builtin set, only two raw builtins are async:
+- async builtin doing direct read/sync work against existing cells
+- async builtin launching or materializing more runtime work
+- navigation or shell callback follow-on work outside `Runner.run()`
 
-- [`navigate-to.ts`](/Users/berni/labs-perf-settle-wave-debugging/packages/runner/src/builtins/navigate-to.ts)
-- [`wish.ts`](/Users/berni/labs-perf-settle-wave-debugging/packages/runner/src/builtins/wish.ts)
+Use these tools to disambiguate:
 
-The important distinction is:
+- `runner.trigger-flow` to see which source action id is re-entering
+  `Runner.run()`
+- exact action-run tracing to tell whether the same raw action actually ran or
+  was merely scheduled
+- write stack tracing to see whether the repeated writes are setup pairs or
+  later state updates
 
-- `wish` directly calls `runtime.runSynced()`, which flows into
-  `Runner.run()` / `setupInternal()`
-- `navigateTo` does not call `Runner.run()` directly; it hands off to
-  `navigateCallback` and follow-on shell/runtime work
+Do not treat the generic `raw:async` frame by itself as evidence of one
+specific builtin. The useful signal is the resolved raw action id plus the next
+few frames underneath it.
 
-So a direct `raw:async -> Runner.run` stack is currently a strong signal for
-`wish`, while navigation-related churn tends to show up through
-runtime-processor or piece-manager follow-on paths instead.
+## Investigating Broad Async Readers
 
-## Wish Findings
+Sometimes the hottest action is not the true root cause, especially when it is
+an async reader over a broad index or collection.
 
-The first useful split is between two very different `wish()` behaviors:
+Signs that this is happening:
 
-- direct well-known tag/path resolution:
-  `#default`, `#mentionable`, `#recent`, `/...`
-- suggestion-pattern launch:
-  freeform query or multi-result picker, which calls `runtime.runSynced()`
+- run count stays low, but total time is large or highly variable
+- one action spends much of its time in awaited `sync()` or lookup work
+- downstream index, grid, or summary actions also appear hot in the same wave
 
-For the `Notes -> New Note` flow on a reused note-heavy space, the current
-instrumentation shows:
+When that happens:
 
-- no `wish` suggestion-pattern launches at all
-- no `wish`-driven `runSynced()` re-entry in that interaction window
-- repeated direct reads of `#mentionable` (`4` times), plus one each of
-  `#default`, `#recent`, and `#favorites`
-- one-shot hashtag-search misses for `#notebook` and `#allNotes`
+1. Measure both run count and total time. Do not optimize only by count.
+2. Check whether the hot action is loading or syncing a large result set.
+3. Inspect the producer side as well as the reader side.
+4. Compare the same measurement on small and large spaces before assuming the
+   action body itself is the only problem.
 
-That means the observed storm is not primarily "`wish()` is recursively
-launching more patterns". In this flow, `wish()` is mainly serving as a set of
-reactive readers over broad cells:
+Typical producer-side surfaces to inspect include:
 
-- [`note.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/notes/note.tsx)
-  reads `#default`, `#mentionable`, `#recent`, `#notebook`, and `#allNotes`
-- [`summary-index.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/summary-index.tsx)
-  reads `#mentionable`
-- [`favorites-manager.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/favorites-manager.tsx)
-  reads `#favorites`
-
-So the current working theory is:
-
-- adding one note rewrites broad root state such as `allPieces` and
-  `backlinksIndex/mentionable`
-- every mounted `wish()` reader of those cells reruns
-- the real cost is the breadth and size of the invalidated data, not a
-  suggestion-pattern loop inside `wish()`
-
-If the note count effect grows further, the next place to instrument is not
-`wish()` picker launching. It is the producers behind `#mentionable` and
-`#default`, especially:
-
-- [`backlinks-index.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/backlinks-index.tsx)
-- [`default-app.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/system/default-app.tsx)
-- [`note.tsx`](/Users/berni/labs-perf-settle-wave-debugging/packages/patterns/notes/note.tsx)
+- index builders that scan all pieces
+- home/list/grid views that materialize many previews
+- broad root-state cells that are rewritten wholesale instead of updated
+  narrowly
 
 ### What To Look For In Debug Logs
 

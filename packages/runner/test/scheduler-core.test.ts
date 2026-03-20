@@ -187,6 +187,7 @@ describe("scheduler", () => {
         shallowReads: [],
         writes: [b.getAsNormalizedFullLink()],
       },
+      { changeGroup: "compute-intermediate-change-group" },
     );
     runtime.scheduler.subscribe(
       effectSink,
@@ -222,6 +223,14 @@ describe("scheduler", () => {
 
     expect(trace.length).toBeGreaterThan(0);
     expect(matchingEntry).toBeDefined();
+    const intermediateEntityId = b.getAsNormalizedFullLink().id;
+    expect(
+      trace.some((entry) =>
+        entry.entityId === intermediateEntityId &&
+        entry.writerActionId === "computeIntermediate"
+      ),
+      "captures writer action IDs outside diagnosis mode",
+    ).toBe(true);
   });
 
   it("captures exact action runs for one reactive update", async () => {

@@ -6,23 +6,24 @@ declare global {
   var commontools: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
-    watchWrites?: (options?:
-      | {
-        space?: string;
-        did?: string;
-        id?: string;
-        path?: string[];
-        match?: "exact" | "prefix";
-        label?: string;
-      }
-      | {
-        space?: string;
-        did?: string;
-        id?: string;
-        path?: string[];
-        match?: "exact" | "prefix";
-        label?: string;
-      }[]
+    watchWrites?: (
+      options?:
+        | {
+          space?: string;
+          did?: string;
+          id?: string;
+          path?: string[];
+          match?: "exact" | "prefix";
+          label?: string;
+        }
+        | {
+          space?: string;
+          did?: string;
+          id?: string;
+          path?: string[];
+          match?: "exact" | "prefix";
+          label?: string;
+        }[],
     ) => Promise<unknown>;
     getWriteStackTrace?: () => Promise<unknown>;
     explainTriggerTrace?: (options?: {

@@ -27,10 +27,6 @@ import {
   IDBCompilationCache,
 } from "@commontools/runner/compilation-cache";
 import {
-  getWriteStackTrace,
-  setWriteStackTraceMatchers,
-} from "@commontools/runner/storage/write-stack-trace";
-import {
   NameSchema,
   nameSchema,
   rendererVDOMSchema,
@@ -41,6 +37,7 @@ import {
   parseLink,
 } from "../../runner/src/link-utils.ts";
 import {
+  type ActionRunTraceResponse,
   BooleanResponse,
   type CellGetRequest,
   type CellResolveAsCellRequest,
@@ -78,23 +75,22 @@ import {
   type PageStopRequest,
   type RecreateSpaceRootPatternRequest,
   RequestType,
+  type SetActionRunTraceEnabledRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
-  type SetActionRunTraceEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
-  type ActionRunTraceResponse,
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type TriggerTraceResponse,
-  type WriteStackTraceResponse,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -326,8 +322,9 @@ export class RuntimeProcessor {
         if (link.space !== space) {
           console.warn("Navigating cross-space, not adding to pieces list.");
         } else {
-          void runtime.withWriteDebugContext(writeContext, () =>
-            pieceManager!.add([target])
+          void runtime.withWriteDebugContext(
+            writeContext,
+            () => pieceManager!.add([target]),
           ).catch((e: unknown) => {
             console.error(
               "[RuntimeProcessor] Failed to add navigated piece:",
@@ -338,8 +335,9 @@ export class RuntimeProcessor {
           });
 
           // Track as recently used (async, fire-and-forget)
-          void runtime.withWriteDebugContext(writeContext, () =>
-            RuntimeProcessor.trackRecentPiece(pieceManager!, target)
+          void runtime.withWriteDebugContext(
+            writeContext,
+            () => RuntimeProcessor.trackRecentPiece(pieceManager!, target),
           ).catch((e: unknown) => {
             console.error(
               "[RuntimeProcessor] Failed to track recent piece:",
@@ -360,8 +358,9 @@ export class RuntimeProcessor {
         const writeContext = runtime.getWriteDebugContext();
         const manager = pieceManager;
         if (!manager) return;
-        void runtime.withWriteDebugContext(writeContext, () =>
-          manager.add([piece])
+        void runtime.withWriteDebugContext(
+          writeContext,
+          () => manager.add([piece]),
         ).catch((e: unknown) => {
           console.error(
             "[RuntimeProcessor] Failed to add created piece:",
@@ -852,14 +851,14 @@ export class RuntimeProcessor {
     _request: GetWriteStackTraceRequest,
   ): WriteStackTraceResponse {
     return {
-      trace: getWriteStackTrace(),
+      trace: this.runtime.getWriteStackTrace(),
     };
   }
 
   setWriteStackTraceMatchers(
     request: SetWriteStackTraceMatchersRequest,
   ): void {
-    setWriteStackTraceMatchers(request.matchers);
+    this.runtime.setWriteStackTraceMatchers(request.matchers);
   }
 
   async handleRequest(

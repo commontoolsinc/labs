@@ -257,7 +257,10 @@ describe("default-app flow test", () => {
           page,
           "runner.trigger-flow",
         );
-        assert(runnerLogs, "Expected runner trigger-flow logs to be available");
+        assert(
+          Array.isArray(runnerLogs) && runnerLogs.length > 0,
+          "Expected runner trigger-flow logs to be available",
+        );
         console.log(
           "Runner trigger-flow logs (create note):",
           JSON.stringify(runnerLogs, null, 2),
@@ -278,7 +281,10 @@ describe("default-app flow test", () => {
 
       if (noteIndex === 1 && CAPTURE_WISH_FLOW_LOG) {
         const wishLogs = await collectCapturedConsoleLogs(page, "[WISH");
-        assert(wishLogs, "Expected runner wish-flow logs to be available");
+        assert(
+          Array.isArray(wishLogs) && wishLogs.length > 0,
+          "Expected runner wish-flow logs to be available",
+        );
         console.log(
           "Runner wish-flow logs (create note):",
           JSON.stringify(wishLogs, null, 2),
@@ -536,7 +542,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         stack.includes("_CellImpl.setRawUntyped") &&
         stack.includes("Runner.setupInternal")
       ) {
-        const runnerLine = stack.match(/runner\\.ts:(\\d+)/)?.[1];
+        const runnerLine = stack.match(/runner\.ts:(\d+)/)?.[1];
         if (runnerLine) {
           const line = Number(runnerLine);
           if (line >= 300 && line < 330) {

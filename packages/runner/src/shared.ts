@@ -45,6 +45,6 @@ export type {
 } from "./scheduler.ts";
 export type {
   WriteStackTraceEntry,
-  WriteStackTraceMatchMode,
   WriteStackTraceMatcher,
+  WriteStackTraceMatchMode,
 } from "./storage/write-stack-trace.ts";

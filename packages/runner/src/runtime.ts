@@ -65,6 +65,16 @@ import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import type { CachedCompiler } from "./compilation-cache/mod.ts";
+import type {
+  WriteStackTraceEntry,
+  WriteStackTraceMatcher,
+} from "./storage/write-stack-trace.ts";
+import {
+  getWriteStackTrace,
+  setWriteStackTraceMatchers,
+} from "./storage/write-stack-trace.ts";
+
+const { AsyncLocalStorage } = await import("node:async_hooks");
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -211,7 +221,7 @@ export class Runtime {
   readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
-  private writeDebugContextStack: string[] = [];
+  private writeDebugContext = new AsyncLocalStorage<string>();
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -433,6 +443,7 @@ export class Runtime {
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
+    (tx as { writeTraceScopeId?: string }).writeTraceScopeId = this.id;
     const debugActionId = this.getWriteDebugContext();
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
@@ -441,7 +452,7 @@ export class Runtime {
   }
 
   getWriteDebugContext(): string | undefined {
-    return this.writeDebugContextStack.at(-1) ?? this.scheduler.currentActionId;
+    return this.writeDebugContext.getStore() ?? this.scheduler.currentActionId;
   }
 
   withWriteDebugContext<T>(
@@ -451,34 +462,15 @@ export class Runtime {
     if (!label) {
       return fn();
     }
+    return this.writeDebugContext.run(label, fn);
+  }
 
-    this.writeDebugContextStack.push(label);
-    let popped = false;
-    const pop = () => {
-      if (popped) return;
-      popped = true;
-      const index = this.writeDebugContextStack.lastIndexOf(label);
-      if (index >= 0) {
-        this.writeDebugContextStack.splice(index, 1);
-      }
-    };
+  setWriteStackTraceMatchers(matchers: WriteStackTraceMatcher[]): void {
+    setWriteStackTraceMatchers(matchers, { scopeId: this.id });
+  }
 
-    try {
-      const result = fn();
-      if (
-        result &&
-        typeof result === "object" &&
-        "then" in result &&
-        typeof result.then === "function"
-      ) {
-        return Promise.resolve(result).finally(pop) as T;
-      }
-      pop();
-      return result;
-    } catch (error) {
-      pop();
-      throw error;
-    }
+  getWriteStackTrace(): WriteStackTraceEntry[] {
+    return getWriteStackTrace({ scopeId: this.id });
   }
 
   /**

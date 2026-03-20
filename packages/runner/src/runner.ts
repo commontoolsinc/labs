@@ -85,9 +85,7 @@ function sanitizeDebugLabel(label?: string): string | undefined {
 function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
-  return tx
-    ? (tx.tx as { debugActionId?: string }).debugActionId
-    : undefined;
+  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
 }
 
 function describePatternOrModule(
@@ -1914,7 +1912,7 @@ export class Runner {
       moduleRefName,
     ) ??
       sanitizeDebugLabel(
-      (module as { debugName?: string }).debugName,
+        (module as { debugName?: string }).debugName,
       ) ??
       sanitizeDebugLabel(impl.src) ??
       sanitizeDebugLabel(impl.name) ??

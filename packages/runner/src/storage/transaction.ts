@@ -283,7 +283,10 @@ export const write = (
     const result = space.write(memoryAddress, value);
     if (!result.error) {
       recordWriteStackTrace(address, value, {
-        writerActionId: (transaction as { debugActionId?: string }).debugActionId,
+        scopeId:
+          (transaction as { writeTraceScopeId?: string }).writeTraceScopeId,
+        writerActionId:
+          (transaction as { debugActionId?: string }).debugActionId,
       });
     }
     return result;

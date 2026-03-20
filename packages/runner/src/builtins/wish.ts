@@ -49,9 +49,7 @@ export type ParsedWishTarget = {
 function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
-  return tx
-    ? (tx.tx as { debugActionId?: string }).debugActionId
-    : undefined;
+  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
 }
 
 function sanitizeQueryKey(query: string): string {
@@ -290,17 +288,20 @@ function searchMentionablesForHashtag(
 
   const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
   const query = `#${searchTermWithoutHash}`;
-  wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () => [
-    `[WISH SEARCH] source=${sourceKey}`,
-    `query=${query}`,
-    `scope=${formatScope(ctx.scope)}`,
-    `space=${describeCell(spaceCell ?? getSpaceCell(ctx))}`,
-    `mentionableCount=${mentionables.length}`,
-    `matchCount=${matches.length}`,
-    matches.length > 0
-      ? `matches=${matches.slice(0, 5).map((cell) => describeCell(cell)).join(", ")}`
-      : undefined,
-  ].filter(Boolean));
+  wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () =>
+    [
+      `[WISH SEARCH] source=${sourceKey}`,
+      `query=${query}`,
+      `scope=${formatScope(ctx.scope)}`,
+      `space=${describeCell(spaceCell ?? getSpaceCell(ctx))}`,
+      `mentionableCount=${mentionables.length}`,
+      `matchCount=${matches.length}`,
+      matches.length > 0
+        ? `matches=${
+          matches.slice(0, 5).map((cell) => describeCell(cell)).join(", ")
+        }`
+        : undefined,
+    ].filter(Boolean));
 
   return {
     matches: matches.map((match) => ({ cell: match, pathPrefix })),
@@ -695,7 +696,11 @@ export function wish(
             `[WISH RUN SUGGESTION] source=${sourceKey}`,
             `query=${input.situation}`,
             `mode=fetch-then-run`,
-            `result=${suggestionPatternResultCell ? describeCell(suggestionPatternResultCell) : "unknown"}`,
+            `result=${
+              suggestionPatternResultCell
+                ? describeCell(suggestionPatternResultCell)
+                : "unknown"
+            }`,
           ]);
           wishFlowLogger.debug(
             `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
@@ -714,7 +719,11 @@ export function wish(
         `[WISH RUN SUGGESTION] source=${sourceKey}`,
         `query=${input.situation}`,
         `mode=reuse-pattern`,
-        `result=${suggestionPatternResultCell ? describeCell(suggestionPatternResultCell) : "unknown"}`,
+        `result=${
+          suggestionPatternResultCell
+            ? describeCell(suggestionPatternResultCell)
+            : "unknown"
+        }`,
       ]);
       wishFlowLogger.debug(
         `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
@@ -825,17 +834,22 @@ export function wish(
             (performance.now() - resolveStartedAt).toFixed(3),
           );
 
-          wishFlowLogger.debug(`wish/resolve/${queryKey}`, () => [
-            `[WISH RESOLVE] source=${sourceKey}`,
-            `query=${query}`,
-            `kind=${getResolutionKind(parsed)}`,
-            `baseResolutions=${baseResolutions.length}`,
-            `uniqueResults=${uniqueResultCells.length}`,
-            `resolveMs=${resolveMs}`,
-            uniqueResultCells.length > 0
-              ? `results=${uniqueResultCells.slice(0, 5).map((cell) => describeCell(cell)).join(", ")}`
-              : undefined,
-          ].filter(Boolean));
+          wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
+            [
+              `[WISH RESOLVE] source=${sourceKey}`,
+              `query=${query}`,
+              `kind=${getResolutionKind(parsed)}`,
+              `baseResolutions=${baseResolutions.length}`,
+              `uniqueResults=${uniqueResultCells.length}`,
+              `resolveMs=${resolveMs}`,
+              uniqueResultCells.length > 0
+                ? `results=${
+                  uniqueResultCells.slice(0, 5).map((cell) =>
+                    describeCell(cell)
+                  ).join(", ")
+                }`
+                : undefined,
+            ].filter(Boolean));
           wishFlowLogger.debug(
             `wish/resolve-source/${queryKey}/${sourceBucket}`,
             () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
