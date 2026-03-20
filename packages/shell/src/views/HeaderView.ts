@@ -548,6 +548,7 @@ export class XHeaderView extends BaseView {
 
   private _unsubscribeFavorites: (() => void) | undefined;
 
+  /** Subscribe to the favorites list so the menu reflects current state. */
   private _setupFavoritesSubscription(): void {
     this._cleanupFavoritesSubscription();
     if (!this.rt) return;
@@ -560,6 +561,7 @@ export class XHeaderView extends BaseView {
     );
   }
 
+  /** Unsubscribe from favorites when component disconnects or runtime changes. */
   private _cleanupFavoritesSubscription(): void {
     if (this._unsubscribeFavorites) {
       this._unsubscribeFavorites();
@@ -567,6 +569,10 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /**
+   * Derive whether the current piece is favorited. Prefers optimistic
+   * local state (set immediately on click) over server state.
+   */
   private _isFavorite(): boolean {
     if (this._localIsFavorite !== undefined) {
       return this._localIsFavorite;
@@ -596,6 +602,11 @@ export class XHeaderView extends BaseView {
     if (this._resizeTimer) clearTimeout(this._resizeTimer);
   }
 
+  /**
+   * Temporarily disable all CSS transitions during viewport resize to
+   * prevent the menu from flashing when crossing the mobile/desktop
+   * breakpoint in DevTools.
+   */
   private _handleResize = () => {
     this.classList.add("resizing");
     if (this._resizeTimer) clearTimeout(this._resizeTimer);
@@ -604,6 +615,8 @@ export class XHeaderView extends BaseView {
     }, 150);
   };
 
+  /** Close the innermost open dropdown on Escape, prioritizing the piece
+   *  switcher over the main menu. Returns focus to the trigger on menu close. */
   private _handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       if (this.headerPieceDropdownOpen) {
@@ -631,6 +644,12 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /**
+   * Lazily fetch all pieces in the current space. Only runs when a piece
+   * list is actually expanded (mobile menu or desktop breadcrumb dropdown).
+   * Fetches are parallelized with Promise.allSettled; pieces that fail
+   * to resolve are silently skipped.
+   */
   private _pieces = new Task(this, {
     task: async ([rt, expanded]): Promise<PieceItem[]> => {
       if (!rt || !expanded) return [];
@@ -671,6 +690,7 @@ export class XHeaderView extends BaseView {
       ] as const,
   });
 
+  /** Clear the keystore and identity, logging the user out. */
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -683,6 +703,7 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
+  /** Toggle the debugger panel visibility via app state command. */
   private handleDebuggerToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -694,6 +715,7 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
+  /** Navigate to the current space root when the breadcrumb is clicked. */
   private _handleSpaceClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -704,6 +726,7 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /** Open the main dropdown menu and move focus to the close button. */
   private handleLogoClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -713,12 +736,14 @@ export class XHeaderView extends BaseView {
     });
   }
 
+  /** Return focus to the logo trigger button after the menu closes. */
   private _focusTrigger() {
     this.updateComplete.then(() => {
       this.renderRoot.querySelector<HTMLElement>(".nav-picker")?.focus();
     });
   }
 
+  /** Close the main menu via the X button. */
   private handleCloseMenu(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -727,24 +752,28 @@ export class XHeaderView extends BaseView {
     this._focusTrigger();
   }
 
+  /** Close the main menu when the dark backdrop overlay is clicked. */
   private handleBackdropClick() {
     this.menuOpen = false;
     this.pieceListExpanded = false;
     this._focusTrigger();
   }
 
+  /** Toggle the piece list inside the mobile menu. */
   private handleTogglePieceList(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.pieceListExpanded = !this.pieceListExpanded;
   }
 
+  /** Toggle the piece switcher dropdown in the desktop header breadcrumb. */
   private handleToggleHeaderPieceDropdown(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.headerPieceDropdownOpen = !this.headerPieceDropdownOpen;
   }
 
+  /** Close the desktop piece switcher when clicking outside of it. */
   private _closeHeaderPieceDropdown = (e: Event) => {
     const path = e.composedPath();
     const wrapper = this.renderRoot.querySelector(".header-piece-wrapper");
@@ -753,6 +782,10 @@ export class XHeaderView extends BaseView {
     }
   };
 
+  /**
+   * Delegated click handler for piece list items. Uses data-piece-id
+   * attribute to identify the target piece, avoiding per-item closures.
+   */
   private handlePieceClick(e: Event) {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
       "[data-piece-id]",
@@ -771,6 +804,10 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /**
+   * Contextual navigation: when viewing a piece, go back to the space
+   * root. When already at the space root, go to the user's home (/).
+   */
   private handleNavigateUp(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -788,20 +825,24 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /** Whether we have a space identifier (name or DID) to navigate with. */
   private get _hasSpace(): boolean {
     return !!(this.spaceName || this.spaceDid);
   }
 
+  /** Human-readable space name, falling back to a truncated DID. */
   private get _spaceDisplayName(): string {
     if (this.spaceName) return this.spaceName;
     if (this.spaceDid) return this.spaceDid.slice(0, 20) + "...";
     return "";
   }
 
+  /** True when viewing a specific piece (not the space's default pattern). */
   private get _isViewingPiece(): boolean {
     return !!(this.pieceId && this._hasSpace && !this.isViewingDefaultPattern);
   }
 
+  /** Label for the navigate-up button: "Back to <space>" or "Go Home". */
   private get _navigateUpLabel(): string {
     if (this._isViewingPiece) {
       return `Back to ${this._spaceDisplayName}`;
@@ -809,6 +850,7 @@ export class XHeaderView extends BaseView {
     return "Go Home";
   }
 
+  /** Copy the current page URL to the clipboard. */
   private async handleCopyLink(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -820,6 +862,11 @@ export class XHeaderView extends BaseView {
     this.menuOpen = false;
   }
 
+  /**
+   * Toggle the current piece's favorite status. Uses optimistic UI —
+   * updates local state immediately, then syncs with the server.
+   * Rolls back local state on error.
+   */
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -844,6 +891,7 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  /** Derive connection status from runtime availability. */
   private getConnectionStatus(): ConnectionStatus {
     return this.rt ? "connected" : "disconnected";
   }
@@ -1026,6 +1074,7 @@ export class XHeaderView extends BaseView {
     `;
   }
 
+  /** Render the piece list, shared between the mobile menu and desktop dropdown. */
   private renderPieceList() {
     const pieces = this._pieces.value ?? [];
     if (pieces.length === 0) {
