@@ -92,6 +92,73 @@ describe("PatternManager program persistence", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
   });
 
+  it("loads transformed entrypoints that import non-transformed helper modules", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { NAME, pattern, type Stream, UI, type VNode } from 'commontools';",
+            "import { type CounterInput, decrement, increment } from './utils.ts';",
+            "interface CounterOutput {",
+            "  [NAME]: string;",
+            "  [UI]: VNode;",
+            "  increment: Stream<void>;",
+            "  decrement: Stream<void>;",
+            "  value: number;",
+            "}",
+            "export default pattern<CounterInput, CounterOutput>((cell) => ({",
+            "  [NAME]: 'Mixed Module Counter',",
+            "  [UI]: <div>{cell.value}</div>,",
+            "  increment: increment(cell),",
+            "  decrement: decrement(cell),",
+            "  value: cell.value,",
+            "}));",
+          ].join("\n"),
+        },
+        {
+          name: "/utils.ts",
+          contents: [
+            "import { Default, handler, schema, Writable } from 'commontools';",
+            "import 'commontools/schema';",
+            "export const model = schema({",
+            "  type: 'object',",
+            "  properties: {",
+            "    value: { type: 'number', default: 0, asCell: true },",
+            "  },",
+            "  default: { value: 0 },",
+            "});",
+            "export interface CounterInput {",
+            "  value?: Writable<Default<number, 0>>;",
+            "}",
+            "export const increment = handler({}, model, (_event, state) => {",
+            "  state.value.set(state.value.get() + 1);",
+            "});",
+            "export const decrement = handler({}, model, (_event, state) => {",
+            "  state.value.set(state.value.get() - 1);",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const resultCell = runtime.getCell<{ value: number }>(
+      space,
+      "pattern-manager: mixed module run",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, compiled, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await result.pull();
+
+    expect(result.getAsQueryResult()).toMatchObject({ value: 0 });
+  });
+
   it("register/save idempotency: saving same pattern id twice is harmless", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",

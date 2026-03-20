@@ -34,6 +34,31 @@ describe("CommonToolsTransformerPipeline", () => {
       "no replacements without <cts-enable />",
     );
   });
+
+  it("transforms only files marked with <cts-enable /> in multi-file programs", async () => {
+    const output = await transformFiles({
+      "/main.tsx": [
+        "/// <cts-enable />",
+        "import { helper } from './utils.ts';",
+        "export default helper;",
+      ].join("\n"),
+      "/utils.ts": [
+        "import { toSchema } from 'commontools';",
+        "export const helper = toSchema<{ value: number }>({",
+        "  default: { value: 1 },",
+        "});",
+      ].join("\n"),
+    });
+
+    assert(
+      /import \* as __ctHelpers/.test(output["/main.tsx"]!),
+      "cts-enabled entrypoints should be transformed",
+    );
+    assert(
+      !/import \* as __ctHelpers/.test(output["/utils.ts"]!),
+      "plain helper modules should remain untransformed",
+    );
+  });
 });
 
 describe("CTHelpers handling", () => {
