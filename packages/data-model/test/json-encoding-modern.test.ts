@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonEncodingContext } from "../json-encoding.ts";
+import { JsonEncodingContext } from "../json-encoding-modern.ts";
 import {
   DECONSTRUCT,
   FabricInstance,

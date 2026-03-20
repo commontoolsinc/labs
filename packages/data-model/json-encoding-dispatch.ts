@@ -1,6 +1,6 @@
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import { JsonEncodingContext } from "./json-encoding.ts";
+import { JsonEncodingContext } from "./json-encoding-modern.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level JSON encoding context (stateless -- created once, reused).
