@@ -27,7 +27,7 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 // - Function name: [\w\.$<>]* allows alphanumeric, underscore, dot, $, and <> (for <anonymous>)
 // - [as identifier]: \[as \w+\] matches any identifier, not just "factory"
 const stackTracePattern =
-  /at (?:async )?([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
+  /at (?:async )?(.+?) (?:\[as [^\]]+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
 // V8 eval frames without a function name show the filename directly after "at".
 // When there is a nested position in parens, it is the more precise location:
 //   at recipe-abc.js, <anonymous>:14:15 (recipe-abc.js, <anonymous>:20:10)

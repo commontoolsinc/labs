@@ -213,6 +213,8 @@ export default errorOnLine6;
       "    at MyClass.myMethod (file.js, <anonymous>:10:5)",
       // Nested namespace
       "    at A.B.C.method (file.js, <anonymous>:20:10)",
+      // Source-labeled function name used by runner action/module ids
+      "    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (file.js, <anonymous>:20:10)",
       // eval
       "    at eval (recipe-abc.js, <anonymous>:17:10)",
       // AMDLoader methods
@@ -226,6 +228,34 @@ export default errorOnLine6;
       // Should either transform the line or leave it unchanged (not drop it)
       expect(result.includes("at ")).toBe(true);
     }
+  });
+
+  it("maps stack frames with source-labeled function names", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `// line 1
+// line 2
+// line 3
+// line 4
+function errorOnLine6(): never {
+  throw new Error("error from line 6"); // THIS IS LINE 6
+}
+
+export default errorOnLine6;
+`,
+    });
+
+    const compiled = await compiler.resolveAndCompile(program, {
+      filename: "known-line.js",
+    });
+
+    const parser = new SourceMapParser();
+    parser.load("known-line.js", compiled.sourceMap!);
+
+    const parsed = parser.parse(`Error: test
+    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (known-line.js, <anonymous>:5:15)`);
+
+    expect(parsed).toContain("main.tsx:6:");
   });
 
   it("preserves unmapped stack frames from external files", () => {
