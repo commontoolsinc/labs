@@ -21,6 +21,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -92,6 +93,8 @@ interface RecordPiece {
   subPieces?: SubPieceEntry[];
   trashedSubPieces?: TrashedSubPieceEntry[];
 }
+
+const nowIsoString = (): string => new Date(safeDateNow()).toISOString();
 
 // ===== Data Extraction =====
 
@@ -223,7 +226,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date().toISOString(),
+      exportDate: nowIsoString(),
       records: exportedRecords,
     };
   },
@@ -666,9 +669,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 </p>
                 <ct-file-download
                   $data={exportedJson}
-                  filename={`record-backup-${
-                    new Date().toISOString().slice(0, 10)
-                  }.json`}
+                  filename={`record-backup-${nowIsoString().slice(0, 10)}.json`}
                   mimeType="application/json"
                   variant="primary"
                   allowAutosave

@@ -144,125 +144,136 @@ function fromMetadata(
 
 // Static registry - defines available sub-piece types
 // Now built from peer pattern metadata
-export const SUB_PIECE_REGISTRY: Record<string, SubPieceDefinition> = {
-  // Notes is special - must be created in record.tsx with linkPattern
-  notes: {
-    type: "notes",
-    label: "Notes",
-    icon: "\u{1F4DD}", // 📝
-    createInstance: () => {
-      throw new Error(
-        "Notes must be created directly with linkPattern, not through registry",
-      );
-    },
-    schema: {
-      content: {
-        type: "string",
-        description:
-          "IMPORTANT: Output the REMAINING text that should stay in Notes after extraction. Include any text that was NOT extracted into structured fields above (preferences, personality traits, conversational context, hobby mentions, etc). Return null ONLY if ALL content was extracted into structured fields.",
+function getSubPieceRegistry(): Record<string, SubPieceDefinition> {
+  return {
+    // Notes is special - must be created in record.tsx with linkPattern
+    notes: {
+      type: "notes",
+      label: "Notes",
+      icon: "\u{1F4DD}", // 📝
+      createInstance: () => {
+        throw new Error(
+          "Notes must be created directly with linkPattern, not through registry",
+        );
       },
+      schema: {
+        content: {
+          type: "string",
+          description:
+            "IMPORTANT: Output the REMAINING text that should stay in Notes after extraction. Include any text that was NOT extracted into structured fields above (preferences, personality traits, conversational context, hobby mentions, etc). Return null ONLY if ALL content was extracted into structured fields.",
+        },
+      },
+      fieldMapping: ["content", "notes"],
     },
-    fieldMapping: ["content", "notes"],
-  },
 
-  // Data modules - imported from peer patterns
-  // Each module factory receives initial values when createInstance is called
-  birthday: fromMetadata(BirthdayMeta, (init) => BirthdayModule(init as any)),
-  rating: fromMetadata(RatingMeta, (init) => RatingModule(init as any)),
-  tags: fromMetadata(TagsMeta, (init) => TagsModule(init as any)),
-  status: fromMetadata(StatusMeta, (init) => StatusModule(init as any)),
-  address: fromMetadata(AddressMeta, (init) => AddressModule(init as any)),
-  timeline: fromMetadata(TimelineMeta, (init) => TimelineModule(init as any)),
-  social: fromMetadata(SocialMeta, (init) => SocialModule(init as any)),
-  link: fromMetadata(LinkMeta, (init) => LinkModule(init as any)),
-  location: fromMetadata(LocationMeta, (init) => LocationModule(init as any)),
-  "location-track": fromMetadata(
-    LocationTrackMeta,
-    (init) => LocationTrackModule(init as any),
-  ),
-  relationship: fromMetadata(
-    RelationshipMeta,
-    (init) => RelationshipModule(init as any),
-  ),
-  giftprefs: fromMetadata(
-    GiftPrefsMeta,
-    (init) => GiftPrefsModule(init as any),
-  ),
-  timing: fromMetadata(TimingMeta, (init) => TimingModule(init as any)),
-  "age-category": fromMetadata(
-    AgeCategoryMeta,
-    (init) => AgeCategoryModule(init as any),
-  ),
-  "dietary-restrictions": fromMetadata(
-    DietaryMeta,
-    (init) => DietaryRestrictionsModule(init as any),
-  ),
-  gender: fromMetadata(GenderMeta, (init) => GenderModule(init as any)),
-  email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
-  phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
-  "record-icon": fromMetadata(
-    RecordIconMeta,
-    (init) => RecordIconModule(init as any),
-  ),
-  nickname: fromMetadata(NicknameMeta, (init) => NicknameModule(init as any)),
-  "simple-list": fromMetadata(
-    SimpleListMeta,
-    (init) => SimpleListModule(init as any),
-  ),
-  photo: fromMetadata(PhotoMeta, (init) => PhotoModule(init as any)),
-  "custom-field": fromMetadata(
-    CustomFieldMeta,
-    (init) => CustomFieldModule(init as any),
-  ),
-  "occurrence-tracker": fromMetadata(
-    OccurrenceTrackerMeta,
-    (init) => OccurrenceTrackerModule(init as any),
-  ),
-  "text-import": fromMetadata(
-    TextImportMeta,
-    (init) => TextImportModule(init as any),
-  ),
+    // Data modules - imported from peer patterns
+    // Each module factory receives initial values when createInstance is called
+    birthday: fromMetadata(BirthdayMeta, (init) => BirthdayModule(init as any)),
+    rating: fromMetadata(RatingMeta, (init) => RatingModule(init as any)),
+    tags: fromMetadata(TagsMeta, (init) => TagsModule(init as any)),
+    status: fromMetadata(StatusMeta, (init) => StatusModule(init as any)),
+    address: fromMetadata(AddressMeta, (init) => AddressModule(init as any)),
+    timeline: fromMetadata(
+      TimelineMeta,
+      (init) => TimelineModule(init as any),
+    ),
+    social: fromMetadata(SocialMeta, (init) => SocialModule(init as any)),
+    link: fromMetadata(LinkMeta, (init) => LinkModule(init as any)),
+    location: fromMetadata(
+      LocationMeta,
+      (init) => LocationModule(init as any),
+    ),
+    "location-track": fromMetadata(
+      LocationTrackMeta,
+      (init) => LocationTrackModule(init as any),
+    ),
+    relationship: fromMetadata(
+      RelationshipMeta,
+      (init) => RelationshipModule(init as any),
+    ),
+    giftprefs: fromMetadata(
+      GiftPrefsMeta,
+      (init) => GiftPrefsModule(init as any),
+    ),
+    timing: fromMetadata(TimingMeta, (init) => TimingModule(init as any)),
+    "age-category": fromMetadata(
+      AgeCategoryMeta,
+      (init) => AgeCategoryModule(init as any),
+    ),
+    "dietary-restrictions": fromMetadata(
+      DietaryMeta,
+      (init) => DietaryRestrictionsModule(init as any),
+    ),
+    gender: fromMetadata(GenderMeta, (init) => GenderModule(init as any)),
+    email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
+    phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
+    "record-icon": fromMetadata(
+      RecordIconMeta,
+      (init) => RecordIconModule(init as any),
+    ),
+    nickname: fromMetadata(
+      NicknameMeta,
+      (init) => NicknameModule(init as any),
+    ),
+    "simple-list": fromMetadata(
+      SimpleListMeta,
+      (init) => SimpleListModule(init as any),
+    ),
+    photo: fromMetadata(PhotoMeta, (init) => PhotoModule(init as any)),
+    "custom-field": fromMetadata(
+      CustomFieldMeta,
+      (init) => CustomFieldModule(init as any),
+    ),
+    "occurrence-tracker": fromMetadata(
+      OccurrenceTrackerMeta,
+      (init) => OccurrenceTrackerModule(init as any),
+    ),
+    "text-import": fromMetadata(
+      TextImportMeta,
+      (init) => TextImportModule(init as any),
+    ),
 
-  // Controller modules - TypePicker needs special handling in record.tsx
-  // Metadata is inlined here to avoid circular dependency (see note at top)
-  "type-picker": {
-    type: "type-picker",
-    label: "Type Picker",
-    icon: "\u{1F3AF}", // 🎯 target emoji
-    createInstance: () => {
-      throw new Error(
-        "Use TypePickerModule directly with ContainerCoordinationContext",
-      );
+    // Controller modules - TypePicker needs special handling in record.tsx
+    // Metadata is inlined here to avoid circular dependency (see note at top)
+    "type-picker": {
+      type: "type-picker",
+      label: "Type Picker",
+      icon: "\u{1F3AF}", // 🎯 target emoji
+      createInstance: () => {
+        throw new Error(
+          "Use TypePickerModule directly with ContainerCoordinationContext",
+        );
+      },
+      internal: true,
     },
-    internal: true,
-  },
-  // ExtractorModule is imported directly in record.tsx
-  "extractor": {
-    type: "extractor",
-    label: "AI Extract",
-    icon: "\u2728", // ✨
-    // createInstance is a no-op - record.tsx imports ExtractorModule directly
-    createInstance: () => {
-      throw new Error("Use ExtractorModule directly, not through registry");
+    // ExtractorModule is imported directly in record.tsx
+    "extractor": {
+      type: "extractor",
+      label: "AI Extract",
+      icon: "\u2728", // ✨
+      // createInstance is a no-op - record.tsx imports ExtractorModule directly
+      createInstance: () => {
+        throw new Error("Use ExtractorModule directly, not through registry");
+      },
+      internal: false, // Show in Add dropdown - user can add this
     },
-    internal: false, // Show in Add dropdown - user can add this
-  },
-};
+  };
+}
 
 // Helper functions
 export function getAvailableTypes(): SubPieceDefinition[] {
-  return Object.values(SUB_PIECE_REGISTRY);
+  return Object.values(getSubPieceRegistry());
 }
 
 // Get types available for "Add" dropdown (excludes internal modules like type-picker)
 export function getAddableTypes(): SubPieceDefinition[] {
-  return Object.values(SUB_PIECE_REGISTRY).filter((def) => !def.internal);
+  return Object.values(getSubPieceRegistry()).filter((def) => !def.internal);
 }
 
 export function getDefinition(
   type: SubPieceType | string,
 ): SubPieceDefinition | undefined {
-  return SUB_PIECE_REGISTRY[type];
+  return getSubPieceRegistry()[type];
 }
 
 // Create a new sub-piece instance by type, optionally with initial values
@@ -271,7 +282,7 @@ export function createSubPiece(
   type: string,
   initialValues?: Record<string, unknown>,
 ): unknown {
-  const def = SUB_PIECE_REGISTRY[type];
+  const def = getSubPieceRegistry()[type];
   if (!def) {
     throw new Error(`Unknown sub-piece type: ${type}`);
   }
@@ -293,7 +304,7 @@ export function buildExtractionSchema(): {
     },
   };
 
-  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
+  for (const def of Object.values(getSubPieceRegistry())) {
     if (!def.schema) continue;
 
     // Add primary schema fields
@@ -343,7 +354,7 @@ export function getFieldToTypeMapping(): Record<string, string> {
   // "name" extracts to "record-title" pseudo-type, handled specially in applySelected
   fieldToType["name"] = "record-title";
 
-  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
+  for (const def of Object.values(getSubPieceRegistry())) {
     if (def.fieldMapping) {
       for (const field of def.fieldMapping) {
         fieldToType[field] = def.type;

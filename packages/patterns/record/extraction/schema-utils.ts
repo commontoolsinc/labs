@@ -24,6 +24,10 @@ import { getResultSchema, isInternalModule } from "./schema-utils-pure.ts";
 export type { JSONSchema };
 export { getResultSchema, isInternalModule };
 
+type SubPieceEntryCellLike = {
+  get?: () => SubPieceEntry[] | null | undefined;
+};
+
 /**
  * Get schema for a sub-piece from the manual registry.
  *
@@ -127,8 +131,7 @@ export function buildExtractionSchema(
  * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchemaFromCell(
-  // deno-lint-ignore no-explicit-any
-  parentSubPieces: Writable<SubPieceEntry[]> | any,
+  parentSubPieces: Writable<SubPieceEntry[]> | SubPieceEntryCellLike,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field

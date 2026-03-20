@@ -20,6 +20,7 @@ import {
   lift,
   NAME,
   pattern,
+  safeDateNow,
   SELF,
   str,
   UI,
@@ -46,6 +47,8 @@ const STANDARD_LABELS: Record<string, string[]> = {
   phone: ["Mobile", "Home", "Work", "Other"],
   address: ["Home", "Work", "Billing", "Shipping", "Other"],
 };
+
+const nowIsoString = (): string => new Date(safeDateNow()).toISOString();
 
 // Helper to get next unused standard label for a module type
 function getNextUnusedLabel(
@@ -327,7 +330,7 @@ const trashSubPiece = handler<
   if (!entry) return;
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date().toISOString() });
+  trash.push({ ...entry, trashedAt: nowIsoString() });
 
   // Remove from active using splice
   const updated = [...current];
@@ -741,7 +744,7 @@ const handleRemoveModule = handler<
   const def = getDefinition(entry.type);
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date().toISOString() });
+  trash.push({ ...entry, trashedAt: nowIsoString() });
 
   // Remove from active
   const updated = [...current];

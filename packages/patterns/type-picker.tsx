@@ -23,6 +23,7 @@ import {
   handler,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commontools";
@@ -37,6 +38,8 @@ import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // Filter function at module scope to avoid transformer errors
 const isNotBlankTemplate = (t: TemplateDefinition): boolean => t.id !== "blank";
+
+const nowIsoString = (): string => new Date(safeDateNow()).toISOString();
 
 // ===== Self-Describing Metadata =====
 export const MODULE_METADATA: ModuleMetadata = {
@@ -108,7 +111,7 @@ const applyTemplate = handler<
   if (selfEntry) {
     const trashedSelf: TrashedSubPieceEntry = {
       ...selfEntry,
-      trashedAt: new Date().toISOString(),
+      trashedAt: nowIsoString(),
     };
     trashedEntries.push(trashedSelf);
   }
@@ -135,7 +138,7 @@ const dismiss = handler<
   // Add to trash
   const trashedSelf: TrashedSubPieceEntry = {
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: nowIsoString(),
   };
   trashedEntries.push(trashedSelf);
 });

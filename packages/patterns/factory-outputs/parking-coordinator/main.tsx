@@ -5,10 +5,11 @@ import {
   Default,
   NAME,
   pattern,
+  safeDateNow,
+  safeRandom,
   Stream,
   UI,
   type VNode,
-  wish,
   Writable,
 } from "commontools";
 
@@ -168,8 +169,8 @@ const formatDateDisplay = (dateStr: string): string => {
   return `${shortName} ${monthLabel} ${dayNum}`;
 };
 
-let _idCounter = 0;
-const genId = (): string => `req-${Date.now()}-${_idCounter++}`;
+const genId = (): string =>
+  `req-${safeDateNow()}-${Math.floor(safeRandom() * 1_000_000_000)}`;
 
 const parsePreferences = (s: string): string[] =>
   s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -246,16 +247,13 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
   ({ spots, people, requests }) => {
-    const nowTimestamp = wish<number>({ query: "#now" });
-    const todayStr = computed(() =>
-      toLocalDateStr(nowTimestamp.result || Date.now())
-    );
-    const weekDatesArr = computed(() => getWeekDates(todayStr));
+    const todayStr = toLocalDateStr(safeDateNow());
+    const weekDatesArr = getWeekDates(todayStr);
 
     // UI state
     const adminMode = Writable.of(false);
     const selectedPersonName = Writable.of("");
-    const requestDate = Writable.of(toLocalDateStr(Date.now()));
+    const requestDate = Writable.of(toLocalDateStr(safeDateNow()));
     const requestResult = Writable.of("");
 
     // Admin form state

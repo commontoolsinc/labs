@@ -1259,13 +1259,10 @@ function buildAutocompleteItems(): AutocompleteItem[] {
   return items;
 }
 
-// Lazy-init singleton for autocomplete items (defers work until first use)
-let _cachedAutocompleteItems: AutocompleteItem[] | null = null;
+const AUTOCOMPLETE_ITEMS = buildAutocompleteItems();
+
 function getAutocompleteItems(): AutocompleteItem[] {
-  if (!_cachedAutocompleteItems) {
-    _cachedAutocompleteItems = buildAutocompleteItems();
-  }
-  return _cachedAutocompleteItems;
+  return AUTOCOMPLETE_ITEMS;
 }
 
 // ===== Computed UI helpers (stable identity, no inline callbacks) =====

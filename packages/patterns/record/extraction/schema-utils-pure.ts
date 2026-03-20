@@ -51,6 +51,10 @@ export interface JSONSchema {
   readonly [key: string]: unknown;
 }
 
+type SubPieceEntryCellLike = {
+  get?: () => SubPieceEntry[] | null | undefined;
+};
+
 /**
  * Set of internal module types that don't have extractable data.
  * These are controller/system modules that should be skipped during extraction.
@@ -145,8 +149,7 @@ export function buildExtractionSchemaPure(
  * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchemaFromCellPure(
-  // deno-lint-ignore no-explicit-any
-  parentSubPieces: { get?: () => SubPieceEntry[] | null | undefined } | any,
+  parentSubPieces: SubPieceEntryCellLike,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field
