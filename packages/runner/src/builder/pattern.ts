@@ -12,7 +12,7 @@ import {
   type OpaqueRef,
   type Pattern,
   type PatternFactory,
-  type PatternInputProxy,
+  type PatternInput,
   type RequireDefaults,
   type SchemaWithoutCell,
   SELF,
@@ -56,37 +56,37 @@ import {
 // Function-only overloads (most common)
 export function pattern<T>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & {
-      [SELF]: PatternInputProxy<any>;
+    input: PatternInput<T> & {
+      [SELF]: unknown;
     },
   ) => any,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+    input: PatternInput<T> & { [SELF]: R },
   ) => Opaque<R>,
 ): PatternFactory<T, R>;
 // Function + schemas overloads
 export function pattern<S extends JSONSchema>(
   fn: (
-    input: PatternInputProxy<SchemaWithoutCell<S>> & {
-      [SELF]: PatternInputProxy<any>;
+    input: SchemaWithoutCell<S> & {
+      [SELF]: unknown;
     },
   ) => any,
   argumentSchema: S,
 ): PatternFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 export function pattern<S extends JSONSchema, R>(
   fn: (
-    input: PatternInputProxy<SchemaWithoutCell<S>> & {
-      [SELF]: PatternInputProxy<R>;
+    input: SchemaWithoutCell<S> & {
+      [SELF]: R;
     },
   ) => Opaque<R>,
   argumentSchema: S,
 ): PatternFactory<SchemaWithoutCell<S>, R>;
 export function pattern<S extends JSONSchema, RS extends JSONSchema>(
   fn: (
-    input: PatternInputProxy<SchemaWithoutCell<S>> & {
-      [SELF]: PatternInputProxy<SchemaWithoutCell<RS>>;
+    input: SchemaWithoutCell<S> & {
+      [SELF]: SchemaWithoutCell<RS>;
     },
   ) => Opaque<SchemaWithoutCell<RS>>,
   argumentSchema: S,
@@ -95,8 +95,8 @@ export function pattern<S extends JSONSchema, RS extends JSONSchema>(
 // Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
 export function pattern<T>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & {
-      [SELF]: PatternInputProxy<any>;
+    input: PatternInput<T> & {
+      [SELF]: unknown;
     },
   ) => any,
   argumentSchema: JSONSchema,
@@ -104,7 +104,7 @@ export function pattern<T>(
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+    input: PatternInput<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
@@ -112,7 +112,7 @@ export function pattern<T, R>(
 // Implementation signature
 export function pattern<T, R>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+    input: PatternInput<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
@@ -139,7 +139,7 @@ export function pattern<T, R>(
   let result;
   try {
     const outputs = fn!(
-      inputs as PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+      inputs as PatternInput<T> & { [SELF]: R },
     );
 
     applyInputIfcToOutput(inputs, outputs);
@@ -159,7 +159,7 @@ export function pattern<T, R>(
 // Same as above, but assumes the caller manages the frame
 export function patternFromFrame<T, R>(
   fn: (
-    input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+    input: PatternInput<T> & { [SELF]: R },
   ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
@@ -176,7 +176,7 @@ export function patternFromFrame<T, R>(
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
   const outputs = fn(
-    inputs as PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+    inputs as PatternInput<T> & { [SELF]: R },
   );
   return factoryFromPattern<T, R>(
     argumentSchema,

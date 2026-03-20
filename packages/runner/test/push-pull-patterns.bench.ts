@@ -183,6 +183,10 @@ type BenchTimingSummary = {
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
 
+function asReactiveArray<T>(value: T[]): Cell<T[]> {
+  return value as unknown as Cell<T[]>;
+}
+
 function benchOptions(group: string, baseline: boolean) {
   return {
     group,
@@ -484,7 +488,7 @@ async function setupMapScenario(
   const mapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: asReactiveArray(values).mapWithPattern(doublePattern as any, {}),
     }),
     numberListInputSchema,
     mappedResultSchema,
@@ -532,7 +536,10 @@ async function setupFilterScenario(
   const filterPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: asReactiveArray(values).filterWithPattern(
+        filterPatternFn as any,
+        {},
+      ),
     }),
     numberListInputSchema,
     filteredResultSchema,
@@ -580,7 +587,10 @@ async function setupFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: asReactiveArray(values).flatMapWithPattern(
+        flatMapPatternFn as any,
+        {},
+      ),
     }),
     numberListInputSchema,
     flatMappedResultSchema,
@@ -624,7 +634,7 @@ async function setupObjectMapScenario(
   const mapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: asReactiveArray(values).mapWithPattern(doublePattern as any, {}),
     }),
     numberObjectListInputSchema,
     mappedResultSchema,
@@ -673,7 +683,10 @@ async function setupObjectFilterScenario(
   const filterPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: asReactiveArray(values).filterWithPattern(
+        filterPatternFn as any,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     filteredResultSchema,
@@ -722,7 +735,10 @@ async function setupObjectFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: asReactiveArray(values).flatMapWithPattern(
+        flatMapPatternFn as any,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     flatMappedResultSchema,

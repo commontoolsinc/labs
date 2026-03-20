@@ -42,7 +42,33 @@ export default pattern((state) => {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
-            <span>{state.key("card", "title")}</span>
+            <span>{__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        card: {
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["title"]
+                        }
+                    },
+                    required: ["card"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                card: {
+                    title: state.key("card").title
+                }
+            } }, ({ state }) => state.card.title)}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
             {__ctHelpers.derive({

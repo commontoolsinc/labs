@@ -328,8 +328,8 @@ declare module "commontools" {
     // Function + two schemas: infer types from JSONSchema literals
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
-        input: PatternInputProxy<Schema<IS>> & {
-          [SELF]: PatternInputProxy<Schema<OS>>;
+        input: Schema<IS> & {
+          [SELF]: Schema<OS>;
         },
       ) => Opaque<Schema<OS>>,
       argumentSchema: IS,
@@ -339,8 +339,8 @@ declare module "commontools" {
     // Function + one schema: infer input type from JSONSchema literal
     <IS extends JSONSchema = JSONSchema>(
       fn: (
-        input: PatternInputProxy<Schema<IS>> & {
-          [SELF]: PatternInputProxy<any>;
+        input: Schema<IS> & {
+          [SELF]: unknown;
         },
       ) => any,
       argumentSchema: IS,

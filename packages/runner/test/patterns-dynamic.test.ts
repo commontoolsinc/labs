@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type JSONSchema } from "../src/builder/types.ts";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -60,6 +60,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       numberElementArgumentSchema,
       resultSchema,
     );
+  }
+
+  function asReactiveArray<T>(value: T[]): Cell<T[]> {
+    return value as unknown as Cell<T[]>;
   }
 
   beforeEach(() => {
@@ -296,7 +300,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asReactiveArray(values).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -364,7 +371,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asReactiveArray(values).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -431,7 +441,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asReactiveArray(values).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -469,7 +482,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: values.mapWithPattern(doublePattern as any, {}),
+        doubled: asReactiveArray(values).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -523,7 +539,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: asReactiveArray(values).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
       };
     });
 
@@ -553,7 +572,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asReactiveArray(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -622,7 +644,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asReactiveArray(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -717,7 +742,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asReactiveArray(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -752,7 +780,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: values.filterWithPattern(isEvenPattern as any, {}),
+        evens: asReactiveArray(values).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
       };
     });
 
@@ -786,7 +817,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asReactiveArray(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -842,7 +876,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: values.filterWithPattern(isPositivePattern as any, {}),
+        positives: asReactiveArray(values).filterWithPattern(
+          isPositivePattern as any,
+          {},
+        ),
       };
     });
 
@@ -881,7 +918,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -914,7 +954,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(expandPattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          expandPattern as any,
+          {},
+        ),
       };
     });
 
@@ -973,7 +1016,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1064,7 +1110,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(maybeExpandPattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          maybeExpandPattern as any,
+          {},
+        ),
       };
     });
 
@@ -1099,7 +1148,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(expandOrPassthroughPattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          expandOrPassthroughPattern as any,
+          {},
+        ),
       };
     });
 
@@ -1133,7 +1185,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1172,7 +1227,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+        flat: asReactiveArray(values).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 

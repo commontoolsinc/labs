@@ -963,29 +963,18 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 export type OpaqueRef<T> = T;
 
 /**
- * Pattern callback inputs still expose the structural proxy surface even though
- * OpaqueRef itself is now transparent.
+ * Pattern callback inputs are plain structural data by default.
+ *
+ * Explicitly capability-typed pattern inputs such as `Writable<T>` or
+ * `Cell<T>` keep their top-level cell surface, but nested properties are not
+ * re-proxied through the type system.
  */
-export type PatternInputProxy<T> =
-  [T] extends [AnyBrandedCell<any>] ? T
-    : [NonNullable<T>] extends [AnyBrandedCell<any>]
-      ? [NonNullable<T>] extends [never]
-        ? OpaqueCell<T> & PatternInputProxyInner<T>
-      : NonNullable<T>
-    :
-      & OpaqueCell<T>
-      & PatternInputProxyInner<T>;
-
-type PatternInputProxyInner<T> = [T] extends
-  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<PatternInputProxy<U>>
-  : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: PatternInputProxy<T[K]> }
-  : [NonNullable<T>] extends [never] ? T
-  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? NonNullable<T>
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<PatternInputProxy<U>>
-  : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: PatternInputProxy<NonNullable<T>[K]> }
+export type PatternInput<T> = IsAny<T> extends true ? T
+  : [T] extends [AnyBrandedCell<any> | undefined]
+    ? Exclude<T, undefined> | Extract<T, undefined>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [readonly unknown[]] ? T
+  : [T] extends [object] ? RequireDefaults<T>
   : T;
 
 // ============================================================================
@@ -1557,21 +1546,21 @@ export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
-      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+      input: PatternInput<T> & { [SELF]: R },
     ) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
-      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
+      input: PatternInput<T> & { [SELF]: unknown },
     ) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
-      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
+      input: PatternInput<T> & { [SELF]: unknown },
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1580,7 +1569,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
+      input: PatternInput<T> & { [SELF]: R },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1602,7 +1591,7 @@ export type PatternToolFunction = <
 >(
   fnOrPattern:
     | ((
-      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
+      input: PatternInput<T> & { [SELF]: unknown },
     ) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
@@ -1900,36 +1889,38 @@ export type StripDefaultBrand<T> = Exclude<
   { readonly [DEFAULT_MARKER]: any }
 >;
 
-type DeriveArrayInput<T extends readonly unknown[]> =
-  IsAny<T[number]> extends true ? any
-    : number extends T["length"] ? Array<DerivePropertyValue<T[number]>>
-    : { -readonly [K in keyof T]: DerivePropertyValue<T[K]> };
+type DeriveArrayInput<T extends readonly unknown[]> = IsAny<T[number]> extends
+  true ? any
+  : number extends T["length"] ? Array<DerivePropertyValue<T[number]>>
+  : { -readonly [K in keyof T]: DerivePropertyValue<T[K]> };
 
-export type DeriveTupleInput<T extends readonly unknown[]> = readonly [...T] &
-  (number extends T["length"] ? never : unknown);
+export type DeriveTupleInput<T extends readonly unknown[]> =
+  & readonly [...T]
+  & (number extends T["length"] ? never : unknown);
 
 type DeriveValue<T> = IsAny<T> extends true ? T
-  : [T] extends [AnyBrandedCell<any> | undefined]
-    ? DeriveRootValueInner<StripDefaultBrand<Exclude<T, undefined>>> |
-      Extract<T, undefined>
+  : [T] extends [AnyBrandedCell<any> | undefined] ?
+      | DeriveRootValueInner<StripDefaultBrand<Exclude<T, undefined>>>
+      | Extract<T, undefined>
   : DeriveRootValueInner<StripDefaultBrand<T>>;
 
 type DeriveRootValueInner<T> = [T] extends [Stream<any>] ? T
   : [T] extends [OpaqueCell<infer U>] ? DerivePropertyValue<U>
   : [T] extends [AnyBrandedCell<infer U>]
-    ? [U] extends [readonly unknown[] | ArrayBuffer | ArrayBufferView | URL | Date]
+    ? [U] extends
+      [readonly unknown[] | ArrayBuffer | ArrayBufferView | URL | Date]
       ? DerivePropertyValue<U>
-      : [U] extends [object] ? T
-      : DerivePropertyValue<U>
+    : [U] extends [object] ? T
+    : DerivePropertyValue<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [readonly unknown[]] ? DeriveArrayInput<T>
   : [T] extends [object] ? { [K in keyof T]: DerivePropertyValue<T[K]> }
   : T;
 
 type DerivePropertyValue<T> = IsAny<T> extends true ? T
-  : [T] extends [OpaqueCell<any> | undefined]
-    ? DerivePropertyValueInner<StripDefaultBrand<Exclude<T, undefined>>> |
-      Extract<T, undefined>
+  : [T] extends [OpaqueCell<any> | undefined] ?
+      | DerivePropertyValueInner<StripDefaultBrand<Exclude<T, undefined>>>
+      | Extract<T, undefined>
   : DerivePropertyValueInner<StripDefaultBrand<T>>;
 
 type DerivePropertyValueInner<T> = [T] extends [Stream<any>] ? T

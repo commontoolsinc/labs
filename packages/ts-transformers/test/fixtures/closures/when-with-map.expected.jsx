@@ -34,8 +34,12 @@ export default pattern((__ct_pattern_input) => {
             type: "array",
             items: {}
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {}
+            anyOf: [{
+                    type: "boolean"
+                }, {
+                    type: "array",
+                    items: {}
+                }]
         } as const satisfies __ctHelpers.JSONSchema, showItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return <li>{item.key("label")}</li>;

@@ -54,7 +54,7 @@ export default pattern((__ct_pattern_input) => {
         },
         required: ["card"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
+        "enum": [false, true, ""]
     } as const satisfies __ctHelpers.JSONSchema, { card: {
             description: card.key("description")
         } }, ({ card }) => {
@@ -85,7 +85,7 @@ export default pattern((__ct_pattern_input) => {
             <span>{card.key("title")}</span>
             {/* Nested ternary with computed - lowers locally inside JSX */}
             {__ctHelpers.ifElse({
-            type: "boolean"
+            "enum": [false, true, ""]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",

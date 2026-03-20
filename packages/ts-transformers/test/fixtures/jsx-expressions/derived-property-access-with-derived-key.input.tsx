@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, derive, pattern, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 
 interface Item {
   name: string;
-  done: Cell<boolean>;
+  done: boolean;
 }
 
 interface Assignment {

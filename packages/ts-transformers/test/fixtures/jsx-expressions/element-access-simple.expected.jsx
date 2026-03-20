@@ -38,11 +38,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 index: state.key("index")
@@ -67,11 +63,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
@@ -104,11 +96,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "number"
-                }]
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),

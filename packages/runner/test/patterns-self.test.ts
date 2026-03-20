@@ -9,8 +9,6 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type JSONSchema, SELF } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 
-// Import types from public API for compile-time type tests
-import { type OpaqueRef } from "@commontools/api";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -197,7 +195,7 @@ describe("Pattern Runner - SELF", () => {
   });
 
   it("should correctly infer SELF type (TypeScript types, compile-time check)", () => {
-    // This test verifies SELF type inference using the PUBLIC API types from @commontools/api
+    // This test verifies SELF is typed as the plain declared output type.
     // The @ts-expect-error directives verify that SELF is NOT typed as `any`
     // If SELF were `any`, the "wrong type" assignments would succeed,
     // making @ts-expect-error unused - which is itself a compile error
@@ -210,16 +208,16 @@ describe("Pattern Runner - SELF", () => {
     const treePattern = pattern<{ name: string }, TreeNode>(
       ({ name, [SELF]: self }) => {
         // Positive type tests: these assignments SHOULD work
-        const _correctType: OpaqueRef<TreeNode> = self;
-        const _correctChildren: OpaqueRef<TreeNode[]> = self.children;
-        const _correctName: OpaqueRef<string> = self.name;
+        const _correctType: TreeNode = self;
+        const _correctChildren: TreeNode[] = self.children;
+        const _correctName: string = self.name;
 
         // Negative type tests: these should NOT work (verified by @ts-expect-error)
-        // If self were ApiOpaqueRef<any>, these would succeed, making @ts-expect-error unused
-        // @ts-expect-error - self should not be assignable to ApiOpaqueRef<{ wrong: true }>
-        const _wrongType: OpaqueRef<{ wrong: true }> = self;
-        // @ts-expect-error - children should not be assignable to ApiOpaqueRef<string[]>
-        const _wrongChildren: OpaqueRef<string[]> = self.children;
+        // If self were `any`, these would succeed, making @ts-expect-error unused
+        // @ts-expect-error - self should not be assignable to { wrong: true }
+        const _wrongType: { wrong: true } = self;
+        // @ts-expect-error - children should not be assignable to string[]
+        const _wrongChildren: string[] = self.children;
 
         // Use self in the return type
         const children: (typeof self)[] = [];

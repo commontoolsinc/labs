@@ -19,7 +19,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
   // Filter out self to prevent infinite recursion if this grid view
   // appears in the pieces list it's rendering
   const filtered = computed(() =>
-    pieces.filter((piece: Piece) => !equals(piece, self))
+    pieces.filter((piece: Piece) => !equals(piece, self as object))
   );
 
   return {

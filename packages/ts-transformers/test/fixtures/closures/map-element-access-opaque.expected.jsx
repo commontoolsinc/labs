@@ -38,11 +38,7 @@ export default pattern((state) => {
                     },
                     required: ["state", "tag"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "number"
-                        }]
+                    type: ["number", "undefined"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     state: {
                         tagCounts: state.key("tagCounts")

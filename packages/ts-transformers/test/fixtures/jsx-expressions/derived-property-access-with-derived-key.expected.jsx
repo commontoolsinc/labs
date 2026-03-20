@@ -1,8 +1,8 @@
 import * as __ctHelpers from "commontools";
-import { Cell, derive, pattern, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 interface Item {
     name: string;
-    done: Cell<boolean>;
+    done: boolean;
 }
 interface Assignment {
     aisle: string;
@@ -31,8 +31,7 @@ export default pattern((__ct_pattern_input) => {
                             type: "string"
                         },
                         done: {
-                            type: "boolean",
-                            asCell: true
+                            type: "boolean"
                         }
                     },
                     required: ["name", "done"]
@@ -55,8 +54,7 @@ export default pattern((__ct_pattern_input) => {
                             type: "string"
                         },
                         done: {
-                            type: "boolean",
-                            asCell: true
+                            type: "boolean"
                         }
                     },
                     required: ["name", "done"]
@@ -87,8 +85,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "string"
                                 },
                                 done: {
-                                    type: "boolean",
-                                    asCell: true
+                                    type: "boolean"
                                 }
                             },
                             required: ["name", "done"]
@@ -128,8 +125,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "string"
                     },
                     done: {
-                        type: "boolean",
-                        asCell: true
+                        type: "boolean"
                     }
                 },
                 required: ["name", "done"]
@@ -167,8 +163,7 @@ export default pattern((__ct_pattern_input) => {
                                         type: "string"
                                     },
                                     done: {
-                                        type: "boolean",
-                                        asCell: true
+                                        type: "boolean"
                                     }
                                 },
                                 required: ["name", "done"]
@@ -235,8 +230,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "string"
                                 },
                                 done: {
-                                    type: "boolean",
-                                    asCell: true
+                                    type: "boolean"
                                 }
                             },
                             required: ["name", "done"]
@@ -271,8 +265,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "string"
                                 },
                                 done: {
-                                    type: "boolean",
-                                    asCell: true
+                                    type: "boolean"
                                 }
                             },
                             required: ["name", "done"]
@@ -321,8 +314,7 @@ export default pattern((__ct_pattern_input) => {
                                         type: "object",
                                         properties: {
                                             done: {
-                                                type: "boolean",
-                                                asCell: true
+                                                type: "boolean"
                                             }
                                         },
                                         required: ["done"]
@@ -333,8 +325,7 @@ export default pattern((__ct_pattern_input) => {
                         },
                         required: ["assignment"]
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: "boolean",
-                        asCell: true
+                        type: "boolean"
                     } as const satisfies __ctHelpers.JSONSchema, { assignment: {
                             item: {
                                 done: assignment.key("item").done
@@ -369,8 +360,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "string"
                                 },
                                 done: {
-                                    type: "boolean",
-                                    asCell: true
+                                    type: "boolean"
                                 }
                             },
                             required: ["name", "done"]
@@ -442,8 +432,7 @@ export default pattern((__ct_pattern_input) => {
                                 type: "string"
                             },
                             done: {
-                                type: "boolean",
-                                asCell: true
+                                type: "boolean"
                             }
                         },
                         required: ["name", "done"]
@@ -493,8 +482,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "string"
                 },
                 done: {
-                    type: "boolean",
-                    asCell: true
+                    type: "boolean"
                 }
             },
             required: ["name", "done"]

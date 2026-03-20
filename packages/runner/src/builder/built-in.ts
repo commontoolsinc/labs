@@ -9,8 +9,7 @@ import type {
   Opaque,
   OpaqueRef,
   PatternFactory,
-  PatternInputProxy,
-  RequireDefaults,
+  PatternInput,
   Schema,
 } from "./types.ts";
 import { SELF } from "./types.ts";
@@ -414,8 +413,8 @@ export const patternTool = (<
 >(
   fnOrPattern:
     | ((
-      input: PatternInputProxy<RequireDefaults<T>> & {
-        [SELF]: PatternInputProxy<any>;
+      input: PatternInput<T> & {
+        [SELF]: unknown;
       },
     ) => any)
     | PatternFactory<T, any>,
