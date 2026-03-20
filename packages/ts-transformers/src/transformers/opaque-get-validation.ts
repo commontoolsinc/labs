@@ -11,7 +11,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
-import { isReactiveOriginCall } from "../ast/call-kind.ts";
+import { isStructurallyReactiveExpression } from "../ast/mod.ts";
 
 export class OpaqueGetValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -49,6 +49,16 @@ export class OpaqueGetValidationTransformer extends Transformer {
       return;
     }
 
+    // Allow defensive compatibility probes like `value?.get?.() ?? value`.
+    // These don't force a reactive read; they simply check whether a legacy
+    // `.get()` method exists before falling back to direct access.
+    if (
+      ("questionDotToken" in node && !!node.questionDotToken) ||
+      ("questionDotToken" in expr && !!expr.questionDotToken)
+    ) {
+      return;
+    }
+
     // Get the type of the receiver (the expression before .get())
     const receiverExpr = expr.expression;
     let receiverType: ts.Type;
@@ -70,7 +80,7 @@ export class OpaqueGetValidationTransformer extends Transformer {
 
     // Determine if the receiver is a reactive value (type-based or structural)
     const isReactive = cellKind === "opaque" ||
-      this.isReactiveExpression(receiverExpr, checker);
+      isStructurallyReactiveExpression(receiverExpr, checker);
 
     if (isReactive) {
       // Get the receiver text for the error message
@@ -87,85 +97,5 @@ export class OpaqueGetValidationTransformer extends Transformer {
         node,
       });
     }
-  }
-
-  /**
-   * Check if an expression is reactive via structural analysis (not type-based).
-   * This handles cases where OpaqueRef<T> = T and the type loses its brand.
-   *
-   * Important: this only infers reactivity from values produced by reactive
-   * calls, not from callback parameters to builder definitions. Builder
-   * callbacks keep their declared input semantics; only the values produced by
-   * invoking the resulting factories should be treated as structurally reactive.
-   */
-  private isReactiveExpression(
-    expr: ts.Expression,
-    checker: ts.TypeChecker,
-  ): boolean {
-    if (ts.isIdentifier(expr)) {
-      const symbol = checker.getSymbolAtLocation(expr);
-      if (!symbol) return false;
-
-      for (const decl of symbol.declarations ?? []) {
-        // Check if it's a variable initialized from a reactive call
-        if (ts.isVariableDeclaration(decl) && decl.initializer) {
-          if (this.isReactiveInitializer(decl.initializer, checker)) {
-            return true;
-          }
-        }
-
-        // Check binding elements (destructured variables)
-        if (ts.isBindingElement(decl)) {
-          let parent: ts.Node = decl;
-          while (
-            ts.isBindingElement(parent) ||
-            ts.isObjectBindingPattern(parent) ||
-            ts.isArrayBindingPattern(parent)
-          ) {
-            parent = parent.parent;
-          }
-          if (ts.isVariableDeclaration(parent) && parent.initializer) {
-            if (this.isReactiveInitializer(parent.initializer, checker)) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-
-    // Property access on reactive expression
-    if (ts.isPropertyAccessExpression(expr)) {
-      return this.isReactiveExpression(expr.expression, checker);
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if an initializer expression comes from a reactive call.
-   */
-  private isReactiveInitializer(
-    expr: ts.Expression,
-    checker: ts.TypeChecker,
-  ): boolean {
-    let current: ts.Expression = expr;
-    while (true) {
-      if (
-        ts.isNonNullExpression(current) ||
-        ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      if (ts.isPropertyAccessExpression(current)) {
-        current = current.expression;
-        continue;
-      }
-      break;
-    }
-    return ts.isCallExpression(current) &&
-      isReactiveOriginCall(current, checker);
   }
 }

@@ -209,10 +209,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -235,23 +235,17 @@ export default pattern((state) => {
 
         <h3>Array Methods</h3>
         <p>Item count: {state.key("items", "length")}</p>
-        <p>Active items: {__ctHelpers.derive({
+        <p>Active items: {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            return i.key("active");
+        }, {
             type: "object",
             properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            }
-                        }
-                    },
-                    required: ["items"]
+                element: {
+                    $ref: "#/$defs/Item"
                 }
             },
-            required: ["state"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",
@@ -273,10 +267,8 @@ export default pattern((state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items")
-            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {}).length}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({
@@ -558,10 +550,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

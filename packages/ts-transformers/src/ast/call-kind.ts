@@ -29,7 +29,7 @@
 import ts from "typescript";
 
 import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind } from "../transformers/opaque-ref/opaque-ref.ts";
 
 const ARRAY_METHOD_NAMES = new Set([
   "map",
@@ -80,6 +80,7 @@ const COMMONTOOLS_CALL_NAMES = new Set([
   "cell",
   "wish",
   "generateObject",
+  "generateText",
   "patternTool",
 ]);
 
@@ -94,6 +95,7 @@ export type CallKind =
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
+  | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
 const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
@@ -102,6 +104,7 @@ const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
   "cell-for",
   "derive",
   "generate-object",
+  "generate-text",
   "ifElse",
   "unless",
   "when",
@@ -134,6 +137,262 @@ export function isReactiveOriginCall(
 ): boolean {
   const callKind = detectCallKind(call, checker);
   return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
+}
+
+function tryGetTypeAtLocation(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeAtLocation(expression);
+  } catch {
+    return undefined;
+  }
+}
+
+function isFallbackExpression(
+  expression: ts.Expression,
+): expression is ts.BinaryExpression {
+  return ts.isBinaryExpression(expression) &&
+    (
+      expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+      expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    );
+}
+
+function isPatternBuilderCallback(
+  node: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const parent = node.parent;
+  if (
+    !parent || !ts.isCallExpression(parent) || !parent.arguments.includes(node)
+  ) {
+    return false;
+  }
+
+  const kind = detectCallKind(parent, checker);
+  if (kind?.kind === "builder" && kind.builderName === "pattern") {
+    return true;
+  }
+
+  const expression = stripWrappers(parent.expression);
+  if (ts.isIdentifier(expression)) {
+    return expression.text === "pattern";
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text === "pattern";
+  }
+  return false;
+}
+
+function getOwningParameterDeclaration(
+  declaration: ts.BindingElement,
+): ts.ParameterDeclaration | undefined {
+  let current: ts.Node | undefined = declaration.parent;
+  while (current) {
+    if (ts.isParameter(current)) {
+      return current;
+    }
+    if (ts.isSourceFile(current)) {
+      return undefined;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function isPatternOwnedParameterDeclaration(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  const owner = declaration.parent;
+  return !!owner &&
+    (ts.isArrowFunction(owner) || ts.isFunctionExpression(owner)) &&
+    isPatternBuilderCallback(owner, checker);
+}
+
+function isReactiveCollectionCallbackParameter(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const owner = declaration.parent;
+  if (
+    !owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))
+  ) {
+    return false;
+  }
+
+  const call = owner.parent;
+  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(owner)) {
+    return false;
+  }
+
+  if (!ts.isPropertyAccessExpression(call.expression)) {
+    return false;
+  }
+
+  const methodName = call.expression.name.text;
+  if (
+    !ARRAY_METHOD_NAMES.has(methodName) &&
+    methodName !== "filterWithPattern" &&
+    methodName !== "flatMapWithPattern"
+  ) {
+    return false;
+  }
+
+  return isStructurallyReactiveExpression(
+    call.expression.expression,
+    checker,
+    seenSymbols,
+  );
+}
+
+function isReactiveParameterDeclaration(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  return isPatternOwnedParameterDeclaration(declaration, checker) ||
+    isReactiveCollectionCallbackParameter(declaration, checker, seenSymbols);
+}
+
+function isStructurallyReactiveSymbol(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const resolved = resolveAlias(symbol, checker, new Set()) ?? symbol;
+  if (seenSymbols.has(resolved)) {
+    return false;
+  }
+  seenSymbols.add(resolved);
+
+  for (const declaration of resolved.declarations ?? []) {
+    if (
+      ts.isParameter(declaration) &&
+      isReactiveParameterDeclaration(declaration, checker, seenSymbols)
+    ) {
+      return true;
+    }
+
+    if (ts.isBindingElement(declaration)) {
+      const parameter = getOwningParameterDeclaration(declaration);
+      if (
+        parameter &&
+        isReactiveParameterDeclaration(parameter, checker, seenSymbols)
+      ) {
+        return true;
+      }
+
+      let parent: ts.Node = declaration;
+      while (
+        ts.isBindingElement(parent) ||
+        ts.isObjectBindingPattern(parent) ||
+        ts.isArrayBindingPattern(parent)
+      ) {
+        parent = parent.parent;
+      }
+      if (
+        ts.isVariableDeclaration(parent) &&
+        parent.initializer &&
+        isStructurallyReactiveExpression(
+          parent.initializer,
+          checker,
+          seenSymbols,
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      declaration.initializer &&
+      isStructurallyReactiveExpression(
+        declaration.initializer,
+        checker,
+        seenSymbols,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isStructurallyReactiveExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol> = new Set(),
+): boolean {
+  const current = stripWrappers(expression);
+
+  const type = tryGetTypeAtLocation(current, checker);
+  if (type && getCellKind(type, checker) !== undefined) {
+    return true;
+  }
+
+  if (isFallbackExpression(current)) {
+    return isStructurallyReactiveExpression(
+      current.left,
+      checker,
+      seenSymbols,
+    ) ||
+      isStructurallyReactiveExpression(current.right, checker, seenSymbols);
+  }
+
+  if (ts.isCallExpression(current)) {
+    if (isReactiveOriginCall(current, checker)) {
+      return true;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(current.expression) &&
+      ARRAY_METHOD_NAMES.has(current.expression.name.text)
+    ) {
+      return isStructurallyReactiveExpression(
+        current.expression.expression,
+        checker,
+        seenSymbols,
+      );
+    }
+
+    if (
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text === "key"
+    ) {
+      return isStructurallyReactiveExpression(
+        current.expression.expression,
+        checker,
+        seenSymbols,
+      );
+    }
+
+    return false;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    return isStructurallyReactiveExpression(
+      current.expression,
+      checker,
+      seenSymbols,
+    );
+  }
+
+  if (!ts.isIdentifier(current)) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(current);
+  return symbol
+    ? isStructurallyReactiveSymbol(symbol, checker, seenSymbols)
+    : false;
 }
 
 function resolveExpressionKind(
@@ -177,10 +436,9 @@ function resolveExpressionKind(
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
     if (ARRAY_METHOD_NAMES.has(name)) {
-      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
-      // Plain Array.prototype methods should not be treated as reactive.
-      const receiverType = checker.getTypeAtLocation(target.expression);
-      if (isOpaqueRefType(receiverType, checker)) {
+      // Defer policy decisions to later passes, but keep a structural notion
+      // of reactivity available even when OpaqueRef<T> is an identity alias.
+      if (isStructurallyReactiveExpression(target.expression, checker)) {
         return { kind: "array-method" };
       }
     }
@@ -546,6 +804,10 @@ function createNamedCallKind(
       return symbol
         ? { kind: "generate-object", symbol }
         : { kind: "generate-object" };
+    case "generateText":
+      return symbol
+        ? { kind: "generate-text", symbol }
+        : { kind: "generate-text" };
     case "patternTool":
       return symbol
         ? { kind: "pattern-tool", symbol }

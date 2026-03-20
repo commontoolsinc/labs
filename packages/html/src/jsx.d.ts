@@ -3479,7 +3479,7 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
-  "$open"?: CellLike<boolean> | boolean;
+  "$open"?: CellLike<boolean>;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
   "prevent-scroll"?: boolean;
@@ -3788,8 +3788,8 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
-  "$mentionable"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
-  "$mentioned"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
+  "$mentionable"?: CellLike<Charm[] | undefined>;
+  "$mentioned"?: CellLike<Charm[] | undefined>;
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;

@@ -723,8 +723,8 @@ export interface IEquatable {
  * .map() and their WithPattern variants.
  *
  * Note: .filter() and .flatMap() are deliberately omitted from the type
- * interface to avoid conflicting with Array.prototype.filter/flatMap on
- * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
+ * interface because the runtime intercepts them, but TypeScript otherwise falls
+ * back to Array.prototype signatures for plain array values.
  * The runtime methods exist on Cell and are intercepted by the proxy; they
  * just don't have type declarations here until the compiler transform
  * (Phase 3) resolves the ambiguity. This means pattern authors won't get
@@ -766,6 +766,23 @@ export interface IDerivable<T> {
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
+}
+
+declare global {
+  interface Array<T> {
+    mapWithPattern<S>(
+      op: PatternFactory<T, S>,
+      params: Record<string, any>,
+    ): S[];
+    filterWithPattern<S>(
+      op: PatternFactory<T, S>,
+      params: Record<string, any>,
+    ): T[];
+    flatMapWithPattern<S>(
+      op: PatternFactory<T, S[]>,
+      params: Record<string, any>,
+    ): S[];
+  }
 }
 
 export interface IOpaquable<T> {
@@ -984,58 +1001,29 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 // ============================================================================
 
 /**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
+ * OpaqueRef is currently an identity alias.
  *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Transformer behavior must derive from structural reactive flow, not from a
+ * proxy-heavy surface type.
  */
-export type OpaqueRef<T> =
-  // Already a branded cell? Return as-is
-  [T] extends [AnyBrandedCell<any>] ? T
-    // Branded cell | undefined? Strip undefined to avoid brand collision
-    // in the OpaqueCell<T> & OpaqueRefInner<T> intersection below.
-    // The proxy never returns undefined at runtime, so this is safe.
-    : [NonNullable<T>] extends [AnyBrandedCell<any>]
-      ? [NonNullable<T>] extends [never] ? OpaqueCell<T> & OpaqueRefInner<T>
-      : NonNullable<T>
-    // Everything else: wrap in OpaqueCell + map inner properties
-    :
-      & OpaqueCell<T>
-      & OpaqueRefInner<T>;
-
-// Helper type for OpaqueRef's inner property/array mapping
-// Handles nullable types by extracting the non-null part for mapping
-type OpaqueRefInner<T> = [T] extends
-  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-  // For nullable types (T | null | undefined), extract and map the non-null part
-  : [NonNullable<T>] extends [never] ? T
-  // Handle nullable branded cells (e.g., (OpaqueRef<X> | undefined) from .find() on proxy arrays)
-  // Use NonNullable<T> instead of T to avoid leaking null/undefined into the
-  // OpaqueCell<T> & OpaqueRefInner<T> intersection, where TypeScript's
-  // intersection simplification would erase them (object & undefined = never).
-  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? NonNullable<T>
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
-  : T;
+export type OpaqueRef<T> = T;
 
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells
 // ============================================================================
 
 /**
- * CellLike is a cell (AnyCell) whose nested values are Opaque.
- * The top level must be AnyCell, but nested values can be plain or wrapped.
+ * CellLike accepts a plain value or a cell (AnyCell) whose nested values are
+ * plain or wrapped.
  *
- * Note: This is primarily used for type constraints that require a cell.
+ * This keeps binding surfaces simple while still allowing structurally nested
+ * cell values when a branded cell is provided.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
-  [CELL_LIKE]?: unknown;
-};
+export type CellLike<T> =
+  | T
+  | (AnyBrandedCell<MaybeCellWrapped<T>> & {
+    [CELL_LIKE]?: unknown;
+  });
 type MaybeCellWrapped<T> =
   | T
   | AnyBrandedCell<T>
@@ -1087,9 +1075,9 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
  */
 export type Opaque<T> =
   | T
+  | CellLike<T>
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
-  | OpaqueRef<T>
   | AnyCell<T>
   | AnyBrandedCell<T>
   | OpaqueCell<T>

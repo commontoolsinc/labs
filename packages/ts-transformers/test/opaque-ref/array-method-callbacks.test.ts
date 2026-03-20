@@ -172,7 +172,7 @@ describe("OpaqueRef map callbacks", () => {
       output,
       'spotPreferences = person.key("spotPreferences")',
     );
-    assertStringIncludes(output, 'length: spotPreferences.key("length")');
+    assertStringIncludes(output, 'spotPreferences.key("length") > 0');
   });
 
   it("derives map callback parameters and unary negations (capability-first)", async () => {

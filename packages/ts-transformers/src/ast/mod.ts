@@ -3,6 +3,7 @@ export {
   detectCallKind,
   detectDirectBuilderCall,
   isReactiveOriginCall,
+  isStructurallyReactiveExpression,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

@@ -532,33 +532,26 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
 
-        // Check if this is a computed expression (property access on call result, etc.)
-        const isPropertyOnCall = ts.isCallExpression(expression.expression);
-
         const parentId =
           context.expressionToNodeId.get(expression.expression) ?? null;
 
-        // If the target is a complex expression requiring rewrite (ElementAccess or Call),
-        // propagate its dataFlows. Otherwise add this property access as a dataFlow.
-        if (
-          isPropertyOnCall ||
-          (target.requiresRewrite && target.dataFlows.length > 0)
-        ) {
-          // This is a computed expression - use the dependencies from the target
+        // Preserve simple path navigation as pass-through. Only inherit rewrite
+        // pressure when the base expression already required a rewrite.
+        if (target.requiresRewrite && target.dataFlows.length > 0) {
           recordDataFlow(expression, scope, parentId, false);
           return {
             containsOpaqueRef: true,
-            requiresRewrite: true,
+            requiresRewrite: target.requiresRewrite,
             dataFlows: target.dataFlows,
           };
         }
 
-        // This is a direct property access on an OpaqueRef (like state.charms.length)
-        // It should be its own explicit dependency
+        // Direct property access on a structurally reactive value should stay
+        // as an explicit dependency without forcing a derive wrapper.
         recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
-          requiresRewrite: true,
+          requiresRewrite: target.requiresRewrite,
           dataFlows: [expression],
         };
       }

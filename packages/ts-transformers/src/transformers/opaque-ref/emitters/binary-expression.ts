@@ -12,10 +12,10 @@ import {
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
+  isStructurallyReactiveExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
@@ -49,7 +49,10 @@ function canDeferFallbackMapReceiverDerive(
   }
 
   const left = unwrapExpression(expression.left);
-  return isSimpleOpaqueRefAccess(left, checker);
+  return (
+    (ts.isIdentifier(left) || ts.isPropertyAccessExpression(left)) &&
+    isStructurallyReactiveExpression(left, checker)
+  );
 }
 
 export const emitBinaryExpression: Emitter = ({
@@ -69,17 +72,17 @@ export const emitBinaryExpression: Emitter = ({
     operator,
   );
 
-  // Check if the left side of && or || has an OpaqueRef type.
-  // This is important for cases like `computed(() => plainValue) && <JSX>`
-  // where the computed() returns an OpaqueRef but doesn't contain opaques in its inputs.
-  // OpaqueRefs are always truthy as objects, so we need when/unless for correct semantics.
-  const leftType = context.checker.getTypeAtLocation(expression.left);
-  const leftIsOpaqueRef = isOpaqueRefType(leftType, context.checker);
+  // Preserve logical lowering for structurally reactive values even when the
+  // surface type has simplified to a plain T.
+  const leftIsReactive = isStructurallyReactiveExpression(
+    expression.left,
+    context.checker,
+  );
 
-  // Skip if no dataflows AND left side isn't an OpaqueRef type
+  // Skip if no dataflows AND left side isn't structurally reactive
   if (
     dataFlows.all.length === 0 &&
-    !leftIsOpaqueRef &&
+    !leftIsReactive &&
     !shouldLowerByContextPolicy
   ) {
     return undefined;
@@ -110,7 +113,16 @@ export const emitBinaryExpression: Emitter = ({
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
-        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+        if (
+          !(
+            (ts.isIdentifier(expression.left) ||
+              ts.isPropertyAccessExpression(expression.left)) &&
+            isStructurallyReactiveExpression(
+              expression.left,
+              context.checker,
+            )
+          )
+        ) {
           const plan = createBindingPlan(leftDataFlows);
           const computedCondition = createComputedCallForExpression(
             expression.left,
@@ -172,7 +184,16 @@ export const emitBinaryExpression: Emitter = ({
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
-        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+        if (
+          !(
+            (ts.isIdentifier(expression.left) ||
+              ts.isPropertyAccessExpression(expression.left)) &&
+            isStructurallyReactiveExpression(
+              expression.left,
+              context.checker,
+            )
+          )
+        ) {
           const plan = createBindingPlan(leftDataFlows);
           const computedCondition = createComputedCallForExpression(
             expression.left,

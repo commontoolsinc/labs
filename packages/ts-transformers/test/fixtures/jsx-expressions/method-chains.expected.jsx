@@ -109,64 +109,10 @@ export default pattern((state) => {
         {/* Filter then length */}
         <p>
           Count above threshold:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            }
-                        },
-                        threshold: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                threshold: state.key("threshold")
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}
-        </p>
-
-        {/* Filter then map */}
-        <ul>
           {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const x = __ct_pattern_input.key("element");
             const state = __ct_pattern_input.key("params", "state");
-            return __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number"
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            threshold: {
-                                type: "number"
-                            }
-                        },
-                        required: ["threshold"]
-                    }
-                },
-                required: ["x", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
-                state: {
-                    threshold: state.key("threshold")
-                }
-            }, ({ x, state }) => x > state.threshold);
+            return x > state.key("threshold");
         }, {
             type: "object",
             properties: {
@@ -196,43 +142,53 @@ export default pattern((state) => {
             state: {
                 threshold: state.key("threshold")
             }
-        }).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-            const x = __ct_pattern_input.key("element");
-            const state = __ct_pattern_input.key("params", "state");
-            return (<li>Value: {__ctHelpers.derive({
+        }).length}
+        </p>
+
+        {/* Filter then map */}
+        <ul>
+          {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return x > state.key("threshold");
+            }, {
                 type: "object",
                 properties: {
-                    x: {
+                    element: {
                         type: "number"
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            factor: {
-                                type: "number"
+                            state: {
+                                type: "object",
+                                properties: {
+                                    threshold: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["threshold"]
                             }
                         },
-                        required: ["factor"]
+                        required: ["state"]
                     }
                 },
-                required: ["x", "state"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    factor: state.key("factor")
+                    threshold: state.key("threshold")
                 }
-            }, ({ x, state }) => x * state.factor)}</li>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number"
-                },
-                params: {
+            }).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<li>Value: {__ctHelpers.derive({
                     type: "object",
                     properties: {
+                        x: {
+                            type: "number"
+                        },
                         state: {
                             type: "object",
                             properties: {
@@ -243,70 +199,135 @@ export default pattern((state) => {
                             required: ["factor"]
                         }
                     },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
+                    required: ["x", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    x: x,
+                    state: {
+                        factor: state.key("factor")
+                    }
+                }, ({ x, state }) => x * state.factor)}</li>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "number"
                     },
-                    required: ["$UI"]
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    factor: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["factor"]
+                            }
+                        },
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
                 }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                factor: state.key("factor")
-            }
-        })}
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    factor: state.key("factor")
+                }
+            })}
         </ul>
 
         {/* Multiple filters */}
         <p>
           Double filter count:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
+          {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return x > state.key("start");
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    start: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["start"]
                             }
                         },
-                        start: {
-                            type: "number"
-                        },
-                        end: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "start", "end"]
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    start: state.key("start")
                 }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.key("items"),
-                start: state.key("start"),
-                end: state.key("end")
-            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
+            }).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return x < state.key("end");
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    end: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["end"]
+                            }
+                        },
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    end: state.key("end")
+                }
+            }).length}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
@@ -398,11 +419,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "undefined"
-                }, {
-                    type: "string"
-                }]
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.key("names"),
                 searchTerm: state.key("searchTerm")
@@ -437,10 +454,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -610,44 +627,52 @@ export default pattern((state) => {
         {/* Filter with multiple conditions */}
         <p>
           Active adults:{" "}
-          {__ctHelpers.derive({
+          {state.key("users").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const u = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return u.key("age") >= state.key("minAge") && u.key("active");
+        }, {
             type: "object",
             properties: {
-                state: {
+                element: {
                     type: "object",
                     properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            }
+                        name: {
+                            type: "string"
                         },
-                        minAge: {
+                        age: {
                             type: "number"
+                        },
+                        active: {
+                            type: "boolean"
                         }
                     },
-                    required: ["users", "minAge"]
+                    required: ["name", "age", "active"]
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                minAge: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["minAge"]
+                        }
+                    },
+                    required: ["state"]
                 }
             },
-            required: ["state"]
+            required: ["element", "params"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                users: state.key("users"),
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
                 minAge: state.key("minAge")
-            } }, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
+            }
+        }).length}
         </p>
 
         {/* Map with conditional logic */}
@@ -723,10 +748,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -1020,10 +1045,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {
