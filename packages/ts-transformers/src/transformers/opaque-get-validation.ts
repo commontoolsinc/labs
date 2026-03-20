@@ -11,7 +11,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
-import { isReactiveOriginCall } from "../ast/call-kind.ts";
+import { isReactiveValueExpression } from "../ast/mod.ts";
 
 export class OpaqueGetValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -102,70 +102,6 @@ export class OpaqueGetValidationTransformer extends Transformer {
     expr: ts.Expression,
     checker: ts.TypeChecker,
   ): boolean {
-    if (ts.isIdentifier(expr)) {
-      const symbol = checker.getSymbolAtLocation(expr);
-      if (!symbol) return false;
-
-      for (const decl of symbol.declarations ?? []) {
-        // Check if it's a variable initialized from a reactive call
-        if (ts.isVariableDeclaration(decl) && decl.initializer) {
-          if (this.isReactiveInitializer(decl.initializer, checker)) {
-            return true;
-          }
-        }
-
-        // Check binding elements (destructured variables)
-        if (ts.isBindingElement(decl)) {
-          let parent: ts.Node = decl;
-          while (
-            ts.isBindingElement(parent) ||
-            ts.isObjectBindingPattern(parent) ||
-            ts.isArrayBindingPattern(parent)
-          ) {
-            parent = parent.parent;
-          }
-          if (ts.isVariableDeclaration(parent) && parent.initializer) {
-            if (this.isReactiveInitializer(parent.initializer, checker)) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-
-    // Property access on reactive expression
-    if (ts.isPropertyAccessExpression(expr)) {
-      return this.isReactiveExpression(expr.expression, checker);
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if an initializer expression comes from a reactive call.
-   */
-  private isReactiveInitializer(
-    expr: ts.Expression,
-    checker: ts.TypeChecker,
-  ): boolean {
-    let current: ts.Expression = expr;
-    while (true) {
-      if (
-        ts.isNonNullExpression(current) ||
-        ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      if (ts.isPropertyAccessExpression(current)) {
-        current = current.expression;
-        continue;
-      }
-      break;
-    }
-    return ts.isCallExpression(current) &&
-      isReactiveOriginCall(current, checker);
+    return isReactiveValueExpression(expr, checker, new Set(), null);
   }
 }

@@ -1,4 +1,6 @@
 import type {
+  DeriveCallbackInput,
+  DeriveTupleInput,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -307,9 +309,13 @@ export function derive<
     input: Schema<InputSchema>,
   ) => Schema<ResultSchema>,
 ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+export function derive<const In extends readonly unknown[], Out>(
+  input: In,
+  f: (input: DeriveCallbackInput<In>) => Out,
+): OpaqueRef<Out>;
 export function derive<In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out,
+  input: In,
+  f: (input: DeriveCallbackInput<In>) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
   if (args.length === 4) {
@@ -327,10 +333,10 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
   }
 
   const [input, f] = args as [
-    Opaque<In>,
-    (input: In) => Out,
+    In,
+    (input: DeriveCallbackInput<In>) => Out,
   ];
-  return lift(f)(input);
+  return lift(f as (input: any) => Out)(input as any);
 }
 
 // unsafe closures: like derive, but doesn't need any arguments.

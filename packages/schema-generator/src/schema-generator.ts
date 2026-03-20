@@ -22,6 +22,8 @@ import {
   safeGetIndexTypeOfType,
   safeGetNodeText,
   safeGetTypeOfSymbolAtLocation,
+  safeGetTypeFromTypeNode,
+  type TypeWithInternals,
 } from "./type-utils.ts";
 import { extractDocFromType } from "./doc-utils.ts";
 
@@ -283,6 +285,17 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     isRootType: boolean = false,
   ): SchemaDefinition {
+    const noInfer = this.unwrapNoInfer(type, context);
+    if (noInfer) {
+      return this.formatType(
+        noInfer.type,
+        noInfer.typeNode
+          ? { ...context, typeNode: noInfer.typeNode }
+          : context,
+        isRootType,
+      );
+    }
+
     if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
       const checker = context.typeChecker;
       const baseConstraint = checker.getBaseConstraintOfType(type);
@@ -407,6 +420,40 @@ export class SchemaGenerator implements ISchemaGenerator {
         "This indicates incomplete formatter coverage - every TypeScript " +
         "type should be handled by a formatter.",
     );
+  }
+
+  private unwrapNoInfer(
+    type: ts.Type,
+    context: GenerationContext,
+  ): { type: ts.Type; typeNode?: ts.TypeNode } | undefined {
+    const typeNode = context.typeNode;
+    if (
+      typeNode &&
+      ts.isTypeReferenceNode(typeNode) &&
+      ts.isIdentifier(typeNode.typeName) &&
+      typeNode.typeName.text === "NoInfer" &&
+      typeNode.typeArguments?.[0]
+    ) {
+      const innerNode = typeNode.typeArguments[0];
+      const innerType = safeGetTypeFromTypeNode(
+        context.typeChecker,
+        innerNode,
+        "NoInfer inner type",
+      );
+      if (innerType) {
+        return { type: innerType, typeNode: innerNode };
+      }
+    }
+
+    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+    const aliasArgs = (type as TypeWithInternals).aliasTypeArguments;
+    if (aliasName === "NoInfer" && aliasArgs?.[0]) {
+      return typeNode
+        ? { type: aliasArgs[0], typeNode }
+        : { type: aliasArgs[0] };
+    }
+
+    return undefined;
   }
 
   /**

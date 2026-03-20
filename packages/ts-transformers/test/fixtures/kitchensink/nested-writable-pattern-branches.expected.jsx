@@ -101,20 +101,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/UIRenderable",
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
+        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
             {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
             {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
             {state.key("sections").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -127,17 +114,13 @@ export default pattern((state) => {
                 <h2 style={{
                     // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
                     color: __ctHelpers.ifElse({
-                        anyOf: [{
-                                type: "undefined"
-                            }, {
-                                type: ["string", "undefined"]
-                            }]
-                    } as const satisfies __ctHelpers.JSONSchema, {
                         type: ["string", "undefined"]
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: ["string", "undefined"]
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
                 }}>
                   {section.key("title")}
@@ -155,20 +138,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    $ref: "#/$defs/UIRenderable",
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
+                } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
                     {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
                     {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
                     {section.key("tasks").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -196,20 +166,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {}
                                     }]
-                            } as const satisfies __ctHelpers.JSONSchema, {
-                                $ref: "#/$defs/UIRenderable",
-                                $defs: {
-                                    UIRenderable: {
-                                        type: "object",
-                                        properties: {
-                                            $UI: {
-                                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                                            }
-                                        },
-                                        required: ["$UI"]
-                                    }
-                                }
-                            } as const satisfies __ctHelpers.JSONSchema, {
+                            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, {
                                 anyOf: [{}, {
                                         type: "object",
                                         properties: {}
@@ -226,20 +183,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {}
                                     }]
-                            } as const satisfies __ctHelpers.JSONSchema, {
-                                $ref: "#/$defs/UIRenderable",
-                                $defs: {
-                                    UIRenderable: {
-                                        type: "object",
-                                        properties: {
-                                            $UI: {
-                                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                                            }
-                                        },
-                                        required: ["$UI"]
-                                    }
-                                }
-                            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+                            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
                                 type: "boolean"
                             } as const satisfies __ctHelpers.JSONSchema, {
                                 type: "boolean"
@@ -252,11 +196,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             note: {
-                                                anyOf: [{
-                                                        type: "undefined"
-                                                    }, {
-                                                        type: ["string", "undefined"]
-                                                    }]
+                                                type: ["string", "undefined"]
                                             }
                                         }
                                     }
@@ -273,7 +213,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             note: {
-                                                type: ["string", "undefined"]
+                                                type: "string"
                                             }
                                         }
                                     }
@@ -434,10 +374,10 @@ export default pattern((state) => {
                                 anyOf: [{
                                         $ref: "https://commonfabric.org/schemas/vnode.json"
                                     }, {
+                                        $ref: "#/$defs/UIRenderable"
+                                    }, {
                                         type: "object",
                                         properties: {}
-                                    }, {
-                                        $ref: "#/$defs/UIRenderable"
                                     }],
                                 $defs: {
                                     UIRenderable: {
@@ -542,10 +482,10 @@ export default pattern((state) => {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
                                 type: "object",
                                 properties: {}
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
                             }],
                         $defs: {
                             UIRenderable: {
@@ -597,10 +537,10 @@ export default pattern((state) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -717,10 +657,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -836,10 +776,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

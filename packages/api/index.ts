@@ -690,6 +690,8 @@ export interface IEquatable {
   equalLinks(other: AnyCell<any> | object): boolean;
 }
 
+type DerivableElement<T> = [NonNullable<T>] extends [Array<infer U>] ? U : T;
+
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
  * .map() and their WithPattern variants.
@@ -708,34 +710,34 @@ export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      element: OpaqueRef<DerivableElement<T>>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
   ): OpaqueRef<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<DerivableElement<T>, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
   reduce<S>(
     this: IsThisObject,
     fn: (
       accumulator: S,
-      element: T extends Array<infer U> ? U : T,
+      element: DerivableElement<T>,
       index: number,
-      array: (T extends Array<infer U> ? U : T)[],
+      array: DerivableElement<T>[],
     ) => S,
     initialValue: S,
   ): OpaqueRef<S>;
   filterWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<DerivableElement<T>, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  ): OpaqueRef<DerivableElement<T>[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
+    op: PatternFactory<DerivableElement<T>, S[]>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
 }
@@ -956,43 +958,34 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 // ============================================================================
 
 /**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * OpaqueRef is currently a transparent alias for T.
  */
-export type OpaqueRef<T> =
-  // Already a branded cell? Return as-is
+export type OpaqueRef<T> = T;
+
+/**
+ * Pattern callback inputs still expose the structural proxy surface even though
+ * OpaqueRef itself is now transparent.
+ */
+export type PatternInputProxy<T> =
   [T] extends [AnyBrandedCell<any>] ? T
-    // Branded cell | undefined? Strip undefined to avoid brand collision
-    // in the OpaqueCell<T> & OpaqueRefInner<T> intersection below.
-    // The proxy never returns undefined at runtime, so this is safe.
     : [NonNullable<T>] extends [AnyBrandedCell<any>]
-      ? [NonNullable<T>] extends [never] ? OpaqueCell<T> & OpaqueRefInner<T>
+      ? [NonNullable<T>] extends [never]
+        ? OpaqueCell<T> & PatternInputProxyInner<T>
       : NonNullable<T>
-    // Everything else: wrap in OpaqueCell + map inner properties
     :
       & OpaqueCell<T>
-      & OpaqueRefInner<T>;
+      & PatternInputProxyInner<T>;
 
-// Helper type for OpaqueRef's inner property/array mapping
-// Handles nullable types by extracting the non-null part for mapping
-type OpaqueRefInner<T> = [T] extends
+type PatternInputProxyInner<T> = [T] extends
   [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [T] extends [Array<infer U>] ? Array<PatternInputProxy<U>>
   : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-  // For nullable types (T | null | undefined), extract and map the non-null part
+  : [T] extends [object] ? { [K in keyof T]: PatternInputProxy<T[K]> }
   : [NonNullable<T>] extends [never] ? T
-  // Handle nullable branded cells (e.g., (OpaqueRef<X> | undefined) from .find() on proxy arrays)
-  // Use NonNullable<T> instead of T to avoid leaking null/undefined into the
-  // OpaqueCell<T> & OpaqueRefInner<T> intersection, where TypeScript's
-  // intersection simplification would erase them (object & undefined = never).
   : [NonNullable<T>] extends [AnyBrandedCell<any>] ? NonNullable<T>
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [NonNullable<T>] extends [Array<infer U>] ? Array<PatternInputProxy<U>>
   : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
+    ? { [K in keyof NonNullable<T>]: PatternInputProxy<NonNullable<T>[K]> }
   : T;
 
 // ============================================================================
@@ -1000,14 +993,15 @@ type OpaqueRefInner<T> = [T] extends
 // ============================================================================
 
 /**
- * CellLike is a cell (AnyCell) whose nested values are Opaque.
- * The top level must be AnyCell, but nested values can be plain or wrapped.
+ * CellLike accepts either T directly or a cell whose nested values are Opaque.
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
-  [CELL_LIKE]?: unknown;
-};
+export type CellLike<T> =
+  | T
+  | (AnyBrandedCell<MaybeCellWrapped<T>> & {
+    [CELL_LIKE]?: unknown;
+  });
 type MaybeCellWrapped<T> =
   | T
   | AnyBrandedCell<T>
@@ -1563,21 +1557,21 @@ export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
     ) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
     ) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
     ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1586,7 +1580,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<R> },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1608,7 +1602,7 @@ export type PatternToolFunction = <
 >(
   fnOrPattern:
     | ((
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+      input: PatternInputProxy<RequireDefaults<T>> & { [SELF]: PatternInputProxy<any> },
     ) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
@@ -1713,10 +1707,16 @@ export interface DeriveFunction {
     f: (input: In) => Out,
   ): OpaqueRef<Out>;
 
-  // Overload 3: Generic fallback - unwraps all Opaque types
+  // Overload 3: Preserve tuple literals passed directly to derive()
+  <const In extends readonly unknown[], Out>(
+    input: In,
+    f: (input: DeriveCallbackInput<In>) => Out,
+  ): OpaqueRef<Out>;
+
+  // Overload 4: Generic fallback - unwraps all Opaque types
   <In, Out>(
-    input: Opaque<In>,
-    f: (input: In) => Out,
+    input: In,
+    f: (input: DeriveCallbackInput<In>) => Out,
   ): OpaqueRef<Out>;
 }
 
@@ -1899,6 +1899,48 @@ export type StripDefaultBrand<T> = Exclude<
   T,
   { readonly [DEFAULT_MARKER]: any }
 >;
+
+type DeriveArrayInput<T extends readonly unknown[]> =
+  IsAny<T[number]> extends true ? any
+    : number extends T["length"] ? Array<DerivePropertyValue<T[number]>>
+    : { -readonly [K in keyof T]: DerivePropertyValue<T[K]> };
+
+export type DeriveTupleInput<T extends readonly unknown[]> = readonly [...T] &
+  (number extends T["length"] ? never : unknown);
+
+type DeriveValue<T> = IsAny<T> extends true ? T
+  : [T] extends [AnyBrandedCell<any> | undefined]
+    ? DeriveRootValueInner<StripDefaultBrand<Exclude<T, undefined>>> |
+      Extract<T, undefined>
+  : DeriveRootValueInner<StripDefaultBrand<T>>;
+
+type DeriveRootValueInner<T> = [T] extends [Stream<any>] ? T
+  : [T] extends [OpaqueCell<infer U>] ? DerivePropertyValue<U>
+  : [T] extends [AnyBrandedCell<infer U>]
+    ? [U] extends [readonly unknown[] | ArrayBuffer | ArrayBufferView | URL | Date]
+      ? DerivePropertyValue<U>
+      : [U] extends [object] ? T
+      : DerivePropertyValue<U>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [readonly unknown[]] ? DeriveArrayInput<T>
+  : [T] extends [object] ? { [K in keyof T]: DerivePropertyValue<T[K]> }
+  : T;
+
+type DerivePropertyValue<T> = IsAny<T> extends true ? T
+  : [T] extends [OpaqueCell<any> | undefined]
+    ? DerivePropertyValueInner<StripDefaultBrand<Exclude<T, undefined>>> |
+      Extract<T, undefined>
+  : DerivePropertyValueInner<StripDefaultBrand<T>>;
+
+type DerivePropertyValueInner<T> = [T] extends [Stream<any>] ? T
+  : [T] extends [OpaqueCell<infer U>] ? DerivePropertyValue<U>
+  : [T] extends [AnyBrandedCell<infer U>] ? DerivePropertyValue<U>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [readonly unknown[]] ? DeriveArrayInput<T>
+  : [T] extends [object] ? { [K in keyof T]: DerivePropertyValue<T[K]> }
+  : T;
+
+export type DeriveCallbackInput<T> = DeriveValue<T>;
 
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required

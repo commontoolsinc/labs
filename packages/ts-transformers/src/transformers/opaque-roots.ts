@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind, isReactiveOriginCall } from "../ast/mod.ts";
+import { detectCallKind, isReactiveValueCall } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
@@ -100,7 +100,7 @@ export function isOpaqueOriginCall(
   expression: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  return isReactiveOriginCall(expression, context.checker) ||
+  return isReactiveValueCall(expression, context.checker) ||
     detectCallKind(expression, context.checker)?.kind === "pattern-tool";
 }
 

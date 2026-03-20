@@ -12,10 +12,11 @@ import {
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
+  isReactiveValueExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
+import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
@@ -49,7 +50,16 @@ function canDeferFallbackMapReceiverDerive(
   }
 
   const left = unwrapExpression(expression.left);
-  return isSimpleOpaqueRefAccess(left, checker);
+  return isSimpleReactiveAccess(left, checker);
+}
+
+function isSimpleReactiveAccess(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return isSimpleOpaqueRefAccess(expression, checker) ||
+    ((ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) &&
+      isReactiveValueExpression(expression, checker));
 }
 
 export const emitBinaryExpression: Emitter = ({
@@ -73,13 +83,15 @@ export const emitBinaryExpression: Emitter = ({
   // This is important for cases like `computed(() => plainValue) && <JSX>`
   // where the computed() returns an OpaqueRef but doesn't contain opaques in its inputs.
   // OpaqueRefs are always truthy as objects, so we need when/unless for correct semantics.
-  const leftType = context.checker.getTypeAtLocation(expression.left);
-  const leftIsOpaqueRef = isOpaqueRefType(leftType, context.checker);
+  const leftIsReactiveValue = isReactiveValueExpression(
+    expression.left,
+    context.checker,
+  );
 
   // Skip if no dataflows AND left side isn't an OpaqueRef type
   if (
     dataFlows.all.length === 0 &&
-    !leftIsOpaqueRef &&
+    !leftIsReactiveValue &&
     !shouldLowerByContextPolicy
   ) {
     return undefined;
@@ -110,7 +122,7 @@ export const emitBinaryExpression: Emitter = ({
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
-        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+        if (!isSimpleReactiveAccess(expression.left, context.checker)) {
           const plan = createBindingPlan(leftDataFlows);
           const computedCondition = createComputedCallForExpression(
             expression.left,
@@ -172,7 +184,7 @@ export const emitBinaryExpression: Emitter = ({
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
-        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+        if (!isSimpleReactiveAccess(expression.left, context.checker)) {
           const plan = createBindingPlan(leftDataFlows);
           const computedCondition = createComputedCallForExpression(
             expression.left,

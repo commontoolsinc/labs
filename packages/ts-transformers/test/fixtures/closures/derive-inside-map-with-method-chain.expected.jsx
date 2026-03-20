@@ -35,24 +35,19 @@ export default pattern((state) => {
               {derive({
                         type: "array",
                         items: {
-                            $ref: "#/$defs/SubItem"
-                        },
-                        $defs: {
-                            SubItem: {
-                                type: "object",
-                                properties: {
-                                    id: {
-                                        type: "number"
-                                    },
-                                    name: {
-                                        type: "string"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "number"
                                 },
-                                required: ["id", "name", "active"]
-                            }
+                                name: {
+                                    type: "string"
+                                },
+                                active: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["id", "name", "active"]
                         }
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
@@ -109,10 +104,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -187,10 +182,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

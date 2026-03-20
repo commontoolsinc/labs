@@ -1,8 +1,8 @@
 import ts from "typescript";
 import {
   getCellKind,
-  isOpaqueRefType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isReactiveValueExpression } from "../ast/mod.ts";
 import type { ReactiveContextKind } from "../ast/reactive-context.ts";
 
 export type ReactiveReceiverKind =
@@ -11,20 +11,25 @@ export type ReactiveReceiverKind =
   | "celllike_requires_rewrite";
 
 export function classifyReactiveReceiverKind(
+  expression: ts.Expression | undefined,
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
 ): ReactiveReceiverKind {
-  if (!type || !isOpaqueRefType(type, checker)) {
-    return "plain";
+  if (type) {
+    const kind = getCellKind(type, checker);
+    if (kind === "cell" || kind === "stream") {
+      return "celllike_requires_rewrite";
+    }
+    if (kind === "opaque") {
+      return "opaque_autounwrapped";
+    }
   }
 
-  const kind = getCellKind(type, checker);
-  if (kind === "cell" || kind === "stream") {
-    return "celllike_requires_rewrite";
+  if (expression && isReactiveValueExpression(expression, checker)) {
+    return "opaque_autounwrapped";
   }
 
-  // Opaque values auto-unwrap in compute callbacks.
-  return "opaque_autounwrapped";
+  return "plain";
 }
 
 export function shouldLowerLogicalInJsx(

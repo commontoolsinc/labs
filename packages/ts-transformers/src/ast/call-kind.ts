@@ -29,7 +29,6 @@
 import ts from "typescript";
 
 import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 const ARRAY_METHOD_NAMES = new Set([
   "map",
@@ -49,12 +48,10 @@ const BUILDER_SYMBOL_NAMES = new Set([
   "render",
 ]);
 
-const ARRAY_OWNER_NAMES = new Set([
+const ARRAY_METHOD_OWNER_NAMES = new Set([
   "Array",
   "ReadonlyArray",
-]);
-
-const OPAQUE_REF_OWNER_NAMES = new Set([
+  "IDerivable",
   "OpaqueRefMethods",
   "OpaqueRef",
 ]);
@@ -68,6 +65,7 @@ const CELL_LIKE_CLASSES = new Set([
   "ReadonlyCell",
   "WriteonlyCell",
   "CellTypeConstructor",
+  "ICreatable",
 ]);
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
@@ -80,7 +78,22 @@ const COMMONTOOLS_CALL_NAMES = new Set([
   "cell",
   "wish",
   "generateObject",
+  "generateText",
+  "fetchData",
+  "fetchProgram",
+  "streamData",
+  "compileAndRun",
+  "navigateTo",
+  "llm",
+  "llmDialog",
   "patternTool",
+]);
+
+const PLAIN_VALUE_CALLBACK_BUILDERS = new Set([
+  "action",
+  "computed",
+  "handler",
+  "lift",
 ]);
 
 export type CallKind =
@@ -94,6 +107,7 @@ export type CallKind =
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
+  | { kind: "reactive-source"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
 const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
@@ -136,6 +150,142 @@ export function isReactiveOriginCall(
   return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
 }
 
+export function isReactiveValueCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const callKind = detectCallKind(call, checker);
+  if (!callKind) {
+    return false;
+  }
+
+  switch (callKind.kind) {
+    case "array-method":
+    case "cell-factory":
+    case "cell-for":
+    case "derive":
+    case "generate-object":
+    case "ifElse":
+    case "reactive-source":
+    case "unless":
+    case "when":
+    case "wish":
+      return true;
+    case "builder": {
+      const directBuilder = detectDirectBuilderCall(call, checker);
+      if (!directBuilder) {
+        return true;
+      }
+      return directBuilder.builderName === "action" ||
+        directBuilder.builderName === "computed";
+    }
+    default:
+      return false;
+  }
+}
+
+export function isReactiveValueExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol> = new Set(),
+  plainValueBoundary?: ts.Node | null,
+): boolean {
+  const boundary = plainValueBoundary === undefined
+    ? findPlainValueBoundary(expression, checker)
+    : plainValueBoundary ?? undefined;
+  const target = stripWrappers(expression);
+
+  if (ts.isCallExpression(target)) {
+    if (isReactiveValueCall(target, checker)) {
+      return true;
+    }
+
+    if (ts.isPropertyAccessExpression(target.expression)) {
+      const methodName = target.expression.name.text;
+      if (methodName === "key") {
+        return isReactiveValueExpression(
+          target.expression.expression,
+          checker,
+          seenSymbols,
+          boundary,
+        );
+      }
+    }
+
+    return false;
+  }
+
+  if (ts.isTaggedTemplateExpression(target)) {
+    return false;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    return isReactiveValueExpression(
+      target.expression,
+      checker,
+      seenSymbols,
+      boundary,
+    );
+  }
+
+  if (ts.isConditionalExpression(target)) {
+    return isReactiveValueExpression(
+        target.condition,
+        checker,
+        seenSymbols,
+        boundary,
+      ) ||
+      isReactiveValueExpression(
+        target.whenTrue,
+        checker,
+        seenSymbols,
+        boundary,
+      ) ||
+      isReactiveValueExpression(
+        target.whenFalse,
+        checker,
+        seenSymbols,
+        boundary,
+      );
+  }
+
+  if (
+    ts.isBinaryExpression(target) &&
+    (
+      target.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      target.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )
+  ) {
+    return isReactiveValueExpression(
+        target.left,
+        checker,
+        seenSymbols,
+        boundary,
+      ) ||
+      isReactiveValueExpression(
+        target.right,
+        checker,
+        seenSymbols,
+        boundary,
+      );
+  }
+
+  if (!ts.isIdentifier(target)) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(target);
+  return isReactiveValueSymbol(
+    symbol,
+    checker,
+    seenSymbols,
+    boundary,
+  );
+}
+
 function resolveExpressionKind(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -171,16 +321,25 @@ function resolveExpressionKind(
 
   if (symbol) {
     const kind = resolveSymbolKind(symbol, checker, seen);
-    if (kind) return kind;
+    if (kind) {
+      if (kind.kind !== "array-method") {
+        return kind;
+      }
+      if (
+        ts.isPropertyAccessExpression(target) &&
+        isReactiveValueExpression(target.expression, checker)
+      ) {
+        return kind;
+      }
+    }
   }
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
     if (ARRAY_METHOD_NAMES.has(name)) {
-      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
-      // Plain Array.prototype methods should not be treated as reactive.
-      const receiverType = checker.getTypeAtLocation(target.expression);
-      if (isOpaqueRefType(receiverType, checker)) {
+      // Only classify as array-map if receiver is reactive. Plain
+      // Array.prototype methods should not be treated as reactive.
+      if (isReactiveValueExpression(target.expression, checker)) {
         return { kind: "array-method" };
       }
     }
@@ -192,7 +351,16 @@ function resolveExpressionKind(
     const signatureSymbol = getSignatureSymbol(signature);
     if (!signatureSymbol) continue;
     const kind = resolveSymbolKind(signatureSymbol, checker, seen);
-    if (kind) return kind;
+    if (!kind) continue;
+    if (kind.kind !== "array-method") {
+      return kind;
+    }
+    if (
+      ts.isPropertyAccessExpression(target) &&
+      isReactiveValueExpression(target.expression, checker)
+    ) {
+      return kind;
+    }
   }
 
   return undefined;
@@ -210,7 +378,15 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
       current = current.expression;
       continue;
     }
+    if (ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+      continue;
+    }
     if (ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isPartiallyEmittedExpression(current)) {
       current = current.expression;
       continue;
     }
@@ -479,10 +655,7 @@ function resolveSymbolKind(
     const cellKind = detectCellMethodFromDeclaration(resolved, declaration);
     if (cellKind) return cellKind;
 
-    if (
-      isArrayMethodDeclaration(declaration) ||
-      isOpaqueRefMethodDeclaration(declaration)
-    ) {
+    if (isArrayMethodDeclaration(declaration)) {
       return { kind: "array-method", symbol: resolved };
     }
     if (
@@ -546,6 +719,17 @@ function createNamedCallKind(
       return symbol
         ? { kind: "generate-object", symbol }
         : { kind: "generate-object" };
+    case "generateText":
+    case "fetchData":
+    case "fetchProgram":
+    case "streamData":
+    case "compileAndRun":
+    case "navigateTo":
+    case "llm":
+    case "llmDialog":
+      return symbol
+        ? { kind: "reactive-source", symbol }
+        : { kind: "reactive-source" };
     case "patternTool":
       return symbol
         ? { kind: "pattern-tool", symbol }
@@ -599,16 +783,7 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;
-  return ARRAY_OWNER_NAMES.has(owner);
-}
-
-function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
-  if (!hasIdentifierName(declaration)) return false;
-  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
-
-  const owner = findOwnerName(declaration);
-  if (!owner) return false;
-  return OPAQUE_REF_OWNER_NAMES.has(owner);
+  return ARRAY_METHOD_OWNER_NAMES.has(owner);
 }
 
 function findOwnerName(node: ts.Node): string | undefined {
@@ -622,6 +797,177 @@ function findOwnerName(node: ts.Node): string | undefined {
       if (current.name) return current.name.text;
     }
     if (ts.isSourceFile(current)) break;
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function isReactiveValueSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+  plainValueBoundary: ts.Node | undefined,
+): boolean {
+  if (!symbol || seenSymbols.has(symbol)) {
+    return false;
+  }
+  seenSymbols.add(symbol);
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (
+      plainValueBoundary &&
+      !isNodeWithinBoundary(declaration, plainValueBoundary)
+    ) {
+      continue;
+    }
+
+    if (ts.isParameter(declaration)) {
+      if (isReactiveParameterDeclaration(declaration, checker)) {
+        return true;
+      }
+      continue;
+    }
+
+    if (ts.isBindingElement(declaration)) {
+      const parameter = getOwningParameterDeclaration(declaration);
+      if (parameter && isReactiveParameterDeclaration(parameter, checker)) {
+        return true;
+      }
+
+      const variable = getOwningVariableDeclaration(declaration);
+      if (
+        variable?.initializer &&
+        isReactiveValueExpression(
+          variable.initializer,
+          checker,
+          seenSymbols,
+          plainValueBoundary,
+        )
+      ) {
+        return true;
+      }
+      continue;
+    }
+
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      declaration.initializer &&
+      isReactiveValueExpression(
+        declaration.initializer,
+        checker,
+        seenSymbols,
+        plainValueBoundary,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isReactiveParameterDeclaration(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  const owner = declaration.parent;
+  if (
+    !owner ||
+    (!ts.isArrowFunction(owner) &&
+      !ts.isFunctionExpression(owner) &&
+      !ts.isFunctionDeclaration(owner))
+  ) {
+    return false;
+  }
+
+  let current: ts.Node | undefined = owner.parent;
+  while (current && !ts.isCallExpression(current)) {
+    current = current.parent;
+  }
+  if (!current) {
+    return false;
+  }
+
+  const callKind = detectCallKind(current, checker);
+  if (
+    callKind?.kind === "builder" &&
+    callKind.builderName === "pattern" &&
+    owner.parameters[0] === declaration
+  ) {
+    return true;
+  }
+
+  return callKind?.kind === "array-method";
+}
+
+function findPlainValueBoundary(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): ts.Node | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const parent: ts.Node | undefined = current.parent;
+      if (
+        parent &&
+        ts.isCallExpression(parent) &&
+        parent.arguments.includes(current)
+      ) {
+        const callKind = detectCallKind(parent, checker);
+        if (callKind?.kind === "derive") {
+          return current;
+        }
+        if (
+          callKind?.kind === "builder" &&
+          PLAIN_VALUE_CALLBACK_BUILDERS.has(callKind.builderName)
+        ) {
+          return current;
+        }
+      }
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function isNodeWithinBoundary(node: ts.Node, boundary: ts.Node): boolean {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (current === boundary) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function getOwningParameterDeclaration(
+  declaration: ts.BindingElement,
+): ts.ParameterDeclaration | undefined {
+  let current: ts.Node | undefined = declaration.parent;
+  while (current) {
+    if (ts.isParameter(current)) {
+      return current;
+    }
+    if (ts.isVariableDeclaration(current) || ts.isSourceFile(current)) {
+      return undefined;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function getOwningVariableDeclaration(
+  declaration: ts.BindingElement,
+): ts.VariableDeclaration | undefined {
+  let current: ts.Node | undefined = declaration.parent;
+  while (current) {
+    if (ts.isVariableDeclaration(current)) {
+      return current;
+    }
+    if (ts.isParameter(current) || ts.isSourceFile(current)) {
+      return undefined;
+    }
     current = current.parent;
   }
   return undefined;

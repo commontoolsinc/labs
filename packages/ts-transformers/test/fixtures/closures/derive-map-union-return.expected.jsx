@@ -25,28 +25,25 @@ export default pattern((state) => {
     const latestMessage = derive({
         type: "array",
         items: {
-            $ref: "#/$defs/Message"
+            type: "object",
+            properties: {
+                role: {
+                    "enum": ["user", "assistant"]
+                },
+                content: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/ContentPart"
+                            }
+                        }]
+                }
+            },
+            required: ["role", "content"]
         },
         $defs: {
-            Message: {
-                type: "object",
-                properties: {
-                    role: {
-                        "enum": ["user", "assistant"]
-                    },
-                    content: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/ContentPart"
-                                }
-                            }]
-                    }
-                },
-                required: ["role", "content"]
-            },
             ContentPart: {
                 type: "object",
                 properties: {
@@ -153,10 +150,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

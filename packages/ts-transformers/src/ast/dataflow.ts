@@ -9,7 +9,11 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { detectCallKind, isReactiveOriginCall } from "./call-kind.ts";
+import {
+  detectCallKind,
+  isReactiveOriginCall,
+  isReactiveValueExpression,
+} from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
@@ -349,27 +353,7 @@ export function createDataFlowAnalyzer(
           }
         }
         if (!initExpr) continue;
-        // Walk through wrappers to find the call expression
-        let current: ts.Expression = initExpr;
-        while (true) {
-          if (
-            ts.isNonNullExpression(current) ||
-            ts.isParenthesizedExpression(current) ||
-            ts.isAsExpression(current) ||
-            ts.isTypeAssertionExpression(current)
-          ) {
-            current = current.expression;
-            continue;
-          }
-          if (ts.isPropertyAccessExpression(current)) {
-            current = current.expression;
-            continue;
-          }
-          break;
-        }
-        if (
-          ts.isCallExpression(current) && isReactiveOriginCall(current, checker)
-        ) {
+        if (isReactiveValueExpression(initExpr, checker, new Set([symbol]))) {
           return true;
         }
       }
@@ -379,11 +363,7 @@ export function createDataFlowAnalyzer(
     const isImplicitOpaqueRefExpression = (
       expr: ts.Expression,
     ): boolean => {
-      const root = findRootIdentifier(expr);
-      if (!root) return false;
-      const symbol = tryGetSymbol(root);
-      return isRootOpaqueParameter(symbol) ||
-        isVariableFromReactiveCall(symbol);
+      return isReactiveValueExpression(expr, checker);
     };
 
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {

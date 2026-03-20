@@ -58,6 +58,8 @@ import {
   txToReactivityLog,
 } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
+
+type DerivableElement<T> = [NonNullable<T>] extends [Array<infer U>] ? U : T;
 import {
   processDefaultValue,
   resolveSchema,
@@ -1482,7 +1484,7 @@ export class CellImpl<T extends FabricValue>
    */
   map<S>(
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      element: OpaqueRef<DerivableElement<T>>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
@@ -1510,7 +1512,7 @@ export class CellImpl<T extends FabricValue>
    */
   mapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<DerivableElement<T>, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]> {
     // Create the factory if it doesn't exist
@@ -1537,9 +1539,9 @@ export class CellImpl<T extends FabricValue>
     this: IsThisObject,
     fn: (
       accumulator: S,
-      element: T extends Array<infer U> ? U : T,
+      element: DerivableElement<T>,
       index: number,
-      array: (T extends Array<infer U> ? U : T)[],
+      array: DerivableElement<T>[],
     ) => S,
     initialValue: S,
   ): OpaqueRef<S> {
@@ -1559,9 +1561,9 @@ export class CellImpl<T extends FabricValue>
   findIndex(
     this: IsThisObject,
     fn: (
-      element: T extends Array<infer U> ? U : T,
+      element: DerivableElement<T>,
       index: number,
-      array: (T extends Array<infer U> ? U : T)[],
+      array: DerivableElement<T>[],
     ) => boolean,
   ): OpaqueRef<number> {
     // Uses lift rather than a per-element-pattern builtin (like filter/map)
@@ -1585,11 +1587,11 @@ export class CellImpl<T extends FabricValue>
    */
   filter(
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      element: OpaqueRef<DerivableElement<T>>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): OpaqueRef<DerivableElement<T>[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
         type: "ref",
@@ -1611,9 +1613,9 @@ export class CellImpl<T extends FabricValue>
    */
   filterWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<DerivableElement<T>, S>,
     params: Record<string, any>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+  ): OpaqueRef<DerivableElement<T>[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
         type: "ref",
@@ -1635,7 +1637,7 @@ export class CellImpl<T extends FabricValue>
    */
   flatMap<S>(
     fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      element: OpaqueRef<DerivableElement<T>>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S[]>,
@@ -1661,7 +1663,7 @@ export class CellImpl<T extends FabricValue>
    */
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
+    op: PatternFactory<DerivableElement<T>, S[]>,
     params: Record<string, any>,
   ): OpaqueRef<S[]> {
     if (!flatMapFactory) {

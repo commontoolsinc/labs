@@ -31,7 +31,11 @@ describe("data flow analyzer", () => {
 
   it("identifies array map calls that should skip wrapping", () => {
     const { analysis } = analyzeExpression(
-      "state.items.map(item => item + state.count)",
+      "generateText({ prompt: 'hi' }).result.map((item) => item + '!')",
+      {
+        prelude:
+          "declare function generateText(input: unknown): { result: string[] };",
+      },
     );
 
     assert(

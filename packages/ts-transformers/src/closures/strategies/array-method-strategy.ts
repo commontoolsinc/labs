@@ -7,7 +7,8 @@ import {
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
-  isReactiveOriginCall,
+  isReactiveValueCall,
+  isReactiveValueExpression,
   type ReactiveContextInfo,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
@@ -136,7 +137,8 @@ function createsReactiveCollectionInPlace(
     context.options.logger,
   );
   if (
-    classifyReactiveReceiverKind(currentType, context.checker) !== "plain"
+    classifyReactiveReceiverKind(current, currentType, context.checker) !==
+      "plain"
   ) {
     return true;
   }
@@ -145,7 +147,7 @@ function createsReactiveCollectionInPlace(
     return true;
   }
 
-  return isReactiveOriginCall(current, context.checker);
+  return isReactiveValueCall(current, context.checker);
 }
 
 function isLocalReactiveRewrapAlias(
@@ -293,6 +295,7 @@ function shouldTransformArrayMethod(
     context.options.logger,
   );
   const receiverKind = classifyReactiveReceiverKind(
+    mapTarget,
     targetType,
     context.checker,
   );
@@ -526,7 +529,7 @@ function isReactiveMapOrigin(
 ): boolean {
   const current = unwrapExpression(expression);
 
-  if (isDeriveCall(current)) {
+  if (isReactiveValueExpression(current, context.checker, seenSymbols)) {
     return true;
   }
 
@@ -542,11 +545,6 @@ function isReactiveMapOrigin(
     ) {
       return true;
     }
-
-    if (isReactiveOriginCall(current, context.checker)) {
-      return true;
-    }
-
     // Syntactic chaining detection: .filter().map() — the intermediate result
     // of a reactive array method call is still reactive.
     if (
@@ -567,7 +565,9 @@ function isReactiveMapOrigin(
     context.options.typeRegistry,
     context.options.logger,
   );
-  if (classifyReactiveReceiverKind(type, context.checker) !== "plain") {
+  if (
+    classifyReactiveReceiverKind(current, type, context.checker) !== "plain"
+  ) {
     return true;
   }
 

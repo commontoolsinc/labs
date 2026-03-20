@@ -1,10 +1,23 @@
 import ts from "typescript";
 
-import { classifyReactiveContext, detectCallKind } from "../../../ast/mod.ts";
+import {
+  classifyReactiveContext,
+  detectCallKind,
+  isReactiveValueExpression,
+} from "../../../ast/mod.ts";
 import type { TransformationContext } from "../../../core/mod.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import type { AnalyzeFn } from "../types.ts";
+
+function isSimpleReactiveAccess(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return isSimpleOpaqueRefAccess(expression, checker) ||
+    ((ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) &&
+      isReactiveValueExpression(expression, checker));
+}
 
 function isTransparentWrapContainer(node: ts.Expression): boolean {
   return (
@@ -206,7 +219,7 @@ export function findPendingComputeWrapCandidate(
       return;
     }
 
-    if (isSimpleOpaqueRefAccess(node, context.checker)) {
+    if (isSimpleReactiveAccess(node, context.checker)) {
       ts.forEachChild(node, visit);
       return;
     }

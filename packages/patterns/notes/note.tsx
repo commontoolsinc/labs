@@ -298,8 +298,7 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Link pattern for wiki-links
     const patternJson = computed(() => {
-      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
-      const custom = typeof lpValue === "string" ? lpValue.trim() : "";
+      const custom = linkPattern.get().trim();
       return custom || JSON.stringify(Note);
     });
 

@@ -25,26 +25,21 @@ export default pattern((__ct_pattern_input) => {
             items: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Item"
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        done: {
+                            type: "boolean",
+                            asCell: true
+                        }
+                    },
+                    required: ["name", "done"]
                 }
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -54,25 +49,20 @@ export default pattern((__ct_pattern_input) => {
                     type: "string"
                 },
                 item: {
-                    $ref: "#/$defs/Item"
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        done: {
+                            type: "boolean",
+                            asCell: true
+                        }
+                    },
+                    required: ["name", "done"]
                 }
             },
             required: ["aisle", "item"]
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
         }
     } as const satisfies __ctHelpers.JSONSchema, { items }, ({ items }) => items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
@@ -91,29 +81,24 @@ export default pattern((__ct_pattern_input) => {
                             type: "string"
                         },
                         item: {
-                            $ref: "#/$defs/Item"
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                },
+                                done: {
+                                    type: "boolean",
+                                    asCell: true
+                                }
+                            },
+                            required: ["name", "done"]
                         }
                     },
                     required: ["aisle", "item"]
                 }
             }
         },
-        required: ["itemsWithAisles"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["itemsWithAisles"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {},
@@ -170,39 +155,31 @@ export default pattern((__ct_pattern_input) => {
                 additionalProperties: {
                     type: "array",
                     items: {
-                        $ref: "#/$defs/Assignment"
+                        type: "object",
+                        properties: {
+                            aisle: {
+                                type: "string"
+                            },
+                            item: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    done: {
+                                        type: "boolean",
+                                        asCell: true
+                                    }
+                                },
+                                required: ["name", "done"]
+                            }
+                        },
+                        required: ["aisle", "item"]
                     }
                 }
             }
         },
-        required: ["groupedByAisle"],
-        $defs: {
-            Assignment: {
-                type: "object",
-                properties: {
-                    aisle: {
-                        type: "string"
-                    },
-                    item: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["aisle", "item"]
-            },
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["groupedByAisle"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -307,8 +284,62 @@ export default pattern((__ct_pattern_input) => {
                 }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const assignment = __ct_pattern_input.key("element");
                     return (<div>
-                  <span>{assignment.key("item", "name")}</span>
-                  <ct-checkbox $checked={assignment.key("item", "done")}/>
+                  <span>{__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            name: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["name"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                name: assignment.key("item").name
+                            }
+                        } }, ({ assignment }) => assignment.item.name)}</span>
+                  <ct-checkbox $checked={__ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            assignment: {
+                                type: "object",
+                                properties: {
+                                    item: {
+                                        type: "object",
+                                        properties: {
+                                            done: {
+                                                type: "boolean",
+                                                asCell: true
+                                            }
+                                        },
+                                        required: ["done"]
+                                    }
+                                },
+                                required: ["item"]
+                            }
+                        },
+                        required: ["assignment"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean",
+                        asCell: true
+                    } as const satisfies __ctHelpers.JSONSchema, { assignment: {
+                            item: {
+                                done: assignment.key("item").done
+                            }
+                        } }, ({ assignment }) => assignment.item.done)}/>
                 </div>);
                 }, {
                     type: "object",
@@ -349,10 +380,10 @@ export default pattern((__ct_pattern_input) => {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
                             type: "object",
                             properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -422,10 +453,10 @@ export default pattern((__ct_pattern_input) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -482,10 +513,10 @@ export default pattern((__ct_pattern_input) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

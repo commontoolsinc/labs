@@ -26,11 +26,7 @@ export default pattern((state) => {
                     },
                     required: ["element", "__ct_amount_key"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "number"
-                        }]
+                    type: ["number", "undefined"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_amount_key: __ct_amount_key
@@ -52,10 +48,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -99,10 +95,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

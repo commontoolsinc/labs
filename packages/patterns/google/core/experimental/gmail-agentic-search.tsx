@@ -1049,7 +1049,7 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
 
     // Check if we have direct auth input (CT-1085 workaround)
-    const hasDirectAuth = derive(inputAuth, (a: Auth) => !!(a?.token));
+    const hasDirectAuth = derive(inputAuth, (a) => !!(a?.token));
 
     // Local writable cell for account type selection
     // Input `accountType` may be read-only (Default cells are read-only when using default value)
@@ -1087,52 +1087,41 @@ const GmailAgenticSearch = pattern<
     const foundItemsTracker = Writable.of<Record<string, number>>({});
 
     // Watch the signal and update foundItemsTracker when it increases
-    derive(
-      [itemFoundSignal, lastSignalValueCell, lastExecutedQueryIdCell],
-      (
-        [signalValue, lastSignalValue, queryId]: [
-          number,
-          number,
-          string | null,
-        ],
-      ) => {
-        // Use the unwrapped values from derive directly
-        const signalVal = signalValue || 0;
-        const lastSignalVal = lastSignalValue || 0;
+    derive(itemFoundSignal, (signalValue) => {
+      const signalVal = signalValue || 0;
+      const lastSignalVal = lastSignalValueCell.get() || 0;
+      const queryId = lastExecutedQueryIdCell.get();
 
-        if (DEBUG_AGENT) {
-          console.log(
-            `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
+      if (DEBUG_AGENT) {
+        console.log(
+          `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
+        );
+      }
+
+      if (signalVal > lastSignalVal) {
+        if (queryId) {
+          const tracker = foundItemsTracker.get() || {};
+          const currentCount = tracker[queryId] || 0;
+          const newCount = currentCount + 1;
+
+          foundItemsTracker.set({
+            ...tracker,
+            [queryId]: newCount,
+          });
+
+          if (DEBUG_AGENT) {
+            console.log(
+              `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
+            );
+          }
+        } else if (DEBUG_AGENT) {
+          console.warn(
+            "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
           );
         }
-
-        if (signalVal > lastSignalVal) {
-          if (queryId) {
-            const tracker = foundItemsTracker.get() || {};
-            const currentCount = tracker[queryId] || 0;
-            const newCount = currentCount + 1;
-
-            foundItemsTracker.set({
-              ...tracker,
-              [queryId]: newCount,
-            });
-
-            if (DEBUG_AGENT) {
-              console.log(
-                `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
-              );
-            }
-          } else {
-            if (DEBUG_AGENT) {
-              console.warn(
-                "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
-              );
-            }
-          }
-          lastSignalValueCell.set(signalVal);
-        }
-      },
-    );
+        lastSignalValueCell.set(signalVal);
+      }
+    });
 
     // Merge localQueries with foundItems from the tracker for display
     const localQueriesWithFoundItems = derive(
@@ -1313,8 +1302,8 @@ const GmailAgenticSearch = pattern<
 
     // Build the full prompt with suggested queries
     const fullPrompt = derive(
-      [agentGoal, suggestedQueries, maxSearches],
-      ([goal, queries, max]: [string, string[], number]) => {
+      [agentGoal, suggestedQueries, maxSearches] as const,
+      ([goal, queries, max]) => {
         if (!goal) return ""; // Don't run agent without a goal
 
         let prompt = goal;
@@ -1794,8 +1783,8 @@ When you're done searching, STOP calling tools and produce your final structured
           scanCompleted,
           null,
           derive(
-            [isScanning, searchProgress],
-            ([scanning, progress]: [boolean, SearchProgress]) =>
+            [isScanning, searchProgress] as const,
+            ([scanning, progress]) =>
               scanning && progress.status !== "idle" &&
                 progress.status !== "auth_error"
                 ? (
@@ -1824,8 +1813,8 @@ When you're done searching, STOP calling tools and produce your final structured
                     </div>
 
                     {/* Current Activity */}
-                    {derive(searchProgress, (progress: SearchProgress) =>
-                      progress.currentQuery
+                    {derive(searchProgress.currentQuery, (currentQuery) =>
+                      currentQuery
                         ? (
                           <div
                             style={{
@@ -1852,7 +1841,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 wordBreak: "break-all",
                               }}
                             >
-                              {progress.currentQuery}
+                              {currentQuery}
                             </div>
                           </div>
                         )
@@ -1881,8 +1870,10 @@ When you're done searching, STOP calling tools and produce your final structured
                         ))}
 
                     {/* Completed Searches */}
-                    {derive(searchProgress, (progress: SearchProgress) =>
-                      progress.completedQueries.length > 0
+                    {derive(
+                      searchProgress.completedQueries,
+                      (completedQueries) =>
+                        completedQueries.length > 0
                         ? (
                           <div style={{ marginTop: "8px" }}>
                             <div
@@ -1893,8 +1884,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 marginBottom: "4px",
                               }}
                             >
-                              ✅ Completed searches ({progress.completedQueries
-                                .length}
+                              ✅ Completed searches ({completedQueries.length}
                               ):
                             </div>
                             <div
@@ -1905,14 +1895,11 @@ When you're done searching, STOP calling tools and produce your final structured
                                 color: "#3b82f6",
                               }}
                             >
-                              {[...progress.completedQueries]
+                              {[...completedQueries]
                                 .reverse()
                                 .slice(0, 5)
                                 .map(
-                                  (
-                                    q: { query: string; emailCount: number },
-                                    i: number,
-                                  ) => (
+                                  (q, i: number) => (
                                     <div
                                       key={i}
                                       style={{
@@ -1941,7 +1928,8 @@ When you're done searching, STOP calling tools and produce your final structured
                             </div>
                           </div>
                         )
-                        : null)}
+                        : null,
+                    )}
                   </div>
                 )
                 : null,
@@ -2008,7 +1996,7 @@ When you're done searching, STOP calling tools and produce your final structured
     // Debug Log UI - collapsible log of agent activity
     const debugLogUI = (
       <div style={{ marginTop: "8px" }}>
-        {derive(debugLog, (log: DebugLogEntry[]) =>
+        {derive(debugLog, (log) =>
           log && log.length > 0
             ? (
               <div

@@ -13,31 +13,58 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    n: {
+        {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                plainArray: {
+                    type: "array",
+                    items: {
                         type: "number"
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["multiplier"]
                     }
                 },
-                required: ["n", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                n: n,
                 state: {
-                    multiplier: state.multiplier
+                    type: "object",
+                    properties: {
+                        multiplier: {
+                            type: "number"
+                        }
+                    },
+                    required: ["multiplier"]
                 }
-            }, ({ n, state }) => n * state.multiplier)}</span>))}
+            },
+            required: ["plainArray", "state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "array",
+            items: {
+                $ref: "#/$defs/JSXElement"
+            },
+            $defs: {
+                JSXElement: {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            $ref: "#/$defs/UIRenderable"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }]
+                },
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            plainArray: plainArray,
+            state: {
+                multiplier: state.key("multiplier")
+            }
+        }, ({ plainArray, state }) => plainArray.map((n) => (<span>{n * state.multiplier}</span>)))}
       </div>),
     };
 }, {
@@ -61,10 +88,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

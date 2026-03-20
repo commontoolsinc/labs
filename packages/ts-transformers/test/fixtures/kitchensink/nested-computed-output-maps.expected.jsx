@@ -302,9 +302,19 @@ export default pattern((state) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
-            $ref: "#/$defs/UIRenderable"
+            $ref: "#/$defs/JSXElement"
         },
         $defs: {
+            JSXElement: {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }]
+            },
             UIRenderable: {
                 type: "object",
                 properties: {
@@ -417,20 +427,7 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        $ref: "#/$defs/UIRenderable",
-                        $defs: {
-                            UIRenderable: {
-                                type: "object",
-                                properties: {
-                                    $UI: {
-                                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                                    }
-                                },
-                                required: ["$UI"]
-                            }
-                        }
-                    } as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
+                    } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
               </button>
               {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
               {comment.reactions.map((reaction, reactionIndex) => (<span>
@@ -507,10 +504,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -572,10 +569,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -681,10 +678,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -711,7 +708,7 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/UIRenderable"
+                        $ref: "#/$defs/JSXElement"
                     },
                     index: {
                         type: "number"
@@ -719,6 +716,16 @@ export default pattern((state) => {
                 },
                 required: ["element"],
                 $defs: {
+                    JSXElement: {
+                        anyOf: [{
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }]
+                    },
                     UIRenderable: {
                         type: "object",
                         properties: {
@@ -733,10 +740,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -826,10 +833,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

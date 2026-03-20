@@ -775,6 +775,34 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step(
+    "allows map callback on direct writable cells outside JSX",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, Writable } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern(() => {
+        const items = Writable.of<Item[]>([]).for("items");
+        const result = items.map((item) => ({
+          label: item.name,
+        }));
+        return { result };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Map callback on direct writable cells should be allowed",
+      );
+    },
+  );
+
+  await t.step(
     "allows nested map/filter callbacks inside module-scope helpers",
     async () => {
       const source = `/// <cts-enable />

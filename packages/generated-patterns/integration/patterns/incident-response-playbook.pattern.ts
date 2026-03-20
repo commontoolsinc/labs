@@ -506,7 +506,7 @@ export const incidentResponsePlaybook = pattern<IncidentResponsePlaybookArgs>(
         if (!id) {
           return "idle";
         }
-        const target = list.find((step) => step.id === active.get());
+        const target = list.find((step) => step.id === id);
         return target ? target.title : "idle";
       },
     );

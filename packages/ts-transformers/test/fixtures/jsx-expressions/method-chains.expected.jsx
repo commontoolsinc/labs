@@ -251,10 +251,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -306,7 +306,40 @@ export default pattern((state) => {
                 items: state.key("items"),
                 start: state.key("start"),
                 end: state.key("end")
-            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
+            } }, ({ state }) => state.items.filter((x) => x > state.start).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const x = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return x < state.key("end");
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                end: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["end"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                end: state.end
+            }
+        }).length)}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
@@ -437,10 +470,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -723,10 +756,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -1020,10 +1053,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

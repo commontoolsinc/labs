@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
+  isReactiveValueExpression,
   normalizeDataFlows,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
@@ -18,6 +19,15 @@ import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
+
+function isSimpleReactiveAccess(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return isSimpleOpaqueRefAccess(expression, checker) ||
+    ((ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) &&
+      isReactiveValueExpression(expression, checker));
+}
 
 function processBranch(
   expr: ts.Expression,
@@ -90,7 +100,7 @@ export const emitConditionalExpression: Emitter = ({
     expression.condition,
   );
   const shouldDerivePredicate = predicateDataFlows.length > 0 &&
-    !isSimpleOpaqueRefAccess(expression.condition, context.checker);
+    !isSimpleReactiveAccess(expression.condition, context.checker);
 
   let predicate: ts.Expression = expression.condition;
   if (shouldDerivePredicate) {
