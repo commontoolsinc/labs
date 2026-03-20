@@ -10,7 +10,10 @@ import {
   type FabricDatum,
   type FabricValue,
 } from "@commontools/data-model/fabric-value";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -65,10 +68,7 @@ export function resolveSchema(
   // Treat undefined/null/{} or any other non-object as no schema
   // We don't use ContextualFlowControl.isTrueSchema here, since we want to
   // handle flags like default or ifc
-  if (
-    typeof schema !== "object" || schema === null ||
-    Object.keys(schema).length === 0
-  ) {
+  if (!isNontrivialSchema(schema)) {
     return undefined;
   }
 
@@ -85,9 +85,7 @@ export function resolveSchema(
 
   // Return no schema if all it said is that this was a reference or an
   // object without properties.
-  if (
-    resolvedSchema === undefined || Object.keys(resolvedSchema).length === 0
-  ) {
+  if (!isNontrivialSchema(resolvedSchema)) {
     return undefined;
   }
 
@@ -95,11 +93,11 @@ export function resolveSchema(
 }
 
 function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
-  if (typeof schema !== "object") {
+  if (!isNontrivialSchema(schema)) {
     return schema;
   }
   const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
-  if (restSchema === undefined || Object.keys(restSchema).length === 0) {
+  if (!isNontrivialSchema(restSchema)) {
     return undefined;
   }
   return restSchema;
