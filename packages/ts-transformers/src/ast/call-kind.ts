@@ -233,11 +233,11 @@ export function isReactiveValueExpression(
 
   if (ts.isConditionalExpression(target)) {
     return isReactiveValueExpression(
-        target.condition,
-        checker,
-        seenSymbols,
-        boundary,
-      ) ||
+      target.condition,
+      checker,
+      seenSymbols,
+      boundary,
+    ) ||
       isReactiveValueExpression(
         target.whenTrue,
         checker,
@@ -260,11 +260,11 @@ export function isReactiveValueExpression(
     )
   ) {
     return isReactiveValueExpression(
-        target.left,
-        checker,
-        seenSymbols,
-        boundary,
-      ) ||
+      target.left,
+      checker,
+      seenSymbols,
+      boundary,
+    ) ||
       isReactiveValueExpression(
         target.right,
         checker,

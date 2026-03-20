@@ -21,8 +21,8 @@ import {
   isDefaultTypeRef,
   safeGetIndexTypeOfType,
   safeGetNodeText,
-  safeGetTypeOfSymbolAtLocation,
   safeGetTypeFromTypeNode,
+  safeGetTypeOfSymbolAtLocation,
   type TypeWithInternals,
 } from "./type-utils.ts";
 import { extractDocFromType } from "./doc-utils.ts";
@@ -289,9 +289,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (noInfer) {
       return this.formatType(
         noInfer.type,
-        noInfer.typeNode
-          ? { ...context, typeNode: noInfer.typeNode }
-          : context,
+        noInfer.typeNode ? { ...context, typeNode: noInfer.typeNode } : context,
         isRootType,
       );
     }

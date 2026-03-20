@@ -15,7 +15,8 @@ function isSimpleReactiveAccess(
   checker: ts.TypeChecker,
 ): boolean {
   return isSimpleOpaqueRefAccess(expression, checker) ||
-    ((ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) &&
+    ((ts.isIdentifier(expression) ||
+      ts.isPropertyAccessExpression(expression)) &&
       isReactiveValueExpression(expression, checker));
 }
 

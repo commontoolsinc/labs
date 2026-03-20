@@ -1,7 +1,5 @@
 import ts from "typescript";
-import {
-  getCellKind,
-} from "../transformers/opaque-ref/opaque-ref.ts";
+import { getCellKind } from "../transformers/opaque-ref/opaque-ref.ts";
 import { isReactiveValueExpression } from "../ast/mod.ts";
 import type { ReactiveContextKind } from "../ast/reactive-context.ts";
 

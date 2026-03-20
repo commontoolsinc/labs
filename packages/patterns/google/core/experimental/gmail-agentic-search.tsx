@@ -1874,61 +1874,63 @@ When you're done searching, STOP calling tools and produce your final structured
                       searchProgress.completedQueries,
                       (completedQueries) =>
                         completedQueries.length > 0
-                        ? (
-                          <div style={{ marginTop: "8px" }}>
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "#475569",
-                                fontWeight: "600",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              ✅ Completed searches ({completedQueries.length}
-                              ):
-                            </div>
-                            <div
-                              style={{
-                                maxHeight: "120px",
-                                overflowY: "auto",
-                                fontSize: "11px",
-                                color: "#3b82f6",
-                              }}
-                            >
-                              {[...completedQueries]
-                                .reverse()
-                                .slice(0, 5)
-                                .map(
-                                  (q, i: number) => (
-                                    <div
-                                      key={i}
-                                      style={{
-                                        padding: "2px 0",
-                                        borderBottom: "1px solid #dbeafe",
-                                      }}
-                                    >
-                                      <span style={{ fontFamily: "monospace" }}>
-                                        {q?.query
-                                          ? q.query.length > 50
-                                            ? q.query.substring(0, 50) + "..."
-                                            : q.query
-                                          : "unknown"}
-                                      </span>
-                                      <span
+                          ? (
+                            <div style={{ marginTop: "8px" }}>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#475569",
+                                  fontWeight: "600",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                ✅ Completed searches ({completedQueries.length}
+                                ):
+                              </div>
+                              <div
+                                style={{
+                                  maxHeight: "120px",
+                                  overflowY: "auto",
+                                  fontSize: "11px",
+                                  color: "#3b82f6",
+                                }}
+                              >
+                                {[...completedQueries]
+                                  .reverse()
+                                  .slice(0, 5)
+                                  .map(
+                                    (q, i: number) => (
+                                      <div
+                                        key={i}
                                         style={{
-                                          marginLeft: "8px",
-                                          color: "#059669",
+                                          padding: "2px 0",
+                                          borderBottom: "1px solid #dbeafe",
                                         }}
                                       >
-                                        ({q?.emailCount ?? 0} emails)
-                                      </span>
-                                    </div>
-                                  ),
-                                )}
+                                        <span
+                                          style={{ fontFamily: "monospace" }}
+                                        >
+                                          {q?.query
+                                            ? q.query.length > 50
+                                              ? q.query.substring(0, 50) + "..."
+                                              : q.query
+                                            : "unknown"}
+                                        </span>
+                                        <span
+                                          style={{
+                                            marginLeft: "8px",
+                                            color: "#059669",
+                                          }}
+                                        >
+                                          ({q?.emailCount ?? 0} emails)
+                                        </span>
+                                      </div>
+                                    ),
+                                  )}
+                              </div>
                             </div>
-                          </div>
-                        )
-                        : null,
+                          )
+                          : null,
                     )}
                   </div>
                 )
