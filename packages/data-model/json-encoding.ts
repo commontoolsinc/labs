@@ -1,430 +1,116 @@
 import type { FabricValue } from "./fabric-value.ts";
-import { type FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
-import {
-  type FabricClass,
-  type ReconstructionContext,
-  type SerializationContext,
-} from "./fabric-value.ts";
-import { ExplicitTagValue } from "./explicit-tag-value.ts";
-import { deepFreeze } from "./deep-freeze.ts";
-import { UnknownValue } from "./unknown-value.ts";
-import { ProblematicValue } from "./problematic-value.ts";
-import {
-  createDefaultRegistry,
-  type JsonWireValue,
-  type TypeHandlerCodec,
-  type TypeHandlerRegistry,
-} from "./json-type-handlers.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricRegExp,
-  FabricSet,
-  FabricUint8Array,
-} from "./fabric-native-instances.ts";
-import { TAGS } from "./fabric-type-tags.ts";
+import type { ReconstructionContext } from "./fabric-value.ts";
+import { JsonEncodingContext } from "./json-encoding-modern.ts";
 
-/** Shared default handler registry, created once. */
-const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
+// ---------------------------------------------------------------------------
+// Module-level JSON encoding context (stateless -- created once, reused).
+// ---------------------------------------------------------------------------
+
+const jsonEncodingContext = new JsonEncodingContext();
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched public API
+//
+// These two symbols are reassigned by `configureDispatch()` whenever the
+// unified JSON encoding flag changes. When OFF (default), both are plain
+// JSON.stringify / JSON.parse. When ON, they route through the
+// `JsonEncodingContext` codec which handles serialization and deserialization internally.
+// ---------------------------------------------------------------------------
 
 /**
- * JSON encoding context implementing the `/<Type>@<Version>` wire format
- * from the formal spec (Section 5).
- *
- * Public interface: `SerializationContext<string>`
- * - `encode(value)` -- full pipeline: serialize + stringify
- * - `decode(data, runtime)` -- full pipeline: parse + deserialize
- *
- * All internal machinery (tag wrapping, tree walking, byte conversion) is
- * private. Type handlers receive a narrow `TypeHandlerCodec` view of `this`
- * during tree walking.
+ * Encode a fabric value to a JSON string. When unified JSON encoding is
+ * ON, serializes rich types (bigint, undefined, Map, etc.) into the
+ * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
+ * equivalent to `JSON.stringify(value)`.
  */
-export class JsonEncodingContext implements SerializationContext<string> {
-  /** Tag -> class registry for known types. */
-  private readonly registry = new Map<
-    string,
-    FabricClass<FabricInstance>
-  >();
+export let jsonFromValue: (value: FabricValue) => string;
 
-  /** Whether failed reconstructions produce `ProblematicValue` instead of
-   *  throwing. */
-  readonly lenient: boolean;
+/**
+ * Decode a JSON string back into a fabric value. When unified JSON
+ * encoding is ON, parses the string and deserializes tagged forms back
+ * into rich runtime types. When OFF,
+ * equivalent to `JSON.parse(json)`.
+ */
+export let valueFromJson: (
+  json: string,
+  runtime: ReconstructionContext,
+) => FabricValue;
 
-  /** Narrow codec view for type handlers (avoids exposing private methods). */
-  private readonly codec: TypeHandlerCodec;
+// ---------------------------------------------------------------------------
+// Unified JSON encoding flag and dispatch configuration
+// ---------------------------------------------------------------------------
 
-  constructor(options?: { lenient?: boolean }) {
-    this.lenient = options?.lenient ?? false;
+/**
+ * Module-level flag for unified JSON encoding, set by the `Runtime`
+ * constructor via `setJsonEncodingConfig()`. When enabled, the public API
+ * symbols dispatch to the `JsonEncodingContext` codec instead of plain
+ * JSON.stringify / JSON.parse.
+ */
+let jsonEncodingEnabled = false;
 
-    // Create a codec view that delegates to our private methods.
-    this.codec = {
-      wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => this.getTagFor(value),
+/**
+ * Reassign the public API symbols based on the current value of
+ * `jsonEncodingEnabled`. Called at module load and whenever the flag
+ * changes.
+ */
+function configureDispatch(): void {
+  if (jsonEncodingEnabled) {
+    // ----- Unified JSON encoding implementations -----
+
+    jsonFromValue = (value: FabricValue): string => {
+      return jsonEncodingContext.encode(value);
     };
 
-    // Register native wrapper classes for deserialization. Each wrapper's
-    // static [RECONSTRUCT] method is used by the class registry fallback
-    // path in deserialize().
-    this.registry.set(TAGS.Error, FabricError);
-    this.registry.set(TAGS.Map, FabricMap);
-    this.registry.set(TAGS.Set, FabricSet);
-    this.registry.set(TAGS.Bytes, FabricUint8Array);
-    this.registry.set(TAGS.RegExp, FabricRegExp);
-  }
+    valueFromJson = (
+      json: string,
+      runtime: ReconstructionContext,
+    ): FabricValue => {
+      return jsonEncodingContext.decode(json, runtime);
+    };
+  } else {
+    // ----- Passthrough (flag OFF) -----
 
-  // -------------------------------------------------------------------------
-  // SerializationContext<string> -- public boundary interface
-  // -------------------------------------------------------------------------
-
-  /**
-   * Encode a fabric value to a JSON string. Serializes rich types into
-   * the `/<Type>@<Version>` tagged wire format, then stringifies.
-   */
-  encode(value: FabricValue): string {
-    return JSON.stringify(this.serialize(value));
-  }
-
-  /**
-   * Decode a JSON string back into a fabric value. Parses the string,
-   * then deserializes tagged forms back into rich runtime types.
-   */
-  decode(data: string, runtime: ReconstructionContext): FabricValue {
-    const parsed = JSON.parse(data) as JsonWireValue;
-    return this.deserialize(parsed, runtime);
-  }
-
-  // -------------------------------------------------------------------------
-  // Byte-level boundary (public for now -- used by serializeToBytes tests)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Serialize a fabric value to UTF-8 JSON bytes.
-   */
-  encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.serialize(value));
-  }
-
-  /**
-   * Deserialize UTF-8 JSON bytes back into a fabric value.
-   */
-  decodeFromBytes(
-    bytes: Uint8Array,
-    runtime: ReconstructionContext,
-  ): FabricValue {
-    const tree = this.fromBytes(bytes);
-    return this.deserialize(tree, runtime);
-  }
-
-  // -------------------------------------------------------------------------
-  // Tag wrapping/unwrapping (private)
-  // -------------------------------------------------------------------------
-
-  /** Get the wire format tag for a fabric instance's type. */
-  private getTagFor(value: FabricInstance): string {
-    if (value instanceof ExplicitTagValue) {
-      return value.typeTag;
-    }
-    const typeTag = (value as { typeTag?: unknown }).typeTag;
-    if (typeof typeTag === "string") {
-      return typeTag;
-    }
-    throw new Error(
-      `JsonEncodingContext: no tag registered for value: ${value}`,
-    );
-  }
-
-  /** Get the class that can reconstruct instances for a given tag. */
-  private getClassFor(
-    tag: string,
-  ): FabricClass<FabricInstance> | undefined {
-    return this.registry.get(tag);
-  }
-
-  /**
-   * Wrap a tag and state into the `/<tag>` wire format. Prepends `/` to the
-   * tag to produce the JSON key. See Section 5.2 of the formal spec.
-   */
-  private wrapTag(tag: string, state: JsonWireValue): JsonWireValue {
-    return { [`/${tag}`]: state } as JsonWireValue;
-  }
-
-  /**
-   * Unwrap a wire representation. Detects single-key objects with `/`-prefixed
-   * keys. Returns `{ tag, state }` or `null` if not a tagged value.
-   * See Section 5.4 of the formal spec.
-   */
-  private unwrapTag(
-    data: JsonWireValue,
-  ): { tag: string; state: JsonWireValue } | null {
-    if (
-      data === null || typeof data !== "object" || Array.isArray(data)
-    ) {
-      return null;
-    }
-
-    const keys = Object.keys(data);
-    if (keys.length !== 1) {
-      return null;
-    }
-
-    const key = keys[0];
-    if (!key.startsWith("/")) {
-      return null;
-    }
-
-    const tag = key.slice(1);
-    const state = (data as Record<string, JsonWireValue>)[key];
-    return { tag, state };
-  }
-
-  // -------------------------------------------------------------------------
-  // Byte conversion (private)
-  // -------------------------------------------------------------------------
-
-  /** Convert a wire-format tree to UTF-8-encoded JSON bytes. */
-  private toBytes(data: JsonWireValue): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(data));
-  }
-
-  /** Parse UTF-8-encoded JSON bytes back into a wire-format tree. */
-  private fromBytes(bytes: Uint8Array): JsonWireValue {
-    return JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
-  }
-
-  // -------------------------------------------------------------------------
-  // Tree-walking serialization (private)
-  //
-  // Moved from serialization.ts. These methods walk the value tree,
-  // dispatching to type handlers and applying structural escaping.
-  // -------------------------------------------------------------------------
-
-  /**
-   * Serialize a fabric value into wire format. Recursively processes nested
-   * values. See Section 4.5 of the formal spec.
-   */
-  private serialize(
-    value: FabricValue,
-    _seen?: Set<object>,
-    registry: TypeHandlerRegistry = defaultRegistry,
-  ): JsonWireValue {
-    // --- Try type handlers first ---
-    const handler = registry.findSerializer(value);
-    if (handler) {
-      const seen = _seen ?? new Set<object>();
-
-      if (value !== null && typeof value === "object") {
-        if (seen.has(value as object)) {
-          throw new Error("Circular reference detected during serialization");
-        }
-        seen.add(value as object);
-      }
-
-      const result = handler.serialize(
-        value,
-        this.codec,
-        (v: FabricValue) => this.serialize(v, seen, registry),
-      );
-
-      if (value !== null && typeof value === "object") {
-        seen.delete(value as object);
-      }
-
-      return result;
-    }
-
-    // --- Primitives ---
-    if (
-      value === null || typeof value === "boolean" ||
-      typeof value === "number" || typeof value === "string"
-    ) {
-      return value as JsonWireValue;
-    }
-
-    // --- Arrays ---
-    if (Array.isArray(value)) {
-      const seen = _seen ?? new Set<object>();
-      if (seen.has(value)) {
-        throw new Error("Circular reference detected during serialization");
-      }
-      seen.add(value);
-
-      const result: JsonWireValue[] = [];
-      let i = 0;
-      while (i < value.length) {
-        if (!(i in value)) {
-          let count = 0;
-          while (i < value.length && !(i in value)) {
-            count++;
-            i++;
-          }
-          result.push(this.wrapTag(TAGS.hole, count));
-        } else {
-          result.push(
-            this.serialize(value[i] as FabricValue, seen, registry),
-          );
-          i++;
-        }
-      }
-
-      seen.delete(value);
-      return result as JsonWireValue;
-    }
-
-    // --- Plain objects ---
-    const seen = _seen ?? new Set<object>();
-    if (seen.has(value as object)) {
-      throw new Error("Circular reference detected during serialization");
-    }
-    seen.add(value as object);
-
-    const result: Record<string, JsonWireValue> = {};
-    for (
-      const [key, val] of Object.entries(
-        value as Record<string, FabricValue>,
-      )
-    ) {
-      result[key] = this.serialize(val, seen, registry);
-    }
-
-    seen.delete(value as object);
-
-    // Apply `TAGS.object` escaping per Section 5.6.
-    const keys = Object.keys(result);
-    if (keys.length === 1 && keys[0].startsWith("/")) {
-      return this.wrapTag(TAGS.object, result) as JsonWireValue;
-    }
-
-    return result as JsonWireValue;
-  }
-
-  // -------------------------------------------------------------------------
-  // Tree-walking deserialization (private)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Deserialize a wire-format value back into rich runtime types.
-   * See Section 4.5 of the formal spec.
-   */
-  private deserialize(
-    data: JsonWireValue,
-    runtime: ReconstructionContext,
-    registry: TypeHandlerRegistry = defaultRegistry,
-  ): FabricValue {
-    const decoded = this.unwrapTag(data);
-    if (decoded !== null) {
-      const { tag, state } = decoded;
-
-      // `TAGS.object` unwrapping (Section 5.6).
-      if (tag === TAGS.object) {
-        const inner = state as Record<string, JsonWireValue>;
-        const result: Record<string, FabricValue> = {};
-        for (const [key, val] of Object.entries(inner)) {
-          result[key] = this.deserialize(val, runtime, registry);
-        }
-        return Object.freeze(result);
-      }
-
-      // `TAGS.quote` literal handling (Section 5.6).
-      if (tag === TAGS.quote) {
-        return deepFreeze(state) as FabricValue;
-      }
-
-      // --- Type handler dispatch ---
-      const handler = registry.getDeserializer(tag);
-      if (handler) {
-        if (this.lenient) {
-          try {
-            return handler.deserialize(
-              state,
-              runtime,
-              (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-            );
-          } catch (e: unknown) {
-            return new ProblematicValue(
-              tag,
-              state as unknown as FabricValue,
-              e instanceof Error ? e.message : String(e),
-            ) as unknown as FabricValue;
-          }
-        }
-        return handler.deserialize(
-          state,
-          runtime,
-          (v: JsonWireValue) => this.deserialize(v, runtime, registry),
+    jsonFromValue = (value: FabricValue): string => {
+      const result = JSON.stringify(value);
+      if (result === undefined) {
+        throw new Error(
+          "jsonFromValue: cannot stringify undefined (flag OFF)",
         );
       }
+      return result;
+    };
 
-      // --- Class registry fallback ---
-      const cls = this.getClassFor(tag);
-      const deserializedState = this.deserialize(state, runtime, registry);
-
-      if (cls) {
-        if (this.lenient) {
-          try {
-            return cls[RECONSTRUCT](
-              deserializedState,
-              runtime,
-            ) as unknown as FabricValue;
-          } catch (e: unknown) {
-            return new ProblematicValue(
-              tag,
-              deserializedState,
-              e instanceof Error ? e.message : String(e),
-            ) as unknown as FabricValue;
-          }
-        }
-        return cls[RECONSTRUCT](
-          deserializedState,
-          runtime,
-        ) as unknown as FabricValue;
-      }
-
-      // Unknown type: preserve for round-tripping.
-      return new UnknownValue(
-        tag,
-        deserializedState,
-      ) as unknown as FabricValue;
-    }
-
-    // Primitives pass through.
-    if (
-      data === null || typeof data === "boolean" ||
-      typeof data === "number" || typeof data === "string"
-    ) {
-      return data;
-    }
-
-    // Arrays: recursively deserialize elements.
-    if (Array.isArray(data)) {
-      let logicalLength = 0;
-      for (const entry of data) {
-        const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
-          logicalLength += entryDecoded.state as number;
-        } else {
-          logicalLength++;
-        }
-      }
-
-      const result = new Array(logicalLength);
-      let targetIndex = 0;
-      for (const entry of data) {
-        const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
-          targetIndex += entryDecoded.state as number;
-        } else {
-          result[targetIndex] = this.deserialize(entry, runtime, registry);
-          targetIndex++;
-        }
-      }
-      return Object.freeze(result);
-    }
-
-    // Plain objects: recursively deserialize values, then freeze.
-    const result: Record<string, FabricValue> = {};
-    for (const [key, val] of Object.entries(data)) {
-      result[key] = this.deserialize(val, runtime, registry);
-    }
-    return Object.freeze(result);
+    valueFromJson = (
+      json: string,
+      _runtime: ReconstructionContext,
+    ): FabricValue => {
+      return JSON.parse(json) as FabricValue;
+    };
   }
 }
+
+/**
+ * Activates or deactivates unified JSON encoding mode. Called by the
+ * `Runtime` constructor to propagate
+ * `ExperimentalOptions.unifiedJsonEncoding` into the memory layer.
+ */
+export function setJsonEncodingConfig(enabled: boolean): void {
+  jsonEncodingEnabled = enabled;
+  configureDispatch();
+}
+
+/**
+ * Restores unified JSON encoding mode to its default (disabled). Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetJsonEncodingConfig(): void {
+  jsonEncodingEnabled = false;
+  configureDispatch();
+}
+
+// ---------------------------------------------------------------------------
+// Initialize dispatch to passthrough mode at module load.
+// ---------------------------------------------------------------------------
+
+configureDispatch();

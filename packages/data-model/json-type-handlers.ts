@@ -1,9 +1,9 @@
-import type { FabricValue } from "./fabric-value.ts";
-import { DECONSTRUCT, type FabricInstance } from "./fabric-instance.ts";
 import {
-  isFabricInstance,
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
   type ReconstructionContext,
-} from "./fabric-value.ts";
+} from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { ProblematicValue } from "./problematic-value.ts";
 
@@ -343,7 +343,7 @@ export const StorableInstanceHandler: TypeHandler = {
   tag: "",
 
   canSerialize(value: FabricValue): boolean {
-    return isFabricInstance(value);
+    return value instanceof FabricInstance;
   },
 
   serialize(
@@ -392,7 +392,7 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   // by instanceof, and must be checked before the generic StorableInstanceHandler.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
-  // FabricInstance (generic -- checked via isFabricInstance brand).
+  // FabricInstance (generic -- checked via instanceof).
   // Covers FabricError, UnknownValue, ProblematicValue, etc.
   registry.register(StorableInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).

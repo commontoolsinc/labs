@@ -1,9 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
+import {
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  RECONSTRUCT,
+  type ReconstructionContext,
+} from "../interface.ts";
 import {
   FabricError,
   FabricMap,
@@ -11,9 +14,8 @@ import {
   FabricSet,
   FabricUint8Array,
   isConvertibleNativeInstance,
-  nativeFromFabricValueModern,
-  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
+import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
   NATIVE_TAGS,
@@ -38,9 +40,9 @@ describe("fabric-native-instances", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricError", () => {
-    it("implements FabricInstance (isFabricInstance returns true)", () => {
+    it("implements FabricInstance (instanceof returns true)", () => {
       const se = new FabricError(new Error("test"));
-      expect(isFabricInstance(se)).toBe(true);
+      expect(se instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag 'Error@1'", () => {
@@ -291,7 +293,7 @@ describe("fabric-native-instances", () => {
   describe("stub wrappers", () => {
     it("FabricMap implements FabricInstance", () => {
       const sm = new FabricMap(new Map());
-      expect(isFabricInstance(sm)).toBe(true);
+      expect(sm instanceof FabricInstance).toBe(true);
       expect(sm.typeTag).toBe("Map@1");
     });
 
@@ -347,7 +349,7 @@ describe("fabric-native-instances", () => {
 
     it("FabricSet implements FabricInstance", () => {
       const ss = new FabricSet(new Set());
-      expect(isFabricInstance(ss)).toBe(true);
+      expect(ss instanceof FabricInstance).toBe(true);
       expect(ss.typeTag).toBe("Set@1");
     });
 
@@ -392,7 +394,7 @@ describe("fabric-native-instances", () => {
 
     it("FabricUint8Array implements FabricInstance", () => {
       const su = new FabricUint8Array(new Uint8Array([1, 2, 3]));
-      expect(isFabricInstance(su)).toBe(true);
+      expect(su instanceof FabricInstance).toBe(true);
       expect(su.typeTag).toBe("Bytes@1");
     });
 
@@ -424,146 +426,6 @@ describe("fabric-native-instances", () => {
       const result = su.toNativeValue(false);
       expect(result).toBe(bytes); // same reference
       expect(result).toBeInstanceOf(Uint8Array);
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // nativeValueFromFabricValue (shallow unwrap)
-  // --------------------------------------------------------------------------
-
-  describe("nativeValueFromFabricValue", () => {
-    it("unwraps FabricError to frozen Error (default)", () => {
-      const err = new TypeError("test");
-      const se = new FabricError(err);
-      const result = nativeValueFromFabricValue(se as FabricValue);
-      // Creates a frozen copy since the input error is unfrozen.
-      expect(result).toBeInstanceOf(TypeError);
-      expect((result as Error).message).toBe("test");
-      expect(Object.isFrozen(result)).toBe(true);
-    });
-
-    it("unwraps FabricMap to FrozenMap (default frozen)", () => {
-      const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new FabricMap(map);
-      const result = nativeValueFromFabricValue(sm as FabricValue);
-      expect(result).toBeInstanceOf(FrozenMap);
-      expect((result as FrozenMap<string, number>).get("a")).toBe(1);
-    });
-
-    it("unwraps FabricMap to original Map when frozen=false", () => {
-      const map = new Map<FabricValue, FabricValue>([["a", 1]]);
-      const sm = new FabricMap(map);
-      const result = nativeValueFromFabricValue(sm as FabricValue, false);
-      expect(result).toBe(map); // same reference
-      expect(result).toBeInstanceOf(Map);
-      expect(result).not.toBeInstanceOf(FrozenMap);
-    });
-
-    it("unwraps FabricSet to FrozenSet (default frozen)", () => {
-      const set = new Set<FabricValue>([1, 2, 3]);
-      const ss = new FabricSet(set);
-      const result = nativeValueFromFabricValue(ss as FabricValue);
-      expect(result).toBeInstanceOf(FrozenSet);
-      expect((result as FrozenSet<number>).has(1)).toBe(true);
-    });
-
-    it("unwraps FabricSet to original Set when frozen=false", () => {
-      const set = new Set<FabricValue>([1, 2, 3]);
-      const ss = new FabricSet(set);
-      const result = nativeValueFromFabricValue(ss as FabricValue, false);
-      expect(result).toBe(set); // same reference
-      expect(result).toBeInstanceOf(Set);
-      expect(result).not.toBeInstanceOf(FrozenSet);
-    });
-
-    it("unwraps FabricUint8Array to Blob (default frozen)", () => {
-      const bytes = new Uint8Array([1, 2, 3]);
-      const su = new FabricUint8Array(bytes);
-      const result = nativeValueFromFabricValue(su as FabricValue);
-      expect(result).toBeInstanceOf(Blob);
-      expect((result as Blob).size).toBe(3);
-    });
-
-    it("unwraps FabricUint8Array to original Uint8Array when frozen=false", () => {
-      const bytes = new Uint8Array([1, 2, 3]);
-      const su = new FabricUint8Array(bytes);
-      const result = nativeValueFromFabricValue(su as FabricValue, false);
-      expect(result).toBe(bytes); // same reference
-    });
-
-    it("passes through primitives", () => {
-      expect(nativeValueFromFabricValue(42)).toBe(42);
-      expect(nativeValueFromFabricValue("hello")).toBe("hello");
-      expect(nativeValueFromFabricValue(null)).toBe(null);
-      expect(nativeValueFromFabricValue(true)).toBe(true);
-    });
-
-    it("returns frozen copy of unfrozen plain objects (frozen=true)", () => {
-      const obj = { a: 1 } as FabricValue;
-      const result = nativeValueFromFabricValue(obj);
-      expect(Object.isFrozen(result)).toBe(true);
-      expect((result as Record<string, unknown>).a).toBe(1);
-    });
-
-    it("passes through frozen plain objects (frozen=true)", () => {
-      const obj = Object.freeze({ a: 1 }) as FabricValue;
-      expect(nativeValueFromFabricValue(obj)).toBe(obj);
-    });
-
-    it("passes through unfrozen plain objects (frozen=false)", () => {
-      const obj = { a: 1 } as FabricValue;
-      expect(nativeValueFromFabricValue(obj, false)).toBe(obj);
-    });
-
-    it("returns frozen copy of unfrozen arrays (frozen=true)", () => {
-      const arr = [1, 2] as FabricValue;
-      const result = nativeValueFromFabricValue(arr);
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(result).toEqual([1, 2]);
-    });
-
-    it("passes through frozen arrays (frozen=true)", () => {
-      const arr = Object.freeze([1, 2]) as FabricValue;
-      expect(nativeValueFromFabricValue(arr)).toBe(arr);
-    });
-
-    it("passes through unfrozen arrays (frozen=false)", () => {
-      const arr = [1, 2] as FabricValue;
-      expect(nativeValueFromFabricValue(arr, false)).toBe(arr);
-    });
-
-    it("freezing a sparse array preserves holes", () => {
-      // Create a sparse array: [1, <hole>, 3]
-      const sparse = new Array(3) as FabricValue[];
-      sparse[0] = 1 as FabricValue;
-      sparse[2] = 3 as FabricValue;
-      const result = nativeValueFromFabricValue(
-        sparse as FabricValue,
-      ) as unknown[];
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(result.length).toBe(3);
-      expect(result[0]).toBe(1);
-      expect(result[2]).toBe(3);
-      // Verify index 1 is a true hole, not undefined.
-      expect(!(1 in result)).toBe(true);
-    });
-
-    it("unfreezing a sparse array preserves holes", () => {
-      // Create a frozen sparse array: [1, <hole>, 3]
-      const sparse = new Array(3) as FabricValue[];
-      sparse[0] = 1 as FabricValue;
-      sparse[2] = 3 as FabricValue;
-      Object.freeze(sparse);
-      const result = nativeValueFromFabricValue(
-        sparse as FabricValue,
-        false,
-      ) as unknown[];
-      expect(Object.isFrozen(result)).toBe(false);
-      expect(result.length).toBe(3);
-      expect(result[0]).toBe(1);
-      expect(result[2]).toBe(3);
-      // Verify index 1 is a true hole, not undefined.
-      expect(!(1 in result)).toBe(true);
     });
   });
 

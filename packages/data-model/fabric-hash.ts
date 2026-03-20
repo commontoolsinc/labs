@@ -7,7 +7,7 @@
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
  */
-import { FabricPrimitive } from "./fabric-primitive.ts";
+import { FabricPrimitive } from "./interface.ts";
 import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
 export class FabricHash extends FabricPrimitive {

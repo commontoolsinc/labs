@@ -271,7 +271,10 @@ export function normalizeAndDiff(
   if (isWriteRedirectLink(newValue)) {
     if (
       isWriteRedirectLink(currentValue) &&
-      areNormalizedLinksSame(parseLink(currentValue, link), link)
+      areNormalizedLinksSame(
+        parseLink(currentValue, link),
+        parseLink(newValue, link),
+      )
     ) {
       diffLogger.debug(
         "diff",

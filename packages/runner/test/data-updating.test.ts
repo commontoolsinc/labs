@@ -365,6 +365,27 @@ describe("data-updating", () => {
       expect(changes[0].value).toBe(5);
     });
 
+    it("should no-op when writing the same write redirect alias twice", () => {
+      const testCell = runtime.getCell<{
+        alias: any;
+      }>(
+        space,
+        "normalizeAndDiff test duplicate same alias",
+        undefined,
+        tx,
+      );
+
+      const aliasLink = { $alias: { path: ["some_value"] } };
+      testCell.set({ alias: aliasLink });
+
+      const current = testCell.getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, {
+        alias: aliasLink,
+      });
+
+      expect(changes.length).toBe(0);
+    });
+
     it("should follow aliases", () => {
       const testCell = runtime.getCell<{
         value: number;

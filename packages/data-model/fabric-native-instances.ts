@@ -1,10 +1,10 @@
-import type { FabricValue } from "./fabric-value.ts";
-import { DECONSTRUCT, FabricInstance, RECONSTRUCT } from "./fabric-instance.ts";
 import {
-  isFabricInstance,
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  RECONSTRUCT,
   type ReconstructionContext,
-} from "./fabric-value.ts";
-import { FabricPrimitive } from "./fabric-primitive.ts";
+} from "./interface.ts";
 
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
@@ -217,7 +217,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
    * Reconstruct a `FabricError` from its essential state. Nested values
    * in `state` have already been reconstructed by the serialization system.
    * Returns a `FabricError` wrapping the reconstructed `Error`; callers
-   * who need the native `Error` use `nativeValueFromFabricValue()`.
+   * who need the native `Error` use `nativeFromFabricValue()`.
    */
   static [RECONSTRUCT](
     state: FabricValue,
@@ -467,189 +467,4 @@ export class FabricUint8Array extends FabricNativeWrapper<Blob | Uint8Array> {
   ): FabricUint8Array {
     throw new Error("FabricUint8Array: not yet implemented");
   }
-}
-
-// ---------------------------------------------------------------------------
-// Unwrapping: FabricValue -> native JS types
-// ---------------------------------------------------------------------------
-
-/**
- * Shallow unwrap: convert a `FabricValue` to a native JS value, with
- * freeze-state adjustment for types that support it.
- *
- * Behavior by value category:
- * - **FabricNativeWrapper** (Error, Map, Set, Uint8Array): delegates to
- *   `toNativeValue(frozen)`, which adjusts freeze state.
- * - **Arrays and plain objects**: freeze state is adjusted to match `frozen`
- *   (shallow copy if needed).
- * - **FabricPrimitive** (EpochNsec, EpochDays, ContentId): pass through
- *   as-is (always frozen by construction).
- * - **Non-native FabricInstance** (Cell, Stream, UnknownValue, etc.):
- *   pass through as-is (freeze state is an internal concern of the wrapper).
- * - **Primitives** (null, undefined, boolean, number, string, bigint):
- *   inherently immutable, pass through unchanged.
- */
-export function nativeValueFromFabricValue(
-  value: FabricValue,
-  frozen = true,
-): unknown {
-  if (value instanceof FabricNativeWrapper) {
-    return value.toNativeValue(frozen);
-  }
-
-  // Special primitives (FabricEpochNsec, FabricEpochDays) are simple
-  // value wrappers -- pass through as-is.
-  if (value instanceof FabricPrimitive) {
-    return value;
-  }
-
-  // Primitives (null, undefined, boolean, number, string, bigint) are
-  // inherently immutable -- no freeze adjustment needed.
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value;
-  }
-
-  // Non-native FabricInstance values (Cell, Stream, UnknownValue, etc.)
-  // pass through unchanged -- spreading would strip their prototype/methods,
-  // and their freeze state is an internal concern of the wrapper.
-  if (isFabricInstance(value)) return value;
-
-  // For arrays and plain objects: ensure the freeze state matches `frozen`.
-  const isFrozen = Object.isFrozen(value);
-  if (frozen === isFrozen) return value; // already matches
-
-  if (frozen) {
-    // Value is unfrozen but caller wants frozen -> freeze a shallow copy.
-    if (Array.isArray(value)) {
-      const copy = new Array(value.length);
-      for (let i = 0; i < value.length; i++) {
-        if (i in value) copy[i] = value[i];
-      }
-      return Object.freeze(copy);
-    }
-    return Object.freeze({ ...value });
-  }
-
-  // Value is frozen but caller wants unfrozen -> shallow copy.
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) copy[i] = value[i];
-    }
-    return copy;
-  }
-  return { ...(value as Record<string, unknown>) };
-}
-
-/**
- * Deep unwrap: recursively walk a `FabricValue` tree, unwrapping any
- * `FabricNativeWrapper` values to their underlying native types via
- * `toNativeValue()`. Non-native `FabricInstance` values (Cell, Stream,
- * UnknownValue, etc.) pass through as-is.
- *
- * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
- * Arrays and objects are copied and frozen/unfrozen accordingly. For
- * `FabricError`, the inner Error's `cause` and custom properties are also
- * recursively unwrapped (since they may contain `FabricInstance` wrappers).
- *
- * When `frozen` is true (the default), collections are returned as FrozenMap /
- * FrozenSet and plain objects/arrays are frozen. When false, mutable copies are
- * returned.
- */
-export function nativeFromFabricValueModern(
-  value: FabricValue,
-  frozen = true,
-): unknown {
-  // FabricError: deep-unwrap the inner Error's internals (cause, custom
-  // properties) since they may contain FabricInstance wrappers.
-  if (value instanceof FabricError) {
-    return deepUnwrapError(value.error, frozen);
-  }
-
-  // Other native wrappers (Map, Set, Uint8Array) -> native types.
-  if (value instanceof FabricNativeWrapper) {
-    return value.toNativeValue(frozen);
-  }
-
-  // Special primitives (FabricEpochNsec, FabricEpochDays) are simple
-  // value wrappers -- pass through as-is.
-  if (value instanceof FabricPrimitive) {
-    return value;
-  }
-
-  // Other FabricInstance (Cell, Stream, UnknownValue, etc.) -- pass through.
-  if (isFabricInstance(value)) return value;
-
-  // Fabric primitives (null, undefined, boolean, number, string, bigint)
-  // pass through. Note: `symbol` and `function` are NOT fabric-compatible and cannot
-  // reach here because the `FabricValue` type excludes them.
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value;
-  }
-
-  // Arrays -- recursively unwrap elements, then freeze if requested.
-  if (Array.isArray(value)) {
-    const result: unknown[] = [];
-    for (let i = 0; i < value.length; i++) {
-      if (!(i in value)) {
-        // Preserve sparse holes.
-        result.length = i + 1;
-      } else {
-        result[i] = nativeFromFabricValueModern(
-          value[i] as FabricValue,
-          frozen,
-        );
-      }
-    }
-    if (frozen) Object.freeze(result);
-    return result;
-  }
-
-  // Objects -- recursively unwrap values, then freeze if requested.
-  // Skip prototype-sensitive keys to prevent prototype pollution.
-  const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value)) {
-    if (!UNSAFE_KEYS.has(key)) {
-      result[key] = nativeFromFabricValueModern(
-        val as FabricValue,
-        frozen,
-      );
-    }
-  }
-  if (frozen) Object.freeze(result);
-  return result;
-}
-
-/**
- * Deep-unwrap an Error's internals: recursively unwrap `cause` and custom
- * enumerable properties that may contain `FabricInstance` wrappers. Creates
- * a copy of the Error to avoid mutating the stored value. Freezes the result
- * when `frozen` is true.
- */
-function deepUnwrapError(error: Error, frozen: boolean): Error {
-  const copy = new (error.constructor as ErrorConstructor)(error.message);
-  if (copy.name !== error.name) copy.name = error.name;
-  if (error.stack !== undefined) copy.stack = error.stack;
-
-  // Recursively unwrap cause.
-  if (error.cause !== undefined) {
-    copy.cause = nativeFromFabricValueModern(
-      error.cause as FabricValue,
-      frozen,
-    );
-  }
-
-  // Recursively unwrap custom enumerable properties.
-  const SKIP = new Set(["name", "message", "stack", "cause"]);
-  for (const key of Object.keys(error)) {
-    if (SKIP.has(key) || UNSAFE_KEYS.has(key)) continue;
-    (copy as unknown as Record<string, unknown>)[key] =
-      nativeFromFabricValueModern(
-        (error as unknown as Record<string, unknown>)[key] as FabricValue,
-        frozen,
-      );
-  }
-
-  if (frozen) Object.freeze(copy);
-  return copy;
 }

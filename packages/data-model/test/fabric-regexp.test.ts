@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, RECONSTRUCT } from "../fabric-instance.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
+import {
+  DECONSTRUCT,
+  FabricInstance,
+  type FabricValue,
+  RECONSTRUCT,
+  type ReconstructionContext,
+} from "../interface.ts";
 import {
   FabricNativeWrapper,
   FabricRegExp,
   isConvertibleNativeInstance,
-  nativeValueFromFabricValue,
 } from "../fabric-native-instances.ts";
 import {
   canBeStored,
@@ -40,9 +42,9 @@ describe("FabricRegExp", () => {
   // --------------------------------------------------------------------------
 
   describe("wrapper basics", () => {
-    it("implements FabricInstance (isFabricInstance returns true)", () => {
+    it("implements FabricInstance (instanceof check)", () => {
       const sr = new FabricRegExp(/abc/gi);
-      expect(isFabricInstance(sr)).toBe(true);
+      expect(sr instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag 'RegExp@1'", () => {
@@ -244,31 +246,6 @@ describe("FabricRegExp", () => {
       } finally {
         resetDataModelConfig();
       }
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Unwrapping: nativeValueFromFabricValue
-  // --------------------------------------------------------------------------
-
-  describe("nativeValueFromFabricValue", () => {
-    it("unwraps FabricRegExp to frozen RegExp (default)", () => {
-      const sr = new FabricRegExp(/abc/gi);
-      const result = nativeValueFromFabricValue(sr as FabricValue);
-      expect(result).toBeInstanceOf(RegExp);
-      expect((result as RegExp).source).toBe("abc");
-      expect((result as RegExp).flags).toBe("gi");
-      expect(Object.isFrozen(result)).toBe(true);
-    });
-
-    it("unwraps FabricRegExp to unfrozen RegExp when frozen=false", () => {
-      const sr = new FabricRegExp(/abc/gi);
-      const result = nativeValueFromFabricValue(
-        sr as FabricValue,
-        false,
-      );
-      expect(result).toBeInstanceOf(RegExp);
-      expect(Object.isFrozen(result)).toBe(false);
     });
   });
 

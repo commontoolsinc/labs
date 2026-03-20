@@ -1,8 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricPrimitive } from "../fabric-primitive.ts";
-import { isFabricInstance } from "../fabric-instance.ts";
+import { FabricInstance, FabricPrimitive } from "../interface.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -82,14 +81,14 @@ describe("FabricEpochDays", () => {
 describe("FabricEpochNsec (protocol)", () => {
   it("is NOT a FabricInstance (no DECONSTRUCT)", () => {
     const sn = new FabricEpochNsec(0n);
-    expect(isFabricInstance(sn)).toBe(false);
+    expect(sn instanceof FabricInstance).toBe(false);
   });
 });
 
 describe("FabricEpochDays (protocol)", () => {
   it("is NOT a FabricInstance (no DECONSTRUCT)", () => {
     const sd = new FabricEpochDays(0n);
-    expect(isFabricInstance(sd)).toBe(false);
+    expect(sd instanceof FabricInstance).toBe(false);
   });
 });
 

@@ -29,7 +29,7 @@ function throwIfFrozen(obj: object): void {
 /**
  * Effectively-immutable `Map` wrapper. Extends `Map` so that `instanceof Map`
  * checks still pass, but all mutation methods throw. Returned by
- * `nativeValueFromFabricValue()` for `FabricMap` to preserve the
+ * `nativeFromFabricValueModern()` for `FabricMap` to preserve the
  * immutability guarantee across the FabricValue -> native round-trip.
  *
  * Uses `Object.freeze(this)` after population; mutation overrides check
@@ -64,7 +64,7 @@ export class FrozenMap<K, V> extends Map<K, V> {
 /**
  * Effectively-immutable `Set` wrapper. Extends `Set` so that `instanceof Set`
  * checks still pass, but all mutation methods throw. Returned by
- * `nativeValueFromFabricValue()` for `FabricSet` to preserve the
+ * `nativeFromFabricValueModern()` for `FabricSet` to preserve the
  * immutability guarantee across the FabricValue -> native round-trip.
  *
  * Uses `Object.freeze(this)` after population; mutation overrides check

@@ -304,13 +304,14 @@ export interface BuilderFunctionsAndConstants {
 
   // Fabric value classes
   FabricInstance:
-    typeof import("@commontools/data-model/fabric-instance").FabricInstance;
+    typeof import("@commontools/data-model/fabric-value").FabricInstance;
   FabricPrimitive:
-    typeof import("@commontools/data-model/fabric-primitive").FabricPrimitive;
+    typeof import("@commontools/data-model/fabric-value").FabricPrimitive;
   FabricEpochNsec:
     typeof import("@commontools/data-model/fabric-epoch").FabricEpochNsec;
   FabricEpochDays:
     typeof import("@commontools/data-model/fabric-epoch").FabricEpochDays;
+  FabricHash: typeof import("@commontools/data-model/fabric-hash").FabricHash;
 }
 
 // Runtime interface needed by createCell

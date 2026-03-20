@@ -13,7 +13,7 @@ import { createHasher, type IncrementalHasher } from "./sha256-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import { FabricUint8Array } from "./fabric-native-instances.ts";
-import { DECONSTRUCT, type FabricInstance } from "./fabric-instance.ts";
+import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
