@@ -775,6 +775,30 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
   });
 
   await t.step(
+    "allows arithmetic computation inside authored ifElse branches",
+    async () => {
+      const source = `/// <cts-enable />
+      import { ifElse, pattern } from "commontools";
+
+      export default pattern<{ count: number; show: boolean }>(({ count, show }) => {
+        return {
+          value: ifElse(show, count + 1, 0),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Arithmetic inside authored ifElse branches should be owned by helper rewriting",
+      );
+    },
+  );
+
+  await t.step(
     "allows nested map/filter callbacks inside module-scope helpers",
     async () => {
       const source = `/// <cts-enable />

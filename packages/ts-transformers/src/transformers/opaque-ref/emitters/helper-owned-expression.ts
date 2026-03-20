@@ -13,6 +13,15 @@ import {
 } from "./compute-wrap-invariants.ts";
 import type { Emitter } from "../types.ts";
 
+function isHelperOwnedComputationExpression(
+  expression: ts.Expression,
+): boolean {
+  return ts.isBinaryExpression(expression) ||
+    ts.isPrefixUnaryExpression(expression) ||
+    ts.isPostfixUnaryExpression(expression) ||
+    ts.isConditionalExpression(expression);
+}
+
 interface RewriteHelperOwnedExpressionParams {
   readonly expression: ts.Expression;
   readonly containerLabel: string;
@@ -54,6 +63,9 @@ export function rewriteHelperOwnedExpression(
   const pendingRewrite = relevantDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expression, analyze, context)
     : undefined;
+  const plan = relevantDataFlows.length > 0
+    ? createBindingPlan(relevantDataFlows)
+    : undefined;
 
   if (pendingRewrite) {
     assertValidComputeWrapCandidate(
@@ -63,10 +75,21 @@ export function rewriteHelperOwnedExpression(
       context,
     );
 
-    const plan = createBindingPlan(relevantDataFlows);
-    const derived = createComputedCallForExpression(expression, plan, context);
+    const derived = createComputedCallForExpression(expression, plan!, context);
     if (derived) {
       return derived;
+    }
+  }
+
+  if (
+    plan &&
+    isHelperOwnedComputationExpression(expression)
+  ) {
+    const forced = createComputedCallForExpression(expression, plan, context, {
+      allowDirectExpressionWrap: true,
+    });
+    if (forced) {
+      return forced;
     }
   }
 

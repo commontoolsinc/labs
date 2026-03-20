@@ -2,6 +2,7 @@ import {
   CapabilityLoweringTransformer,
   CastValidationTransformer,
   EmptyArrayOfValidationTransformer,
+  HelperOwnedExpressionSiteLoweringTransformer,
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
@@ -52,6 +53,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new OpaqueRefJSXTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
+      new HelperOwnedExpressionSiteLoweringTransformer(sharedOps),
     );
 
     transformers.push(new CapabilityLoweringTransformer(sharedOps));

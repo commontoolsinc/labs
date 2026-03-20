@@ -2517,6 +2517,30 @@ export default pattern<{ items: Item[]; limit: number }>(({ items, limit }) => (
 );
 
 Deno.test(
+  "Capability-first: authored ifElse arithmetic branch wraps computation",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern } from "commontools";
+
+export default pattern<{ count: number; show: boolean }>(({ count, show }) => ({
+  value: ifElse(show, count + 1, 0),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(output, "__ctHelpers.computed((): number => count + 1)");
+    assert(
+      !output.includes("ifElse(show, count + 1, 0)"),
+      "expected authored ifElse arithmetic branch to be compute-wrapped",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse condition factory call keeps captured property access inside factory boundary",
   async () => {
     const source = `/// <cts-enable />

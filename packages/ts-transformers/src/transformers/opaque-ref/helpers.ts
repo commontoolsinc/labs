@@ -258,6 +258,7 @@ export function createComputedCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
   context: TransformationContext,
+  options: { allowDirectExpressionWrap?: boolean } = {},
 ): ts.Expression | undefined {
   if (plan.entries.length === 0) return undefined;
 
@@ -275,7 +276,11 @@ export function createComputedCallForExpression(
     }
   }
 
-  if (!plan.usesObjectBinding && plan.entries.length === 1) {
+  if (
+    !options.allowDirectExpressionWrap &&
+    !plan.usesObjectBinding &&
+    plan.entries.length === 1
+  ) {
     const [entry] = plan.entries;
     if (entry && entry.dataFlow.expression === expression) {
       return undefined;

@@ -175,6 +175,7 @@ function getHelperBoundaryKind(
     if (
       parent &&
       ts.isCallExpression(parent) &&
+      parent.pos >= 0 &&
       ts.isExpression(current) &&
       parent.arguments.includes(current)
     ) {
@@ -292,6 +293,78 @@ function canRewriteExpressionSite(
   return analysis.requiresRewrite || isLogicalBinaryExpression(expression);
 }
 
+function canDeferExpressionSiteToHelperBoundary(
+  siteInfo: ExpressionSitePolicyInfo,
+  analysis: ReturnType<AnalyzeFn>,
+): boolean {
+  if (!siteInfo.helperBoundaryKind) {
+    return false;
+  }
+
+  if (!siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute) {
+    return false;
+  }
+
+  if (siteInfo.syntheticComputeOwned) {
+    return false;
+  }
+
+  if (siteInfo.reactiveContext.kind !== "pattern") {
+    return false;
+  }
+
+  if (siteInfo.deferredJsxArrayMethod) {
+    return false;
+  }
+
+  return analysis.containsOpaqueRef && analysis.requiresRewrite;
+}
+
+function canRewriteHelperOwnedExpressionSite(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  if (containerKind === "jsx-expression") {
+    return false;
+  }
+
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  if (!siteInfo.helperBoundaryKind) {
+    return false;
+  }
+
+  if (!siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute) {
+    return false;
+  }
+
+  if (siteInfo.syntheticComputeOwned || siteInfo.deferredJsxArrayMethod) {
+    return false;
+  }
+
+  if (siteInfo.reactiveContext.kind !== "pattern") {
+    return false;
+  }
+
+  if (
+    !ts.isBinaryExpression(expression) &&
+    !ts.isPrefixUnaryExpression(expression) &&
+    !ts.isPostfixUnaryExpression(expression) &&
+    !ts.isConditionalExpression(expression)
+  ) {
+    return false;
+  }
+
+  const analysis = analyze(expression);
+  return analysis.containsOpaqueRef && analysis.requiresRewrite;
+}
+
 export function findLowerableExpressionSite(
   expression: ts.Expression,
   context: TransformationContext,
@@ -308,14 +381,23 @@ export function findLowerableExpressionSite(
 
     if (ts.isExpression(current)) {
       const containerKind = getExpressionContainerKind(current);
-      if (
-        containerKind &&
-        canRewriteExpressionSite(current, containerKind, context, analyze)
-      ) {
-        return {
-          expression: current,
+      if (containerKind) {
+        const siteInfo = getExpressionSitePolicyInfo(
+          current,
           containerKind,
-        };
+          context,
+          analyze,
+        );
+        const analysis = analyze(current);
+        if (
+          canRewriteExpressionSite(current, containerKind, context, analyze) ||
+          canDeferExpressionSiteToHelperBoundary(siteInfo, analysis)
+        ) {
+          return {
+            expression: current,
+            containerKind,
+          };
+        }
       }
     }
 
@@ -376,6 +458,48 @@ export function rewriteExpressionSite(
     visit,
     context.tsContext,
   ) as ts.Expression;
+}
+
+export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
+  root: T,
+  context: TransformationContext,
+): T {
+  const analyze = createDataFlowAnalyzer(context.checker);
+
+  const visit: ts.Visitor = (node) => {
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+
+    if (ts.isExpression(visited)) {
+      const containerKind = getExpressionContainerKind(visited);
+      if (
+        containerKind &&
+        canRewriteHelperOwnedExpressionSite(
+          visited,
+          containerKind,
+          context,
+          analyze,
+        )
+      ) {
+        const analysis = analyze(visited);
+        const result = rewriteExpression({
+          expression: visited,
+          analysis,
+          context,
+          analyze,
+          reactiveContextKind: "pattern",
+          inSafeContext: false,
+          containerKind,
+        });
+        if (result) {
+          return result;
+        }
+      }
+    }
+
+    return visited;
+  };
+
+  return ts.visitNode(root, visit) as T;
 }
 
 export function rewriteArrayMethodCallbackExpressionSites(
