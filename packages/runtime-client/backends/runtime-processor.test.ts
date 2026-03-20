@@ -118,7 +118,7 @@ describe("sanitizeForPostMessage", () => {
       expect(result.dangerous).toBe("[Unreadable]");
     });
 
-    it("handles proxies with throwing get trap - walks keys but marks values unreadable", () => {
+    it("handles proxies with throwing get trap", () => {
       const throwingProxy = new Proxy(
         {},
         {
@@ -134,12 +134,10 @@ describe("sanitizeForPostMessage", () => {
         },
       );
 
-      // The proxy itself can be iterated (ownKeys works), but reading values throws
-      const result = sanitizeForPostMessage(throwingProxy) as Record<
-        string,
-        unknown
-      >;
-      expect(result).toEqual({ problematic: "[Unreadable]" });
+      // isCellResult() probes symbol-backed access first, so a hostile get trap
+      // is treated as an uncloneable object before the plain-object walker runs.
+      const result = sanitizeForPostMessage(throwingProxy);
+      expect(result).toBe("[Object - uncloneable]");
     });
 
     it("handles proxies that throw on Object.keys", () => {
