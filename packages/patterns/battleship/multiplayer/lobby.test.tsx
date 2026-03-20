@@ -99,7 +99,7 @@ export default pattern(() => {
   // Player 1 has ships assigned
   const assert_player1_has_ships = computed(
     () =>
-      lobby.player1 !== null &&
+      lobby.player1 != null &&
       Array.isArray(lobby.player1.ships) &&
       lobby.player1.ships.length === 5,
   );
@@ -107,7 +107,7 @@ export default pattern(() => {
   // Player 1 has a color
   const assert_player1_has_color = computed(
     () =>
-      lobby.player1 !== null &&
+      lobby.player1 != null &&
       typeof lobby.player1.color === "string" &&
       lobby.player1.color.length > 0,
   );
@@ -130,7 +130,7 @@ export default pattern(() => {
   // Player 2 has ships assigned
   const assert_player2_has_ships = computed(
     () =>
-      lobby.player2 !== null &&
+      lobby.player2 != null &&
       Array.isArray(lobby.player2.ships) &&
       lobby.player2.ships.length === 5,
   );

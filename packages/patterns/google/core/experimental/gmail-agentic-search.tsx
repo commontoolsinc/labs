@@ -33,6 +33,8 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
+  safeRandom,
   Stream,
   UI,
   wish,
@@ -388,7 +390,7 @@ const stopScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan stopped");
@@ -403,7 +405,7 @@ const completeScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan completed");
@@ -432,12 +434,22 @@ const addDebugLogEntry = (
   entry: Omit<DebugLogEntry, "timestamp">,
 ) => {
   try {
-    logCell.push({ ...entry, timestamp: Date.now() });
+    logCell.push({ ...entry, timestamp: safeDateNow() });
   } catch (err) {
     // Log to console but don't let debug logging errors crash the agent
     console.error("[GmailAgenticSearch] Debug log error:", err);
   }
 };
+
+const createQueryId = (): string =>
+  `query-${safeDateNow()}-${
+    Math.floor(safeRandom() * 1_000_000_000)
+      .toString(36)
+  }`;
+
+function toArray<T>(value: readonly T[] | T[] | null | undefined): T[] {
+  return Array.isArray(value) ? [...value] : [];
+}
 
 // Handler for searching Gmail
 const searchGmailHandler = handler<
@@ -620,7 +632,7 @@ const searchGmailHandler = handler<
           {
             query: input.query,
             emailCount: emails.length,
-            timestamp: Date.now(),
+            timestamp: safeDateNow(),
           },
         ],
         status: "analyzing",
@@ -628,7 +640,7 @@ const searchGmailHandler = handler<
       });
 
       // Track query in localQueries for potential sharing
-      const currentLocalQueries = state.localQueries.get() || [];
+      const currentLocalQueries = toArray(state.localQueries.get());
       const existingQueryIndex = currentLocalQueries.findIndex(
         (q) =>
           q && q.query && q.query.toLowerCase() === input.query.toLowerCase(),
@@ -638,7 +650,7 @@ const searchGmailHandler = handler<
         // Update existing query using .key().key().set() for atomic updates
         const existing = currentLocalQueries[existingQueryIndex];
         const itemCell = state.localQueries.key(existingQueryIndex);
-        itemCell.key("lastUsed").set(Date.now());
+        itemCell.key("lastUsed").set(safeDateNow());
         itemCell.key("useCount").set(existing.useCount + 1);
         // Auto-increase effectiveness if it found results (capped at 5)
         itemCell.key("effectiveness").set(
@@ -650,14 +662,12 @@ const searchGmailHandler = handler<
         state.lastExecutedQueryIdCell.set(existing.id);
       } else if (emails.length > 0) {
         // Only add new query if it found results
-        const newQueryId = `query-${Date.now()}-${
-          Math.random().toString(36).slice(2, 8)
-        }`;
+        const newQueryId = createQueryId();
         const newQuery: LocalQuery = {
           id: newQueryId,
           query: input.query,
-          createdAt: Date.now(),
-          lastUsed: Date.now(),
+          createdAt: safeDateNow(),
+          lastUsed: safeDateNow(),
           useCount: 1,
           effectiveness: 1, // Start at 1 since it found results
           shareStatus: "private",
@@ -670,7 +680,7 @@ const searchGmailHandler = handler<
 
       // Auto-upvote community queries that found results
       if (emails.length > 0) {
-        const communityRefs = state.communityQueryRefs.get() || [];
+        const communityRefs = toArray(state.communityQueryRefs.get());
         const matchingCommunityQuery = communityRefs.find(
           (ref) =>
             ref && ref.query &&
@@ -832,7 +842,7 @@ const rateQueryHandler = handler<
   unknown,
   { queryId: string; rating: number; localQueries: Writable<LocalQuery[]> }
 >((_, state) => {
-  const queries = state.localQueries.get() || [];
+  const queries = toArray(state.localQueries.get());
   const index = queries.findIndex((q) => q.id === state.queryId);
   if (index >= 0) {
     state.localQueries.key(index).key("effectiveness").set(state.rating);
@@ -848,10 +858,10 @@ const deleteLocalQueryHandler = handler<
     pendingSubmissions: Writable<PendingSubmission[]>;
   }
 >((_, state) => {
-  const queries = state.localQueries.get() || [];
+  const queries = toArray(state.localQueries.get());
   state.localQueries.set(queries.filter((q) => q.id !== state.queryId));
   // Also remove from pending if exists
-  const pending = state.pendingSubmissions.get() || [];
+  const pending = toArray(state.pendingSubmissions.get());
   state.pendingSubmissions.set(
     pending.filter((p) => p.localQueryId !== state.queryId),
   );
@@ -867,8 +877,8 @@ const flagForShareHandler = handler<
   }
 >((_, state) => {
   // Read both cells upfront
-  const queries = state.localQueries.get() || [];
-  const pending = state.pendingSubmissions.get() || [];
+  const queries = toArray(state.localQueries.get());
+  const pending = toArray(state.pendingSubmissions.get());
 
   const qry = queries.find((q) => q.id === state.queryId);
   if (!qry) return;
@@ -904,12 +914,12 @@ const _flagQueryForSharingHandler = handler<
     pendingSubmissions: Writable<PendingSubmission[]>;
   }
 >((input, state) => {
-  const queries = state.localQueries.get() || [];
+  const queries = toArray(state.localQueries.get());
   const query = queries.find((q) => q.id === input.queryId);
   if (!query) return;
 
   // Check if already pending
-  const pending = state.pendingSubmissions.get() || [];
+  const pending = toArray(state.pendingSubmissions.get());
   if (pending.some((p) => p.localQueryId === input.queryId)) return;
 
   // Create pending submission (PII screening happens via generateObject below)
@@ -938,7 +948,7 @@ const _approvePendingSubmissionHandler = handler<
   { localQueryId: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
-  const submissions = state.pendingSubmissions.get() || [];
+  const submissions = toArray(state.pendingSubmissions.get());
   const idx = submissions.findIndex((s) =>
     s.localQueryId === input.localQueryId
   );
@@ -957,13 +967,13 @@ const _rejectPendingSubmissionHandler = handler<
   }
 >((input, state) => {
   // Remove from pending
-  const submissions = state.pendingSubmissions.get() || [];
+  const submissions = toArray(state.pendingSubmissions.get());
   state.pendingSubmissions.set(
     submissions.filter((s) => s.localQueryId !== input.localQueryId),
   );
 
   // Reset local query status to private
-  const queries = state.localQueries.get() || [];
+  const queries = toArray(state.localQueries.get());
   const idx = queries.findIndex((q) => q.id === input.localQueryId);
   if (idx >= 0) {
     state.localQueries.key(idx).key("shareStatus").set("private");
@@ -976,7 +986,7 @@ const _updateSanitizedQueryHandler = handler<
   { localQueryId: string; sanitizedQuery: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
-  const submissions = state.pendingSubmissions.get() || [];
+  const submissions = toArray(state.pendingSubmissions.get());
   const idx = submissions.findIndex((s) =>
     s.localQueryId === input.localQueryId
   );
@@ -1138,7 +1148,7 @@ const GmailAgenticSearch = pattern<
     const localQueriesWithFoundItems = derive(
       [localQueries, foundItemsTracker],
       ([queries, tracker]: [LocalQuery[], Record<string, number>]) => {
-        return (queries || []).map((q) => {
+        return toArray(queries).map((q) => {
           if (!q || !q.id) return q;
           const trackedCount = tracker[q.id] || 0;
           return { ...q, foundItems: trackedCount };
@@ -1219,14 +1229,14 @@ const GmailAgenticSearch = pattern<
       if (!a?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return Date.now() > (a.expiresAt - bufferMs);
+      return safeDateNow() > (a.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
     const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
     const hasGmailScope = derive(auth, (a: Auth) => {
-      const scopes = a?.scope || [];
+      const scopes = toArray(a?.scope);
       return scopes.includes(GMAIL_SCOPE);
     });
 
@@ -1276,7 +1286,7 @@ const GmailAgenticSearch = pattern<
         const agentRegistry = registriesCell.key(typeUrl)?.get?.();
         if (!agentRegistry) return [];
         // Return top queries sorted by score, keeping IDs for upvoting
-        return [...(agentRegistry.queries || [])]
+        return [...toArray<SharedQuery>(agentRegistry.queries)]
           .sort((a: SharedQuery, b: SharedQuery) =>
             (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes)
           )
@@ -1288,20 +1298,20 @@ const GmailAgenticSearch = pattern<
     // Just the query strings for combining with other suggestions
     const communityQueries = derive(
       communityQueryRefs,
-      (refs: CommunityQueryRef[]) => refs.map((r) => r.query),
+      (refs: CommunityQueryRef[]) => toArray(refs).map((r) => r.query),
     );
 
     // Combine all suggested queries: local effective + community + pattern-defined
     const allSuggestedQueries = derive(
       [suggestedQueries, localQueries, communityQueries],
       ([suggested, local, community]: [string[], LocalQuery[], string[]]) => {
-        const effectiveLocal = (local || [])
+        const effectiveLocal = toArray(local)
           .filter((q) => q && q.effectiveness >= 3)
           .map((q) => q.query);
         // Deduplicate and combine: pattern-defined first, then community, then local
         const all = new Set<string>();
-        (suggested || []).forEach((q) => all.add(q));
-        (community || []).forEach((q) => all.add(q));
+        toArray(suggested).forEach((q) => all.add(q));
+        toArray(community).forEach((q) => all.add(q));
         effectiveLocal.forEach((q) => all.add(q));
         return Array.from(all);
       },
@@ -2144,7 +2154,7 @@ When you're done searching, STOP calling tools and produce your final structured
           [localQueriesWithFoundItems, onlySaveQueriesWithItems],
           ([queries, onlyWithItems]: [LocalQuery[], boolean]) => {
             // Filter queries: when onlyWithItems is true, only show queries that found target items
-            const filteredQueries = (queries || []).filter(
+            const filteredQueries = toArray(queries).filter(
               (q): q is LocalQuery => {
                 if (!q) return false;
                 if (onlyWithItems) {
@@ -2357,7 +2367,7 @@ When you're done searching, STOP calling tools and produce your final structured
       pendingSubmissions,
       (submissions: PendingSubmission[]) => {
         // Filter out any undefined/null items first, then find unscreened submissions
-        const validSubmissions = (submissions || []).filter((
+        const validSubmissions = toArray(submissions).filter((
           s,
         ): s is PendingSubmission => s != null);
         const unscreened = validSubmissions.filter(
@@ -2445,7 +2455,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
       const pendingWritable = pendingSubmissions as Writable<
         PendingSubmission[]
       >;
-      const submissions = (pendingWritable.get() || []).filter((
+      const submissions = toArray(pendingWritable.get()).filter((
         s: PendingSubmission | null,
       ): s is PendingSubmission => s != null);
 
@@ -2468,10 +2478,10 @@ Be conservative: when in doubt, recommend "do_not_share".`,
         screeningData.sanitizedQuery || submission.originalQuery,
       );
       (itemCell.key("piiWarnings") as Writable<string[]>).set(
-        screeningData.piiFound || [],
+        toArray(screeningData.piiFound),
       );
       (itemCell.key("generalizabilityIssues") as Writable<string[]>).set(
-        screeningData.generalizabilityIssues || [],
+        toArray(screeningData.generalizabilityIssues),
       );
       (itemCell.key("recommendation") as Writable<
         "share" | "share_with_edits" | "do_not_share" | "pending"
@@ -2487,8 +2497,9 @@ Be conservative: when in doubt, recommend "do_not_share".`,
     // Pending Submissions UI
     const pendingSubmissionsUI = (
       <div style={{ marginTop: "8px" }}>
-        {derive(pendingSubmissions, (submissions: PendingSubmission[]) =>
-          submissions && submissions.length > 0
+        {derive(pendingSubmissions, (submissions: PendingSubmission[]) => {
+          const safeSubmissions = toArray(submissions);
+          return safeSubmissions.length > 0
             ? (
               <div
                 style={{
@@ -2518,11 +2529,10 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                   <span>
                     {derive(pendingSubmissionsExpanded, (e: boolean) =>
                       e ? "▼" : "▶")}{" "}
-                    Share Your Discoveries ({submissions.length} pending)
+                    Share Your Discoveries ({safeSubmissions.length} pending)
                   </span>
                   <span style={{ fontSize: "11px", color: "#3b82f6" }}>
-                    click to{" "}
-                    {derive(pendingSubmissionsExpanded, (e: boolean) =>
+                    click to {derive(pendingSubmissionsExpanded, (e: boolean) =>
                       e ? "collapse" : "expand")}
                   </span>
                 </div>
@@ -2539,7 +2549,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                           padding: "8px",
                         }}
                       >
-                        {submissions.filter((s): s is PendingSubmission =>
+                        {safeSubmissions.filter((s): s is PendingSubmission =>
                           s != null
                         ).map((submission: PendingSubmission) => (
                           <div
@@ -2673,7 +2683,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     pendingSubmissions as Writable<
                                       PendingSubmission[]
                                     >;
-                                  const subs = pendingWritable.get() || [];
+                                  const subs = toArray(pendingWritable.get());
                                   const idx = subs.findIndex((
                                     s: PendingSubmission,
                                   ) =>
@@ -2713,14 +2723,14 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     >;
                                   const localWritable =
                                     localQueries as Writable<LocalQuery[]>;
-                                  const subs = pendingWritable.get() || [];
+                                  const subs = toArray(pendingWritable.get());
                                   pendingWritable.set(
                                     subs.filter((s: PendingSubmission) =>
                                       s.localQueryId !== submission.localQueryId
                                     ),
                                   );
                                   // Reset local query status
-                                  const queries = localWritable.get() || [];
+                                  const queries = toArray(localWritable.get());
                                   const idx = queries.findIndex((
                                     q: LocalQuery,
                                   ) =>
@@ -2747,7 +2757,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     pendingSubmissions as Writable<
                                       PendingSubmission[]
                                     >;
-                                  const subs = pendingWritable.get() || [];
+                                  const subs = toArray(pendingWritable.get());
                                   const idx = subs.findIndex((
                                     s: PendingSubmission,
                                   ) =>
@@ -2783,7 +2793,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                               string,
                             ],
                           ) => {
-                            const approvedCount = (subs || []).filter((s) =>
+                            const approvedCount = toArray(subs).filter((s) =>
                               s.userApproved && !s.submittedAt
                             ).length;
                             const hasRegistry = !!registry?.result?.submitQuery;
@@ -2803,11 +2813,9 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                       if (!hasRegistry || !typeUrl) {
                                         return;
                                       }
-                                      const approved = (subs || []).filter((
+                                      const approved = toArray(subs).filter((
                                         s: PendingSubmission,
-                                      ) =>
-                                        s.userApproved && !s.submittedAt
-                                      );
+                                      ) => s.userApproved && !s.submittedAt);
                                       const submitHandler = registry?.result
                                         ?.submitQuery;
                                       const pendingWritable =
@@ -2818,7 +2826,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         localQueries as Writable<LocalQuery[]>;
 
                                       // Submit each approved query
-                                      approved.forEach(
+                                      toArray(approved).forEach(
                                         (submission: PendingSubmission) => {
                                           if (submitHandler) {
                                             submitHandler({
@@ -2828,8 +2836,9 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                           }
 
                                           // Mark as submitted in pendingSubmissions
-                                          const currentSubs =
-                                            pendingWritable.get() || [];
+                                          const currentSubs = toArray(
+                                            pendingWritable.get(),
+                                          );
                                           const idx = currentSubs.findIndex((
                                             s: PendingSubmission,
                                           ) =>
@@ -2840,12 +2849,13 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                             (pendingWritable.key(idx).key(
                                               "submittedAt",
                                             ) as Writable<number | undefined>)
-                                              .set(Date.now());
+                                              .set(safeDateNow());
                                           }
 
                                           // Update local query status to submitted
-                                          const queries = localWritable.get() ||
-                                            [];
+                                          const queries = toArray(
+                                            localWritable.get(),
+                                          );
                                           const qIdx = queries.findIndex((
                                             q: LocalQuery,
                                           ) =>
@@ -2920,7 +2930,8 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                     : null)}
               </div>
             )
-            : null)}
+            : null;
+        })}
       </div>
     );
 

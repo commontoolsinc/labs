@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -35,7 +36,7 @@ interface CalendarOutput {
 }
 
 const getTodayDate = (): string => {
-  const now = new Date();
+  const now = new Date(safeDateNow());
   return now.toISOString().split("T")[0];
 };
 

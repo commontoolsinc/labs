@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { action, computed, NAME, pattern, UI, Writable } from "commontools";
+import {
+  action,
+  computed,
+  NAME,
+  pattern,
+  safeDateNow,
+  UI,
+  Writable,
+} from "commontools";
 import type {
   Habit,
   HabitTrackerInput,
@@ -11,13 +19,13 @@ export type { Habit, HabitLog } from "./schemas.tsx";
 
 // Get today's date as YYYY-MM-DD
 const getTodayDate = (): string => {
-  const now = new Date();
+  const now = new Date(safeDateNow());
   return now.toISOString().split("T")[0];
 };
 
 // Get date N days ago as YYYY-MM-DD
 const getDateDaysAgo = (daysAgo: number): string => {
-  const date = new Date();
+  const date = new Date(safeDateNow());
   date.setDate(date.getDate() - daysAgo);
   return date.toISOString().split("T")[0];
 };

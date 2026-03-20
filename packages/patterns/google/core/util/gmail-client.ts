@@ -15,7 +15,7 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, safeRandom, Writable } from "commontools";
 
 const env = getPatternEnvironment();
 
@@ -75,7 +75,13 @@ export interface FullEmail {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) =>
+  typeof setTimeout === "function"
+    ? new Promise((resolve) => setTimeout(resolve, ms))
+    : Promise.resolve();
+
+const createBatchBoundary = (): string =>
+  `batch_${Math.floor(safeRandom() * 1_000_000_000).toString(36)}`;
 
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GmailClient]", ...args);
@@ -254,7 +260,7 @@ export class GmailClient {
   async fetchBatch(messages: { id: string }[]): Promise<any[]> {
     if (messages.length === 0) return [];
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = createBatchBoundary();
     debugLog(this.debugMode, `Processing batch of ${messages.length} messages`);
 
     const batchBody = messages
@@ -393,7 +399,7 @@ Accept: application/json
       return results;
     }
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = createBatchBoundary();
     debugLog(
       this.debugMode,
       `Processing attachment batch of ${attachments.length} items`,

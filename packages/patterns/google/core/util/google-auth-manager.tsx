@@ -28,6 +28,7 @@
 
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+import type { Opaque, OpaqueRef } from "commontools";
 import GoogleAuth from "../google-auth.tsx";
 
 // Re-export shared types for consumers
@@ -72,12 +73,40 @@ export type ScopeKey = keyof typeof SCOPE_MAP;
 export type AccountType = "default" | "personal" | "work";
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
-  Object.entries(SCOPE_MAP).map(([key, url]) => [
-    key,
-    { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
-  ]),
-);
+const SCOPES: AuthManagerDescriptor["scopes"] = {
+  gmail: {
+    description: SCOPE_DESCRIPTIONS.gmail,
+    scopeString: SCOPE_MAP.gmail,
+  },
+  gmailSend: {
+    description: SCOPE_DESCRIPTIONS.gmailSend,
+    scopeString: SCOPE_MAP.gmailSend,
+  },
+  gmailModify: {
+    description: SCOPE_DESCRIPTIONS.gmailModify,
+    scopeString: SCOPE_MAP.gmailModify,
+  },
+  calendar: {
+    description: SCOPE_DESCRIPTIONS.calendar,
+    scopeString: SCOPE_MAP.calendar,
+  },
+  calendarWrite: {
+    description: SCOPE_DESCRIPTIONS.calendarWrite,
+    scopeString: SCOPE_MAP.calendarWrite,
+  },
+  drive: {
+    description: SCOPE_DESCRIPTIONS.drive,
+    scopeString: SCOPE_MAP.drive,
+  },
+  docs: {
+    description: SCOPE_DESCRIPTIONS.docs,
+    scopeString: SCOPE_MAP.docs,
+  },
+  contacts: {
+    description: SCOPE_DESCRIPTIONS.contacts,
+    scopeString: SCOPE_MAP.contacts,
+  },
+};
 
 const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "google",
@@ -93,12 +122,28 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: true,
 };
 
-export const GoogleAuthManager = createAuthManager(
-  GoogleAuthManagerDescriptor,
-  GoogleAuth,
-);
+export function GoogleAuthManager(
+  input: Opaque<
+    import("../../../auth/create-auth-manager.tsx").AuthManagerInput
+  >,
+): OpaqueRef<
+  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+> {
+  return createAuthManager(
+    GoogleAuthManagerDescriptor,
+    GoogleAuth,
+  )(input);
+}
 
 export default GoogleAuthManager;
 
 // Backward-compatible export for existing code that uses createGoogleAuth()
-export const createGoogleAuth = GoogleAuthManager;
+export function createGoogleAuth(
+  input: Opaque<
+    import("../../../auth/create-auth-manager.tsx").AuthManagerInput
+  >,
+): OpaqueRef<
+  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+> {
+  return GoogleAuthManager(input);
+}

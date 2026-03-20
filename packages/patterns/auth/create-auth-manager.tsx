@@ -23,6 +23,7 @@ import {
   lift,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -130,19 +131,21 @@ const attemptRefresh = handler<
   }
   refreshing.set(true);
   refreshFailed.set(false);
-  refreshStartedAt.set(Date.now());
+  refreshStartedAt.set(safeDateNow());
 
   refreshStream.send({});
 
   // Note: in theory the Writable could be invalid if the pattern were
   // hot-reloaded, but CTS pattern lifecycle matches page lifecycle so
   // there is no practical risk of accessing a stale Writable here.
-  setTimeout(() => {
-    if (refreshing.get()) {
-      refreshing.set(false);
-      refreshFailed.set(true);
-    }
-  }, REFRESH_FAILURE_TIMEOUT_MS);
+  if (typeof setTimeout === "function") {
+    setTimeout(() => {
+      if (refreshing.get()) {
+        refreshing.set(false);
+        refreshFailed.set(true);
+      }
+    }, REFRESH_FAILURE_TIMEOUT_MS);
+  }
 });
 
 // =============================================================================
@@ -331,7 +334,7 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const now = Writable.of(Date.now());
+      const now = Writable.of(safeDateNow());
       startReactiveClock(now);
 
       // Picker UI - NOT inside computed (wishResult[UI] crashes reactive graph)

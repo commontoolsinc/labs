@@ -62,23 +62,29 @@ export type Auth = {
   >;
 };
 
-// Initialize turndown service
-const turndown = new TurndownService({
-  headingStyle: "atx",
-  codeBlockStyle: "fenced",
-  emDelimiter: "*",
-});
-
 const _env = getPatternEnvironment();
 
-turndown.addRule("removeStyleTags", {
-  filter: ["style"],
-  replacement: function () {
-    return "";
-  },
-});
+function createTurndownService(): TurndownService {
+  const turndown = new TurndownService({
+    headingStyle: "atx",
+    codeBlockStyle: "fenced",
+    emDelimiter: "*",
+  });
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  turndown.addRule("removeStyleTags", {
+    filter: ["style"],
+    replacement: function () {
+      return "";
+    },
+  });
+
+  return turndown;
+}
+
+const sleep = (ms: number) =>
+  typeof setTimeout === "function"
+    ? new Promise((resolve) => setTimeout(resolve, ms))
+    : Promise.resolve();
 
 /** An #email */
 export type Email = {
@@ -636,7 +642,7 @@ async function messageToEmail(
           );
           try {
             // Convert HTML to markdown using our custom converter
-            markdownContent = turndown.turndown(htmlContent);
+            markdownContent = createTurndownService().turndown(htmlContent);
             debugLog(
               debugMode,
               `[messageToEmail] Markdown conversion successful, length: ${markdownContent.length}`,

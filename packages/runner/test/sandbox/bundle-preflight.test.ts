@@ -234,6 +234,48 @@ Deno.test("AMD factory verifier enforces canonical wrappers and dependency polic
     );
   });
 
+  await t.step("accepts async builder wrappers", () => {
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["exports"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource:
+        `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:handler:builder*/const handler=__ctHelpers.__ct_builder("handler","main.tsx#000:handler",async function(input){return input;});exports.default=handler;}`,
+    });
+  });
+
+  await t.step("accepts commented async function wrappers", () => {
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["exports"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource:
+        `function(exports){/*__CT_TOPLEVEL__:main.tsx:000:loader:fn*/const loader=__ctHelpers.__ct_fn("main.tsx#000:loader",/** doc */ async function load(){return 1;});exports.default=loader;}`,
+    });
+  });
+
+  await t.step("accepts safe top-level class declarations", () => {
+    verifyAMDFactory({
+      moduleId: "main",
+      dependencies: ["exports"],
+      registeredModuleIds: new Set(["main"]),
+      factorySource:
+        `function(exports){class Client{value;constructor(value){this.value=value;}getValue(){return this.value;}};exports.Client=Client;}`,
+    });
+  });
+
+  await t.step("rejects top-level classes with static blocks", () => {
+    assertThrows(() =>
+      verifyAMDFactory({
+        moduleId: "main",
+        dependencies: ["exports"],
+        registeredModuleIds: new Set(["main"]),
+        factorySource:
+          `function(exports){class Client{static { globalThis.pwned = true; }};exports.Client=Client;}`,
+      })
+    );
+  });
+
   await t.step(
     "rejects unexpected module-load statements even with a sentinel",
     () => {

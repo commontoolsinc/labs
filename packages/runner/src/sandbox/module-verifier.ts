@@ -112,6 +112,7 @@ function isAllowedStatement(statement: string): boolean {
     USE_STRICT_PATTERN.test(compactWithoutComments) ||
     EXPORTS_OBJECT_PATTERN.test(compactWithoutComments) ||
     isTrustedConsoleStatement(compactWithoutComments) ||
+    isTrustedClassDeclaration(commentStripped) ||
     SCHEMA_ASSIGNMENT_PATTERN.test(compactWithoutComments) ||
     EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
     CHAINED_EXPORT_VOID_PATTERN.test(compactWithoutComments) ||
@@ -214,16 +215,115 @@ function isTrustedConsoleStatement(statement: string): boolean {
   );
 }
 
+function isTrustedClassDeclaration(statement: string): boolean {
+  const trimmed = stripAllowedLeadingComments(statement).trim();
+  if (!trimmed.startsWith("class ")) {
+    return false;
+  }
+
+  const bodyStart = trimmed.indexOf("{");
+  if (bodyStart < 0) {
+    return false;
+  }
+
+  const bodyEnd = trimmed.lastIndexOf("}");
+  if (bodyEnd <= bodyStart) {
+    return false;
+  }
+
+  if (trimmed.slice(bodyEnd + 1).trim().length > 0) {
+    return false;
+  }
+
+  const header = trimmed.slice(0, bodyStart).trim();
+  if (
+    !/^class\s+[A-Za-z_$][\w$]*(?:\s+extends\s+[$A-Z_a-z][\w$]*(?:\.[A-Za-z_$][\w$]*)*)?$/
+      .test(header)
+  ) {
+    return false;
+  }
+
+  const body = trimmed.slice(bodyStart + 1, bodyEnd);
+  if (FORBIDDEN_CALLBACK_PATTERN.test(body)) {
+    return false;
+  }
+
+  if (/\bstatic\s*\{/.test(body)) {
+    return false;
+  }
+
+  if (/\bstatic\s+(?:#?[A-Za-z_$][\w$]*|\[[^\]]+\])\s*=/.test(body)) {
+    return false;
+  }
+
+  return true;
+}
+
 function splitVerifiableStatements(statement: string): string[] {
   const trimmed = statement.trim();
   const sentinelIndex = trimmed.indexOf("/*__CT_TOPLEVEL__:");
   if (sentinelIndex <= 0) {
-    return [statement];
+    return splitLeadingClassStatement(trimmed) ?? [statement];
   }
 
   const prefix = trimmed.slice(0, sentinelIndex).trim();
   const suffix = trimmed.slice(sentinelIndex).trim();
   return [prefix, suffix].filter((part) => part.length > 0);
+}
+
+function splitLeadingClassStatement(statement: string): string[] | null {
+  const trimmed = statement.trim();
+  const { remaining, consumed } = consumeAllowedLeadingComments(trimmed);
+  if (!remaining.startsWith("class ")) {
+    return null;
+  }
+
+  const bodyStart = remaining.indexOf("{");
+  if (bodyStart < 0) {
+    return null;
+  }
+
+  const { end: bodyEnd } = findBalancedRegion(remaining, bodyStart, "{", "}");
+  const suffix = remaining.slice(bodyEnd + 1).trim();
+  if (!suffix) {
+    return null;
+  }
+
+  const classPart = trimmed.slice(0, consumed + bodyEnd + 1).trim();
+  return [classPart, suffix].filter((part) => part.length > 0);
+}
+
+function consumeAllowedLeadingComments(
+  statement: string,
+): { remaining: string; consumed: number } {
+  let remaining = statement.trimStart();
+  let consumed = statement.length - remaining.length;
+
+  while (remaining.startsWith("//") || remaining.startsWith("/*")) {
+    if (remaining.startsWith("/*__CT_TOPLEVEL__:")) {
+      return { remaining, consumed };
+    }
+
+    if (remaining.startsWith("//")) {
+      const newlineIndex = remaining.indexOf("\n");
+      if (newlineIndex < 0) {
+        return { remaining: "", consumed: statement.length };
+      }
+      consumed += newlineIndex + 1;
+      remaining = remaining.slice(newlineIndex + 1).trimStart();
+      consumed = statement.length - remaining.length;
+      continue;
+    }
+
+    const commentEnd = remaining.indexOf("*/");
+    if (commentEnd < 0) {
+      return { remaining, consumed };
+    }
+    remaining = remaining.slice(commentEnd + 2).trimStart();
+    consumed = statement.length - remaining.length;
+  }
+
+  return { remaining, consumed };
 }
 
 function isCanonicalWrapperStatement(statement: string): boolean {
@@ -338,10 +438,10 @@ function isTrustedFunctionExpression(
   source: string,
   allowedCaptures?: ReadonlySet<string>,
 ): boolean {
-  if (!hasFunctionExpressionShape(source)) {
+  const trimmed = normalizeTrustedFunctionSource(source);
+  if (!hasFunctionExpressionShape(trimmed)) {
     return false;
   }
-  const trimmed = source.trim();
   const paramsStart = trimmed.indexOf("(");
   const { end: paramsEnd } = findBalancedRegion(trimmed, paramsStart, "(", ")");
   const bodyStart = trimmed.indexOf("{", paramsEnd + 1);
@@ -369,9 +469,13 @@ function isTrustedFunctionExpression(
   return true;
 }
 
+function normalizeTrustedFunctionSource(source: string): string {
+  return stripAllowedLeadingComments(source.trim()).trim();
+}
+
 function hasFunctionExpressionShape(source: string): boolean {
   const trimmed = source.trim();
-  if (!trimmed.startsWith("function")) {
+  if (!/^(?:async\s+)?function\b/.test(trimmed)) {
     return false;
   }
   const paramsStart = trimmed.indexOf("(");
