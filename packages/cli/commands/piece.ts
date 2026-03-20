@@ -378,18 +378,21 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
     }
 
     output += "\n\n--- Result ---";
-    if (displayData.result) {
-      // Filter out large UI objects that clutter the output
-      const filteredResult = {
-        ...(displayData.result as Record<string | symbol, unknown>),
-      };
-      if (
-        !options.summary && UI in filteredResult &&
-        typeof filteredResult[UI] === "object"
-      ) {
-        filteredResult[UI] = "<large UI object - use --json to see full UI>";
+    if (displayData.result !== null && displayData.result !== undefined) {
+      const isPlainObject = typeof displayData.result === "object" &&
+        !Array.isArray(displayData.result);
+      if (!options.summary && isPlainObject) {
+        // Filter out large UI objects that clutter the non-summary output
+        const filteredResult = {
+          ...(displayData.result as Record<string | symbol, unknown>),
+        };
+        if (UI in filteredResult && typeof filteredResult[UI] === "object") {
+          filteredResult[UI] = "<large UI object - use --json to see full UI>";
+        }
+        output += `\n${safeStringify(filteredResult)}`;
+      } else {
+        output += `\n${safeStringify(displayData.result)}`;
       }
-      output += `\n${safeStringify(filteredResult)}`;
     } else {
       output += "\n<no result data>";
     }
