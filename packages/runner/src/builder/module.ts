@@ -1,6 +1,5 @@
 import type {
   DeriveCallbackInput,
-  DeriveTupleInput,
   Handler,
   HandlerFactory,
   JSONSchema,

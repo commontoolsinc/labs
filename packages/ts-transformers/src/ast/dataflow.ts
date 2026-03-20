@@ -9,11 +9,7 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import {
-  detectCallKind,
-  isReactiveOriginCall,
-  isReactiveValueExpression,
-} from "./call-kind.ts";
+import { detectCallKind, isReactiveValueExpression } from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
