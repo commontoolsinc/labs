@@ -43,13 +43,10 @@ export class CTHelpers {
     identityNode?: ts.Node,
   ): T {
     const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
-    return ts.setOriginalNode(
-      ts.setSourceMapRange(
-        ts.setTextRange(node, originalNode),
-        sourceMapRange,
-      ),
-      identityNode ?? originalNode,
-    ) as T;
+    const preserved = ts.setSourceMapRange(node, sourceMapRange);
+    return identityNode
+      ? ts.setOriginalNode(preserved, identityNode) as T
+      : preserved as T;
   }
 
   getHelperExpr(

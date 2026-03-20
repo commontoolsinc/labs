@@ -77,48 +77,6 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   logCountEvery: 0,
 });
 
-function sanitizeDebugLabel(label?: string): string | undefined {
-  if (!label) return undefined;
-  return label.replace(/^async\s+/, "").trim() || undefined;
-}
-
-function getTxDebugActionId(
-  tx?: IExtendedStorageTransaction,
-): string | undefined {
-  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
-}
-
-function describePatternOrModule(
-  patternOrModule: Pattern | Module | undefined,
-): string {
-  if (!patternOrModule) return "undefined";
-  if (isModule(patternOrModule)) {
-    if (
-      patternOrModule.type === "ref" &&
-      typeof patternOrModule.implementation === "string"
-    ) {
-      return `module:ref:${patternOrModule.implementation}`;
-    }
-
-    if (typeof patternOrModule.implementation === "function") {
-      const impl = patternOrModule.implementation as {
-        debugName?: string;
-        src?: string;
-        name?: string;
-      };
-      const name = sanitizeDebugLabel(impl.debugName) ??
-        sanitizeDebugLabel(impl.src) ??
-        sanitizeDebugLabel(impl.name) ??
-        "anonymous";
-      return `module:${patternOrModule.type}:${name}`;
-    }
-
-    return `module:${patternOrModule.type}`;
-  }
-
-  return `pattern:nodes=${patternOrModule.nodes.length}`;
-}
-
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -2242,6 +2200,48 @@ export function mergeObjects<T>(
   }
 
   return result as T;
+}
+
+function sanitizeDebugLabel(label?: string): string | undefined {
+  if (!label) return undefined;
+  return label.replace(/^async\s+/, "").trim() || undefined;
+}
+
+function getTxDebugActionId(
+  tx?: IExtendedStorageTransaction,
+): string | undefined {
+  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
+}
+
+function describePatternOrModule(
+  patternOrModule: Pattern | Module | undefined,
+): string {
+  if (!patternOrModule) return "undefined";
+  if (isModule(patternOrModule)) {
+    if (
+      patternOrModule.type === "ref" &&
+      typeof patternOrModule.implementation === "string"
+    ) {
+      return `module:ref:${patternOrModule.implementation}`;
+    }
+
+    if (typeof patternOrModule.implementation === "function") {
+      const impl = patternOrModule.implementation as {
+        debugName?: string;
+        src?: string;
+        name?: string;
+      };
+      const name = sanitizeDebugLabel(impl.debugName) ??
+        sanitizeDebugLabel(impl.src) ??
+        sanitizeDebugLabel(impl.name) ??
+        "anonymous";
+      return `module:${patternOrModule.type}:${name}`;
+    }
+
+    return `module:${patternOrModule.type}`;
+  }
+
+  return `pattern:nodes=${patternOrModule.nodes.length}`;
 }
 
 const moduleWrappers = {

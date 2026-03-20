@@ -25,6 +25,21 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
           name,
         );
       },
+      createHelperCall(
+        name: string,
+        _originalNode: ts.Node,
+        typeArguments: readonly ts.TypeNode[] | undefined,
+        argumentsArray: readonly ts.Expression[],
+      ) {
+        return factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            factory.createIdentifier("__ctHelpers"),
+            name,
+          ),
+          typeArguments,
+          argumentsArray,
+        );
+      },
     } as unknown as CTHelpers;
 
     // Create a minimal program for type checking

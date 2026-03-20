@@ -878,9 +878,8 @@ function createPatternCallWithParams(
     typeArgs.push(resultTypeNode);
   }
 
-  const patternCall = context.ctHelpers.createHelperCall(
-    "pattern",
-    methodCall,
+  const patternCall = factory.createCallExpression(
+    context.ctHelpers.getHelperExpr("pattern"),
     typeArgs,
     [newCallback],
   );

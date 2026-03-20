@@ -1359,6 +1359,13 @@ export class Scheduler {
               continue;
             }
 
+            if (
+              this.triggers.size === 0 &&
+              this.nonRecursiveTriggers.size === 0
+            ) {
+              continue;
+            }
+
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
             const nonRecursivePaths = this.nonRecursiveTriggers.get(
