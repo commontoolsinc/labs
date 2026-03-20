@@ -832,6 +832,9 @@ export class PieceManager {
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
     await this.syncPattern(piece);
+    if (start) {
+      await this.getResult(piece).pull();
+    }
 
     return piece;
   }
