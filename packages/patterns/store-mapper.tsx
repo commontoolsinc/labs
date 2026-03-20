@@ -276,7 +276,7 @@ export default pattern<Input, Output>(
       const current = departments.get();
       if (current.length === 0) {
         // Schedule the set for next tick to avoid reactive cycle
-        queueMicrotask(() => {
+        void Promise.resolve().then(() => {
           departments.set(
             DEFAULT_DEPARTMENTS.map((d) => ({
               ...d,

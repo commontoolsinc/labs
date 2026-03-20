@@ -5,18 +5,18 @@
  *
  * Run: deno task ct test packages/patterns/test/non-idempotent/timestamp.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commontools";
+import { computed, pattern, safeDateNow, Writable } from "commontools";
 
 export default pattern(() => {
   const items = Writable.of([{ title: "Task A" }, { title: "Task B" }]);
   const processed = Writable.of<{ title: string; processedAt: number }[]>([]);
 
-  // Non-idempotent: Date.now() produces different values each run
+  // Non-idempotent: safeDateNow() produces different values each run
   computed(() => {
     processed.set(
       items.get().map((i) => ({
         title: i.title,
-        processedAt: Date.now(),
+        processedAt: safeDateNow(),
       })),
     );
   });

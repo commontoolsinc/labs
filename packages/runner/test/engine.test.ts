@@ -592,15 +592,24 @@ describe("Engine compile + evaluate", () => {
           name: "/main.tsx",
           contents: [
             "/// <cts-enable />",
+            "import { safeDateNow, safeRandom } from 'commontools';",
             "export function readGlobalSurface() {",
             "  const proxyType = typeof Proxy;",
             "  const fetchType = typeof fetch;",
             "  const dateType = typeof Date;",
             "  const dateNowType = typeof Date.now;",
+            "  const dateNowCall = (() => { try { return Date.now(); } catch (error) { return error instanceof Error ? `${error.name}:${error.message}` : String(error); } })();",
             "  const epoch = new Date(0).getUTCFullYear();",
             "  const randomType = typeof Math.random;",
+            "  const randomCall = (() => { try { return Math.random(); } catch (error) { return error instanceof Error ? `${error.name}:${error.message}` : String(error); } })();",
             "  const scType = typeof structuredClone;",
             "  const cloned = structuredClone({ nested: ['ok'] });",
+            "  const safeDateNowType = typeof safeDateNow;",
+            "  const safeDateNowValueType = typeof safeDateNow();",
+            "  const safeRandomType = typeof safeRandom;",
+            "  const safeRandomValue = safeRandom();",
+            "  const safeRandomValueType = typeof safeRandomValue;",
+            "  const safeRandomInRange = safeRandomValue >= 0 && safeRandomValue < 1;",
             "  const evalType = typeof eval;",
             "  const functionType = typeof Function;",
             "  const helperKey = '__ct' + 'Helpers';",
@@ -608,7 +617,7 @@ describe("Engine compile + evaluate", () => {
             "  const helperType = typeof helpers.h;",
             "  const helpersFrozen = Object.isFrozen(helpers);",
             "  const hFrozen = Object.isFrozen(helpers.h);",
-            "  return `${proxyType}:${fetchType}:${dateType}:${dateNowType}:${epoch}:${randomType}:${scType}:${cloned.nested[0]}:${evalType}:${functionType}:${helperType}:${helpersFrozen}:${hFrozen}`;",
+            "  return { proxyType, fetchType, dateType, dateNowType, dateNowCall, epoch, randomType, randomCall, scType, clonedValue: cloned.nested[0], safeDateNowType, safeDateNowValueType, safeRandomType, safeRandomValueType, safeRandomInRange, evalType, functionType, helperType, helpersFrozen, hFrozen };",
             "}",
             "export default readGlobalSurface;",
           ].join("\n"),
@@ -621,9 +630,31 @@ describe("Engine compile + evaluate", () => {
 
     expect(main).toBeDefined();
     expect(typeof main!["default"]).toBe("function");
-    expect((main!["default"] as () => string)()).toBe(
-      "undefined:undefined:function:function:1970:function:function:ok:function:function:function:true:true",
-    );
+    const surface = (main!["default"] as () => Record<string, unknown>)();
+    expect(surface).toMatchObject({
+      proxyType: "undefined",
+      fetchType: "undefined",
+      dateType: "function",
+      dateNowType: "function",
+      epoch: 1970,
+      randomType: "function",
+      scType: "function",
+      clonedValue: "ok",
+      safeDateNowType: "function",
+      safeDateNowValueType: "number",
+      safeRandomType: "function",
+      safeRandomValueType: "number",
+      safeRandomInRange: true,
+      evalType: "function",
+      functionType: "function",
+      helperType: "function",
+      helpersFrozen: true,
+      hFrozen: true,
+    });
+    expect(String(surface.dateNowCall)).toContain("TypeError");
+    expect(String(surface.dateNowCall)).toContain("Date");
+    expect(String(surface.randomCall)).toContain("TypeError");
+    expect(String(surface.randomCall)).toContain("Math");
   });
 
   it("normalizes returned internal cells to value schemas on SES-evaluated patterns", async () => {

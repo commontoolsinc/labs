@@ -1833,6 +1833,18 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+/**
+ * Explicit capability for accessing nondeterministic time inside SES patterns.
+ * Prefer this over ambient `Date.now()`, which SES intentionally disables.
+ */
+export type SafeDateNowFunction = () => number;
+
+/**
+ * Explicit capability for accessing nondeterministic randomness inside SES patterns.
+ * Prefer this over ambient `Math.random()`, which SES intentionally disables.
+ */
+export type SafeRandomFunction = () => number;
+
 export type WishTag = `/${string}` | `#${string}`;
 
 export type DID = `did:${string}:${string}`;
@@ -2034,6 +2046,8 @@ export declare const fetchData: FetchDataFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const safeDateNow: SafeDateNowFunction;
+export declare const safeRandom: SafeRandomFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;

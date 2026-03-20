@@ -39,6 +39,8 @@ import type {
   OpaqueRef,
   Pattern,
   PatternToolFunction,
+  SafeDateNowFunction,
+  SafeRandomFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -263,6 +265,8 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  safeDateNow: SafeDateNowFunction;
+  safeRandom: SafeRandomFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 

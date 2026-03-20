@@ -5,17 +5,17 @@
  *
  * Run: deno task ct test packages/patterns/test/non-idempotent/shuffle.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commontools";
+import { computed, pattern, safeRandom, Writable } from "commontools";
 
 export default pattern(() => {
   const items = Writable.of(["alpha", "bravo", "charlie", "delta", "echo"]);
   const shuffled = Writable.of<string[]>([]);
 
-  // Non-idempotent: Math.random() produces different permutations each run
+  // Non-idempotent: safeRandom() produces different permutations each run
   computed(() => {
     const arr = [...items.get()];
     for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(safeRandom() * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     shuffled.set(arr);

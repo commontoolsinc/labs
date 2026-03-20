@@ -15,7 +15,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern, safeDateNow } from "commontools";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
@@ -26,9 +26,9 @@ const toLocalDateStr = (d: Date): string =>
     String(d.getDate()).padStart(2, "0")
   }`;
 
-const TODAY = toLocalDateStr(new Date());
+const TODAY = toLocalDateStr(new Date(safeDateNow()));
 const TOMORROW = (() => {
-  const d = new Date();
+  const d = new Date(safeDateNow());
   d.setDate(d.getDate() + 1);
   return toLocalDateStr(d);
 })();

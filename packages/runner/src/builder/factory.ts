@@ -37,6 +37,8 @@ import {
   llmDialog,
   navigateTo,
   patternTool,
+  safeDateNow,
+  safeRandom,
   str,
   streamData,
   unless,
@@ -113,6 +115,8 @@ export const createBuilder = (): {
       fetchProgram,
       streamData,
       compileAndRun,
+      safeDateNow,
+      safeRandom,
       navigateTo,
       wish,
 

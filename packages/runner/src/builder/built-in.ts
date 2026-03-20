@@ -32,6 +32,9 @@ import type {
 import { isRecord } from "@commontools/utils/types";
 import { isCell } from "../cell.ts";
 
+const hostDateNow = Date.now.bind(Date);
+const hostMathRandom = Math.random.bind(Math);
+
 const WISH_ARGUMENT_SCHEMA = toDeepFrozenSchema({
   type: "object",
   properties: {
@@ -156,6 +159,10 @@ export const streamData = createNodeFactory({
     result?: T;
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
+
+export const safeDateNow = (): number => hostDateNow();
+
+export const safeRandom = (): number => hostMathRandom();
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
