@@ -229,7 +229,6 @@ export function createDeriveCall(
     lambdaBody,
   );
 
-  const deriveExpr = ctHelpers.getHelperExpr("derive");
   const deriveArgs = [
     ...createDeriveArgs(factory, captureTree, fallbackEntries),
     arrowFunction,
@@ -246,8 +245,9 @@ export function createDeriveCall(
   const resultTypeNode = buildResultTypeNode(expression, context);
 
   // Create derive call with type arguments for SchemaInjectionTransformer
-  const deriveCall = factory.createCallExpression(
-    deriveExpr,
+  const deriveCall = ctHelpers.createHelperCall(
+    "derive",
+    expression,
     [inputTypeNode, resultTypeNode],
     deriveArgs,
   );

@@ -314,8 +314,9 @@ export function createComputedCallForExpression(
   );
   context.markAsSyntheticComputeCallback(arrowFunction);
 
-  const computedCall = factory.createCallExpression(
-    context.ctHelpers.getHelperExpr("computed"),
+  const computedCall = context.ctHelpers.createHelperCall(
+    "computed",
+    expression,
     undefined,
     [arrowFunction],
   );

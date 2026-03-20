@@ -10,6 +10,7 @@ import {
   type JSONSchema,
   type Module,
   type OpaqueRef as _OpaqueRef,
+  type Pattern,
   type Stream,
 } from "../src/builder/types.ts";
 import {
@@ -27,6 +28,12 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 type MouseEvent = {
   clientX: number;
   clientY: number;
+};
+
+type TestNode = Pattern["nodes"][number];
+type SourceTrackedImplementation = ((...args: any[]) => any) & {
+  preview?: string;
+  src?: string;
 };
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -308,6 +315,55 @@ describe("module", () => {
   });
 
   describe("source location tracking", () => {
+    const compileMain = async (source: string) => {
+      const program = {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: source }],
+      };
+
+      const { id, jsScript } = await runtime.harness.compile(program);
+      return await runtime.harness.evaluate(id, jsScript, program.files);
+    };
+
+    const findNodeByPreview = (
+      patternFn: unknown,
+      previewSubstring: string,
+    ): TestNode | undefined => {
+      if (!isPattern(patternFn)) return undefined;
+      return patternFn.nodes.find((node) =>
+        (() => {
+          const trackedNode = hasTrackedImplementation(node) ? node : undefined;
+          const impl = trackedNode?.module.implementation;
+          return typeof impl?.preview === "string" &&
+            impl.preview.includes(previewSubstring);
+        })()
+      );
+    };
+
+    const hasTrackedImplementation = (
+      node: TestNode | undefined,
+    ): node is TestNode & {
+      module: TestNode["module"] & {
+        implementation: SourceTrackedImplementation;
+      };
+    } =>
+      !!node &&
+      typeof node.module.implementation === "function";
+
+    const expectTrackedNode = (
+      node: TestNode | undefined,
+      label?: string,
+    ) => {
+      expect(node, label).toBeDefined();
+      if (!hasTrackedImplementation(node)) {
+        throw new Error(
+          `Expected tracked implementation${label ? ` for ${label}` : ""}`,
+        );
+      }
+      expect(node.module.implementation.src, label).toBeDefined();
+      return node;
+    };
+
     it("attaches source location to function implementation via .name", () => {
       const fn = (x: number) => x * 2;
       lift(fn);
@@ -342,26 +398,118 @@ describe("module", () => {
         "  return { visible };",
         "});",
       ].join("\n");
-      const program = {
-        main: "/main.tsx",
-        files: [{ name: "/main.tsx", contents: source }],
-      };
 
-      const { id, jsScript } = await runtime.harness.compile(program);
-      const { main } = await runtime.harness.evaluate(id, jsScript, program.files);
+      const { main } = await compileMain(source);
       const patternFn = main?.default;
 
-      expect(isPattern(patternFn)).toBe(true);
-
-      const computedNode = (patternFn as any).nodes.find((node: any) =>
-        typeof node?.module?.implementation === "function" &&
-        typeof node.module.implementation.preview === "string" &&
-        node.module.implementation.preview.includes(".filter(Boolean)")
+      const computedNode = expectTrackedNode(
+        findNodeByPreview(patternFn, ".filter(Boolean)"),
       );
+      expect(computedNode.module.implementation.src).toMatch(
+        /main\.tsx:4:\d+$/,
+      );
+      expect(computedNode.module.implementation.src).not.toContain(
+        "main.tsx:1:23",
+      );
+    });
 
-      expect(computedNode).toBeDefined();
-      expect(computedNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
-      expect(computedNode.module.implementation.src).not.toContain("main.tsx:1:23");
+    it("maps action callsites through the CTS pipeline", async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { action, pattern } from "commontools";',
+        "export default pattern<{ value: number }>(({ value }) => {",
+        "  const inc = action(() => value + 1);",
+        "  return { inc };",
+        "});",
+      ].join("\n");
+
+      const { main } = await compileMain(source);
+      const actionNode = expectTrackedNode(
+        findNodeByPreview(main?.default, "value + 1"),
+      );
+      expect(actionNode.module.wrapper).toBe("handler");
+      expect(actionNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
+      expect(actionNode.module.implementation.src).not.toContain(
+        "main.tsx:1:23",
+      );
+    });
+
+    it("maps synthetic JSX compute callsites through the CTS pipeline", async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern, UI } from "commontools";',
+        "export default pattern<{ value: number }>(({ value }) => ({",
+        "  [UI]: <div>{value + 1}</div>,",
+        "}));",
+      ].join("\n");
+
+      const { main } = await compileMain(source);
+      const jsxNode = expectTrackedNode(
+        findNodeByPreview(main?.default, "value + 1"),
+      );
+      expect(jsxNode.module.implementation.src).toMatch(/main\.tsx:4:\d+$/);
+      expect(jsxNode.module.implementation.src).not.toContain("main.tsx:1:23");
+    });
+
+    it("preserves source locations for explicit lift, handler, and nested pattern calls", async () => {
+      const cases = [
+        {
+          label: "lift",
+          source: [
+            "/// <cts-enable />",
+            'import { lift, pattern } from "commontools";',
+            "const doubler = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ doubled: doubler(value) }));",
+          ].join("\n"),
+          exportName: "default",
+          preview: "value * 2",
+          line: 3,
+        },
+        {
+          label: "handler",
+          source: [
+            "/// <cts-enable />",
+            'import { handler, pattern } from "commontools";',
+            "const click = handler((event: { delta: number }, state: { value: number }) => state.value + event.delta);",
+            "export default pattern<{ value: number }>(({ value }) => ({ click: click({ value }) }));",
+          ].join("\n"),
+          exportName: "default",
+          preview: "state.value + event.delta",
+          line: 3,
+          wrapper: "handler",
+        },
+        {
+          label: "pattern",
+          source: [
+            "/// <cts-enable />",
+            'import { computed, pattern } from "commontools";',
+            "export const Child = pattern<{ value: number }>(({ value }) => ({ doubled: computed(() => value * 2) }));",
+            "export default pattern<{ value: number }>(({ value }) => ({ child: Child({ value }) }));",
+          ].join("\n"),
+          exportName: "Child",
+          preview: "value * 2",
+          line: 3,
+        },
+      ];
+
+      for (const testCase of cases) {
+        const { main } = await compileMain(testCase.source);
+        const node = expectTrackedNode(
+          findNodeByPreview(main?.[testCase.exportName], testCase.preview),
+          testCase.label,
+        );
+        if (testCase.wrapper) {
+          expect(node.module.wrapper, testCase.label).toBe(testCase.wrapper);
+        }
+        expect(
+          node.module.implementation.src,
+          testCase.label,
+        ).toMatch(new RegExp(`main\\.tsx:${testCase.line}:\\d+$`));
+        expect(
+          node.module.implementation.src,
+          testCase.label,
+        ).not.toContain("main.tsx:1:23");
+      }
     });
   });
 

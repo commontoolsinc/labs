@@ -37,6 +37,21 @@ export class CTHelpers {
 
   // Returns an PropertyAccessExpression of the requested
   // helper name e.g. `(__ctHelpers.derive)`.
+  preserveNodeSourceMap<T extends ts.Node>(
+    node: T,
+    originalNode: ts.Node,
+    identityNode?: ts.Node,
+  ): T {
+    const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
+    return ts.setOriginalNode(
+      ts.setSourceMapRange(
+        ts.setTextRange(node, originalNode),
+        sourceMapRange,
+      ),
+      identityNode ?? originalNode,
+    ) as T;
+  }
+
   getHelperExpr(
     name: string,
     originalNode?: ts.Node,
@@ -52,28 +67,37 @@ export class CTHelpers {
       );
     }
 
-    const sourceMapRange = ts.getSourceMapRange(originalNode) ?? originalNode;
-    const helperIdent = ts.setOriginalNode(
-      ts.setSourceMapRange(
-        ts.setTextRange(
-          this.#factory.createIdentifier(this.#helperIdent!.text),
-          originalNode,
-        ),
-        sourceMapRange,
-      ),
+    const helperIdent = this.preserveNodeSourceMap(
+      this.#factory.createIdentifier(this.#helperIdent!.text),
+      originalNode,
       this.#helperIdent!,
     );
-    const helperName = ts.setSourceMapRange(
-      ts.setTextRange(this.#factory.createIdentifier(name), originalNode),
-      sourceMapRange,
+    const helperName = this.preserveNodeSourceMap(
+      this.#factory.createIdentifier(name),
+      originalNode,
     );
-    const helperExpr = this.#factory.createPropertyAccessExpression(
-      helperIdent,
-      helperName,
+    return this.preserveNodeSourceMap(
+      this.#factory.createPropertyAccessExpression(
+        helperIdent,
+        helperName,
+      ),
+      originalNode,
     );
-    return ts.setSourceMapRange(
-      ts.setTextRange(helperExpr, originalNode),
-      sourceMapRange,
+  }
+
+  createHelperCall(
+    name: string,
+    originalNode: ts.Node,
+    typeArguments: readonly ts.TypeNode[] | undefined,
+    argumentsArray: readonly ts.Expression[],
+  ): ts.CallExpression {
+    return this.preserveNodeSourceMap(
+      this.#factory.createCallExpression(
+        this.getHelperExpr(name, originalNode),
+        typeArguments,
+        argumentsArray,
+      ),
+      originalNode,
     );
   }
 

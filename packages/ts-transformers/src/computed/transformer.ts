@@ -75,23 +75,14 @@ function createComputedToDeriveVisitor(
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
     // Always use __ctHelpers.derive for safety (it's always available via cts-enable)
-    const deriveExpr = context.ctHelpers.getHelperExpr("derive", node);
-
-    const deriveCall = factory.updateCallExpression(
+    const preservedDeriveCall = context.ctHelpers.createHelperCall(
+      "derive",
       node,
-      deriveExpr,
-      node.typeArguments, // Preserve type arguments (if any)
+      node.typeArguments,
       [
         factory.createObjectLiteralExpression([], false), // First arg: empty object {}
         callback, // Second arg: original callback (unchanged)
       ],
-    );
-    const preservedDeriveCall = ts.setOriginalNode(
-      ts.setSourceMapRange(
-        ts.setTextRange(deriveCall, node),
-        ts.getSourceMapRange(node) ?? node,
-      ),
-      node,
     );
 
     // Visit children to transform any nested computed() calls

@@ -16,8 +16,7 @@ export interface IfElseOverrides {
 }
 
 export function createIfElseCall(params: IfElseParams): ts.CallExpression {
-  const { factory, ctHelpers, overrides, expression } = params;
-  const ifElseExpr = ctHelpers.getHelperExpr("ifElse");
+  const { ctHelpers, overrides, expression } = params;
 
   let predicate = overrides?.predicate ?? expression.condition;
   let whenTrue = overrides?.whenTrue ?? expression.whenTrue;
@@ -30,8 +29,9 @@ export function createIfElseCall(params: IfElseParams): ts.CallExpression {
     whenFalse = whenFalse.expression;
   }
 
-  return factory.createCallExpression(
-    ifElseExpr,
+  return ctHelpers.createHelperCall(
+    "ifElse",
+    expression,
     undefined,
     [predicate, whenTrue, whenFalse],
   );
@@ -49,8 +49,7 @@ export interface WhenParams {
  * Equivalent to: ifElse(condition, value, condition)
  */
 export function createWhenCall(params: WhenParams): ts.CallExpression {
-  const { factory, ctHelpers, condition, value } = params;
-  const whenExpr = ctHelpers.getHelperExpr("when");
+  const { ctHelpers, condition, value } = params;
 
   let cond = condition;
   let val = value;
@@ -61,8 +60,9 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return factory.createCallExpression(
-    whenExpr,
+  return ctHelpers.createHelperCall(
+    "when",
+    condition,
     undefined,
     [cond, val],
   );
@@ -73,8 +73,7 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
  * Equivalent to: ifElse(condition, condition, value)
  */
 export function createUnlessCall(params: WhenParams): ts.CallExpression {
-  const { factory, ctHelpers, condition, value } = params;
-  const unlessExpr = ctHelpers.getHelperExpr("unless");
+  const { ctHelpers, condition, value } = params;
 
   let cond = condition;
   let val = value;
@@ -85,8 +84,9 @@ export function createUnlessCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return factory.createCallExpression(
-    unlessExpr,
+  return ctHelpers.createHelperCall(
+    "unless",
+    condition,
     undefined,
     [cond, val],
   );

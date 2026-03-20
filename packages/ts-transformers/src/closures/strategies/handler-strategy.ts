@@ -85,9 +85,9 @@ export function transformHandlerJsxAttribute(
     callback.parameters[1] as ts.ParameterDeclaration | undefined,
   );
 
-  const handlerExpr = context.ctHelpers.getHelperExpr("handler");
-  const handlerCall = factory.createCallExpression(
-    handlerExpr,
+  const handlerCall = context.ctHelpers.createHelperCall(
+    "handler",
+    expression,
     [eventTypeNode, stateTypeNode],
     [handlerCallback],
   );

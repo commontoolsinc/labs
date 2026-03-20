@@ -153,9 +153,9 @@ function transformActionCall(
   );
 
   // Build the handler call: handler<void, StateType>(callback)
-  const handlerExpr = context.ctHelpers.getHelperExpr("handler");
-  const handlerCall = factory.createCallExpression(
-    handlerExpr,
+  const handlerCall = context.ctHelpers.createHelperCall(
+    "handler",
+    actionCall,
     [eventTypeNode, stateTypeNode],
     [handlerCallback],
   );
