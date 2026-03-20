@@ -209,9 +209,10 @@ describe("header menu tests", () => {
       }
     });
 
-    // Trigger should have aria-expanded=true
+    // Re-query trigger since Lit may have re-rendered
+    const updatedTrigger = await pierce(page, ".header-piece-trigger");
     assertEquals(
-      await trigger.evaluate(
+      await updatedTrigger.evaluate(
         (el: Element) => el.getAttribute("aria-expanded"),
       ),
       "true",
