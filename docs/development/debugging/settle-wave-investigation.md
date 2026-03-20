@@ -999,6 +999,28 @@ Interpretation:
 - the main growth signals are home-page list/grid computations and their
   downstream effects, not just the per-note `containingNotebooks` revisit
 
+Later sampling on the same space showed that the one-step delta can also be
+surprisingly lumpy once the space is already large. A fresh-tab load comparison
+from `22` to `23` notes produced:
+
+- graph nodes: `689 -> 705`
+- action runs: `319 -> 361`
+- `scheduler/execute`: `4855.5 -> 8270.8 ms`
+- `scheduler/execute/settle`: `4602.2 -> 8004.4 ms`
+
+The biggest per-action deltas in that `+1 note` comparison were:
+
+- `raw:map`: `133 -> 148` runs
+- `default-app.tsx:308:39`: `46 -> 47` runs
+- `piece-grid.tsx:21:19`: `2 -> 10` runs and `111.6 -> 556.3 ms`
+- `backlinks-index.tsx:176:19`: `0 -> 5` runs and `580.1 ms`
+- `raw:wish`: still `3` runs, but `1066.7 -> 1135.0 ms`
+
+That is not the shape of a tiny constant per-note increase. It suggests that
+once the space is large enough, some home-load work crosses into broader
+re-evaluation waves, especially around grid preview work and backlink/index
+rebuilds.
+
 ### Transaction Write-Trace Example
 
 One March 18, 2026 manual run used the new transaction write watcher against
