@@ -119,8 +119,10 @@ async function resolveBundleConfigPath(
     ? await resolveWorkspacePackageImports(workspaceConfigPath, workspaceConfig)
     : {};
 
-  const compilerOptions = manifest.config.esbuildConfig?.tsconfigRaw
-    ?.compilerOptions;
+  const tsconfigRaw = manifest.config.esbuildConfig?.tsconfigRaw;
+  const compilerOptions = typeof tsconfigRaw === "string"
+    ? undefined
+    : tsconfigRaw?.compilerOptions;
   const imports = {
     ...toStringRecord(workspaceConfig?.imports),
     ...workspacePackageImports,

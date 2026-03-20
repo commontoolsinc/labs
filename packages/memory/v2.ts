@@ -1,10 +1,13 @@
-import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
+import {
+  jsonFromValue,
+  valueFromJson,
+} from "@commontools/data-model/json-encoding";
 import type {
   JSONValue,
   SchemaPathSelector,
   StorableDatum,
 } from "./interface.ts";
-import type { ReconstructionContext } from "./storable-protocol.ts";
+import type { ReconstructionContext } from "@commontools/data-model/interface";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;

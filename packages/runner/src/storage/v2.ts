@@ -22,7 +22,7 @@ import {
 } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -568,8 +568,11 @@ export class StorageManager implements IStorageManager {
     }
 
     if (Array.isArray(value)) {
-      const itemSchema = schema && isObject(schema) && schema.items
-        ? schema.items as JSONSchema
+      const schemaObj = typeof schema === "object" && schema !== null
+        ? schema as { items?: JSONSchema }
+        : undefined;
+      const itemSchema = schemaObj?.items
+        ? schemaObj.items as JSONSchema
         : undefined;
       for (const item of value) {
         this.collectLinkedCellSyncs(

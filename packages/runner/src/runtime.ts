@@ -146,12 +146,16 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean | undefined;
+  /** Backward-compat alias for `modernDataModel`. */
+  richStorableValues?: boolean | undefined;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean | undefined;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
   modernHash?: boolean | undefined;
   /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
   modernSchemaHash?: boolean | undefined;
+  /** Backward-compat alias for `modernHash`. */
+  canonicalHashing?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -280,11 +284,28 @@ export class Runtime {
 
     this.experimental = {
       modernDataModel: undefined,
+      richStorableValues: undefined,
       unifiedJsonEncoding: undefined,
       modernHash: undefined,
       modernSchemaHash: undefined,
+      canonicalHashing: undefined,
       ...options.experimental,
     };
+
+    if (
+      options.experimental?.modernDataModel === undefined &&
+      options.experimental?.richStorableValues !== undefined
+    ) {
+      this.experimental.modernDataModel =
+        options.experimental.richStorableValues;
+    }
+
+    if (
+      options.experimental?.modernHash === undefined &&
+      options.experimental?.canonicalHashing !== undefined
+    ) {
+      this.experimental.modernHash = options.experimental.canonicalHashing;
+    }
 
     if (
       this.experimental.modernDataModel &&

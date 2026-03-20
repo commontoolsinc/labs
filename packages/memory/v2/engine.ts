@@ -2,7 +2,7 @@ import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
 import { refer } from "../reference.ts";
 import type { JSONValue } from "../interface.ts";
-import { sha256 } from "../hash-impl.ts";
+import { sha256 } from "@commontools/data-model/sha256-impl";
 import { applyPatch, parsePointer } from "./patch.ts";
 import {
   type Blob,

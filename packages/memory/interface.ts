@@ -1,9 +1,16 @@
 import type { HashObject } from "@commonfabric/data-model/value-hash";
 import type { JSONValue } from "@commonfabric/api";
-
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type {
+  FabricDatum,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
+
+// Backward-compat aliases for branches that still import the older storage
+// naming from the memory package surface.
+export type StorableDatum = FabricDatum;
+export type StorableValue = FabricValue;
 
 export type { JSONValue };
 export type MemoryVersion = "v1" | "v2";
@@ -52,8 +59,8 @@ export interface Principal<ID extends DID = DID> {
  * Principal capable of issuing an {@link Authorization}.
  */
 export interface Authority extends Principal {
-  authorize<T extends FabricValue>(
-    access: Iterable<HashObject<T> | T>,
+  authorize<T extends DefinedReferent>(
+    access: Iterable<ContentId<T> | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
 
@@ -90,15 +97,15 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends FabricValue = FabricValue> {
-  [link: AsString<HashObject<Access>>]: Unit;
+export interface Proof<Access extends DefinedReferent = DefinedReferent> {
+  [link: AsString<ContentId<Access>>]: Unit;
 }
 
 /**
  * Represents a verifiable authorization issued by specific {@link Authority}.
  * It is slightly more abstract notion than signed payload.
  */
-export type Authorization<T extends FabricValue = FabricValue> = {
+export type Authorization<T extends DefinedReferent = DefinedReferent> = {
   signature: Signature<Proof<T>>;
   access: Proof<T>;
 };
@@ -399,7 +406,7 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Job<
   Command extends NonNullable<unknown> = NonNullable<unknown>,
-  Return extends FabricValue = FabricValue,
+  Return extends DefinedReferent = DefinedReferent,
   Effect = unknown,
 > = {
   invoke: Command;
@@ -425,32 +432,32 @@ export type SessionTask<Space extends MemorySpace> =
 
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends FabricValue,
+  Result extends DefinedReferent,
   Effect,
 > =
   | {
     the: "task/return";
-    of: InvocationURL<HashObject<Command>>;
+    of: InvocationURL<ContentId<Command>>;
     is: Awaited<Result>;
   }
   | (Effect extends never ? never
     : {
       the: "task/effect";
-      of: InvocationURL<HashObject<Command>>;
+      of: InvocationURL<ContentId<Command>>;
       is: Effect;
     });
 
 export type Effect<Of extends NonNullable<unknown>, Command> = {
-  of: HashObject<Of>;
+  of: ContentId<Of>;
   run: Command;
   is?: undefined;
 };
 
 export type Return<
   Of extends NonNullable<unknown>,
-  Result extends FabricValue,
+  Result extends DefinedReferent,
 > = {
-  of: HashObject<Of>;
+  of: ContentId<Of>;
   is: Result;
   run?: undefined;
 };
@@ -601,9 +608,9 @@ export interface Assertion<
   of: Of;
   is: Is;
   cause:
-    | HashObject<Assertion<T, Of, Is>>
-    | HashObject<Retraction<T, Of, Is>>
-    | HashObject<Unclaimed<T, Of>>;
+    | ContentId<Assertion<T, Of, Is>>
+    | ContentId<Retraction<T, Of, Is>>
+    | ContentId<Unclaimed<T, Of>>;
 }
 
 /**
@@ -618,7 +625,7 @@ export interface Retraction<
   the: T;
   of: Of;
   is?: undefined;
-  cause: HashObject<Assertion<T, Of, Is>>;
+  cause: ContentId<Assertion<T, Of, Is>>;
 }
 
 export interface Invariant<
@@ -628,7 +635,7 @@ export interface Invariant<
 > {
   the: T;
   of: Of;
-  fact: HashObject<Fact<T, Of, Is>>;
+  fact: ContentId<Fact<T, Of, Is>>;
 
   is?: undefined;
   cause?: undefined;
@@ -809,7 +816,7 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/unsubscribe",
   Space,
-  { source: InvocationURL<HashObject<Subscribe<Space>>> }
+  { source: InvocationURL<ContentId<Subscribe<Space>>> }
 >;
 
 export type SchemaQueryArgs = {
@@ -958,7 +965,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: HashObject<Fact> | null;
+  expected: ContentId<Fact> | null;
 
   /**
    * Actual memory state in the replica repository.

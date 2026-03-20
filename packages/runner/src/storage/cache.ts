@@ -473,13 +473,21 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         } else {
           const newSchemaRefs = new Set<string>();
           ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
+          const newSchemaObj = typeof newSchema === "object" &&
+              newSchema !== null
+            ? newSchema
+            : undefined;
+          const sortedSubSchemaObj = typeof sortedSubSchema === "object" &&
+              sortedSubSchema !== null
+            ? sortedSubSchema
+            : undefined;
           // If we don't use any $refs, we can compare these without $defs
           if (
-            isObject(newSchema) && isObject(sortedSubSchema) &&
+            newSchemaObj && sortedSubSchemaObj &&
             newSchemaRefs.size == 0
           ) {
-            const { $defs: _defs1, ...newSchemaNoDefs } = newSchema;
-            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchema;
+            const { $defs: _defs1, ...newSchemaNoDefs } = newSchemaObj;
+            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchemaObj;
             if (
               JSON.stringify(subSchemaNoDefs) ===
                 JSON.stringify(newSchemaNoDefs)
@@ -2498,8 +2506,12 @@ export const getChanges = (
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
-  if (isObject(change?.is) && "labels" in change.is) {
-    return { ifc: change.is.labels } as JSONSchema;
+  const value = change?.is;
+  if (value !== null && value !== undefined && isObject(value)) {
+    const labels = (value as { labels?: unknown }).labels;
+    if (labels !== undefined) {
+      return { ifc: labels } as JSONSchema;
+    }
   }
   return undefined;
 };
