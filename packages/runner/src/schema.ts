@@ -10,6 +10,7 @@ import {
   type FabricDatum,
   type FabricValue,
 } from "@commontools/data-model/fabric-value";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -656,7 +657,7 @@ export function generateHandlerSchema(
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  return {
+  return toDeepFrozenSchema({
     type: "object",
     properties: {
       "$event": eventSchema ?? true,
@@ -665,5 +666,5 @@ export function generateHandlerSchema(
     ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
-  };
+  }, true);
 }
