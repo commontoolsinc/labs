@@ -40,11 +40,11 @@ describe("default-app flow test", () => {
     // Wait for the note page to load by checking for the note title
     console.log("Look for '📝 New Note'...");
     await waitFor(async () => {
-      const el = await page.waitForSelector(".header-piece-name", {
+      const el = await page.waitForSelector(".header-piece-trigger", {
         strategy: "pierce",
       });
       const innerText = await el.innerText();
-      return innerText === "📝 New Note";
+      return innerText?.includes("📝 New Note");
     });
 
     // Navigate back to the space page via header breadcrumb
