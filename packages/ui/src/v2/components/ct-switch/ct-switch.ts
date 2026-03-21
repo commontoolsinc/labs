@@ -29,11 +29,11 @@ export class CTSwitch extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --ct-switch-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-switch-color-primary: var(--ct-theme-color-primary, #0f172a);
-      --ct-switch-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --ct-switch-color-ring: var(--ct-theme-color-primary, #94a3b8);
-      --ct-switch-color-input: var(--ct-theme-color-border, #e2e8f0);
+      --ct-switch-color-background: var(--ct-theme-color-background, #fdfcf9);
+      --ct-switch-color-primary: var(--ct-theme-color-primary, #2d8c3c);
+      --ct-switch-color-border: var(--ct-theme-color-border, #d4d2c8);
+      --ct-switch-color-ring: var(--ct-theme-color-primary, #2d8c3c);
+      --ct-switch-color-input: var(--ct-theme-color-border, #d4d2c8);
 
       display: inline-block;
       position: relative;
@@ -43,7 +43,7 @@ export class CTSwitch extends BaseElement {
 
     :host([disabled]) {
       cursor: not-allowed;
-      opacity: 0.5;
+      opacity: 0.4;
     }
 
     :host:focus {
@@ -51,47 +51,45 @@ export class CTSwitch extends BaseElement {
     }
 
     :host:focus-visible .switch {
-      outline: 2px solid transparent;
-      outline-offset: 2px;
       box-shadow:
-        0 0 0 2px var(--ct-switch-color-background, #fff),
-        0 0 0 4px var(--ct-switch-color-ring, #94a3b8);
+        0 0 0 2px var(--ct-switch-color-background, #fdfcf9),
+        0 0 0 4px var(--ct-switch-color-ring, #2d8c3c);
       }
 
       .switch {
         position: relative;
-        width: 2rem; /* w-8 */
-        height: 1.15rem; /* h-[1.15rem] */
-        border-radius: 9999px; /* rounded-full */
-        background-color: var(--ct-switch-color-input, #e2e8f0);
-        transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        width: 3.125rem;
+        height: 1.875rem;
+        border-radius: 9999px;
+        background-color: var(--ct-switch-color-input, #d2d2d7);
+        transition: background-color 250ms cubic-bezier(0.25, 0.1, 0.25, 1);
         display: flex;
         align-items: center;
       }
 
       .switch.checked {
-        background-color: var(--ct-switch-color-primary, #0f172a);
+        background-color: var(--ct-switch-color-primary, #2563eb);
       }
 
       .switch.disabled {
         cursor: not-allowed;
-        opacity: 0.5;
+        opacity: 0.4;
       }
 
       /* Thumb element */
       .thumb {
         position: absolute;
-        left: 0.125rem; /* 2px */
-        width: 0.875rem; /* 14px */
-        height: 0.875rem; /* 14px */
+        left: 0.125rem;
+        width: 1.625rem;
+        height: 1.625rem;
         border-radius: 9999px;
         background-color: var(--ct-switch-color-background, #fff);
-        transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        transition: transform 250ms cubic-bezier(0.25, 0.1, 0.25, 1);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15), 0 0.5px 1px rgba(0, 0, 0, 0.1);
       }
 
       .switch.checked .thumb {
-        transform: translateX(0.875rem); /* 14px - move to the right */
+        transform: translateX(1.25rem);
       }
 
       /* Hidden native input for form compatibility */
@@ -109,16 +107,25 @@ export class CTSwitch extends BaseElement {
 
       /* Hover state */
       :host(:not([disabled]):hover) .switch:not(.checked) {
-        background-color: var(--ct-switch-color-border, #e2e8f0);
+        background-color: #c5c3b9;
       }
 
       :host(:not([disabled]):hover) .switch.checked {
-        opacity: 0.9;
+        filter: brightness(1.05);
+      }
+
+      /* Active/press state */
+      :host(:not([disabled]):active) .thumb {
+        width: 1.8125rem;
+      }
+
+      :host(:not([disabled]):active) .switch.checked .thumb {
+        transform: translateX(1.0625rem);
       }
 
       /* Animation for thumb */
       .thumb {
-        will-change: transform;
+        will-change: transform, width;
       }
 
       /* Ensure smooth transition even when changing state rapidly */
@@ -126,8 +133,6 @@ export class CTSwitch extends BaseElement {
       .thumb {
         -webkit-backface-visibility: hidden;
         backface-visibility: hidden;
-        -webkit-perspective: 1000px;
-        perspective: 1000px;
       }
     `;
 

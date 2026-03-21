@@ -125,21 +125,18 @@ export const INPUT_PATTERNS = {
 export class CTInput extends BaseElement {
   static override styles = css`
     :host {
-      --ct-input-color-text: var(--ct-theme-color-text, #111827);
-      --ct-input-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-input-color-border: var(--ct-theme-color-border, #e5e7eb);
-      --ct-input-color-border-hover: var(--ct-theme-color-border-muted, #d1d5db);
-      --ct-input-color-primary: var(--ct-theme-color-primary, #3b82f6);
-      --ct-input-color-ring: rgba(59, 130, 246, 0.15);
-      --ct-input-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --ct-input-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
-      --ct-input-color-error: var(--ct-theme-color-error, #dc2626);
-      --ct-input-color-error-ring: rgba(220, 38, 38, 0.15);
-      --ct-input-color-success: var(--ct-theme-color-success, #16a34a);
-      --ct-input-border-radius: var(
-        --ct-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
-      );
+      --ct-input-color-text: var(--ct-theme-color-text, #2c3227);
+      --ct-input-color-background: var(--ct-theme-color-surface, #f3f1eb);
+      --ct-input-color-border: transparent;
+      --ct-input-color-border-hover: var(--ct-theme-color-border, #d4d2c8);
+      --ct-input-color-primary: var(--ct-theme-color-primary, #2d8c3c);
+      --ct-input-color-ring: rgba(45, 140, 60, 0.2);
+      --ct-input-color-surface: var(--ct-theme-color-surface, #f3f1eb);
+      --ct-input-color-text-muted: var(--ct-theme-color-text-muted, #7a7d72);
+      --ct-input-color-error: var(--ct-theme-color-error, #c44536);
+      --ct-input-color-error-ring: rgba(196, 69, 54, 0.15);
+      --ct-input-color-success: var(--ct-theme-color-success, #3a8f47);
+      --ct-input-border-radius: 0.5rem;
       --ct-input-animation-duration: var(--ct-theme-animation-duration, 150ms);
       --ct-input-font-family: var(--ct-theme-font-family, inherit);
 
@@ -156,625 +153,640 @@ export class CTInput extends BaseElement {
     input {
       display: block;
       width: 100%;
-      padding: 0.5rem 0.75rem;
-      font-size: 0.875rem;
+      padding: 0.75rem 0.875rem;
+      font-size: 1rem;
       line-height: 1.25rem;
-      color: var(--ct-input-color-text, #111827);
-      background-color: var(--ct-input-color-background, #ffffff);
-      border: 1px solid var(--ct-input-color-border, #e5e7eb);
-      border-radius: var(
-        --ct-input-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
-      );
-      transition: all var(--ct-input-animation-duration, 150ms)
-        var(--ct-transition-timing-ease);
+      color: var(--ct-input-color-text, #2c3227);
+      background-color: var(--ct-input-color-background, #f3f1eb);
+      border: none;
+      border-radius: var(--ct-input-border-radius, 0.5rem);
+      transition:
+        background-color var(--ct-input-animation-duration, 150ms) ease,
+        box-shadow var(--ct-input-animation-duration, 150ms) ease;
       font-family: var(--ct-input-font-family, inherit);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     input::placeholder {
-      color: var(--ct-input-color-text-muted, #6b7280);
+      color: var(--ct-input-color-text-muted, #7a7d72);
     }
 
     input:hover:not(:disabled):not(:focus) {
-      border-color: var(--ct-input-color-border-hover, #d1d5db);
+      background-color: #eae8e0;
     }
 
     input:focus {
       outline: none;
-      border-color: var(--ct-input-color-primary, #3b82f6);
-      box-shadow: 0 0 0 3px var(--ct-input-color-ring, rgba(59, 130, 246, 0.15));
-    }
-
-    input:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-      background-color: var(--ct-input-color-surface, #f1f5f9);
-    }
-
-    input[readonly] {
-      background-color: var(--ct-input-color-surface, #f1f5f9);
-    }
-
-    input.error {
-      border-color: var(--ct-input-color-error, #dc2626);
-    }
-
-    input.error:focus {
-      border-color: var(--ct-input-color-error, #dc2626);
-      box-shadow: 0 0 0 3px
-        var(--ct-input-color-error-ring, rgba(220, 38, 38, 0.15));
+      background-color: var(--ct-theme-color-background, #fdfcf9);
+      box-shadow:
+        inset 0 0 0 1px var(--ct-input-color-primary, #2d8c3c),
+        0 0 0 3px var(--ct-input-color-ring, rgba(45, 140, 60, 0.2));
       }
 
-      /* Remove spinner buttons from number inputs in Chrome/Safari/Edge */
-      input[type="number"]::-webkit-outer-spin-button,
-      input[type="number"]::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
+      input:disabled {
+        cursor: not-allowed;
+        opacity: 0.4;
+        background-color: var(--ct-input-color-surface, #f3f1eb);
       }
 
-      /* Remove spinner from number inputs in Firefox */
-      input[type="number"] {
-        -moz-appearance: textfield;
+      input[readonly] {
+        background-color: var(--ct-input-color-surface, #f3f1eb);
+        color: var(--ct-input-color-text-muted, #7a7d72);
       }
 
-      /* Style file input */
-      input[type="file"] {
-        padding: 0.375rem 0.75rem;
-        cursor: pointer;
+      input.error {
+        background-color: var(--ct-theme-color-background, #fdfcf9);
+        box-shadow: inset 0 0 0 1px var(--ct-input-color-error, #c44536);
       }
 
-      input[type="file"]::file-selector-button {
-        margin-right: 0.5rem;
-        padding: 0.125rem 0.5rem;
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: var(--ct-input-color-background, hsl(0, 0%, 100%));
-        background-color: var(--ct-input-color-primary, hsl(212, 100%, 47%));
-        border: none;
-        border-radius: var(
-          --ct-input-border-radius,
-          var(--ct-border-radius-sm, 0.25rem)
-        );
-        cursor: pointer;
-      }
-
-      input[type="file"]::file-selector-button:hover {
-        opacity: 0.9;
-      }
-
-      /* Date/time inputs */
-      input[type="date"],
-      input[type="time"],
-      input[type="datetime-local"],
-      input[type="month"],
-      input[type="week"] {
-        cursor: pointer;
-      }
-
-      /* Color input */
-      input[type="color"] {
-        padding: 0.25rem;
-        cursor: pointer;
-      }
-
-      /* Search input */
-      input[type="search"]::-webkit-search-decoration,
-      input[type="search"]::-webkit-search-cancel-button {
-        -webkit-appearance: none;
-      }
-
-      /* Range input */
-      input[type="range"] {
-        padding: 0.5rem 0;
-        cursor: pointer;
-      }
-
-      input[type="range"]::-webkit-slider-track {
-        width: 100%;
-        height: 4px;
-        background: var(--ct-input-color-surface, #f1f5f9);
-        border-radius: 2px;
-      }
-
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 16px;
-        height: 16px;
-        background: var(--ct-input-color-primary, #3b82f6);
-        border-radius: 50%;
-        cursor: pointer;
-      }
-
-      input[type="range"]::-moz-range-track {
-        width: 100%;
-        height: 4px;
-        background: var(--ct-input-color-surface, #f1f5f9);
-        border-radius: 2px;
-      }
-
-      input[type="range"]::-moz-range-thumb {
-        width: 16px;
-        height: 16px;
-        background: var(--ct-input-color-primary, #3b82f6);
-        border-radius: 50%;
-        border: none;
-        cursor: pointer;
-      }
-
-      /* Hidden input */
-      input[type="hidden"] {
-        display: none;
-      }
-
-      /* Valid state (when showValidation is true) */
-      input:valid:not(:placeholder-shown) {
-        border-color: var(--ct-input-color-success, #16a34a);
-      }
-
-      input:valid:not(:placeholder-shown):focus {
-        border-color: var(--ct-input-color-success, #16a34a);
-        box-shadow: 0 0 0 3px
-          var(--ct-input-color-success, rgba(22, 163, 74, 0.15));
-        }
-      `;
-
-      static override properties = {
-        type: { type: String },
-        placeholder: { type: String },
-        value: { type: String },
-        disabled: { type: Boolean },
-        readonly: { type: Boolean },
-        error: { type: Boolean },
-        name: { type: String },
-        required: { type: Boolean },
-        autofocus: { type: Boolean },
-        autocomplete: { type: String },
-        min: { type: String },
-        max: { type: String },
-        step: { type: String },
-        pattern: { type: String },
-        maxlength: { type: String },
-        minlength: { type: String },
-        inputmode: { type: String },
-        size: { type: Number },
-        multiple: { type: Boolean },
-        accept: { type: String },
-        list: { type: String },
-        spellcheck: { type: Boolean },
-        validationPattern: { type: String },
-        showValidation: { type: Boolean },
-        timingStrategy: { type: String },
-        timingDelay: { type: Number },
-      };
-
-      declare type: InputType;
-      declare placeholder: string;
-      declare value: CellHandle<string> | string;
-      declare disabled: boolean;
-      declare readonly: boolean;
-      declare error: boolean;
-      declare name: string;
-      declare required: boolean;
-      declare autofocus: boolean;
-      declare autocomplete: string;
-      declare min: string;
-      declare max: string;
-      declare step: string;
-      declare pattern: string;
-      declare maxlength: string;
-      declare minlength: string;
-      declare inputmode: InputMode;
-      declare size: number;
-      declare multiple: boolean;
-      declare accept: string;
-      declare list: string;
-      declare spellcheck: boolean;
-      declare validationPattern: keyof typeof INPUT_PATTERNS | "";
-      declare showValidation: boolean;
-      declare timingStrategy: InputTimingOptions["strategy"];
-      declare timingDelay: number;
-
-      private _input: HTMLInputElement | null = null;
-      private _cellController = createStringCellController(this, {
-        timing: {
-          strategy: "debounce",
-          delay: 300,
-        },
-        onChange: (newValue: string, oldValue: string) => {
-          // ct-change is emitted via timing controller to honor timingStrategy
-          this.emit("ct-change", {
-            value: newValue,
-            oldValue,
-            name: this.name,
-            files: this.type === "file" ? this._input?.files : undefined,
-          });
-        },
-      });
-
-      // Form field controller handles buffering when in ct-form context
-      private _formField = createFormFieldController<string>(this, {
-        cellController: this._cellController,
-        validate: () => ({
-          valid: this.checkValidity(),
-          message: this.validationMessage,
-        }),
-      });
-
-      constructor() {
-        super();
-        this.type = "text";
-        this.placeholder = "";
-        this.value = "";
-        this.disabled = false;
-        this.readonly = false;
-        this.error = false;
-        this.name = "";
-        this.required = false;
-        this.autofocus = false;
-        this.autocomplete = "";
-        this.min = "";
-        this.max = "";
-        this.step = "";
-        this.pattern = "";
-        this.maxlength = "";
-        this.minlength = "";
-        this.inputmode = "text";
-        this.size = 0;
-        this.multiple = false;
-        this.accept = "";
-        this.list = "";
-        this.spellcheck = true;
-        this.validationPattern = "";
-        this.showValidation = false;
-        this.timingStrategy = "debounce";
-        this.timingDelay = 300;
-      }
-
-      // Theme consumption
-      @consume({ context: themeContext, subscribe: true })
-      @property({ attribute: false })
-      // deno-lint-ignore no-explicit-any
-      declare theme?: CTTheme;
-
-      private get input(): HTMLInputElement | null {
-        if (!this._input) {
-          this._input = this.shadowRoot?.querySelector("input") || null;
-        }
-        return this._input;
-      }
-
-      private getValue(): string {
-        return this._formField.getValue();
-      }
-
-      private setValue(newValue: string): void {
-        this._formField.setValue(newValue);
-      }
-
-      private getPattern(): string {
-        // Use custom pattern if provided
-        if (this.pattern) {
-          return this.pattern;
+      input.error:focus {
+        box-shadow:
+          inset 0 0 0 1px var(--ct-input-color-error, #c44536),
+          0 0 0 3px var(--ct-input-color-error-ring, rgba(196, 69, 54, 0.15));
         }
 
-        // Use validation pattern if specified
-        if (
-          this.validationPattern && this.validationPattern in INPUT_PATTERNS
-        ) {
-          return INPUT_PATTERNS[this.validationPattern];
+        /* Remove spinner buttons from number inputs in Chrome/Safari/Edge */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
         }
 
-        // Use default patterns for specific types
-        if (this.type === "email" && !this.pattern) {
-          return INPUT_PATTERNS.email;
-        }
-        if (this.type === "url" && !this.pattern) {
-          return INPUT_PATTERNS.url;
+        /* Remove spinner from number inputs in Firefox */
+        input[type="number"] {
+          -moz-appearance: textfield;
         }
 
-        return "";
-      }
-
-      private getInputMode(): InputMode {
-        // Use explicit inputmode if provided
-        if (this.inputmode && this.inputmode !== "text") {
-          return this.inputmode;
+        /* Style file input */
+        input[type="file"] {
+          padding: 0.625rem 0.875rem;
+          cursor: pointer;
         }
 
-        // Return appropriate inputmode based on type
-        switch (this.type) {
-          case "email":
-            return "email";
-          case "tel":
-            return "tel";
-          case "url":
-            return "url";
-          case "number":
-            return "numeric";
-          case "search":
-            return "search";
-          default:
-            return "text";
-        }
-      }
-
-      private getValidationClass(): string {
-        if (!this.showValidation) {
-          return this.error ? "error" : "";
+        input[type="file"]::file-selector-button {
+          margin-right: 0.5rem;
+          padding: 0.25rem 0.75rem;
+          font-size: 0.875rem;
+          font-weight: 700;
+          color: #ffffff;
+          background-color: var(--ct-input-color-primary, #2d8c3c);
+          border: none;
+          border-radius: 1rem;
+          cursor: pointer;
+          transition: filter 150ms ease;
         }
 
-        // Check native validation
-        const isValid = this.checkValidity();
-        return isValid ? "" : "error";
-      }
-
-      override disconnectedCallback() {
-        super.disconnectedCallback();
-        // Controllers handle cleanup automatically via ReactiveController
-      }
-
-      override willUpdate(changedProperties: Map<string, any>) {
-        super.willUpdate(changedProperties);
-
-        // If the value property itself changed (e.g., switched to a different cell)
-        if (changedProperties.has("value")) {
-          // Bind the new cell first so getValue() returns the new value
-          this._cellController.bind(this.value, stringSchema);
-          // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
-          this._formField.clearBuffer();
+        input[type="file"]::file-selector-button:hover {
+          filter: brightness(0.9);
         }
-      }
 
-      override updated(changedProperties: Map<string, any>) {
-        super.updated(changedProperties);
+        /* Date/time inputs */
+        input[type="date"],
+        input[type="time"],
+        input[type="datetime-local"],
+        input[type="month"],
+        input[type="week"] {
+          cursor: pointer;
+        }
 
-        // If value changed, ensure the DOM input is synchronized
-        if (changedProperties.has("value") && this.input) {
-          const currentValue = this.getValue();
-          if (this.input.value !== currentValue) {
-            this.input.value = currentValue;
+        /* Color input */
+        input[type="color"] {
+          padding: 0.25rem;
+          cursor: pointer;
+          height: 2.75rem;
+        }
+
+        /* Search input */
+        input[type="search"]::-webkit-search-decoration,
+        input[type="search"]::-webkit-search-cancel-button {
+          -webkit-appearance: none;
+        }
+
+        /* Range input */
+        input[type="range"] {
+          padding: 0.5rem 0;
+          cursor: pointer;
+          background: transparent;
+        }
+
+        input[type="range"]::-webkit-slider-track {
+          width: 100%;
+          height: 4px;
+          background: #e8e6dd;
+          border-radius: 2px;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 22px;
+          height: 22px;
+          background: #fdfcf9;
+          border-radius: 50%;
+          cursor: pointer;
+          box-shadow:
+            0 1px 4px rgba(60, 70, 50, 0.18),
+            0 0.5px 1px rgba(60, 70, 50, 0.12);
           }
-        }
 
-        // Update timing controller if timing options changed
-        if (
-          changedProperties.has("timingStrategy") ||
-          changedProperties.has("timingDelay")
-        ) {
-          this._cellController.updateTimingOptions({
-            strategy: this.timingStrategy,
-            delay: this.timingDelay,
-          });
-        }
+          input[type="range"]::-moz-range-track {
+            width: 100%;
+            height: 4px;
+            background: #e8e6dd;
+            border-radius: 2px;
+          }
 
-        if (changedProperties.has("theme")) {
-          applyThemeToElement(this, this.theme ?? defaultTheme);
-        }
-      }
+          input[type="range"]::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+            background: #fdfcf9;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            box-shadow:
+              0 1px 4px rgba(60, 70, 50, 0.18),
+              0 0.5px 1px rgba(60, 70, 50, 0.12);
+            }
 
-      override firstUpdated() {
-        // Cache the input element reference
-        this._input = this.shadowRoot?.querySelector("input") || null;
+            /* Hidden input */
+            input[type="hidden"] {
+              display: none;
+            }
 
-        // Bind the initial value to the cell controller
-        this._cellController.bind(this.value, stringSchema);
+            /* Valid state (when showValidation is true) */
+            input:valid:not(:placeholder-shown) {
+              box-shadow: inset 0 0 0 1px var(--ct-input-color-success, #3a8f47);
+            }
 
-        // Update timing options to match current properties
-        this._cellController.updateTimingOptions({
-          strategy: this.timingStrategy,
-          delay: this.timingDelay,
-        });
+            input:valid:not(:placeholder-shown):focus {
+              box-shadow:
+                inset 0 0 0 1px var(--ct-input-color-success, #3a8f47),
+                0 0 0 3px rgba(58, 143, 71, 0.15);
+              }
+            `;
 
-        // Register with form after binding is complete
-        this._formField.register(this.name);
+            static override properties = {
+              type: { type: String },
+              placeholder: { type: String },
+              value: { type: String },
+              disabled: { type: Boolean },
+              readonly: { type: Boolean },
+              error: { type: Boolean },
+              name: { type: String },
+              required: { type: Boolean },
+              autofocus: { type: Boolean },
+              autocomplete: { type: String },
+              min: { type: String },
+              max: { type: String },
+              step: { type: String },
+              pattern: { type: String },
+              maxlength: { type: String },
+              minlength: { type: String },
+              inputmode: { type: String },
+              size: { type: Number },
+              multiple: { type: Boolean },
+              accept: { type: String },
+              list: { type: String },
+              spellcheck: { type: Boolean },
+              validationPattern: { type: String },
+              showValidation: { type: Boolean },
+              timingStrategy: { type: String },
+              timingDelay: { type: Number },
+            };
 
-        if (this.autofocus) {
-          this._input?.focus();
-        }
+            declare type: InputType;
+            declare placeholder: string;
+            declare value: CellHandle<string> | string;
+            declare disabled: boolean;
+            declare readonly: boolean;
+            declare error: boolean;
+            declare name: string;
+            declare required: boolean;
+            declare autofocus: boolean;
+            declare autocomplete: string;
+            declare min: string;
+            declare max: string;
+            declare step: string;
+            declare pattern: string;
+            declare maxlength: string;
+            declare minlength: string;
+            declare inputmode: InputMode;
+            declare size: number;
+            declare multiple: boolean;
+            declare accept: string;
+            declare list: string;
+            declare spellcheck: boolean;
+            declare validationPattern: keyof typeof INPUT_PATTERNS | "";
+            declare showValidation: boolean;
+            declare timingStrategy: InputTimingOptions["strategy"];
+            declare timingDelay: number;
 
-        // Apply theme after first render
-        applyThemeToElement(this, this.theme ?? defaultTheme);
-      }
+            private _input: HTMLInputElement | null = null;
+            private _cellController = createStringCellController(this, {
+              timing: {
+                strategy: "debounce",
+                delay: 300,
+              },
+              onChange: (newValue: string, oldValue: string) => {
+                // ct-change is emitted via timing controller to honor timingStrategy
+                this.emit("ct-change", {
+                  value: newValue,
+                  oldValue,
+                  name: this.name,
+                  files: this.type === "file" ? this._input?.files : undefined,
+                });
+              },
+            });
 
-      override render() {
-        const pattern = this.getPattern();
-        const inputMode = this.getInputMode();
-        const validationClass = this.getValidationClass();
+            // Form field controller handles buffering when in ct-form context
+            private _formField = createFormFieldController<string>(this, {
+              cellController: this._cellController,
+              validate: () => ({
+                valid: this.checkValidity(),
+                message: this.validationMessage,
+              }),
+            });
 
-        // For file inputs, we can't set the value programmatically
-        const inputValue = this.type === "file" ? undefined : this.getValue();
+            constructor() {
+              super();
+              this.type = "text";
+              this.placeholder = "";
+              this.value = "";
+              this.disabled = false;
+              this.readonly = false;
+              this.error = false;
+              this.name = "";
+              this.required = false;
+              this.autofocus = false;
+              this.autocomplete = "";
+              this.min = "";
+              this.max = "";
+              this.step = "";
+              this.pattern = "";
+              this.maxlength = "";
+              this.minlength = "";
+              this.inputmode = "text";
+              this.size = 0;
+              this.multiple = false;
+              this.accept = "";
+              this.list = "";
+              this.spellcheck = true;
+              this.validationPattern = "";
+              this.showValidation = false;
+              this.timingStrategy = "debounce";
+              this.timingDelay = 300;
+            }
 
-        return html`
-          <input
-            type="${this.type}"
-            data-ct-input
-            class="${validationClass}"
-            placeholder="${ifDefined(this.placeholder || undefined)}"
-            .value="${ifDefined(inputValue)}"
-            ?disabled="${this.disabled}"
-            ?readonly="${this.readonly}"
-            ?required="${this.required}"
-            name="${ifDefined(this.name || undefined)}"
-            autocomplete="${ifDefined(this.autocomplete || undefined)}"
-            min="${ifDefined(this.min || undefined)}"
-            max="${ifDefined(this.max || undefined)}"
-            step="${ifDefined(this.step || undefined)}"
-            pattern="${ifDefined(pattern || undefined)}"
-            maxlength="${ifDefined(this.maxlength || undefined)}"
-            minlength="${ifDefined(this.minlength || undefined)}"
-            inputmode="${ifDefined(inputMode || undefined)}"
-            size="${ifDefined(this.size || undefined)}"
-            ?multiple="${this.multiple && this.type === "file"}"
-            accept="${ifDefined(
-              this.accept && this.type === "file" ? this.accept : undefined,
-            )}"
-            list="${ifDefined(this.list || undefined)}"
-            ?spellcheck="${this.spellcheck}"
-            @input="${this._handleInput}"
-            @change="${this._handleChange}"
-            @focus="${this._handleFocus}"
-            @blur="${this._handleBlur}"
-            @keydown="${this._handleKeyDown}"
-            @invalid="${this._handleInvalid}"
-            part="input"
-          />
-        `;
-      }
+            // Theme consumption
+            @consume({ context: themeContext, subscribe: true })
+            @property({ attribute: false })
+            // deno-lint-ignore no-explicit-any
+            declare theme?: CTTheme;
 
-      private _handleInput(event: Event) {
-        const input = event.target as HTMLInputElement;
-        const oldValue = this.getValue();
+            private get input(): HTMLInputElement | null {
+              if (!this._input) {
+                this._input = this.shadowRoot?.querySelector("input") || null;
+              }
+              return this._input;
+            }
 
-        // For file inputs, we can't set the value programmatically
-        if (this.type !== "file") {
-          this.setValue(input.value);
-        } else {
-          // For file inputs, still emit the event with files
-          this.setValue("");
-        }
+            private getValue(): string {
+              return this._formField.getValue();
+            }
 
-        // Emit ct-input event directly for non-cell interop
-        this.emit("ct-input", {
-          value: this.type === "file" ? "" : input.value,
-          oldValue,
-          name: this.name,
-          files: this.type === "file" ? input.files : undefined,
-        });
-      }
+            private setValue(newValue: string): void {
+              this._formField.setValue(newValue);
+            }
 
-      private _handleChange(event: Event) {
-        const input = event.target as HTMLInputElement;
+            private getPattern(): string {
+              // Use custom pattern if provided
+              if (this.pattern) {
+                return this.pattern;
+              }
 
-        // Update value through form field controller
-        // ct-change is emitted by the cell controller's onChange callback
-        // which honors the configured timingStrategy (debounce/throttle/blur)
-        if (this.type !== "file") {
-          this.setValue(input.value);
-        } else {
-          this.setValue("");
-        }
-      }
+              // Use validation pattern if specified
+              if (
+                this.validationPattern &&
+                this.validationPattern in INPUT_PATTERNS
+              ) {
+                return INPUT_PATTERNS[this.validationPattern];
+              }
 
-      private _handleFocus(_event: Event) {
-        this._cellController.onFocus();
-        this.emit("ct-focus", {
-          value: this.getValue(),
-          name: this.name,
-        });
-      }
+              // Use default patterns for specific types
+              if (this.type === "email" && !this.pattern) {
+                return INPUT_PATTERNS.email;
+              }
+              if (this.type === "url" && !this.pattern) {
+                return INPUT_PATTERNS.url;
+              }
 
-      private _handleBlur(_event: Event) {
-        this._cellController.onBlur();
-        this.emit("ct-blur", {
-          value: this.getValue(),
-          name: this.name,
-        });
-      }
+              return "";
+            }
 
-      private _handleKeyDown(event: KeyboardEvent) {
-        this.emit("ct-keydown", {
-          key: event.key,
-          value: this.getValue(),
-          shiftKey: event.shiftKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          altKey: event.altKey,
-          name: this.name,
-        });
+            private getInputMode(): InputMode {
+              // Use explicit inputmode if provided
+              if (this.inputmode && this.inputmode !== "text") {
+                return this.inputmode;
+              }
 
-        // Special handling for Enter key
-        if (event.key === "Enter") {
-          this.emit("ct-submit", {
-            value: this.getValue(),
-            name: this.name,
-          });
-        }
-      }
+              // Return appropriate inputmode based on type
+              switch (this.type) {
+                case "email":
+                  return "email";
+                case "tel":
+                  return "tel";
+                case "url":
+                  return "url";
+                case "number":
+                  return "numeric";
+                case "search":
+                  return "search";
+                default:
+                  return "text";
+              }
+            }
 
-      private _handleInvalid(event: Event) {
-        event.preventDefault(); // Prevent browser's default validation UI
+            private getValidationClass(): string {
+              if (!this.showValidation) {
+                return this.error ? "error" : "";
+              }
 
-        const input = event.target as HTMLInputElement;
-        this.emit("ct-invalid", {
-          value: this.getValue(),
-          name: this.name,
-          validationMessage: input.validationMessage,
-          validity: input.validity,
-        });
+              // Check native validation
+              const isValid = this.checkValidity();
+              return isValid ? "" : "error";
+            }
 
-        // Update visual state if showValidation is enabled
-        if (this.showValidation) {
-          this.requestUpdate();
-        }
-      }
+            override disconnectedCallback() {
+              super.disconnectedCallback();
+              // Controllers handle cleanup automatically via ReactiveController
+            }
 
-      /**
-       * Focus the input programmatically
-       */
-      override focus(): void {
-        this.input?.focus();
-      }
+            override willUpdate(changedProperties: Map<string, any>) {
+              super.willUpdate(changedProperties);
 
-      /**
-       * Blur the input programmatically
-       */
-      override blur(): void {
-        this.input?.blur();
-      }
+              // If the value property itself changed (e.g., switched to a different cell)
+              if (changedProperties.has("value")) {
+                // Bind the new cell first so getValue() returns the new value
+                this._cellController.bind(this.value, stringSchema);
+                // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+                this._formField.clearBuffer();
+              }
+            }
 
-      /**
-       * Select all text in the input
-       */
-      select(): void {
-        this.input?.select();
-      }
+            override updated(changedProperties: Map<string, any>) {
+              super.updated(changedProperties);
 
-      /**
-       * Set selection range in the input
-       */
-      setSelectionRange(
-        start: number,
-        end: number,
-        direction?: "forward" | "backward" | "none",
-      ): void {
-        this.input?.setSelectionRange(start, end, direction);
-      }
+              // If value changed, ensure the DOM input is synchronized
+              if (changedProperties.has("value") && this.input) {
+                const currentValue = this.getValue();
+                if (this.input.value !== currentValue) {
+                  this.input.value = currentValue;
+                }
+              }
 
-      /**
-       * Check validity of the input
-       */
-      checkValidity(): boolean {
-        return this.input?.checkValidity() ?? true;
-      }
+              // Update timing controller if timing options changed
+              if (
+                changedProperties.has("timingStrategy") ||
+                changedProperties.has("timingDelay")
+              ) {
+                this._cellController.updateTimingOptions({
+                  strategy: this.timingStrategy,
+                  delay: this.timingDelay,
+                });
+              }
 
-      /**
-       * Report validity of the input
-       */
-      reportValidity(): boolean {
-        return this.input?.reportValidity() ?? true;
-      }
+              if (changedProperties.has("theme")) {
+                applyThemeToElement(this, this.theme ?? defaultTheme);
+              }
+            }
 
-      /**
-       * Get the validity state
-       */
-      get validity(): ValidityState | undefined {
-        return this.input?.validity;
-      }
+            override firstUpdated() {
+              // Cache the input element reference
+              this._input = this.shadowRoot?.querySelector("input") || null;
 
-      /**
-       * Get validation message
-       */
-      get validationMessage(): string {
-        return this.input?.validationMessage || "";
-      }
+              // Bind the initial value to the cell controller
+              this._cellController.bind(this.value, stringSchema);
 
-      /**
-       * Set custom validity message
-       */
-      setCustomValidity(message: string): void {
-        this.input?.setCustomValidity(message);
-      }
-    }
+              // Update timing options to match current properties
+              this._cellController.updateTimingOptions({
+                strategy: this.timingStrategy,
+                delay: this.timingDelay,
+              });
 
-    globalThis.customElements.define("ct-input", CTInput);
+              // Register with form after binding is complete
+              this._formField.register(this.name);
+
+              if (this.autofocus) {
+                this._input?.focus();
+              }
+
+              // Apply theme after first render
+              applyThemeToElement(this, this.theme ?? defaultTheme);
+            }
+
+            override render() {
+              const pattern = this.getPattern();
+              const inputMode = this.getInputMode();
+              const validationClass = this.getValidationClass();
+
+              // For file inputs, we can't set the value programmatically
+              const inputValue = this.type === "file"
+                ? undefined
+                : this.getValue();
+
+              return html`
+                <input
+                  type="${this.type}"
+                  data-ct-input
+                  class="${validationClass}"
+                  placeholder="${ifDefined(this.placeholder || undefined)}"
+                  .value="${ifDefined(inputValue)}"
+                  ?disabled="${this.disabled}"
+                  ?readonly="${this.readonly}"
+                  ?required="${this.required}"
+                  name="${ifDefined(this.name || undefined)}"
+                  autocomplete="${ifDefined(this.autocomplete || undefined)}"
+                  min="${ifDefined(this.min || undefined)}"
+                  max="${ifDefined(this.max || undefined)}"
+                  step="${ifDefined(this.step || undefined)}"
+                  pattern="${ifDefined(pattern || undefined)}"
+                  maxlength="${ifDefined(this.maxlength || undefined)}"
+                  minlength="${ifDefined(this.minlength || undefined)}"
+                  inputmode="${ifDefined(inputMode || undefined)}"
+                  size="${ifDefined(this.size || undefined)}"
+                  ?multiple="${this.multiple && this.type === "file"}"
+                  accept="${ifDefined(
+                    this.accept && this.type === "file"
+                      ? this.accept
+                      : undefined,
+                  )}"
+                  list="${ifDefined(this.list || undefined)}"
+                  ?spellcheck="${this.spellcheck}"
+                  @input="${this._handleInput}"
+                  @change="${this._handleChange}"
+                  @focus="${this._handleFocus}"
+                  @blur="${this._handleBlur}"
+                  @keydown="${this._handleKeyDown}"
+                  @invalid="${this._handleInvalid}"
+                  part="input"
+                />
+              `;
+            }
+
+            private _handleInput(event: Event) {
+              const input = event.target as HTMLInputElement;
+              const oldValue = this.getValue();
+
+              // For file inputs, we can't set the value programmatically
+              if (this.type !== "file") {
+                this.setValue(input.value);
+              } else {
+                // For file inputs, still emit the event with files
+                this.setValue("");
+              }
+
+              // Emit ct-input event directly for non-cell interop
+              this.emit("ct-input", {
+                value: this.type === "file" ? "" : input.value,
+                oldValue,
+                name: this.name,
+                files: this.type === "file" ? input.files : undefined,
+              });
+            }
+
+            private _handleChange(event: Event) {
+              const input = event.target as HTMLInputElement;
+
+              // Update value through form field controller
+              // ct-change is emitted by the cell controller's onChange callback
+              // which honors the configured timingStrategy (debounce/throttle/blur)
+              if (this.type !== "file") {
+                this.setValue(input.value);
+              } else {
+                this.setValue("");
+              }
+            }
+
+            private _handleFocus(_event: Event) {
+              this._cellController.onFocus();
+              this.emit("ct-focus", {
+                value: this.getValue(),
+                name: this.name,
+              });
+            }
+
+            private _handleBlur(_event: Event) {
+              this._cellController.onBlur();
+              this.emit("ct-blur", {
+                value: this.getValue(),
+                name: this.name,
+              });
+            }
+
+            private _handleKeyDown(event: KeyboardEvent) {
+              this.emit("ct-keydown", {
+                key: event.key,
+                value: this.getValue(),
+                shiftKey: event.shiftKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                altKey: event.altKey,
+                name: this.name,
+              });
+
+              // Special handling for Enter key
+              if (event.key === "Enter") {
+                this.emit("ct-submit", {
+                  value: this.getValue(),
+                  name: this.name,
+                });
+              }
+            }
+
+            private _handleInvalid(event: Event) {
+              event.preventDefault(); // Prevent browser's default validation UI
+
+              const input = event.target as HTMLInputElement;
+              this.emit("ct-invalid", {
+                value: this.getValue(),
+                name: this.name,
+                validationMessage: input.validationMessage,
+                validity: input.validity,
+              });
+
+              // Update visual state if showValidation is enabled
+              if (this.showValidation) {
+                this.requestUpdate();
+              }
+            }
+
+            /**
+             * Focus the input programmatically
+             */
+            override focus(): void {
+              this.input?.focus();
+            }
+
+            /**
+             * Blur the input programmatically
+             */
+            override blur(): void {
+              this.input?.blur();
+            }
+
+            /**
+             * Select all text in the input
+             */
+            select(): void {
+              this.input?.select();
+            }
+
+            /**
+             * Set selection range in the input
+             */
+            setSelectionRange(
+              start: number,
+              end: number,
+              direction?: "forward" | "backward" | "none",
+            ): void {
+              this.input?.setSelectionRange(start, end, direction);
+            }
+
+            /**
+             * Check validity of the input
+             */
+            checkValidity(): boolean {
+              return this.input?.checkValidity() ?? true;
+            }
+
+            /**
+             * Report validity of the input
+             */
+            reportValidity(): boolean {
+              return this.input?.reportValidity() ?? true;
+            }
+
+            /**
+             * Get the validity state
+             */
+            get validity(): ValidityState | undefined {
+              return this.input?.validity;
+            }
+
+            /**
+             * Get validation message
+             */
+            get validationMessage(): string {
+              return this.input?.validationMessage || "";
+            }
+
+            /**
+             * Set custom validity message
+             */
+            setCustomValidity(message: string): void {
+              this.input?.setCustomValidity(message);
+            }
+          }
+
+          globalThis.customElements.define("ct-input", CTInput);

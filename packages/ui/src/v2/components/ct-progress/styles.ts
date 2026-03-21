@@ -5,24 +5,24 @@
 export const progressStyles = `
   :host {
     /* Default color values if not provided */
-    --ct-progress-color-background: var(--ct-theme-color-background, #ffffff);
-    --ct-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
-    --ct-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
-    --ct-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
-    --ct-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
+    --ct-progress-color-background: var(--ct-theme-color-background, #FDFCF9);
+    --ct-progress-color-foreground: var(--ct-theme-color-text, #2C3227);
+    --ct-progress-color-track: var(--ct-theme-color-surface, #E8E6DD);
+    --ct-progress-color-ring: var(--ct-theme-color-primary, #2D8C3C);
+    --ct-progress-color-indicator: var(--ct-theme-color-primary, #2D8C3C);
     --ct-progress-color-indicator-foreground: var(
       --ct-theme-color-primary-foreground,
       #ffffff
     );
-    --ct-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
+    --ct-progress-color-muted: var(--ct-theme-color-surface, #F3F1EB);
     --ct-progress-color-muted-foreground: var(
       --ct-theme-color-text-muted,
-      #64748b
+      #7A7D72
     );
-    
+
     /* Progress dimensions */
-    --progress-height: 0.5rem; /* h-2 equivalent */
-    --progress-border-radius: 9999px; /* rounded-full */
+    --progress-height: 0.5rem;
+    --progress-border-radius: 9999px;
 
     display: block;
     width: 100%;
@@ -46,7 +46,7 @@ export const progressStyles = `
     height: 100%;
     background-color: var(--ct-progress-color-indicator);
     border-radius: var(--progress-border-radius);
-    transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
     will-change: width;
   }
 
@@ -94,7 +94,7 @@ export const progressStyles = `
     .indicator {
       transition: none;
     }
-    
+
     .progress.indeterminate .indicator {
       animation: none;
       width: 100%;
@@ -117,19 +117,19 @@ export const progressStyles = `
 
   /* Custom styling support */
   :host([variant="success"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
+    --ct-progress-color-indicator: var(--ct-theme-color-success, #3A8F47);
   }
 
   :host([variant="warning"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
+    --ct-progress-color-indicator: var(--ct-theme-color-warning, #D4940A);
   }
 
   :host([variant="error"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
+    --ct-progress-color-indicator: var(--ct-theme-color-error, #C44536);
   }
 
   :host([variant="info"]) {
-    --ct-progress-color-indicator: #3b82f6;
+    --ct-progress-color-indicator: #2D8C3C;
   }
 
   /* Striped variant */
@@ -163,7 +163,7 @@ export const progressStyles = `
 
   /* Smooth transition when not indeterminate */
   .progress:not(.indeterminate) .indicator {
-    transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
   }
 
   /* Ensure indicator is visible even at 0% for better UX */

@@ -41,6 +41,8 @@ export class CTTable extends BaseElement {
     :host {
       display: block;
       overflow: auto;
+      font-family: var(--ct-theme-font-family, inherit);
+      -webkit-font-smoothing: antialiased;
     }
 
     table {
@@ -57,17 +59,17 @@ export class CTTable extends BaseElement {
 
     /* Size variants */
     :host([size="sm"]) table {
-      font-size: 0.75rem;
+      font-size: 0.8125rem;
     }
 
     :host([size="sm"]) ::slotted(th),
     :host([size="sm"]) ::slotted(td) {
-      padding: 0.25rem 0.5rem;
+      padding: 0.375rem 0.625rem;
     }
 
     :host([size="md"]) ::slotted(th),
     :host([size="md"]) ::slotted(td) {
-      padding: 0.5rem 0.75rem;
+      padding: 0.625rem 0.875rem;
     }
 
     :host([size="lg"]) table {
@@ -76,21 +78,25 @@ export class CTTable extends BaseElement {
 
     :host([size="lg"]) ::slotted(th),
     :host([size="lg"]) ::slotted(td) {
-      padding: 0.75rem 1rem;
+      padding: 0.875rem 1.125rem;
     }
 
     /* Base cell styles */
     ::slotted(th),
     ::slotted(td) {
-      border-bottom: 1px solid var(--border, #e2e8f0);
+      border-bottom: 1px solid var(--ct-theme-color-border-muted, #e8e7e0);
       text-align: inherit;
       vertical-align: middle;
+      color: var(--ct-theme-color-text, #2c3227);
     }
 
     ::slotted(th) {
-      font-weight: 600;
-      color: var(--foreground, #0f172a);
-      background-color: var(--muted, #f8fafc);
+      font-weight: 700;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--ct-theme-color-text-muted, #7a7d72);
+      background-color: var(--ct-theme-color-surface, #f3f1eb);
     }
 
     /* Sticky header */
@@ -98,23 +104,23 @@ export class CTTable extends BaseElement {
       position: sticky;
       top: 0;
       z-index: 10;
-      background-color: var(--muted, #f8fafc);
+      background-color: var(--ct-theme-color-surface, #f3f1eb);
     }
 
     /* Striped rows */
     :host([striped]) ::slotted(tbody) ::slotted(tr:nth-of-type(even)) {
-      background-color: var(--muted, #f8fafc);
+      background-color: var(--ct-theme-color-surface, #f3f1eb);
     }
 
     /* Hover effect */
     :host([hover]) ::slotted(tbody) ::slotted(tr:hover) {
-      background-color: var(--muted, #f1f5f9);
+      background-color: var(--ct-theme-color-surface-hover, #e8e6dd);
     }
 
     /* Bordered variant */
     :host([bordered]) ::slotted(th),
     :host([bordered]) ::slotted(td) {
-      border: 1px solid var(--border, #e2e8f0);
+      border: 1px solid var(--ct-theme-color-border, #d4d2c8);
     }
 
     /* Remove double borders */
@@ -125,9 +131,10 @@ export class CTTable extends BaseElement {
 
     /* Caption styling */
     ::slotted(caption) {
-      padding: 0.5rem 0.75rem;
-      color: var(--muted-foreground, #64748b);
+      padding: 0.625rem 0.875rem;
+      color: var(--ct-theme-color-text-muted, #7a7d72);
       text-align: left;
+      font-size: 0.875rem;
     }
 
     /* Responsive wrapper for overflow */
@@ -135,6 +142,8 @@ export class CTTable extends BaseElement {
       width: 100%;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
+      border-radius: 0.75rem;
+      border: 1px solid var(--ct-theme-color-border-muted, #e8e7e0);
     }
 
     /* Ensure minimum width for cells */

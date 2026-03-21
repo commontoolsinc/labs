@@ -11,10 +11,10 @@ export const tabListStyles = `
   .tab-list {
     display: flex;
     align-items: center;
-    gap: var(--ct-spacing-1);
-    padding: var(--ct-spacing-1);
-    background-color: var(--ct-colors-gray-100);
-    border-radius: var(--ct-border-radius-md);
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background-color: var(--ct-theme-color-surface, #F3F1EB);
+    border-radius: 0.625rem;
   }
 
   .tab-list[data-orientation="horizontal"] {

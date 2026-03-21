@@ -14,40 +14,50 @@ export const tabStyles = `
     white-space: nowrap;
     cursor: pointer;
     user-select: none;
-    padding: var(--ct-spacing-2) var(--ct-spacing-4);
+    padding: 0.5rem 1rem;
     border: none;
     background: transparent;
-    border-radius: var(--ct-border-radius-md);
-    font-family: var(--ct-font-family-sans);
-    font-size: var(--ct-font-size-sm);
-    font-weight: var(--ct-font-weight-medium);
-    line-height: var(--ct-line-height-normal);
-    color: var(--ct-colors-gray-700);
+    border-radius: 0.5rem;
+    font-family: var(--ct-theme-font-family, inherit);
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.5;
+    color: var(--ct-theme-color-text-muted, #7A7D72);
     transition: all var(--ct-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      cubic-bezier(0.25, 0.1, 0.25, 1);
     outline: none;
     position: relative;
+    -webkit-font-smoothing: antialiased;
   }
 
   .tab:hover:not([data-disabled="true"]) {
-    color: var(--ct-colors-gray-900);
-    background-color: var(--ct-colors-gray-200);
+    color: var(--ct-theme-color-text, #2C3227);
+    background-color: var(--ct-theme-color-surface-hover, #E8E6DD);
+  }
+
+  .tab:active:not([data-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: 0.1s;
   }
 
   .tab:focus-visible {
-    box-shadow: 0 0 0 2px var(--ct-colors-primary-500);
+    box-shadow:
+      0 0 0 2px var(--ct-theme-color-background, #FDFCF9),
+      0 0 0 4px var(--ct-theme-color-primary, #2D8C3C);
   }
 
   .tab[data-selected="true"] {
-    color: var(--ct-colors-gray-900);
-    background-color: white;
-    box-shadow: var(--ct-shadow-sm);
+    color: var(--ct-theme-color-text, #2C3227);
+    background-color: var(--ct-theme-color-background, #FDFCF9);
+    box-shadow:
+      0 1px 3px rgba(60, 70, 50, 0.1),
+      0 1px 2px rgba(60, 70, 50, 0.06);
   }
 
   .tab[data-disabled="true"] {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
-    color: var(--ct-colors-gray-500);
+    color: var(--ct-theme-color-text-muted, #7A7D72);
   }
 
   /* Vertical orientation adjustments */

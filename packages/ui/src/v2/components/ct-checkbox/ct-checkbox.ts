@@ -39,19 +39,21 @@ export class CTCheckbox extends BaseElement {
       position: relative;
       cursor: pointer;
       line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
 
       /* Default color values if not provided */
-      --background: #ffffff;
-      --foreground: #0f172a;
-      --primary: #0f172a;
-      --primary-foreground: #f8fafc;
-      --border: #e2e8f0;
-      --ring: #94a3b8;
+      --background: var(--ct-theme-color-background, #fdfcf9);
+      --foreground: var(--ct-theme-color-text, #2c3227);
+      --primary: var(--ct-theme-color-primary, #2d8c3c);
+      --primary-foreground: #ffffff;
+      --border: var(--ct-theme-color-border, #d4d2c8);
+      --ring: var(--ct-theme-color-primary, #2d8c3c);
     }
 
     :host([disabled]) {
       cursor: not-allowed;
-      opacity: 0.5;
+      opacity: 0.4;
     }
 
     :host:focus {
@@ -59,42 +61,41 @@ export class CTCheckbox extends BaseElement {
     }
 
     :host:focus-visible .checkbox {
-      outline: 2px solid transparent;
-      outline-offset: 2px;
       box-shadow:
-        0 0 0 2px var(--background, #fff),
-        0 0 0 4px var(--ring, #94a3b8);
+        0 0 0 2px var(--background, #fdfcf9),
+        0 0 0 4px var(--ring, #2d8c3c);
       }
 
       .checkbox {
         position: relative;
-        width: 1rem; /* size-4 */
-        height: 1rem; /* size-4 */
-        border: 1px solid var(--primary, #0f172a);
-        border-radius: 0.25rem; /* rounded */
+        width: 1.25rem;
+        height: 1.25rem;
+        border: 1.5px solid var(--border, #d2d2d7);
+        border-radius: 0.375rem;
         background-color: var(--background, #fff);
-        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 180ms cubic-bezier(0.25, 0.1, 0.25, 1);
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .checkbox.checked,
       .checkbox.indeterminate {
-        background-color: var(--primary, #0f172a);
-        border-color: var(--primary, #0f172a);
+        background-color: var(--primary, #2563eb);
+        border-color: var(--primary, #2563eb);
       }
 
       .checkbox.disabled {
         cursor: not-allowed;
-        opacity: 0.5;
+        opacity: 0.4;
       }
 
       /* Checkmark using CSS transforms */
       .checkmark {
         display: none;
-        width: 10px;
-        height: 6px;
+        width: 12px;
+        height: 7px;
         position: relative;
       }
 
@@ -106,10 +107,10 @@ export class CTCheckbox extends BaseElement {
         content: "";
         position: absolute;
         left: 2.5px;
-        top: -2.5px;
-        width: 4px;
-        height: 7px;
-        border: solid var(--primary-foreground, #f8fafc);
+        top: -2px;
+        width: 5px;
+        height: 9px;
+        border: solid var(--primary-foreground, #ffffff);
         border-width: 0 2px 2px 0;
         transform: rotate(45deg);
       }
@@ -117,9 +118,10 @@ export class CTCheckbox extends BaseElement {
       /* Indeterminate state - horizontal line */
       .checkbox.indeterminate .checkmark {
         display: block;
-        width: 8px;
+        width: 10px;
         height: 2px;
-        background-color: var(--primary-foreground, #f8fafc);
+        border-radius: 1px;
+        background-color: var(--primary-foreground, #ffffff);
       }
 
       .checkbox.indeterminate .checkmark::after {
@@ -141,21 +143,44 @@ export class CTCheckbox extends BaseElement {
 
       /* Hover state */
       :host(:not([disabled]):hover) .checkbox:not(.checked):not(.indeterminate) {
-        border-color: var(--primary, #0f172a);
+        border-color: var(--primary, #2563eb);
+      }
+
+      :host(:not([disabled]):hover) .checkbox.checked {
+        filter: brightness(1.08);
+      }
+
+      /* Active/press state */
+      :host(:not([disabled]):active) .checkbox {
+        transform: scale(0.92);
+        transition-duration: 0.1s;
       }
 
       /* Animation for checkmark */
       .checkbox.checked .checkmark::after {
-        animation: checkmark-animation 200ms ease-out;
+        animation: checkmark-animation 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
       }
 
       @keyframes checkmark-animation {
         0% {
           transform: rotate(45deg) scale(0);
+          opacity: 0;
+        }
+        50% {
+          transform: rotate(45deg) scale(1.15);
+          opacity: 1;
         }
         100% {
           transform: rotate(45deg) scale(1);
+          opacity: 1;
         }
+      }
+
+      /* Label text styling via slot */
+      ::slotted(*) {
+        font-size: 0.9375rem;
+        letter-spacing: -0.01em;
+        color: var(--foreground, #1d1d1f);
       }
     `;
 

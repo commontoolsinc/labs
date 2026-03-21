@@ -48,29 +48,29 @@ export class CTLoader extends BaseElement {
     :host {
       --ct-loader-color-track: var(
         --ct-theme-color-border,
-        var(--ct-colors-gray-300, #e0e0e0)
+        #d4d2c8
       );
       --ct-loader-color-arc: var(
         --ct-theme-color-primary,
-        var(--ct-colors-primary-500, #000)
+        #2d8c3c
       );
       --ct-loader-color-text: var(
         --ct-theme-color-text-muted,
-        var(--ct-colors-gray-600, #666)
+        #7a7d72
       );
       --ct-loader-color-surface: var(
         --ct-theme-color-surface,
-        var(--ct-colors-gray-100, #f0f0f0)
+        #f3f1eb
       );
       --ct-loader-color-error: var(
         --ct-theme-color-error,
-        var(--ct-colors-error, #dc2626)
+        #c44536
       );
 
       display: inline-flex;
       align-items: center;
       vertical-align: middle;
-      gap: 0.375rem;
+      gap: 0.5rem;
     }
 
     *,
@@ -80,13 +80,13 @@ export class CTLoader extends BaseElement {
     }
 
     .spinner {
-      animation: spin 0.8s linear infinite;
+      animation: spin 0.9s cubic-bezier(0.4, 0.15, 0.6, 0.85) infinite;
     }
 
-    /* Size variants: sm=12px, md=24px, lg=48px */
+    /* Size variants: sm=14px, md=24px, lg=48px */
     :host([size="sm"]) .spinner {
-      width: 12px;
-      height: 12px;
+      width: 14px;
+      height: 14px;
     }
 
     :host([size="md"]) .spinner,
@@ -101,11 +101,12 @@ export class CTLoader extends BaseElement {
     }
 
     .track {
-      stroke: var(--ct-loader-color-track, #e0e0e0);
+      stroke: var(--ct-loader-color-track, #d4d2c8);
+      opacity: 0.4;
     }
 
     .arc {
-      stroke: var(--ct-loader-color-arc, #000);
+      stroke: var(--ct-loader-color-arc, #2d8c3c);
       stroke-linecap: round;
     }
 
@@ -116,28 +117,37 @@ export class CTLoader extends BaseElement {
     }
 
     .elapsed {
-      font-size: 0.75rem;
-      color: var(--ct-loader-color-text, #666);
+      font-size: 0.8125rem;
+      font-weight: 700;
+      color: var(--ct-loader-color-text, #7a7d72);
       font-variant-numeric: tabular-nums;
+      font-family: var(--ct-theme-font-family, inherit);
+      -webkit-font-smoothing: antialiased;
     }
 
     .stop-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       padding: 0;
       border: none;
-      border-radius: 2px;
+      border-radius: 50%;
       background: transparent;
-      color: var(--ct-loader-color-text, #666);
+      color: var(--ct-loader-color-text, #7a7d72);
       cursor: pointer;
+      transition: all 150ms ease;
     }
 
     .stop-button:hover {
-      background: var(--ct-loader-color-surface, #f0f0f0);
-      color: var(--ct-loader-color-error, #dc2626);
+      background: var(--ct-loader-color-surface, #f3f1eb);
+      color: var(--ct-loader-color-error, #c44536);
+    }
+
+    .stop-button:active {
+      transform: scale(0.9);
+      transition-duration: 0.08s;
     }
 
     .stop-button svg {

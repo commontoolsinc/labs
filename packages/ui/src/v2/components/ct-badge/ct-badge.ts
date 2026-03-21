@@ -22,33 +22,24 @@ export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 export class CTBadge extends BaseElement {
   static override styles = css`
     :host {
-      --ct-badge-color-primary: var(
-        --ct-theme-color-primary,
-        hsl(212, 100%, 47%)
-      );
+      --ct-badge-color-primary: var(--ct-theme-color-primary, #2d8c3c);
       --ct-badge-color-primary-foreground: var(
         --ct-theme-color-primary-foreground,
-        hsl(0, 0%, 100%)
+        #ffffff
       );
-      --ct-badge-color-secondary: var(
-        --ct-theme-color-secondary,
-        hsl(0, 0%, 96%)
-      );
+      --ct-badge-color-secondary: var(--ct-theme-color-surface, #f3f1eb);
       --ct-badge-color-secondary-foreground: var(
-        --ct-theme-color-secondary-foreground,
-        hsl(0, 0%, 9%)
+        --ct-theme-color-text,
+        #2c3227
       );
-      --ct-badge-color-destructive: var(
-        --ct-theme-color-error,
-        hsl(0, 100%, 50%)
-      );
+      --ct-badge-color-destructive: var(--ct-theme-color-error, #c44536);
       --ct-badge-color-destructive-foreground: var(
         --ct-theme-color-error-foreground,
-        hsl(0, 0%, 100%)
+        #ffffff
       );
-      --ct-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
-      --ct-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
-      --ct-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
+      --ct-badge-color-border: var(--ct-theme-color-border, #d4d2c8);
+      --ct-badge-color-text: var(--ct-theme-color-text, #2c3227);
+      --ct-badge-color-ring: var(--ct-theme-color-primary, #2d8c3c);
 
       display: inline-block;
       box-sizing: border-box;
@@ -64,35 +55,37 @@ export class CTBadge extends BaseElement {
       display: inline-flex;
       align-items: center;
       gap: 0.25rem;
-      padding: 0.125rem 0.625rem;
+      padding: 0.1875rem 0.625rem;
       font-size: 0.75rem;
-      font-weight: 600;
+      font-weight: 700;
       line-height: 1;
       border-radius: 9999px;
-      border: 1px solid transparent;
-      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      border: 1.5px solid transparent;
+      transition: all 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+      -webkit-font-smoothing: antialiased;
+      font-family: var(--ct-theme-font-family, inherit);
     }
 
     /* Variant styles */
     .badge.default {
-      background-color: var(--ct-badge-color-primary, hsl(212, 100%, 47%));
-      color: var(--ct-badge-color-primary-foreground, hsl(0, 0%, 100%));
+      background-color: var(--ct-badge-color-primary, #2d8c3c);
+      color: var(--ct-badge-color-primary-foreground, #ffffff);
     }
 
     .badge.secondary {
-      background-color: var(--ct-badge-color-secondary, hsl(0, 0%, 96%));
-      color: var(--ct-badge-color-secondary-foreground, hsl(0, 0%, 9%));
+      background-color: var(--ct-badge-color-secondary, #f3f1eb);
+      color: var(--ct-badge-color-secondary-foreground, #2c3227);
     }
 
     .badge.destructive {
-      background-color: var(--ct-badge-color-destructive, hsl(0, 100%, 50%));
-      color: var(--ct-badge-color-destructive-foreground, hsl(0, 0%, 100%));
+      background-color: var(--ct-badge-color-destructive, #c44536);
+      color: var(--ct-badge-color-destructive-foreground, #ffffff);
     }
 
     .badge.outline {
       background-color: transparent;
-      border-color: var(--ct-badge-color-border, hsl(0, 0%, 89%));
-      color: var(--ct-badge-color-text, hsl(0, 0%, 9%));
+      border-color: var(--ct-badge-color-border, #d4d2c8);
+      color: var(--ct-badge-color-text, #2c3227);
     }
 
     /* Close button */
@@ -109,7 +102,7 @@ export class CTBadge extends BaseElement {
       background: none;
       border: none;
       cursor: pointer;
-      opacity: 0.7;
+      opacity: 0.5;
       transition: opacity 150ms;
       color: currentColor;
     }
@@ -119,9 +112,11 @@ export class CTBadge extends BaseElement {
     }
 
     .close-button:focus-visible {
-      outline: 2px solid var(--ct-badge-color-ring, hsl(212, 100%, 47%));
-      outline-offset: 2px;
-      border-radius: 2px;
+      outline: none;
+      box-shadow:
+        0 0 0 2px var(--ct-theme-color-background, #fdfcf9),
+        0 0 0 4px var(--ct-badge-color-ring, #2d8c3c);
+      border-radius: 50%;
     }
 
     .close-button svg {
