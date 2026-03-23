@@ -13,13 +13,13 @@ import type {
   URI,
 } from "@commontools/memory/interface";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
-import { hashSchemaPathSelector } from "@commontools/data-model/schema-hash";
 import {
   canBranchMatch,
   CompoundCycleTracker,
   getAtPath,
   ManagedStorageTransaction,
   MapSet,
+  MapSetOfPathSelectors,
   mergeAnyOfBranchSchemas,
   PointerCycleTracker,
   SchemaObjectTraverser,
@@ -821,9 +821,7 @@ for (const modernHash of [false, true]) {
           JSONSchema | undefined
         >();
         const cfc = new ContextualFlowControl();
-        const schemaTracker = new MapSet<string, SchemaPathSelector>(
-          hashSchemaPathSelector,
-        );
+        const schemaTracker = new MapSetOfPathSelectors<string>();
 
         const doc: IMemorySpaceValueAttestation = {
           address: {

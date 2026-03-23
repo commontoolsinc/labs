@@ -293,6 +293,17 @@ export class MapSet<K, V> {
   }
 }
 
+/**
+ * Convenience subclass of `MapSet` specialized for `SchemaPathSelector`
+ * values. Uses `hashSchemaPathSelector` from the schema-hash dispatch
+ * layer as the hash function.
+ */
+export class MapSetOfPathSelectors<K> extends MapSet<K, SchemaPathSelector> {
+  constructor() {
+    super(hashSchemaPathSelector);
+  }
+}
+
 // SchemaPathSelectors are relative to the doc root, so if we want to look at
 // the value of the doc, we need to have "value" in the path.
 const DefaultSelector: SchemaPathSelector = { path: ["value"], schema: true };
@@ -610,10 +621,8 @@ export abstract class BaseObjectTraverser {
       Immutable<FabricDatum>,
       JSONSchema | undefined
     >(),
-    protected schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
-      string,
-      SchemaPathSelector
-    >(hashSchemaPathSelector),
+    protected schemaTracker: MapSetOfPathSelectors<string> =
+      new MapSetOfPathSelectors(),
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
     public objectCreator: IObjectCreator<FabricDatum> =
       new StandardObjectCreator(),
@@ -1743,10 +1752,7 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       Immutable<FabricDatum>,
       JSONSchema | undefined
     >(),
-    schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
-      string,
-      SchemaPathSelector
-    >(hashSchemaPathSelector),
+    schemaTracker: MapSetOfPathSelectors<string> = new MapSetOfPathSelectors(),
     cfc: ContextualFlowControl = new ContextualFlowControl(),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,
