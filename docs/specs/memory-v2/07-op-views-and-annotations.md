@@ -52,9 +52,10 @@ Collaborative editors are different:
   operations contributed to which ranges
 
 The existing v2 commit infrastructure already persists the original signed
-command and authorization separately from `commit.hash`. That means Memory v2
-already retains part of the "submitted view". The missing piece is a query model
-that can expose it cleanly, alongside the integrated and materialized views.
+command and authorization separately from the semantic seq-addressed commit
+record. That means Memory v2 already retains part of the "submitted view". The
+missing piece is a query model that can expose it cleanly, alongside the
+integrated and materialized views.
 
 ---
 
@@ -189,13 +190,13 @@ interface ApplyOpResolution {
   id: EntityId;
   path: ReadPath;
   codec: OpCodecId;
-  version: number;      // path-local integrated version after apply
-  opIds: string[];      // stable ids for accepted logical ops
+  version: number; // path-local integrated version after apply
+  opIds: string[]; // stable ids for accepted logical ops
 }
 ```
 
-The exact receipt shape is future work, but op-based writes need some
-path-local versioning surface in addition to the entity-level `seq`.
+The exact receipt shape is future work, but op-based writes need some path-local
+versioning surface in addition to the entity-level `seq`.
 
 ---
 
@@ -221,9 +222,9 @@ to the original submitted op payload.
 
 ### 7.7.2 Canonical Integrated Op Log
 
-Integrated ops need their own queryable, replayable history. That history may
-be stored directly in facts, in an adjunct op log keyed from facts/commits, or
-in another storage shape with equivalent integrity guarantees.
+Integrated ops need their own queryable, replayable history. That history may be
+stored directly in facts, in an adjunct op log keyed from facts/commits, or in
+another storage shape with equivalent integrity guarantees.
 
 Required properties:
 
@@ -297,9 +298,9 @@ in addition to the entity-level `seq`.
 
 ### 7.8.2 Graph Queries
 
-Phase 1 graph traversal is materialized and schema-driven. Op-view graph
-queries should be deferred initially. They add difficult questions around
-topology, fan-out, and mixed projections inside one traversal result.
+Phase 1 graph traversal is materialized and schema-driven. Op-view graph queries
+should be deferred initially. They add difficult questions around topology,
+fan-out, and mixed projections inside one traversal result.
 
 The first incremental step should be:
 
@@ -323,8 +324,8 @@ Properties:
 
 - The label side-data is derived from committed history.
 - Clients may render it but do not author it directly.
-- The authoritative computation happens in storage/query code, not in the
-  editor component.
+- The authoritative computation happens in storage/query code, not in the editor
+  component.
 - The side-data belongs to the materialized projection. It is not a substitute
   for submitted or integrated op views.
 
@@ -367,7 +368,7 @@ interface AnchoredAnnotation {
     path: ReadPath;
   };
   anchor: JSONValue; // codec-defined anchor/range payload
-  data: JSONValue;   // application-defined payload
+  data: JSONValue; // application-defined payload
 }
 ```
 

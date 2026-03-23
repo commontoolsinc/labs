@@ -1,5 +1,11 @@
 # Implementation Guidance: Wiring v2 Into Production
 
+> Editorial note: sections 02-05 were rewritten toward a seq-addressed JSON
+> revision model with session-scoped catch-up sync. This guidance file still
+> contains older hash-oriented and `query.subscribe` implementation notes in
+> places; where it conflicts with sections 02-05, the rewritten spec sections
+> win.
+
 This document supplements the v2 spec (01-06) with architectural guidance and
 known pitfalls. It is written for an agent that has ONLY the spec and this
 document — no access to prior v2 wiring code. Read this before writing any code.
@@ -54,7 +60,7 @@ test followed by the code that makes it pass.
 19. [Minimal Transaction Compatibility Surface](#19-minimal-transaction-compatibility-surface)
 20. [Raw vs Extended Addressing](#20-raw-vs-extended-addressing)
 21. [Rich-Storable Reads Freeze at the Boundary](#21-rich-storable-reads-freeze-at-the-boundary)
-Appendix A. [Required Spec Changes](#appendix-a-required-spec-changes)
+    Appendix A. [Required Spec Changes](#appendix-a-required-spec-changes)
 
 ---
 
@@ -126,10 +132,9 @@ interfaces used outside storage code stable and adapt underneath them.
 
 ## 3. V1/V2 Coexistence
 
-Both v1 and v2 code paths must exist in parallel during the transition. A
-shared code-level default controls which is active, and specific runtimes or
-tests may still opt into the non-default path when they are intentionally
-exercising it.
+Both v1 and v2 code paths must exist in parallel during the transition. A shared
+code-level default controls which is active, and specific runtimes or tests may
+still opt into the non-default path when they are intentionally exercising it.
 
 ### Global Flag
 
@@ -351,9 +356,9 @@ The server-side counterpart to the `"revert"` guarantee is:
   the changed entity snapshots directly into affected subscription results
   rather than re-running the whole `graph.query`. If the topology changes, it
   must fall back to full query re-evaluation.
-- `graph.query` subscription refreshes must reuse the shared traversal code
-  path (`packages/runner/src/traverse.ts`), not a second implementation with
-  slightly different reachability semantics.
+- `graph.query` subscription refreshes must reuse the shared traversal code path
+  (`packages/runner/src/traverse.ts`), not a second implementation with slightly
+  different reachability semantics.
 - If a transaction then fails with `ConflictError` while such a refresh is
   pending, the server must flush that subscription refresh before returning the
   conflict response.
@@ -477,10 +482,11 @@ interface ConfirmedRead {
 ```
 
 The server validates confirmed reads by looking for later writes whose
-footprints overlap `(id, path)` after `read.seq` on `read.branch ??
-commit.branch`. It never checks the hash.
-Dropping it simplifies the client (no need to track fact hashes in confirmed
-state) and avoids the `undefined`-in-hash class of bugs entirely.
+footprints overlap `(id, path)` after `read.seq` on
+`read.branch ??
+commit.branch`. It never checks the hash. Dropping it simplifies
+the client (no need to track fact hashes in confirmed state) and avoids the
+`undefined`-in-hash class of bugs entirely.
 
 ### Writing to New Entities
 
@@ -500,9 +506,9 @@ that don't need conflict detection can omit the read.
 Clients should compact `reads.confirmed` and `reads.pending` before sending a
 commit.
 
-If a recursive read already covers a descendant path for the same entity and
-the same dependency version, the descendant read is redundant and should be
-omitted from the wire payload.
+If a recursive read already covers a descendant path for the same entity and the
+same dependency version, the descendant read is redundant and should be omitted
+from the wire payload.
 
 Examples:
 
@@ -512,9 +518,8 @@ Examples:
   { id, path: [], seq: 17 },
   { id, path: ["profile"], seq: 17 },
   { id, path: ["profile", "name"], seq: 17 },
-]
-// becomes:
-[{ id, path: [], seq: 17 }]
+] // becomes:
+  [{ id, path: [], seq: 17 }];
 ```
 
 ```typescript
@@ -522,9 +527,8 @@ Examples:
 [
   { id, path: [], localSeq: 4 },
   { id, path: ["profile", "name"], localSeq: 4 },
-]
-// becomes:
-[{ id, path: [], localSeq: 4 }]
+] // becomes:
+  [{ id, path: [], localSeq: 4 }];
 ```
 
 This compaction must only happen when the ancestor read is recursive and the
@@ -705,12 +709,20 @@ Recommended normalization:
 
 ```typescript
 type BranchLifecycleWrite =
-  | { cmd: "/memory/branch/create"; args: { localSeq: number; name: string; fromBranch?: string; atSeq?: number } }
+  | {
+    cmd: "/memory/branch/create";
+    args: {
+      localSeq: number;
+      name: string;
+      fromBranch?: string;
+      atSeq?: number;
+    };
+  }
   | { cmd: "/memory/branch/delete"; args: { localSeq: number; name: string } };
 
 type CommitRow = {
-  hash: Reference;             // refer(canonical write payload)
-  invocationRef: Reference;    // refer(invocation)
+  hash: Reference; // refer(canonical write payload)
+  invocationRef: Reference; // refer(invocation)
   authorizationRef: Reference; // refer(authorization)
   original: ClientCommit | BranchLifecycleWrite;
   // ...
@@ -720,8 +732,8 @@ type CommitRow = {
 This split matters for two reasons:
 
 - **Stable semantic identity:** the same logical write may be replayed inside a
-  fresh invocation or fresh authorization wrapper. `commit.hash` must remain
-  the hash of the semantic payload, not of the transport envelope.
+  fresh invocation or fresh authorization wrapper. `commit.hash` must remain the
+  hash of the semantic payload, not of the transport envelope.
 - **Batch sharing:** one authorization may cover many invocation refs. Storing
   authorization separately avoids duplicating signatures and makes batch
   semantics explicit.
@@ -797,8 +809,10 @@ Capability hierarchy: `READ < WRITE < OWNER`.
 
 Command requirements:
 
-- `/memory/transact`, `/memory/branch/create`, `/memory/branch/merge`, and `/memory/branch/delete` require `WRITE`
-- `/memory/session/open`, `/memory/query/subscribe`, `/memory/graph/query`, `/memory/query` (compatibility-only), and `/memory/branch/list` require `READ`
+- `/memory/transact`, `/memory/branch/create`, `/memory/branch/merge`, and
+  `/memory/branch/delete` require `WRITE`
+- `/memory/session/open`, `/memory/query/subscribe`, `/memory/graph/query`,
+  `/memory/query` (compatibility-only), and `/memory/branch/list` require `READ`
 - ACL modifications require `OWNER`
 
 ### Space Initialization (Bootstrap Transaction)
@@ -964,9 +978,9 @@ This means `Cell.set()` and path writes no longer always have to materialize a
 whole-document `set` when the transaction core can prove the write is a simple,
 position-independent object-path update.
 
-Later phases will widen this safely: `Cell.push()` / `Cell.remove()` can
-produce more targeted operations, and some patch classes may eventually shed
-unnecessary read dependencies. But not all patches are equal:
+Later phases will widen this safely: `Cell.push()` / `Cell.remove()` can produce
+more targeted operations, and some patch classes may eventually shed unnecessary
+read dependencies. But not all patches are equal:
 
 - **Position-independent patches** overwrite stable keys and are candidates for
   future read-free fast paths.
@@ -1013,8 +1027,8 @@ protocol field.
 
 ### Concurrent Patches Without Overlapping Reads
 
-Two patches to the same entity without overlapping read dependencies are treated as
-last-writer-wins (LWW) **only when they are genuinely blind overwrites**:
+Two patches to the same entity without overlapping read dependencies are treated
+as last-writer-wins (LWW) **only when they are genuinely blind overwrites**:
 
 ```
 Client A: replace /name = "Alice" (no overlapping reads)
@@ -1114,20 +1128,20 @@ This runs `tasks/integration.ts`, which:
 
 The following packages have integration tests:
 
-| Package | Server needed | Notes |
-|---------|:---:|-------|
-| `runner` | Yes | Core storage round-trip, `syncCell()`, schema traversal |
-| `runtime-client` | Yes | Client runtime tests |
-| `shell` | Yes | End-to-end smoke test (browser, headless) |
-| `background-charm-service` | Yes | Background service tests (browser, headless) |
-| `patterns` | Yes | Pattern execution tests (browser, headless) |
-| `cli` | Yes | CLI command tests (uses shell script) |
-| `generated-patterns` | No | Standalone pattern generation tests |
+| Package                    | Server needed | Notes                                                   |
+| -------------------------- | :-----------: | ------------------------------------------------------- |
+| `runner`                   |      Yes      | Core storage round-trip, `syncCell()`, schema traversal |
+| `runtime-client`           |      Yes      | Client runtime tests                                    |
+| `shell`                    |      Yes      | End-to-end smoke test (browser, headless)               |
+| `background-charm-service` |      Yes      | Background service tests (browser, headless)            |
+| `patterns`                 |      Yes      | Pattern execution tests (browser, headless)             |
+| `cli`                      |      Yes      | CLI command tests (uses shell script)                   |
+| `generated-patterns`       |      No       | Standalone pattern generation tests                     |
 
 ### Recommended Test Order for v2 Validation
 
-1. **`shell`** — Run first as an end-to-end smoke test. If shell works, the
-   core stack is functional.
+1. **`shell`** — Run first as an end-to-end smoke test. If shell works, the core
+   stack is functional.
 2. **`runner`** — Core storage tests: persistence, schema queries, nursery.
 3. **`patterns`** — Pattern execution exercises the full stack.
 4. **`cli`** — CLI commands exercise the API surface.
@@ -1143,9 +1157,9 @@ The following packages have integration tests:
 
 ### Existing Integration Tests
 
-The existing integration tests already test `syncCell()`, schema traversal,
-and multi-entity scenarios across multiple packages. Getting them all to pass
-with `MEMORY_VERSION=v2` is the success criterion for Phase 1.
+The existing integration tests already test `syncCell()`, schema traversal, and
+multi-entity scenarios across multiple packages. Getting them all to pass with
+`MEMORY_VERSION=v2` is the success criterion for Phase 1.
 
 ---
 
@@ -1189,8 +1203,9 @@ with `MEMORY_VERSION=v2` is the success criterion for Phase 1.
 
 Suggested order (server first, then client, then tests):
 
-1. **Server handlers** — Memory service, WebSocket protocol handlers, route registration (plus blob HTTP routes).
-   These are self-contained and testable independently.
+1. **Server handlers** — Memory service, WebSocket protocol handlers, route
+   registration (plus blob HTTP routes). These are self-contained and testable
+   independently.
 2. **Emulation mode** — Mock transport backed by real memory service. This
    enables all subsequent client-side testing.
 3. **Provider** — IStorageProvider implementation with confirmed/pending state,
@@ -1232,8 +1247,8 @@ Prevention strategy:
    merge the server revision into a shadow confirmed/heap tier.
 2. In the commit response handler, compute notifications from the resulting
    **visible** state transition after removing the resolved/rejected pending
-   entries. If a later pending value is still current, do not emit a notification
-   for that entity/path.
+   entries. If a later pending value is still current, do not emit a
+   notification for that entity/path.
 
 ### Self-Referential Thenable OOM
 
@@ -1325,13 +1340,15 @@ interface IStorageTransaction {
   getReadActivities?(): Iterable<IReadActivity>;
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
-  writeBatch?(writes: Iterable<ITransactionWriteRequest>): Result<Unit, WriterError | WriteError>;
+  writeBatch?(
+    writes: Iterable<ITransactionWriteRequest>,
+  ): Result<Unit, WriterError | WriteError>;
 }
 ```
 
-Native v2 should not preserve `journal.activity()`, `journal.novelty(space)`,
-or `journal.history(space)` as first-class internal products. They must not
-dictate the structure of the v2 transaction core.
+Native v2 should not preserve `journal.activity()`, `journal.novelty(space)`, or
+`journal.history(space)` as first-class internal products. They must not dictate
+the structure of the v2 transaction core.
 
 Current direction:
 
@@ -1436,8 +1453,8 @@ subtle bugs:
 
 ### Raw `IStorageTransaction`
 
-Raw transaction reads and writes operate on the **full stored document**.
-For JSON entities that means the top level may contain payload plus metadata
+Raw transaction reads and writes operate on the **full stored document**. For
+JSON entities that means the top level may contain payload plus metadata
 siblings such as:
 
 ```json
@@ -1481,18 +1498,18 @@ The extended wrapper exists to preserve runner-facing convenience methods:
 
 This is where cell-facing payload semantics live. The lower storage layer should
 remain dumb about whether a top-level field is "payload" or "metadata"; the
-wrapper and traversal/query helpers are what narrow ordinary cell reads/writes to
-`.value`.
+wrapper and traversal/query helpers are what narrow ordinary cell reads/writes
+to `.value`.
 
-This means a raw v2 transaction test is **not** interchangeable with an
-extended transaction test.
+This means a raw v2 transaction test is **not** interchangeable with an extended
+transaction test.
 
 Important consequences:
 
 - A raw nested write to `["value", ...path]` will fail on a missing document
   unless the caller first creates the document or writes the whole document.
-- The extended wrapper is the compatibility layer that provides parent
-  creation for nested value writes.
+- The extended wrapper is the compatibility layer that provides parent creation
+  for nested value writes.
 - Native v2 protocol/storage callers must pass explicit full documents for `set`
   operations. The old raw-payload-or-envelope ambiguity is gone.
 - Legacy fact/session boundaries may still wrap old payload-shaped inputs into

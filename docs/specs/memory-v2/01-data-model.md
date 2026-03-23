@@ -1,5 +1,10 @@
 # 01 — Data Model
 
+> Editorial note: sections 02-05 now define the authoritative seq-addressed JSON
+> storage, commit, and sync model. This file still contains older
+> content-addressed terminology in some subsections and needs a follow-up pass
+> to align its fact/reference language with the newer revision-based model.
+
 This section defines the core data types of Memory v2: entities, facts,
 references, blobs, patches, and snapshots. Every concept is accompanied by its
 TypeScript type definition.
@@ -37,13 +42,13 @@ Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
 interface EntityDocument {
-  value: JSONValue;     // The cell's data. Live entities always carry a value.
-  source?: SourceLink;  // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
+  value: JSONValue; // The cell's data. Live entities always carry a value.
+  source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   // Future: labels, schema, etc.
 }
 
 interface SourceLink {
-  "/": string;         // Short source id; runtime resolves to of:<short-id>
+  "/": string; // Short source id; runtime resolves to of:<short-id>
 }
 ```
 
@@ -54,23 +59,23 @@ like `source` that travel with the value but are not part of it.
 **Deletion is explicit**: removing an entity is represented only by a `Delete`
 fact (section 2.2). A missing `value` field is NOT used as a tombstone in v2.
 Supporting a live "undefined" cell value is deferred; if we need it later, it
-should use an explicit sentinel rather than overloading deletion semantics.
-An empty JSON object `{}` is still an ordinary live value, not a delete. A
-marked document may also omit `value` entirely for metadata-only cases such as
+should use an explicit sentinel rather than overloading deletion semantics. An
+empty JSON object `{}` is still an ordinary live value, not a delete. A marked
+document may also omit `value` entirely for metadata-only cases such as
 source-only documents; that is still not a tombstone.
 
 **Source links**: The `source` property uses the short-link form
 `{"/":"<short-id>"}`. The runtime resolves this to `of:<short-id>` in the same
 space (see `traverse.ts` `loadSource()`). This is intentionally different from
-graph/entity links, which use the sigil form
-`{"/":{"link@1":{...}}}`. When the server executes a subscription with graph
-traversal, it MUST follow `source` links transitively (and any `source` links
-on those entities, etc.) to include the full provenance chain.
+graph/entity links, which use the sigil form `{"/":{"link@1":{...}}}`. When the
+server executes a subscription with graph traversal, it MUST follow `source`
+links transitively (and any `source` links on those entities, etc.) to include
+the full provenance chain.
 
-**Fact paths**: Because the envelope wraps the cell value under `"value"`,
-fact paths include a `"value"` prefix. For example, accessing `items[0]`
-on a cell corresponds to the fact path `["value", "items", "0"]`. The
-`readValueOrThrow()` API automatically prepends `"value"` to client paths.
+**Fact paths**: Because the envelope wraps the cell value under `"value"`, fact
+paths include a `"value"` prefix. For example, accessing `items[0]` on a cell
+corresponds to the fact path `["value", "items", "0"]`. The `readValueOrThrow()`
+API automatically prepends `"value"` to client paths.
 
 **SchemaPathSelector paths**: The selector's `path` field is relative to the
 cell value (e.g., `[]` for the root cell, `["items"]` for a sub-path). The
@@ -97,8 +102,8 @@ writes depending on how the value is expressed:
 interface SetWrite {
   type: "set";
   id: EntityId;
-  value: JSONValue;        // The complete new state
-  parent: Reference;       // Hash of the previous fact, or EMPTY
+  value: JSONValue; // The complete new state
+  parent: Reference; // Hash of the previous fact, or EMPTY
 }
 
 /**
@@ -107,8 +112,8 @@ interface SetWrite {
 interface PatchWrite {
   type: "patch";
   id: EntityId;
-  ops: PatchOp[];          // Ordered list of patch operations
-  parent: Reference;       // Hash of the previous fact, or EMPTY
+  ops: PatchOp[]; // Ordered list of patch operations
+  parent: Reference; // Hash of the previous fact, or EMPTY
 }
 
 type Write = SetWrite | PatchWrite;
@@ -124,7 +129,7 @@ end of one value's lifetime.
 interface Delete {
   type: "delete";
   id: EntityId;
-  parent: Reference;       // Hash of the Write or PatchWrite being deleted
+  parent: Reference; // Hash of the Write or PatchWrite being deleted
 }
 ```
 
@@ -175,8 +180,8 @@ interface StoredFact {
 }
 ```
 
-- `seq` is a space-global Lamport clock that increases monotonically with
-  every commit. All facts in the same commit share the same seq number.
+- `seq` is a space-global Lamport clock that increases monotonically with every
+  commit. All facts in the same commit share the same seq number.
 - `commitHash` links the fact to its containing transaction record.
 
 ### 2.5 Causal Chain
@@ -246,11 +251,11 @@ JSON contexts, they appear as plain strings. In the database, they are stored as
 
 References appear in three formats depending on context:
 
-| Context | Format | Example |
-|---------|--------|---------|
-| In-memory (TypeScript) | Branded `Reference` object | `refer({ type: "set", id, value, parent })` |
-| Database / plain string | Raw hash string | `"baedreig..."` |
-| JSON wire protocol (standalone reference) | CID link object | `{ "/": "baedreig..." }` |
+| Context                                   | Format                     | Example                                     |
+| ----------------------------------------- | -------------------------- | ------------------------------------------- |
+| In-memory (TypeScript)                    | Branded `Reference` object | `refer({ type: "set", id, value, parent })` |
+| Database / plain string                   | Raw hash string            | `"baedreig..."`                             |
+| JSON wire protocol (standalone reference) | CID link object            | `{ "/": "baedreig..." }`                    |
 
 Do not conflate standalone `Reference` serialization with entity-link
 serialization. Graph/entity links use the sigil form
@@ -292,8 +297,8 @@ Key properties:
 - **No history on the payload itself**: Blob bytes have no causal chain, no
   version numbers, and no patches.
 - **Mutable metadata lives separately**: Descriptions, provenance,
-  application-specific policy, and similar fields are regular entity state
-  keyed off the blob hash (section 5). This keeps blobs close to regular data:
+  application-specific policy, and similar fields are regular entity state keyed
+  off the blob hash (section 5). This keeps blobs close to regular data:
   immutable content-addressed value, mutable metadata beside it.
 - **Separate table**: Blob payloads live in their own storage table
   (`blob_store`), distinct from entity facts. See §02 Storage for the schema.
@@ -443,10 +448,10 @@ interface MoveOp {
  */
 interface SpliceOp {
   op: "splice";
-  path: JSONPointer;       // Path to the target array
-  index: number;           // Start index
-  remove: number;          // Number of elements to remove
-  add: JSONValue[];        // Elements to insert at the index
+  path: JSONPointer; // Path to the target array
+  index: number; // Start index
+  remove: number; // Number of elements to remove
+  add: JSONValue[]; // Elements to insert at the index
 }
 
 type PatchOp = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
@@ -537,7 +542,7 @@ default policy is: create a snapshot every **N patches** per entity (e.g., every
 ```typescript
 interface SnapshotPolicy {
   /** Create a snapshot after this many patches since the last snapshot. */
-  patchInterval: number;  // Default: 10
+  patchInterval: number; // Default: 10
 }
 ```
 
@@ -549,8 +554,7 @@ before archiving).
 To read an entity's current value:
 
 1. Find the most recent snapshot for the entity on the target branch.
-2. Collect all `PatchWrite` facts with `seq > snapshot.seq` up to the
-   head.
+2. Collect all `PatchWrite` facts with `seq > snapshot.seq` up to the head.
 3. Start from the snapshot value and apply each patch in seq order.
 4. If no snapshot exists, start from the first `SetWrite` fact and replay all
    subsequent patches.
@@ -637,17 +641,17 @@ metadata is stored as **regular entities** with well-known ID conventions.
 
 ### 9.1 Well-Known Entity ID Patterns
 
-| Pattern | Purpose | Example |
-|---------|---------|---------|
-| `<space-did>` | Access control list for a space | `did:key:z6Mkk...` |
-| `urn:schema:<name>` | Schema definition | `urn:schema:todo-item` |
+| Pattern                | Purpose                             | Example                 |
+| ---------------------- | ----------------------------------- | ----------------------- |
+| `<space-did>`          | Access control list for a space     | `did:key:z6Mkk...`      |
+| `urn:schema:<name>`    | Schema definition                   | `urn:schema:todo-item`  |
 | `urn:blob-meta:<hash>` | Mutable metadata for a blob payload | `urn:blob-meta:bafk...` |
 
 ### 9.2 Design Rationale
 
 System entities are normal entities. They benefit from all entity features:
-versioning, causal chains, patches, conflict detection, point-in-time reads,
-and branch isolation. There is no special storage path or query path for system
+versioning, causal chains, patches, conflict detection, point-in-time reads, and
+branch isolation. There is no special storage path or query path for system
 entities — the well-known ID convention is sufficient to distinguish them.
 
 This approach replaces v1's `the` dimension with a simpler, more uniform model:
@@ -686,9 +690,9 @@ type JSONValue =
 type JSONSchema =
   | boolean
   | {
-      type?: string;
-      properties?: Record<string, JSONSchema>;
-      items?: JSONSchema;
-      [key: string]: unknown;
-    };
+    type?: string;
+    properties?: Record<string, JSONSchema>;
+    items?: JSONSchema;
+    [key: string]: unknown;
+  };
 ```

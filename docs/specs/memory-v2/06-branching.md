@@ -1,14 +1,14 @@
 # 6. Branching
 
-This section defines how branches provide isolated lines of development within
-a Space. Branches enable speculative writes, feature development, and undo/redo
+This section defines how branches provide isolated lines of development within a
+Space. Branches enable speculative writes, feature development, and undo/redo
 without affecting the main line of data.
 
 ## 6.1 Default Branch
 
 Every Space has an implicit **default branch** with canonical branch name `""`
-(empty string). It is the target for all operations that do not specify a
-branch explicitly.
+(empty string). It is the target for all operations that do not specify a branch
+explicitly.
 
 - The default branch is created automatically when the Space is initialized.
 - It cannot be deleted.
@@ -25,20 +25,21 @@ const DEFAULT_BRANCH = "";
 
 ## 6.2 Branch Data Model
 
-A branch is a lightweight pointer into the shared fact history. Branches do not
-copy data -- they share the same fact log and entity history as every other
-branch in the Space. What differs between branches is their **head table**: the
-mapping from entity id to the current head fact for that entity.
+A branch is a lightweight pointer into shared revision history. Branches do not
+copy data -- they share the same commit/revision log and entity history as every
+other branch in the Space. What differs between branches is their **head
+table**: the mapping from entity id to the current visible revision for that
+entity.
 
 ```typescript
 interface Branch {
-  name: BranchName;              // Unique name within the space
-  parentBranch: BranchName;      // Branch this was forked from
-  forkSeq: number;               // Seq at which the fork occurred
-  createdSeq: number;            // Seq at which this branch name came into existence
-  headSeq: number;               // Latest seq at which this branch's visible state was updated
-  createdAt: number;             // Timestamp of branch creation
-  status: "active" | "deleted";  // Soft-delete flag
+  name: BranchName; // Unique name within the space
+  parentBranch: BranchName; // Branch this was forked from
+  forkSeq: number; // Seq at which the fork occurred
+  createdSeq: number; // Seq at which this branch name came into existence
+  headSeq: number; // Latest seq at which this branch's visible state was updated
+  createdAt: number; // Timestamp of branch creation
+  status: "active" | "deleted"; // Soft-delete flag
 }
 
 type BranchName = string;
@@ -54,8 +55,8 @@ on that branch:
 interface BranchHead {
   branch: BranchName;
   entityId: EntityId;
-  factHash: Reference;      // Hash of the current head fact
-  seq: number;              // Seq at which this head was set
+  seq: number; // Seq at which this head was set
+  opIndex: number; // Operation index within that commit
 }
 ```
 
@@ -66,14 +67,15 @@ falling back to the parent branch's heads at the fork seq.
 
 ### 6.2.2 Storage Implications
 
-Because branches share the fact history:
+Because branches share revision history:
 
-- **Fact storage is append-only and shared.** A fact committed on branch A is
-  physically the same fact if it appears on branch B.
+- **Revision storage is append-only and shared.** A revision committed on branch
+  A remains part of the shared history visible to point-in-time reads.
 - **Branch creation is O(1).** No data is copied. Only a `Branch` metadata
   record is created.
-- **Branch deletion is O(1).** The branch metadata is marked `status: "deleted"`.
-  Facts are not removed because they may be shared with other branches.
+- **Branch deletion is O(1).** The branch metadata is marked
+  `status: "deleted"`. Revisions are not removed because they may be shared with
+  other branches.
 
 See `02-storage.md` for the physical table layouts that support this model.
 
@@ -84,7 +86,7 @@ See `02-storage.md` for the physical table layouts that support this model.
 A new branch is created from an existing branch at a specific seq.
 
 Branch creation is a **write-class** command even though it does not emit any
-entity facts. It is serialized with ordinary `/memory/transact` writes, uses
+entity revisions. It is serialized with ordinary `/memory/transact` writes, uses
 `localSeq` for replay safety, receives a global `seq`, and records a commit-log
 entry for audit/idempotence.
 
@@ -92,15 +94,15 @@ entry for audit/idempotence.
 
 ```typescript
 interface CreateBranchRequest {
-  localSeq: number;              // Session-scoped idempotence key
-  name: BranchName;              // Must be unique within the space
-  fromBranch?: BranchName;       // Default: default branch
-  atSeq?: number;                // Default: headSeq of fromBranch
+  localSeq: number; // Session-scoped idempotence key
+  name: BranchName; // Must be unique within the space
+  fromBranch?: BranchName; // Default: default branch
+  atSeq?: number; // Default: headSeq of fromBranch
 }
 
 interface CreateBranchResult {
   branch: Branch;
-  seq: number;                   // Global seq assigned to this branch-lifecycle write
+  seq: number; // Global seq assigned to this branch-lifecycle write
 }
 ```
 
@@ -112,27 +114,27 @@ When `branch.create({ localSeq, name, fromBranch, atSeq })` is called:
    branches -- names are permanently consumed).
 2. **Resolve the parent branch.** If `fromBranch` is omitted, use the default
    branch.
-3. **Resolve the fork seq.** If `atSeq` is omitted, use the parent
-   branch's current `headSeq`. If `atSeq` is specified, it must be
-   <= the parent branch's `headSeq`.
+3. **Resolve the fork seq.** If `atSeq` is omitted, use the parent branch's
+   current `headSeq`. If `atSeq` is specified, it must be <= the parent branch's
+   `headSeq`.
 4. **Append a sequenced branch-lifecycle write.** The server assigns a new
    global `seq`, records a commit-log entry for this successful command, and
    applies the branch metadata mutation atomically with that log insert.
 5. **Create the `Branch` record:**
    ```
-     Branch {
-       name: name,
-       parentBranch: fromBranch,
-       forkSeq: atSeq,
-       createdSeq: seq,
-       headSeq: seq,
-       createdAt: now(),
-       status: "active"
-     }
+   Branch {
+     name: name,
+     parentBranch: fromBranch,
+     forkSeq: atSeq,
+     createdSeq: seq,
+     headSeq: seq,
+     createdAt: now(),
+     status: "active"
+   }
    ```
 6. The new branch starts with the same entity heads as the parent branch at the
-   fork seq. No head records are physically copied -- head resolution falls
-   back to the parent (see 6.2.1).
+   fork seq. No head records are physically copied -- head resolution falls back
+   to the parent (see 6.2.1).
 7. The branch-creation command's own `seq` becomes both `createdSeq` and the
    initial `headSeq`, because it makes the inherited fork-state visible under
    the new branch name.
@@ -157,7 +159,7 @@ the head table is scoped to the target branch.
 
 ```typescript
 type BranchCommit = ClientCommit & {
-  branch?: BranchName;   // Omit for default branch
+  branch?: BranchName; // Omit for default branch
 };
 ```
 
@@ -196,8 +198,8 @@ branch.create("feature-x"):
 
 entity-state commit on branch "feature-x":
   globalSeq++
-  for each fact in commit:
-    fact.seq = globalSeq
+  for each revision in commit:
+    revision.seq = globalSeq
   branch["feature-x"].headSeq = globalSeq
 ```
 
@@ -206,8 +208,8 @@ entity-state commit on branch "feature-x":
 ## 6.5 Reading from Branches
 
 Queries target a branch via the `branch` field in `QueryOptions` (see
-`05-queries.md`). All query types -- simple, schema, point-in-time, and
-subscriptions -- respect the branch scope.
+`05-queries.md`). All query types -- simple, schema, point-in-time, and session
+watch sets -- respect the branch scope.
 
 ### 6.5.1 Head Resolution
 
@@ -238,11 +240,11 @@ This cache entry is written lazily on first read, not eagerly at branch creation
 time. Subsequent reads for the same entity on the same branch hit the cache
 directly, turning a multi-hop parent chain walk into a single local lookup.
 
-### 6.5.2 Subscriptions on Branches
+### 6.5.2 Watch Sets on Branches
 
-Subscriptions can target a specific branch. The server sends updates when
-entities on that branch change. Commits on other branches do not trigger updates
-for a branch-scoped subscription.
+Session watch sets can target a specific branch. The server sends sync when
+entities on that branch change. Commits on other branches do not trigger sync
+for a branch-scoped watch.
 
 ---
 
@@ -251,16 +253,17 @@ for a branch-scoped subscription.
 Writes to branch A are **invisible** to branch B until a merge is performed.
 This isolation guarantee is fundamental and absolute:
 
-- A query on branch B will never return facts committed on branch A (unless they
-  were committed on a common ancestor before both branches forked).
-- A subscription on branch B will never be notified of commits on branch A.
+- A query on branch B will never return revisions committed on branch A (unless
+  they were committed on a common ancestor before both branches forked).
+- A watch on branch B will never receive sync caused solely by commits on branch
+  A.
 - The only way for branch A's changes to become visible on branch B is through
   an explicit merge operation (6.7).
 
 ### 6.6.1 Shared History
 
 While branches are isolated going forward from the fork point, they share all
-history prior to the fork. Facts committed before `forkSeq` are visible on
+history prior to the fork. Revisions committed before `forkSeq` are visible on
 both the parent and child branch.
 
 ```
@@ -286,15 +289,15 @@ operates at the **entity level** -- each entity is considered independently.
 
 ```typescript
 interface MergeRequest {
-  source: BranchName;     // Branch to merge from
-  target: BranchName;     // Branch to merge into
+  source: BranchName; // Branch to merge from
+  target: BranchName; // Branch to merge into
 }
 
 interface MergeResult {
   status: "ready" | "conflict";
-  proposal?: MergeProposal;       // Client adds localSeq, then transacts
-  merged?: number;                // Number of entities to materialize
-  conflicts?: BranchConflict[];   // Conflicting entities (on conflict)
+  proposal?: MergeProposal; // Client adds localSeq, then transacts
+  merged?: number; // Number of entities to materialize
+  conflicts?: BranchConflict[]; // Conflicting entities (on conflict)
   sourceSeq: number;
   baseBranch: BranchName;
   baseSeq: number;
@@ -376,9 +379,10 @@ source facts directly can be added later as an optimization if needed.
 For entities that carry commutative, convergent data structures (CRDTs), the
 merge algorithm could apply type-specific merge functions instead of reporting
 conflicts. This would require schema annotations declaring an entity's merge
-strategy (e.g., `"x-merge-strategy": "counter"` or `"x-merge-strategy":
-"lww-register"`). This extension is not part of the current specification but
-is noted as a natural evolution of the merge system.
+strategy (e.g., `"x-merge-strategy": "counter"` or
+`"x-merge-strategy":
+"lww-register"`). This extension is not part of the current
+specification but is noted as a natural evolution of the merge system.
 
 ### 6.7.5 Merge Transaction
 
@@ -422,11 +426,11 @@ server returns the conflicts to the client for resolution.
 ```typescript
 interface BranchConflict {
   entityId: EntityId;
-  sourceValue: JSONValue | null;    // Value on source branch (null = deleted)
-  targetValue: JSONValue | null;    // Value on target branch (null = deleted)
-  ancestorValue: JSONValue | null;  // Value at fork point (null = didn't exist)
-  sourceSeq: number;                // Seq of source's head fact
-  targetSeq: number;                // Seq of target's head fact
+  sourceValue: JSONValue | null; // Value on source branch (null = deleted)
+  targetValue: JSONValue | null; // Value on target branch (null = deleted)
+  ancestorValue: JSONValue | null; // Value at fork point (null = didn't exist)
+  sourceSeq: number; // Seq of source's head revision
+  targetSeq: number; // Seq of target's head revision
 }
 ```
 
@@ -452,7 +456,7 @@ committing the resolutions and immediately retrying the merge with a flag:
 interface MergeRequest {
   source: BranchName;
   target: BranchName;
-  resolutions?: Record<EntityId, JSONValue | null>;  // Inline resolutions
+  resolutions?: Record<EntityId, JSONValue | null>; // Inline resolutions
 }
 ```
 
@@ -476,12 +480,12 @@ it is reported as a conflict. This is a deliberate simplicity trade-off:
 ## 6.9 Branch Deletion
 
 Branches are soft-deleted. The branch metadata is marked as `status: "deleted"`,
-but the branch record and its fact history remain.
+but the branch record and its revision history remain.
 
 Branch deletion is also a **write-class** command. Like branch creation, it is
 serialized with ordinary writes, uses `localSeq` for replay safety, receives a
-global `seq`, and records a commit-log entry even though it does not emit
-entity facts.
+global `seq`, and records a commit-log entry even though it does not emit entity
+revisions.
 
 ### 6.9.1 API
 
@@ -504,16 +508,16 @@ interface DeleteBranchResult {
   for historical inspection and lineage traversal.
 - A deleted branch MAY still be used as a merge source, because that is a
   read-only operation over preserved history.
-- `subscribe: true` on a deleted branch returns the current historical result as
-  a finite snapshot and then produces no future updates, because the branch can
-  no longer advance.
+- a watch set that references a deleted branch returns the current historical
+  result as a finite snapshot and then produces no future sync for that branch,
+  because the branch can no longer advance.
 - The branch-deletion command's own `seq` does **not** advance `headSeq`,
   because it changes branch metadata but not the branch-visible entity state.
 - The branch name is permanently consumed -- a new branch with the same name
   cannot be created.
-- Facts committed on the branch remain in the shared fact history. They may be
-  referenced by other branches or by point-in-time queries that target a seq
-  before the deletion.
+- Revisions committed on the branch remain in the shared revision history. They
+  may be referenced by other branches or by point-in-time queries that target a
+  seq before the deletion.
 - Child branches (branches forked from the deleted branch) remain functional.
   Their `parentBranch` reference still points to the deleted branch, and head
   resolution still works because the deleted branch's head table is preserved.
@@ -540,16 +544,15 @@ state of the `feature-x` branch as it was at seq 42:
 1. **Seq bounds**: `atSeq` must be within the branch's seq range.
    - For the default branch, any seq from 0 to `headSeq` is valid.
    - For a non-default branch, valid seqs are those in the range
-     `[createdSeq, headSeq]`. A query before `createdSeq` is invalid because
-     the branch name did not exist yet.
+     `[createdSeq, headSeq]`. A query before `createdSeq` is invalid because the
+     branch name did not exist yet.
 2. **Reconstruction**: the reconstruction algorithm from `05-queries.md` section
    5.5 applies, scoped to the branch. Only facts committed on the branch (or
    inherited from ancestors before fork) with seq <= `atSeq` are considered.
    Even though the branch may have been created later than `forkSeq`, inherited
    parent facts are still capped at `forkSeq` when reconstructing the branch's
-   visible state.
-   Because merge results are materialized as ordinary target-branch writes, no
-   extra merge-only read path is required.
+   visible state. Because merge results are materialized as ordinary
+   target-branch writes, no extra merge-only read path is required.
 
 ### 6.10.2 Interaction with Merge Commits
 
@@ -569,7 +572,7 @@ their metadata.
 
 ```typescript
 interface ListBranchesRequest {
-  includeDeleted?: boolean;   // Default: false
+  includeDeleted?: boolean; // Default: false
 }
 
 interface ListBranchesResult {
@@ -585,7 +588,7 @@ interface BranchInfo {
   createdAt: number;
   status: "active" | "deleted";
   deletedAt?: number;
-  entityCount?: number;        // Number of entities with explicit heads
+  entityCount?: number; // Number of entities with explicit heads
 }
 ```
 
@@ -693,9 +696,9 @@ interface DiffRequest {
 }
 
 interface DiffResult {
-  added: EntityId[];      // Entities on source but not target
-  removed: EntityId[];    // Entities on target but not source
-  modified: EntityId[];   // Entities changed on both
+  added: EntityId[]; // Entities on source but not target
+  removed: EntityId[]; // Entities on target but not source
+  modified: EntityId[]; // Entities changed on both
 }
 ```
 

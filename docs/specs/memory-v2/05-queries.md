@@ -2,7 +2,7 @@
 
 This section defines how clients retrieve data from a Space. The query system
 supports simple pattern matching, schema-driven graph traversal, point-in-time
-reads, subscriptions, and branch-aware retrieval.
+reads, session watch sets, and branch-aware retrieval.
 
 ## 5.1 Query Types
 
@@ -12,14 +12,14 @@ There are two query types, each with increasing expressiveness:
 2. **Schema queries** -- follow references between entities guided by a JSON
    Schema, reusing the traversal patterns from `traverse.ts`.
 
-Both query types support subscriptions (the primary sync path).
-One-shot queries are compatibility mode.
+Both query types can participate in a session watch set. One-shot queries are
+the direct request/response mode.
 
 ```typescript
 // Base query options shared by all query types
 interface QueryOptions {
-  branch?: BranchName;     // Target branch (default branch if omitted)
-  atSeq?: number;          // Point-in-time read (latest if omitted)
+  branch?: BranchName; // Target branch (default branch if omitted)
+  atSeq?: number; // Point-in-time read (latest if omitted)
 }
 ```
 
@@ -27,9 +27,8 @@ interface QueryOptions {
 
 ## 5.2 Simple Queries
 
-A simple query matches entities by id and optionally filters by seq range.
-This is the lightweight path for clients that know exactly which entities they
-need.
+A simple query matches entities by id and optionally filters by seq range. This
+is the lightweight path for clients that know exactly which entities they need.
 
 ### 5.2.1 Query Structure
 
@@ -49,10 +48,10 @@ interface EntityMatch {
 
 **Matching rules:**
 
-| `select` key | Behavior |
-|---|---|
-| Specific id (e.g. `"urn:entity:abc123"`) | Match exactly that entity |
-| `"*"` (wildcard) | Match all entities in the space |
+| `select` key                             | Behavior                        |
+| ---------------------------------------- | ------------------------------- |
+| Specific id (e.g. `"urn:entity:abc123"`) | Match exactly that entity       |
+| `"*"` (wildcard)                         | Match all entities in the space |
 
 When using the wildcard `"*"` selector, the server MAY impose a fan-out limit
 (e.g., 10,000 entities) to prevent excessive memory use. If the limit is
@@ -66,13 +65,13 @@ server returns only facts with `seq > since`.
 
 ```typescript
 interface IncrementalQuery extends Query {
-  since?: number;  // Only return facts newer than this seq
+  since?: number; // Only return facts newer than this seq
 }
 ```
 
-This is the primary mechanism for keeping a client in sync: after an initial
-full query, subsequent queries use the highest seq seen as the `since`
-value.
+This is the primary incremental read mechanism for one-shot calls. Live sync is
+handled by session-scoped catch-up frames rather than by repeatedly invoking the
+same query.
 
 ### 5.2.3 Simple Query Execution
 
@@ -82,10 +81,10 @@ Given a `Query`, the server:
 2. For each pattern in `select`:
    - If the key is `"*"`, iterate all entities on the branch.
    - If the key is a specific id, look up that entity's head on the branch.
-3. For each matched entity, read its current head fact.
+3. For each matched entity, read its current head state.
 4. If `since` is provided, skip entities whose head seq is <= `since`.
-5. If `atSeq` is provided, reconstruct the entity state at that seq
-   (see section 5.5).
+5. If `atSeq` is provided, reconstruct the entity state at that seq (see section
+   5.5).
 6. Assemble and return a `FactSet`.
 
 ---
@@ -100,9 +99,9 @@ which linked entities to include.
 The traversal code in `packages/runner/src/traverse.ts` is **shared between
 client and server**. The v1 server (`space-schema.ts`) imports
 `SchemaObjectTraverser` from `@commontools/runner/traverse`, and the client
-(`schema.ts`) uses the same code for validation and transformation. This
-ensures identical traversal behavior on both sides. The v2 implementation MUST
-preserve this shared-code property.
+(`schema.ts`) uses the same code for validation and transformation. This ensures
+identical traversal behavior on both sides. The v2 implementation MUST preserve
+this shared-code property.
 
 ### 5.3.1 Schema Query Structure
 
@@ -114,8 +113,8 @@ interface SchemaQuery extends QueryOptions {
 }
 
 interface SchemaQueryLimits {
-  maxDepth?: number;      // Maximum traversal depth (default: 10)
-  maxEntities?: number;   // Maximum entities to visit (default: 1000)
+  maxDepth?: number; // Maximum traversal depth (default: 10)
+  maxEntities?: number; // Maximum entities to visit (default: 1000)
 }
 
 // SchemaSelector maps entity ids to schema path selectors.
@@ -125,14 +124,14 @@ type SchemaSelector = Record<EntityId | "*", SchemaPathSelector>;
 // A path + schema pair that describes what to traverse
 // within a matched entity's value.
 interface SchemaPathSelector {
-  path: string[];          // Path segments into the entity value
-  schema?: JSONSchema;     // JSON Schema constraining traversal
+  path: string[]; // Path segments into the entity value
+  schema?: JSONSchema; // JSON Schema constraining traversal
 }
 ```
 
 The `path` field navigates into the entity's value before applying the schema.
-For example, `{ path: ["settings", "theme"], schema: { type: "object" } }`
-would navigate to the `settings.theme` sub-object and traverse it as an object.
+For example, `{ path: ["settings", "theme"], schema: { type: "object" } }` would
+navigate to the `settings.theme` sub-object and traverse it as an object.
 
 ### 5.3.2 Schema Traversal Algorithm
 
@@ -151,8 +150,8 @@ from the `SchemaPathSelector`:
 3. Once all path segments are consumed, begin schema-guided traversal on the
    resulting value.
 
-This mirrors the `getAtPath` function from `traverse.ts`, which walks a
-document path while resolving references encountered along the way.
+This mirrors the `getAtPath` function from `traverse.ts`, which walks a document
+path while resolving references encountered along the way.
 
 #### Schema-Guided Filtering
 
@@ -243,9 +242,9 @@ top-level document object for:
 ```
 
 If present, the server resolves that short link to `of:<short-id>` in the same
-space, loads that document, adds it to the query result and subscription
-tracker, and then repeats the same `source` check on the loaded document. This
-continues until a document without `source` is reached or a cycle is detected.
+space, loads that document, adds it to the query result and watch tracker, and
+then repeats the same `source` check on the loaded document. This continues
+until a document without `source` is reached or a cycle is detected.
 
 This behavior is not optional provenance decoration. It is part of the query
 result shape, mirroring `loadSource()` in `traverse.ts`, and is required for
@@ -275,8 +274,8 @@ class CycleTracker<K> {
 
 #### CompoundCycleTracker
 
-A more nuanced tracker that considers both node identity and schema context.
-The same entity can be visited multiple times with different schemas without
+A more nuanced tracker that considers both node identity and schema context. The
+same entity can be visited multiple times with different schemas without
 triggering a false cycle. This is important because a single entity may be
 reachable via different schema paths that expose different subsets of its data.
 
@@ -287,11 +286,14 @@ class CompoundCycleTracker<IdentityKey, SchemaKey, Value> {
   include(
     identityKey: IdentityKey,
     schemaKey: SchemaKey,
-    value?: Value
+    value?: Value,
   ): Disposable | null;
 
   // After a failed include, retrieve the value registered by the first visit.
-  getExisting(identityKey: IdentityKey, schemaKey: SchemaKey): Value | undefined;
+  getExisting(
+    identityKey: IdentityKey,
+    schemaKey: SchemaKey,
+  ): Value | undefined;
 }
 ```
 
@@ -299,20 +301,20 @@ In practice, the traverser uses a `CompoundCycleTracker` parameterized as:
 
 ```typescript
 type PointerCycleTracker = CompoundCycleTracker<
-  JSONValue,       // The reference value (identity comparison)
-  JSONSchema,      // The schema context (deep equality comparison)
-  any              // The traversal result for this node
+  JSONValue, // The reference value (identity comparison)
+  JSONSchema, // The schema context (deep equality comparison)
+  any // The traversal result for this node
 >;
 ```
 
 ### 5.3.4 Schema Narrowing
 
-When following a reference from entity A to entity B, the schema applicable to
-B is the **intersection** of:
+When following a reference from entity A to entity B, the schema applicable to B
+is the **intersection** of:
 
 1. The schema context from A's traversal (what A expects B to look like).
-2. Any schema embedded in the reference itself (what the reference declares B
-   to contain).
+2. Any schema embedded in the reference itself (what the reference declares B to
+   contain).
 
 This intersection is computed by `combineSchema`:
 
@@ -354,16 +356,16 @@ mapping entity keys to `SchemaPathSelector` sets):
 
 ```typescript
 type SchemaTracker = MapSet<
-  string,                // Key: "{space}/{entityId}"
-  SchemaPathSelector     // The schema+path used when visiting this entity
+  string, // Key: "{space}/{entityId}"
+  SchemaPathSelector // The schema+path used when visiting this entity
 >;
 ```
 
 The schema tracker serves two purposes:
 
-1. **Subscription bookkeeping** -- after the initial query, the server knows
-   exactly which entities are reachable from the query roots. When any of these
-   entities change, the subscription is notified.
+1. **Watch bookkeeping** -- after the initial query, the server knows exactly
+   which entities are reachable from the query roots. When any of these entities
+   change, the affected session watch union can be recomputed.
 2. **Incremental update evaluation** -- when an entity changes, the server
    re-evaluates its links using the stored schema to determine whether new
    entities have become reachable (or old ones unreachable).
@@ -375,142 +377,115 @@ Given a `SchemaQuery`, the server:
 1. Identifies the target branch.
 2. Iterates the `selectSchema` patterns to find root entities (same matching
    rules as simple queries).
-3. For each root entity:
-   a. Loads the entity's current value.
-   b. Runs the schema traversal algorithm (5.3.2), which recursively loads and
-      filters linked entities.
-   c. For every loaded document, recursively loads any `source` lineage
-      documents (5.3.2 Source / Provenance Resolution).
-   d. Records all visited entities in the schema tracker.
+3. For each root entity: a. Loads the entity's current value. b. Runs the schema
+   traversal algorithm (5.3.2), which recursively loads and filters linked
+   entities. c. For every loaded document, recursively loads any `source`
+   lineage documents (5.3.2 Source / Provenance Resolution). d. Records all
+   visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
-5. If `since` is provided, filters the result to only include entities whose
-   seq exceeds `since`.
-6. Returns the `FactSet` along with the schema tracker (for subscription
-   setup).
+5. If `since` is provided, filters the result to only include entities whose seq
+   exceeds `since`.
+6. Returns the `FactSet` along with the schema tracker (for watch setup).
 
-The initial execution and every later schema-subscription refresh MUST use the
-same traversal semantics as `packages/runner/src/traverse.ts`. The server MAY
-cache bookkeeping such as reachable-entity sets or dirty roots, but the result
-sent to clients must be equivalent to rerunning `graph.query` with the shared
-traversal code against the current committed state.
+The initial execution and every later schema-watch refresh MUST use the same
+traversal semantics as `packages/runner/src/traverse.ts`. The server MAY cache
+bookkeeping such as reachable-entity sets or dirty roots, but the result sent to
+clients must be equivalent to rerunning `graph.query` with the shared traversal
+code against the current committed state.
 
 ---
 
-## 5.4 Subscriptions
+## 5.4 Session Watch Sets and Catch-Up Sync
 
-Subscriptions provide a persistent query that receives incremental updates as
-the matching data changes. Both simple and schema queries support subscriptions.
+Live query behavior is modeled as a session watch set rather than as a
+collection of independent subscription streams.
 
-### 5.4.1 Subscription Lifecycle
+### 5.4.1 Watch Lifecycle
 
-```
+```text
 Client                                Server
   |                                     |
-  |--- subscribe(query) -------------->|
-  |                                     |-- execute initial query
-  |<--- initial FactSet ---------------|
+  |--- watchSet([queryA, queryB]) ---->|
+  |                                     |-- evaluate watch union
+  |<--- ok(serverSeq) -----------------|
+  |<--- session/effect(sync) ----------|
   |                                     |
   |     (data changes on server)        |
-  |<--- incremental FactSet -----------|
+  |<--- session/effect(sync) ----------|
   |                                     |
-  |     (more changes)                  |
-  |<--- incremental FactSet -----------|
-  |                                     |
-  |--- unsubscribe(subscriptionId) --->|
-  |<--- ok ----------------------------|
+  |--- watchSet([queryA]) ------------>|
+  |<--- ok(serverSeq) -----------------|
+  |<--- session/effect(sync removes) --|
 ```
 
-### 5.4.2 Simple Subscriptions
+### 5.4.2 Simple Watches
 
 For simple queries, the server:
 
-1. Executes the initial query and returns the result.
-2. Records the query's entity match patterns and the highest seq sent.
-3. On each commit:
-   a. Check if any committed facts match the subscription's patterns.
-   b. If so, send only the changed facts as an incremental `FactSet`.
-   c. Update the highest seq sent.
+1. Evaluates the union of all simple watch selectors on the session.
+2. Tracks the relevant entities and the session's integrated `seenSeq`.
+3. On each commit or watch change, computes the delta between the relevant set
+   at the prior `seenSeq` and the relevant set now.
+4. Sends the result as one or more `SessionSync` frames.
 
-Matching uses the same rules as `subscription.ts`: an entity matches if its id
-(or the wildcard `*`) intersects with the subscription pattern.
+### 5.4.3 Schema-Aware Watches
 
-### 5.4.3 Schema-Aware Subscriptions
+Schema watches are more sophisticated because the relevant entity set can change
+as references change.
 
-Schema subscriptions are more sophisticated because the set of relevant
-entities can change as data changes. A reference that previously pointed to
-entity X might now point to entity Y, meaning Y's changes should trigger
-updates.
+The server manages this by maintaining a schema tracker for the session's watch
+union:
 
-The server manages this by maintaining the **schema tracker** from the initial
-query:
-
-1. **Initial query**: execute the schema query, build the schema tracker. The
-   tracker records every entity visited and the schema context used.
-2. **On commit**: for each changed entity:
-   a. Check if the entity appears in the schema tracker. If yes, the
-      subscription is affected.
-   b. If the changed entity contains references, re-evaluate its links using
-      `evaluateDocumentLinks` to discover any newly reachable entities.
-   c. Update the schema tracker with any new entity/schema pairs.
-   d. Remove entity/schema pairs that are no longer reachable.
-3. **Send update**: collect all changed and newly reachable entities into an
-   incremental `FactSet` and send to the client.
-
-This mirrors the `evaluateDocumentLinks` function from `space-schema.ts`, which
-re-evaluates a single entity's outgoing references under a given schema.
+1. **Watch install**: evaluate the schema query, recording every visited entity
+   and the schema context used.
+2. **On commit**: for each changed entity, determine whether it can affect the
+   current tracked graph.
+3. **Re-evaluate affected topology**: if links or source chains changed, re-run
+   the shared traversal logic to discover newly reachable or no-longer-
+   reachable entities.
+4. **Emit sync**: send entity upserts for newly relevant/current entities and
+   removes for entities that fell out of the watch union.
 
 ### 5.4.4 Deduplication
 
-The server tracks what has been sent to each subscription to avoid sending
-duplicate data:
+The server deduplicates at the session layer:
 
-- **Seq watermark**: for simple subscriptions, the highest seq sent acts
-  as a watermark. Only facts with seq > watermark are sent.
-- **Sent entity set**: for schema subscriptions, the server additionally tracks
-  which entities have been sent in this subscription session. When
-  `excludeSent: true` is set in the query, entities already sent are omitted
-  from incremental updates unless their value has changed.
+- one entity appears once in the session cache even if multiple watches include
+  it
+- `seenSeq` acts as the primary watermark
+- optional `sentEntities` bookkeeping MAY still be used for watch-local
+  optimizations like `excludeSent`
 
 ### 5.4.5 Update Coalescing
 
-When multiple commits occur in rapid succession, the server MAY coalesce
-subscription updates. Instead of sending one update per commit, the server
-batches changes and sends a single update covering all commits since the last
-sent update. The coalesced update includes the latest `FactEntry` per entity,
-not intermediate states.
+When multiple commits occur in rapid succession, the server MAY coalesce live
+sync into one `SessionSync` frame covering the latest relevant state rather than
+sending one frame per commit.
 
 The required ordering invariant is:
 
-1. The server first drains the currently pending successful commits for the
-   space/branch.
-2. It then re-runs the affected subscriptions against that latest state.
-   Implementations should first filter subscriptions by dirty document
-   intersection and may patch plain, topology-stable entities directly before
-   falling back to full query re-evaluation.
-3. Only after that refresh does it emit subscription updates.
+1. Drain currently pending successful commits for the relevant space/branch.
+2. Recompute the affected watch unions against that latest state.
+3. Emit sync only after the recomputation is complete.
 
-If a new transaction fails with `ConflictError` while such a refresh is still
-pending, the server MUST run the pending subscription refresh before returning
-the conflict. This guarantees that, after the client receives a local revert,
-its subscribed state is fresh enough for an immediate retry.
+If a transaction fails with `ConflictError` while such a refresh is pending, the
+server MUST flush the affected watch unions before returning the conflict.
 
-That conflict-triggered refresh SHOULD remain document-targeted. At minimum,
-the server should seed the reevaluation with the failed commit's touched
-document IDs: operation IDs plus the IDs named in confirmed and pending reads.
-If those targeted subscriptions still need full `graph.query` reevaluation,
-they may do so, but the server should not discard dirty-doc context and rerun
-unrelated subscriptions just because the commit failed.
-
-### 5.4.6 Subscription State
+### 5.4.6 Session Watch State
 
 ```typescript
-interface SubscriptionState {
-  id: string;                                // Unique subscription identifier
-  query: Query | SchemaQuery;                // The subscribed query
-  branch: BranchName;                        // Target branch
-  lastSeqSent: number;                       // Seq watermark
-  schemaTracker?: SchemaTracker;             // For schema subscriptions
-  sentEntities?: Set<string>;                // For excludeSent optimization
+interface WatchState {
+  id: string;
+  query: Query | SchemaQuery;
+  branch: BranchName;
+}
+
+interface SessionWatchState {
+  sessionId: string;
+  seenSeq: number;
+  watches: WatchState[];
+  schemaTracker?: SchemaTracker;
+  sentEntities?: Set<string>;
 }
 ```
 
@@ -518,19 +493,18 @@ interface SubscriptionState {
 
 ## 5.5 Point-in-Time Queries
 
-A point-in-time query reconstructs the state of entities at a specific seq
-on a specific branch. This is specified via the `atSeq` field in
-`QueryOptions`.
+A point-in-time query reconstructs the state of entities at a specific seq on a
+specific branch. This is specified via the `atSeq` field in `QueryOptions`.
 
 ### 5.5.1 Reconstruction Algorithm
 
 For each matched entity at `atSeq`:
 
-1. **Find the nearest snapshot** at or before the target seq. A snapshot is
-   a stored full-value checkpoint of the entity at a specific seq.
-2. **Collect patches** between the snapshot seq and the target seq.
-   These are the incremental operations (patch operations) stored as facts
-   with seq in the range `(snapshotSeq, targetSeq]`.
+1. **Find the nearest snapshot** at or before the target seq. A snapshot is a
+   stored full-value checkpoint of the entity at a specific seq.
+2. **Collect patches** between the snapshot seq and the target seq. These are
+   the incremental operations (patch operations) stored as facts with seq in the
+   range `(snapshotSeq, targetSeq]`.
 3. **Replay patches** on the snapshot value in seq order to reconstruct the
    entity's state at the target seq.
 4. If the entity was deleted (a `Delete` fact) at or before the target seq,
@@ -557,8 +531,8 @@ state(entity, targetSeq):
 - **No snapshot available**: if no snapshot exists for an entity, reconstruction
   starts from the entity's first `Write` fact (which is always a full value,
   acting as an implicit snapshot).
-- **Seq 0**: querying at seq 0 returns the initial state (typically
-  empty for all entities).
+- **Seq 0**: querying at seq 0 returns the initial state (typically empty for
+  all entities).
 
 ### 5.5.3 Point-in-Time with Schema Queries
 
@@ -587,36 +561,33 @@ revision once the label/metadata model is redesigned. Until then:
 
 ## 5.7 Result Format
 
-All queries return results as a `FactSet` -- a structured collection of facts
-organized by entity.
+All queries return results as a `FactSet` -- a structured collection of current
+entity states organized by entity.
 
 ### 5.7.1 FactSet Structure
 
 ```typescript
-// The top-level result: space -> entity facts
+// The top-level result: space -> entity states
 interface QueryResult {
   [spaceId: string]: FactSet;
 }
 
-// Facts organized by entity id
+// Current entity states organized by entity id
 interface FactSet {
   [entityId: EntityId]: FactEntry;
 }
 
-// A single fact entry in the result
+// A single entity entry in the result
 interface FactEntry {
-  value?: JSONValue;   // The entity value (absent for deletes/tombstones)
-  seq: number;         // The seq when this fact was committed
-  hash: Reference;     // Hash of the current head fact
+  value?: JSONValue; // The entity value (absent for deletes/tombstones)
+  seq: number; // The seq when this fact was committed
 }
 ```
 
 ### 5.7.2 Result Semantics
 
-- **Present entity**: has a `FactEntry` with `value` populated. The `hash`
-  field identifies the head fact.
-- **Deleted entity**: has a `FactEntry` without `value` (tombstone). The `hash`
-  still identifies the delete fact.
+- **Present entity**: has a `FactEntry` with `value` populated.
+- **Deleted entity**: has a `FactEntry` without `value` (tombstone).
 - **Unknown entity**: no entry in the `FactSet` at all.
 
 ---
@@ -630,8 +601,8 @@ cursor-based pagination.
 
 ```typescript
 interface PaginatedQuery extends Query {
-  limit?: number;       // Maximum entities to return (default: server-chosen)
-  cursor?: string;      // Opaque continuation token from a previous response
+  limit?: number; // Maximum entities to return (default: server-chosen)
+  cursor?: string; // Opaque continuation token from a previous response
 }
 ```
 
@@ -640,8 +611,8 @@ interface PaginatedQuery extends Query {
 ```typescript
 interface PaginatedResult {
   facts: FactSet;
-  cursor?: string;      // Present if more results are available
-  hasMore: boolean;      // Explicit flag for client convenience
+  cursor?: string; // Present if more results are available
+  hasMore: boolean; // Explicit flag for client convenience
 }
 ```
 
@@ -649,8 +620,8 @@ interface PaginatedResult {
 
 - The cursor is opaque to the client. The server may encode the last entity id
   and seq, or any other state needed to resume iteration.
-- Pagination is **seq-consistent**: the server pins the query to the seq
-  at which the first page was served, so subsequent pages reflect the same
+- Pagination is **seq-consistent**: the server pins the query to the seq at
+  which the first page was served, so subsequent pages reflect the same
   snapshot.
 - Schema queries paginate over root entities. Linked entities reachable from a
   root are always included in the same page as that root.
@@ -659,15 +630,15 @@ interface PaginatedResult {
 
 ## 5.9 Branch-Aware Queries
 
-All queries operate on a specific branch. If no branch is specified, the
-default branch is used.
+All queries operate on a specific branch. If no branch is specified, the default
+branch is used.
 
 ### 5.9.1 Branch Resolution
 
 ```typescript
 interface QueryOptions {
-  branch?: BranchName;  // Omit for default branch
-  atSeq?: number;       // Point-in-time read (latest if omitted)
+  branch?: BranchName; // Omit for default branch
+  atSeq?: number; // Point-in-time read (latest if omitted)
 }
 ```
 
@@ -683,9 +654,9 @@ queries targeting each branch.
 
 ### 5.9.3 Branch + Point-in-Time
 
-Branch and seq interact naturally: `{ branch: "feature-x", atSeq: 42 }`
-reads the state of the `feature-x` branch as it was at seq 42. The
-reconstruction algorithm (5.5) scopes its fact lookup to the specified branch.
+Branch and seq interact naturally: `{ branch: "feature-x", atSeq: 42 }` reads
+the state of the `feature-x` branch as it was at seq 42. The reconstruction
+algorithm (5.5) scopes its fact lookup to the specified branch.
 
 ---
 
@@ -743,7 +714,7 @@ Given a sigil link, the traverser:
 
 1. Parses `{"/":{"link@1":...}}` into a normalized link (id/path/space).
 2. Resolves relative fields against the current traversal base.
-3. Loads the target entity by normalized `id` (not by fact hash).
+3. Loads the target entity by normalized `id` (not by revision identity).
 4. Applies `path` on the target and continues traversal with narrowed schema
    context (see 5.3.4 Schema Narrowing).
 
@@ -786,13 +757,13 @@ how reactivity boundaries interact with the query system.
 
 `asCell(entityId)` returns a reactive cell that updates when the entity's head
 changes. The cell holds the entity's current value and re-evaluates when a new
-fact is committed for that entity on the target branch.
+revision is committed for that entity on the target branch.
 
 ### 5.11.2 asStream
 
 `asStream(query)` returns a reactive stream of `FactSet` updates. Each emission
 contains the incremental changes since the last emission, following the
-subscription semantics defined in section 5.4.
+session-watch semantics defined in section 5.4.
 
 ### 5.11.3 Boundary Rules
 
@@ -805,30 +776,30 @@ cell" is determined by the schema:
 - **Referenced entities** (followed via links) are separate cells. Changes to a
   referenced entity trigger an update on that entity's cell, but do not
   automatically trigger an update on the referencing (parent) cell.
-- **Schema-aware subscriptions** (section 5.4.3) bridge this boundary: the
-  schema tracker monitors all reachable entities, so the subscription stream
-  emits updates for any change in the reachable graph.
+- **Schema-aware watches** (section 5.4.3) bridge this boundary: the schema
+  tracker monitors all reachable entities, so the session sync stream emits
+  updates for any change in the reachable graph.
 
 ---
 
 ## 5.12 Implementation Notes
 
 This section documents constraints and considerations discovered during an
-initial v1 → v2 migration that affect how queries and subscriptions are
+initial v1 → v2 migration that affect how queries and watch-based live sync are
 implemented.
 
 ### 5.12.1 Schema Traversal Is a Server-Side Function
 
 In v1, schema-guided graph traversal happens on the **server** via
 `space-schema.ts` → `selectSchema()`. The server walks from root entities
-through `{"/": { "link@1": {...} } }` references, guided by the JSON schema,
-and returns ALL linked entities in a single query response. The client never
-needs to "discover" linked entities — the server already includes them.
+through `{"/": { "link@1": {...} } }` references, guided by the JSON schema, and
+returns ALL linked entities in a single query response. The client never needs
+to "discover" linked entities — the server already includes them.
 
 The client-side `SchemaObjectTraverser` in `traverse.ts` is used for
-**validating and transforming** already-loaded data (e.g., in `schema.ts`),
-not for discovering what to subscribe to. Any v2 query implementation must
-preserve this server-side traversal pattern.
+**validating and transforming** already-loaded data (e.g., in `schema.ts`), not
+for discovering what to subscribe to. Any v2 query implementation must preserve
+this server-side traversal pattern.
 
 ### 5.12.2 Schema Availability
 
