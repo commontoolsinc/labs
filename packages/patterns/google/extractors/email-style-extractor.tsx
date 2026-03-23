@@ -240,16 +240,13 @@ Extract the writing style patterns from these emails.`;
       model: "anthropic:claude-sonnet-4-5",
     });
 
-    // Track last saved result reference to avoid redundant writes
-    let lastSavedResult: unknown = null;
-
     // Auto-save LLM result to persistent Writable
     const _autoSaveStyle = computed(() => {
       const result = styleResult.result;
       const isPending = styleResult.pending;
+      const currentSavedStyle = savedStyle.get();
 
-      if (!isPending && result && result !== lastSavedResult) {
-        lastSavedResult = result;
+      if (!isPending && result && result !== currentSavedStyle) {
         savedStyle.set(result as EmailStyle);
         const now = new Date().toISOString();
         lastAnalyzedAt.set(now);
