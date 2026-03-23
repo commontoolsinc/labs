@@ -328,7 +328,6 @@ export function mergeDefaults(
  * generally non-extensible) or already bound into some (other) context, then it
  * is first shallow-cloned. It is up to callers to ensure that mutable and
  * unbound `value`s are indeed appropriate to be mutated.
- *
  */
 function annotateWithBackToCellSymbols(
   value: any,
