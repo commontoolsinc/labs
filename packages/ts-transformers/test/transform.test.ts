@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertRejects } from "@std/assert";
-import { transformFiles } from "./utils.ts";
+import { assert, assertRejects, assertStringIncludes } from "@std/assert";
+import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { transformFiles, transformSource } from "./utils.ts";
 
 const fixture = `
 import { toSchema } from "commonfabric";
@@ -31,6 +32,41 @@ describe("CommonFabricTransformerPipeline", () => {
     assert(
       /import \* as __cfHelpers/.test(enabled["/main.ts"]!),
       "no replacements without <cts-enable />",
+    );
+  });
+
+  it("wraps top-level data candidates with __ctHelpers.__ct_data", async () => {
+    const source = `/// <cts-enable />
+import { lift, schema } from "commontools";
+
+const model = schema({ type: "string" } as const);
+const lookup = (() => ({ open: "Open" }))();
+const tags = new Set(["a", "b"]);
+const passthrough = lift((value: string) => value);
+
+export { model, lookup, tags, passthrough };
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      'const model = __ctHelpers.__ct_data(schema({ type: "string" } as const));',
+    );
+    assertStringIncludes(
+      main,
+      'const lookup = __ctHelpers.__ct_data((() => ({ open: "Open" }))());',
+    );
+    assertStringIncludes(
+      main,
+      'const tags = __ctHelpers.__ct_data(new Set(["a", "b"]));',
+    );
+    assert(
+      !main.includes("__ctHelpers.__ct_data(lift("),
+      "top-level builder calls should not be wrapped",
     );
   });
 });

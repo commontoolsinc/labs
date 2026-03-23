@@ -3,7 +3,7 @@ import { toSchema } from "commonfabric";
 interface Config {
     value: number;
 }
-const configSchema = {
+const configSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         value: {
@@ -15,7 +15,7 @@ const configSchema = {
         value: 42
     },
     description: "Configuration schema"
-} as const satisfies __cfHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: with-options
 // Verifies: toSchema options object (default, description) is merged into generated schema
 //   toSchema<Config>({default: ..., description: ...}) → schema with "default" and "description" alongside generated properties

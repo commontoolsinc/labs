@@ -1,6 +1,6 @@
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
-const config = { bar: "module-level" };
+const config = __cfHelpers.__ct_data({ bar: "module-level" });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
 //   the module-level `config.bar` to be rewritten to `config.key("bar")`.

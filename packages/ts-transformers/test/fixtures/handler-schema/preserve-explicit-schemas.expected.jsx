@@ -1,20 +1,20 @@
 import * as __cfHelpers from "commonfabric";
 import { handler } from "commonfabric";
 import "commonfabric/schema";
-const eventSchema = {
+const eventSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         message: { type: "string" },
     },
     required: ["message"],
-} as const;
-const stateSchema = {
+} as const);
+const stateSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         log: { type: "array", items: { type: "string" } },
     },
     required: ["log"],
-} as const;
+} as const);
 const logHandler = handler(eventSchema, stateSchema, (event, state) => {
     state.log.push(event.message);
 });

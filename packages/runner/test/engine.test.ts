@@ -118,6 +118,29 @@ describe("Engine.compile()", () => {
 
     await expect(engine.compile(program)).rejects.toThrow();
   });
+
+  it("emits __ct_data for CTS top-level data and evaluates it at runtime", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'const lookup = (() => ({ open: "Open" }))();',
+            "export default lookup.open;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+
+    expect(jsScript.js).toContain("__ct_data");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBe("Open");
+  });
 });
 
 describe("Engine.evaluate()", () => {

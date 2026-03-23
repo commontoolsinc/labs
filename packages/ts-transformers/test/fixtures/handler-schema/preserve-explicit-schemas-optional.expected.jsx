@@ -2,18 +2,18 @@ import * as __cfHelpers from "commonfabric";
 import { handler } from "commonfabric";
 import "commonfabric/schema";
 // Schema without required fields - properties are optional
-const eventSchema = {
+const eventSchema = __ctHelpers.__ct_data({
     type: "object",
     properties: {
         message: { type: "string" },
     },
-} as const;
-const stateSchema = {
+} as const);
+const stateSchema = __ctHelpers.__ct_data({
     type: "object",
     properties: {
         log: { type: "array", items: { type: "string" } },
     },
-} as const;
+} as const);
 const logHandler = handler(eventSchema, stateSchema, (event, state) => {
     // Use optional chaining and nullish coalescing since properties may be undefined
     state.log?.push(event.message ?? "no message");

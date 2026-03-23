@@ -57,6 +57,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-epoch";
 import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -151,6 +152,7 @@ export const createBuilder = (): {
     // Schema utilities
     schema,
     toSchema,
+    __ct_data: freezeVerifiedPlainData,
     AuthSchema,
     WebhookConfigSchema,
 

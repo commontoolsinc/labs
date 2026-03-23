@@ -12,7 +12,7 @@ interface LinkedData {
     "class": boolean;
     normalProperty: string;
 }
-const linkedDataSchema = {
+const linkedDataSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         "@link": {
@@ -47,7 +47,7 @@ const linkedDataSchema = {
         }
     },
     required: ["@link", "@context", "@type", "kebab-case", "with space", "with-special-chars!", "default", "enum", "class", "normalProperty"]
-} as const satisfies __cfHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: special-property-names
 // Verifies: toSchema handles property names that are JSON-LD keywords, kebab-case, or JS reserved words
 //   toSchema<LinkedData>() → schema with "@link", "kebab-case", "with space", "default", "enum", etc.

@@ -3,6 +3,7 @@ export { PatternCallbackLoweringTransformer } from "./pattern-callback-lowering.
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";
 export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-expression-site-lowering.ts";
 export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";
+export { ModuleScopeCtDataTransformer } from "./module-scope-ct-data.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
 export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";

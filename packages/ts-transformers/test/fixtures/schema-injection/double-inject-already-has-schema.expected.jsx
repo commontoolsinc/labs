@@ -1,6 +1,6 @@
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
-const existingSchema = { type: "number" } as const;
+const existingSchema = __cfHelpers.__ct_data({ type: "number" } as const);
 // FIXTURE: double-inject-already-has-schema
 // Verifies: cell() calls that already have a schema argument are NOT double-injected
 //   cell(10, existingSchema) → cell(10, existingSchema)  (unchanged)

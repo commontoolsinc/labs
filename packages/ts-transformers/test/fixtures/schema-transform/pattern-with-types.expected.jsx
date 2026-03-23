@@ -17,7 +17,7 @@ type InputEventType = {
         message: string;
     };
 };
-const inputSchema = {
+const inputSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         title: {
@@ -45,8 +45,8 @@ const inputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema;
-const outputSchema = {
+} as const satisfies __cfHelpers.JSONSchema);
+const outputSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {
         items_count: {
@@ -77,7 +77,7 @@ const outputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema);
 // Handler that logs the message event
 const addItem = handler // <
 ({

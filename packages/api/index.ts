@@ -2022,6 +2022,8 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+/** Internal compiler-emitted helper for top-level data materialization. */
+export type CtDataFunction = <T>(value: T) => T;
 
 // Pattern environment types
 export interface PatternEnvironment {
@@ -2082,6 +2084,7 @@ export declare const getEntityId: GetEntityIdFunction;
 
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
+export declare const __ct_data: CtDataFunction;
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

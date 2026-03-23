@@ -3,6 +3,7 @@ import {
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
+  ModuleScopeCtDataTransformer,
   OpaqueGetValidationTransformer,
   PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
@@ -63,6 +64,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
+      new ModuleScopeCtDataTransformer(sharedOps),
     );
 
     super(transformers);
