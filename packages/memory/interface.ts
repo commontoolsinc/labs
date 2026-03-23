@@ -2,14 +2,11 @@ import type {
   ContentId,
   DefinedReferent,
 } from "@commontools/data-model/value-hash";
-import type { JSONSchema, JSONValue } from "@commontools/api";
+import type { JSONValue } from "@commontools/api";
 
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
-
-export type SchemaPathSelector = {
-  path: readonly string[];
-  schema?: JSONSchema;
-};
+import type { SchemaPathSelector } from "@commontools/data-model/interface";
+export type { SchemaPathSelector };
 
 export type { JSONValue };
 

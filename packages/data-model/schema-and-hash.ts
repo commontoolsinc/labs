@@ -15,20 +15,18 @@ export class SchemaAndHash {
   /** The canonical hash of the schema. */
   readonly hash: FabricHash;
 
-  private constructor(schema: JSONSchema, hash: FabricHash) {
-    this.schema = schema;
-    this.hash = hash;
+  private constructor(schema: JSONSchema) {
+    this.schema = toDeepFrozenSchema(schema);
+    this.hash = modernHash(this.schema);
     Object.freeze(this);
   }
 
   /**
    * Create a `SchemaAndHash` from a schema. The schema is deep-frozen via
-   * `toDeepFrozenSchema()` before hashing, so the caller's original object
-   * is not modified.
+   * `toDeepFrozenSchema()` in the constructor, so the caller's original
+   * object is not modified.
    */
   static from(schema: JSONSchema): SchemaAndHash {
-    const frozen = toDeepFrozenSchema(schema);
-    const hash = modernHash(frozen);
-    return new SchemaAndHash(frozen, hash);
+    return new SchemaAndHash(schema);
   }
 }
