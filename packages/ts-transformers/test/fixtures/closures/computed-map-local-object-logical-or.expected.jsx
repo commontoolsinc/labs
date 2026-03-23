@@ -68,7 +68,7 @@ export default pattern((state) => {
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
-                        type: ["boolean", "string"]
+                        "enum": [true, "Pending"]
                     } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Pending") };
                 return <span>{view.status}</span>;
             }, {
@@ -94,10 +94,10 @@ export default pattern((state) => {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
                         type: "object",
                         properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -148,10 +148,10 @@ export default pattern((state) => {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
                     type: "object",
                     properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {
