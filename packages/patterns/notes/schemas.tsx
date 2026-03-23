@@ -46,6 +46,7 @@ export interface NotePiece {
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
+  setTitle?: Stream<string>;
 }
 
 /**

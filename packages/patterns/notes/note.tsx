@@ -44,6 +44,7 @@ interface NoteOutput extends NotePiece {
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  setTitle: Stream<string>;
   appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
@@ -263,6 +264,11 @@ const Note = pattern<NoteInput, NoteOutput>(
         content.set(detail.value);
       },
     );
+
+    // Exported stream for external title editing
+    const setTitle = action((newTitle: string) => {
+      title.set(newTitle);
+    });
 
     // Append a wiki-link to another piece at the end of the note content
     const appendLink = action(
@@ -547,6 +553,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       grep: patternTool(grepPattern, { content }),
       translate: patternTool(translatePattern, { content }),
       editContent,
+      setTitle,
       appendLink,
       createNewNote,
       embeddedUI: editorUI,
