@@ -8,3 +8,9 @@ export {
   ModuleVerificationError,
   verifyProgramModuleScope,
 } from "./module-verifier.ts";
+export {
+  assertPlainData,
+  freezeVerifiedPlainData,
+  type ModuleSafeValue,
+  PlainDataValidationError,
+} from "./plain-data.ts";
