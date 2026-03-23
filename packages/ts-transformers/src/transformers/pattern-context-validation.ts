@@ -41,6 +41,7 @@ import {
   detectCallKind,
   detectDirectBuilderCall,
   isInRestrictedReactiveContext,
+  isReactiveArrayMethodCall,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
@@ -392,15 +393,17 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Validates statement-level constructs in top-level pattern/render callbacks.
+   * Validates statement-level constructs in pattern-owned callback bodies.
    * For now, the supported subset is intentionally narrow:
    * - a single terminal return statement
+   * - no let declarations
    * - no reassignment
+   * - no loops
    * - no var declarations
    *
-   * We scope this to authored pattern/render callback bodies only, not safe
-   * wrappers or array-method callbacks, so we can tighten the language boundary
-   * incrementally without breaking callback-local compute patterns.
+   * This applies to any callback body that still classifies as pattern context
+   * at validation time, which intentionally includes pattern-owned array method
+   * callbacks while excluding compute-owned wrappers like computed()/derive().
    */
   private validateSupportedPatternStatements(
     func: ts.ArrowFunction | ts.FunctionExpression,
@@ -412,7 +415,7 @@ export class PatternContextValidationTransformer extends Transformer {
     const bodyContext = classifyReactiveContext(func.body, checker, context);
     if (
       bodyContext.kind !== "pattern" ||
-      (bodyContext.owner !== "pattern" && bodyContext.owner !== "render")
+      !this.isPatternOwnedStatementBoundary(func, context, checker)
     ) {
       return;
     }
@@ -424,6 +427,8 @@ export class PatternContextValidationTransformer extends Transformer {
       type:
         | "pattern-context:assignment"
         | "pattern-context:early-return"
+        | "pattern-context:let-declaration"
+        | "pattern-context:loop"
         | "pattern-context:var-declaration",
       message: string,
     ) => {
@@ -456,15 +461,36 @@ export class PatternContextValidationTransformer extends Transformer {
         return;
       }
 
+      if (ts.isVariableDeclarationList(node)) {
+        if ((node.flags & ts.NodeFlags.Let) !== 0) {
+          reportOnce(
+            node,
+            "pattern-context:let-declaration",
+            `let declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), derive(), or a helper.`,
+          );
+        } else if ((node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+          reportOnce(
+            node,
+            "pattern-context:var-declaration",
+            `var declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), derive(), or a module-scope helper.`,
+          );
+        }
+      }
+
       if (
-        ts.isVariableDeclarationList(node) &&
-        (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
+        ts.isForStatement(node) ||
+        ts.isForInStatement(node) ||
+        ts.isForOfStatement(node) ||
+        ts.isWhileStatement(node) ||
+        ts.isDoStatement(node)
       ) {
         reportOnce(
           node,
-          "pattern-context:var-declaration",
-          `var declarations are not supported in pattern bodies. ` +
-            `Use const, or move mutable logic into computed(), derive(), or a module-scope helper.`,
+          "pattern-context:loop",
+          `Loop statements are not supported in pattern-owned callback bodies. ` +
+            `Use array methods, helper-owned expressions, or move imperative iteration into computed(), derive(), or a helper.`,
         );
       }
 
@@ -475,7 +501,7 @@ export class PatternContextValidationTransformer extends Transformer {
         reportOnce(
           node,
           "pattern-context:assignment",
-          `Reassignment is not supported in pattern bodies. ` +
+          `Reassignment is not supported in pattern-owned callback bodies. ` +
             `Use straight-line data construction, or move mutable logic into computed(), derive(), or a helper.`,
         );
       }
@@ -489,6 +515,30 @@ export class PatternContextValidationTransformer extends Transformer {
   private isAssignmentOperator(kind: ts.SyntaxKind): boolean {
     return kind >= ts.SyntaxKind.FirstAssignment &&
       kind <= ts.SyntaxKind.LastAssignment;
+  }
+
+  private isPatternOwnedStatementBoundary(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): boolean {
+    const parent = func.parent;
+    if (!parent || !ts.isCallExpression(parent) || !parent.arguments.includes(func)) {
+      return false;
+    }
+
+    if (
+      isReactiveArrayMethodCall(parent, checker, context.options.typeRegistry)
+    ) {
+      return true;
+    }
+
+    const callKind = detectCallKind(parent, checker);
+    if (!callKind) return false;
+
+    return callKind.kind === "builder" &&
+      (callKind.builderName === "pattern" ||
+        callKind.builderName === "render");
   }
 
   /**

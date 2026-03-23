@@ -232,6 +232,49 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 
 Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
+    "errors on let declaration in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        let display = count;
+        return display;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:let-declaration");
+    },
+  );
+
+  await t.step(
+    "errors on loop in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern(() => {
+        const values: number[] = [];
+        for (let i = 0; i < 3; i++) {
+          values.push(i);
+        }
+        return values;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:loop");
+    },
+  );
+
+  await t.step(
     "errors on early return in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
@@ -250,6 +293,53 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
       assertEquals(errors[0]!.type, "pattern-context:early-return");
+    },
+  );
+
+  await t.step(
+    "errors on let declaration in pattern-owned map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => {
+          let upper = item.toUpperCase();
+          return upper;
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:let-declaration");
+    },
+  );
+
+  await t.step(
+    "errors on loop in pattern-owned map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => {
+          const chars: string[] = [];
+          for (const char of item) {
+            chars.push(char);
+          }
+          return chars.join("-");
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:loop");
     },
   );
 
@@ -299,6 +389,62 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
       assertEquals(errors[0]!.type, "pattern-context:assignment");
+    },
+  );
+
+  await t.step(
+    "allows let and loops inside computed map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return computed(() =>
+          items.map((item) => {
+            let total = "";
+            for (const char of item) {
+              total += char;
+            }
+            return total;
+          })
+        );
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "compute-owned callbacks should keep imperative local control flow",
+      );
+    },
+  );
+
+  await t.step(
+    "allows let inside plain array callback in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern(() => {
+        const items = ["a", "b"];
+        return items.map((item) => {
+          let upper = item.toUpperCase();
+          return upper;
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "plain array callbacks should stay outside the pattern-owned statement boundary",
+      );
     },
   );
 
