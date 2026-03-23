@@ -43,6 +43,8 @@
     "./fabric-value-modern": "./fabric-value-modern.ts",
     "./array-utils": "./array-utils.ts",
     "./value-hash": "./value-hash.ts",
-    "./value-hash-legacy": "./value-hash-legacy.ts"
+    "./value-hash-legacy": "./value-hash-legacy.ts",
+    "./schema-hash": "./schema-hash.ts",
+    "./schema-hash-legacy": "./schema-hash-legacy.ts"
   }
 }

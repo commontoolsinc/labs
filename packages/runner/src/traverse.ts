@@ -1,4 +1,5 @@
 import { hashOf } from "@commontools/data-model/value-hash";
+import { hashSchema } from "@commontools/data-model/schema-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -1365,7 +1366,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
+  const key = hashSchema(flagSchema) + "|" + hashSchema(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1425,7 +1426,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
+  const key = hashSchema(parentSchema) + "|" + hashSchema(linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1981,7 +1982,7 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          stableStringify(schema);
+          hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -2927,7 +2928,7 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
+  const key = hashSchema(outerSchema) + "|" + hashSchema(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isRecord(innerSchema)
@@ -3035,8 +3036,8 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = stableStringify(outerSchema) + "||" +
-    branches.map(stableStringify).join("|");
+  const key = hashSchema(outerSchema) + "||" +
+    branches.map(hashSchema).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3115,10 +3116,10 @@ function _mergeAnyOfBranchSchemasUncached(
   // Build merged properties
   const mergedProperties: Record<string, JSONSchema> = {};
   for (const [propKey, schemas] of allProps) {
-    // Deduplicate schemas using stableStringify
+    // Deduplicate schemas using hashSchema
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(stableStringify(s), s);
+      uniqueHashes.set(hashSchema(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
