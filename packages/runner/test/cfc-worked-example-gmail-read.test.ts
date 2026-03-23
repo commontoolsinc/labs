@@ -202,8 +202,10 @@ describe("CFC worked example: Gmail read", () => {
     const fetchedResultCell = wrapperRun.result.key("result").resolveAsCell();
     const fetchedResultLink = fetchedResultCell.getAsNormalizedFullLink();
     const phaseOneLabels = await harness.readLabels(fetchedResultLink);
-    expect(phaseOneLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(phaseOneLabels["/"]?.integrity).toEqual(
+    expect(phaseOneLabels["/"]?.label?.classification).toEqual([[
+      userAliceAtom,
+    ]]);
+    expect(phaseOneLabels["/"]?.label?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: "https://commonfabric.org/cfc/atom/AuthorizedRequest",
@@ -246,6 +248,6 @@ describe("CFC worked example: Gmail read", () => {
     const downstreamLabels = await harness.readLabels(
       downstreamRun.outputLink,
     );
-    expect(downstreamLabels["/count"]?.classification).toBeUndefined();
+    expect(downstreamLabels["/count"]?.label?.classification).toBeUndefined();
   });
 });

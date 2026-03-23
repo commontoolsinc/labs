@@ -151,6 +151,48 @@ const gmailErrorHeadersSchema = {
   },
 } as const satisfies JSONSchema;
 
+const gmailOperatorViewSchema = {
+  type: "object",
+  properties: {
+    code: gmailErrorCodeSchema,
+    status: gmailErrorStatusSchema,
+    message: gmailErrorMessageSchema,
+    details: gmailErrorDetailsSchema,
+    headers: gmailErrorHeadersSchema,
+  },
+  ifc: {
+    classification: [[cloneJson(userAliceAtom)], [cloneJson(secretQueryAtom)]],
+  },
+} as const satisfies JSONSchema;
+
+const gmailOperatorViewInputSchema = {
+  type: "object",
+  properties: {
+    error: true,
+  },
+} as const satisfies JSONSchema;
+
+const gmailFetchErrorEnvelopeSchema = {
+  type: "object",
+  properties: {
+    "@Error": {
+      type: "object",
+      properties: {
+        error: {
+          type: "object",
+          properties: {
+            code: { type: "number" },
+            status: { type: "string" },
+            message: { type: "string" },
+            details: gmailErrorDetailsSchema,
+          },
+        },
+        headers: gmailErrorHeadersSchema,
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
 describe("CFC worked example: Gmail error declassification", () => {
   let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let originalFetch: typeof globalThis.fetch;
@@ -245,13 +287,13 @@ describe("CFC worked example: Gmail error declassification", () => {
     const errorCell = wrapperRun.result.key("error").resolveAsCell();
     const errorLink = errorCell.getAsNormalizedFullLink();
     const errorLabels = await harness.readLabels(errorLink);
-    expect(errorLabels["/"]?.classification).toEqual(
+    expect(errorLabels["/"]?.label?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],
       ]),
     );
-    expect(errorLabels["/"]?.integrity).toEqual(
+    expect(errorLabels["/"]?.label?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: "https://commonfabric.org/cfc/atom/AuthorizedRequest",
@@ -342,10 +384,12 @@ describe("CFC worked example: Gmail error declassification", () => {
       headersView.getAsNormalizedFullLink(),
     );
 
-    expect(codeLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(statusLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(messageLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(messageLabels["/"]?.integrity).toEqual(
+    expect(codeLabels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+    expect(statusLabels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+    expect(messageLabels["/"]?.label?.classification).toEqual([[
+      userAliceAtom,
+    ]]);
+    expect(messageLabels["/"]?.label?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining(sanitizedErrorMessageAtom),
         expect.objectContaining({
@@ -356,13 +400,109 @@ describe("CFC worked example: Gmail error declassification", () => {
         }),
       ]),
     );
-    expect(detailsLabels["/"]?.classification).toEqual(
+    expect(detailsLabels["/"]?.label?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],
       ]),
     );
-    expect(headersLabels["/"]?.classification).toEqual(
+    expect(headersLabels["/"]?.label?.classification).toEqual(
+      expect.arrayContaining([
+        [userAliceAtom],
+        [secretQueryAtom],
+      ]),
+    );
+  });
+
+  it("supports direct descendant release while retaining a secret parent whole-value label", async () => {
+    const requestCell = await harness.writeCellValue({
+      id: "gmail-error-request-observation",
+      schema: gmailErrorRequestSchema,
+      value: {
+        url:
+          "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=project-x",
+        mode: "json",
+        options: {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer token",
+          },
+        },
+      },
+      prepare: "boundary",
+    });
+
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
+    const fetchPattern = harness.pattern<{ request: unknown }>(
+      ({ request }: { request: unknown }) => fetchData(request),
+    );
+    const wrapperRun = await harness.runPattern({
+      id: "gmail-error-fetch-wrapper-observation",
+      pattern: fetchPattern,
+      inputs: { request: requestCell },
+    });
+
+    const projectOperatorView = harness.lift(
+      gmailFetchErrorEnvelopeSchema,
+      gmailOperatorViewSchema,
+      (error: any) => {
+        const gmailError = error["@Error"]?.error;
+        return {
+          code: gmailError?.code ?? 0,
+          status: gmailError?.status ?? "",
+          message: gmailError?.message ?? "",
+          details: gmailError?.details ?? [],
+          headers: error["@Error"]?.headers ?? {},
+        };
+      },
+    );
+    const operatorPattern = harness.pattern<{ error: any }>(
+      ({ error }: { error: any }) => projectOperatorView(error),
+      gmailOperatorViewInputSchema,
+      gmailOperatorViewSchema,
+    );
+
+    const operatorRun = await harness.runPattern({
+      id: "gmail-error-operator-view",
+      pattern: operatorPattern,
+      inputs: { error: wrapperRun.result.key("error").resolveAsCell() },
+      outputSchema: gmailOperatorViewSchema,
+      initialOutput: {
+        code: 0,
+        status: "",
+        message: "",
+        details: [],
+        headers: {},
+      },
+    });
+
+    const operatorLabels = await harness.readLabels(
+      operatorRun.outputLink,
+    );
+    expect(operatorLabels["/"]?.label?.classification).toEqual(
+      expect.arrayContaining([
+        [userAliceAtom],
+        [secretQueryAtom],
+      ]),
+    );
+    expect(operatorLabels["/code"]?.label?.classification).toEqual([
+      [userAliceAtom],
+    ]);
+    expect(operatorLabels["/status"]?.label?.classification).toEqual([
+      [userAliceAtom],
+    ]);
+    expect(operatorLabels["/message"]?.label?.classification).toEqual([
+      [userAliceAtom],
+    ]);
+    expect(operatorLabels["/details"]?.label?.classification).toEqual(
+      expect.arrayContaining([
+        [userAliceAtom],
+        [secretQueryAtom],
+      ]),
+    );
+    expect(operatorLabels["/headers"]?.label?.classification).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],

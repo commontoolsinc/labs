@@ -267,6 +267,38 @@ describe("computeCfcActivityDigest", () => {
     expect(digestA1).not.toBe(digestB);
   });
 
+  it("includes read observation op and selector in the digest", async () => {
+    const baseRead = {
+      space: "did:key:test-space",
+      id: "of:test-doc",
+      type: "application/json",
+      path: ["value", "items"],
+      meta: {},
+    } as const;
+
+    const digestA = await computeCfcActivityDigest([{
+      read: {
+        ...baseRead,
+        cfc: { op: "enumerate", selector: "/items/*" },
+      },
+    }]);
+    const digestB = await computeCfcActivityDigest([{
+      read: {
+        ...baseRead,
+        cfc: { op: "value", selector: "/items/*" },
+      },
+    }]);
+    const digestC = await computeCfcActivityDigest([{
+      read: {
+        ...baseRead,
+        cfc: { op: "enumerate", selector: "/items/0" },
+      },
+    }]);
+
+    expect(digestA).not.toBe(digestB);
+    expect(digestA).not.toBe(digestC);
+  });
+
   it("includes prepare scope in the digest", () => {
     const activity: Activity[] = [{
       write: {

@@ -4,8 +4,11 @@ import {
   joinConfidentialityLabels,
   joinIntegrityLabels,
 } from "./label-algebra.ts";
-import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
-import { cfcEntityKey } from "./shared.ts";
+import {
+  cfcEntityKey,
+  type PersistedPathLabels,
+  resolveObservationLabel,
+} from "./shared.ts";
 
 export interface ConsumedReadWithEffectiveLabel {
   readonly read: CanonicalBoundaryRead;
@@ -17,35 +20,15 @@ export function consumedReadEntityKey(read: CanonicalBoundaryRead): string {
 }
 
 export function effectiveLabelForPath(
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: PersistedPathLabels,
   path: string,
 ): Labels | undefined {
-  let classification: Labels["classification"];
-  let integrity: Labels["integrity"];
-  for (const [labelPath, label] of Object.entries(labelsByPath)) {
-    if (!canonicalLabelPathMatchesReadPath(labelPath, path)) {
-      continue;
-    }
-    classification = joinConfidentialityLabels(
-      classification,
-      label.classification,
-    );
-    integrity = joinIntegrityLabels(integrity, label.integrity);
-  }
-
-  if (!classification && !integrity) {
-    return undefined;
-  }
-
-  return {
-    ...(classification ? { classification } : {}),
-    ...(integrity ? { integrity } : {}),
-  };
+  return resolveObservationLabel(labelsByPath, path, "value");
 }
 
 export function collectConsumedInputLabels(
   consumedReads: readonly CanonicalBoundaryRead[],
-  labelsByEntity: ReadonlyMap<string, Record<string, Labels>>,
+  labelsByEntity: ReadonlyMap<string, PersistedPathLabels>,
 ): readonly ConsumedReadWithEffectiveLabel[] {
   return consumedReads.map((read): ConsumedReadWithEffectiveLabel => {
     const labelsByPath = labelsByEntity.get(consumedReadEntityKey(read));
@@ -54,7 +37,35 @@ export function collectConsumedInputLabels(
     }
     return {
       read,
-      effectiveLabel: effectiveLabelForPath(labelsByPath, read.path),
+      effectiveLabel: resolveObservationLabel(
+        labelsByPath,
+        read.path,
+        read.op,
+      ),
     };
   });
+}
+
+export function joinConsumedObservationLabels(
+  consumedLabels: readonly ConsumedReadWithEffectiveLabel[],
+): Labels | undefined {
+  let classification: Labels["classification"];
+  let integrity: Labels["integrity"];
+  for (const consumed of consumedLabels) {
+    classification = joinConfidentialityLabels(
+      classification,
+      consumed.effectiveLabel?.classification,
+    );
+    integrity = joinIntegrityLabels(
+      integrity,
+      consumed.effectiveLabel?.integrity,
+    );
+  }
+  if (!classification && !integrity) {
+    return undefined;
+  }
+  return {
+    ...(classification ? { classification } : {}),
+    ...(integrity ? { integrity } : {}),
+  };
 }

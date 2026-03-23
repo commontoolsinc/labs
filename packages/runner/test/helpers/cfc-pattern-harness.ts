@@ -4,7 +4,6 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createBuilder } from "../../src/builder/factory.ts";
 import type { JSONSchema, Pattern } from "../../src/builder/types.ts";
 import type { Cell } from "../../src/cell.ts";
-import { effectiveLabelForPath } from "../../src/cfc/consumed-input-labels.ts";
 import { canonicalizeStoragePath } from "../../src/cfc/canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "../../src/cfc/internal-markers.ts";
 import { setPatternEnvironment } from "../../src/env.ts";
@@ -14,6 +13,8 @@ import { resolveLink } from "../../src/link-resolution.ts";
 import {
   cfcLabelsAddress,
   normalizePersistedLabels,
+  type PersistedPathLabels,
+  resolveObservationLabel,
 } from "../../src/cfc/shared.ts";
 import type { NormalizedFullLink } from "../../src/link-types.ts";
 import { Runtime, type RuntimeOptions } from "../../src/runtime.ts";
@@ -207,7 +208,7 @@ export class CfcPatternTestHarness {
             id: cell.getAsNormalizedFullLink().id,
             type: "application/json",
           }),
-          { "/": options.labels },
+          { "/": { label: options.labels } } as never,
         );
       }
     }, { prepare: options.prepare ?? "none" });
@@ -226,7 +227,7 @@ export class CfcPatternTestHarness {
 
   async readLabels(
     idOrLink: string | { id: string } | NormalizedFullLink,
-  ): Promise<Record<string, Labels>> {
+  ): Promise<PersistedPathLabels> {
     const id = typeof idOrLink === "string" ? idOrLink : idOrLink.id;
     const tx = this.runtime.edit();
     const raw = tx.readOrThrow(
@@ -263,9 +264,10 @@ export class CfcPatternTestHarness {
           },
         ),
       );
-      return effectiveLabelForPath(
+      return resolveObservationLabel(
         labelsByPath,
         canonicalizeStoragePath(resolved.path),
+        "value",
       );
     } finally {
       await tx.abort("effective-label-inspection-complete");

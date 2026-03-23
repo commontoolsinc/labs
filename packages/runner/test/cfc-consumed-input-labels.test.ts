@@ -6,15 +6,17 @@ import {
   collectConsumedInputLabels,
   consumedReadEntityKey,
 } from "../src/cfc/consumed-input-labels.ts";
+import type { PersistedPathLabels } from "../src/cfc/shared.ts";
 
 describe("collectConsumedInputLabels", () => {
-  it("joins labels from matching path prefixes", () => {
+  it("resolves the most specific matching observation label", () => {
     const reads: CanonicalBoundaryRead[] = [
       {
         space: "did:key:test",
         id: "of:doc",
         type: "application/json",
         path: "/profile/ssn/last4",
+        op: "value",
         meta: {},
         internalVerifierRead: false,
       },
@@ -23,6 +25,7 @@ describe("collectConsumedInputLabels", () => {
         id: "of:doc",
         type: "application/json",
         path: "/profile/name",
+        op: "value",
         meta: {},
         internalVerifierRead: false,
       },
@@ -31,29 +34,34 @@ describe("collectConsumedInputLabels", () => {
         id: "of:other",
         type: "application/json",
         path: "/",
+        op: "value",
         meta: {},
         internalVerifierRead: false,
       },
     ];
 
-    const labelsByEntity = new Map<string, Record<string, Labels>>([
+    const labelsByEntity = new Map<string, PersistedPathLabels>([
       [
         consumedReadEntityKey(reads[0]),
         {
           "/": {
-            classification: ["confidential"],
-            integrity: ["source-a"],
+            label: {
+              classification: ["confidential"],
+              integrity: ["source-a"],
+            },
           },
           "/profile/ssn": {
-            classification: ["secret"],
-            integrity: ["source-b"],
+            label: {
+              classification: ["secret"],
+              integrity: ["source-b"],
+            },
           },
         },
       ],
       [
         consumedReadEntityKey(reads[2]),
         {
-          "/": { classification: ["unclassified"] },
+          "/": { label: { classification: ["unclassified"] } },
         },
       ],
     ]);
@@ -61,15 +69,15 @@ describe("collectConsumedInputLabels", () => {
     const labeled = collectConsumedInputLabels(reads, labelsByEntity);
     expect(labeled).toHaveLength(3);
     expect(labeled[0].effectiveLabel).toEqual({
-      classification: [["confidential"], ["secret"]],
-      integrity: ["source-a", "source-b"],
+      classification: ["secret"],
+      integrity: ["source-b"],
     });
     expect(labeled[1].effectiveLabel).toEqual({
-      classification: [["confidential"]],
+      classification: ["confidential"],
       integrity: ["source-a"],
     });
     expect(labeled[2].effectiveLabel).toEqual({
-      classification: [["unclassified"]],
+      classification: ["unclassified"],
     });
   });
 
@@ -80,11 +88,12 @@ describe("collectConsumedInputLabels", () => {
         id: "of:doc",
         type: "application/json",
         path: "/a/b",
+        op: "value",
         meta: {},
         internalVerifierRead: false,
       },
     ];
-    const labelsByEntity = new Map<string, Record<string, Labels>>();
+    const labelsByEntity = new Map<string, PersistedPathLabels>();
 
     const labeled = collectConsumedInputLabels(reads, labelsByEntity);
     expect(labeled[0].effectiveLabel).toBeUndefined();
@@ -96,17 +105,20 @@ describe("collectConsumedInputLabels", () => {
       id: "of:doc",
       type: "application/json",
       path: "/items/0",
+      op: "value",
       meta: {},
       internalVerifierRead: false,
     };
 
-    const labelsByEntity = new Map<string, Record<string, Labels>>([
+    const labelsByEntity = new Map<string, PersistedPathLabels>([
       [
         consumedReadEntityKey(read),
         {
           "/items/*": {
-            classification: ["secret"],
-            integrity: ["source-a"],
+            label: {
+              classification: ["secret"],
+              integrity: ["source-a"],
+            },
           },
         },
       ],
@@ -114,7 +126,7 @@ describe("collectConsumedInputLabels", () => {
 
     const labeled = collectConsumedInputLabels([read], labelsByEntity);
     expect(labeled[0].effectiveLabel).toEqual({
-      classification: [["secret"]],
+      classification: ["secret"],
       integrity: ["source-a"],
     });
   });
@@ -125,26 +137,31 @@ describe("collectConsumedInputLabels", () => {
       id: "of:doc",
       type: "application/json",
       path: "/profile/ssn",
+      op: "value",
       meta: {},
       internalVerifierRead: false,
     };
 
-    const labelsByEntity = new Map<string, Record<string, Labels>>([
+    const labelsByEntity = new Map<string, PersistedPathLabels>([
       [
         consumedReadEntityKey(read),
         {
           "/": {
-            classification: [[
-              {
-                type: "https://commonfabric.org/cfc/atom/User",
-                subject: "did:key:alice",
-              },
-            ]] as unknown as Labels["classification"],
+            label: {
+              classification: [[
+                {
+                  type: "https://commonfabric.org/cfc/atom/User",
+                  subject: "did:key:alice",
+                },
+              ]] as unknown as Labels["classification"],
+            },
           },
           "/profile/ssn": {
-            classification: [[
-              "https://commonfabric.org/cfc/atom/EmailSecret",
-            ]] as unknown as Labels["classification"],
+            label: {
+              classification: [[
+                "https://commonfabric.org/cfc/atom/EmailSecret",
+              ]] as unknown as Labels["classification"],
+            },
           },
         },
       ],
@@ -153,10 +170,6 @@ describe("collectConsumedInputLabels", () => {
     const labeled = collectConsumedInputLabels([read], labelsByEntity);
     expect(labeled[0].effectiveLabel).toEqual({
       classification: [
-        [{
-          type: "https://commonfabric.org/cfc/atom/User",
-          subject: "did:key:alice",
-        }],
         ["https://commonfabric.org/cfc/atom/EmailSecret"],
       ],
     });

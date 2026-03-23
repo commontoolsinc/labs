@@ -1,4 +1,5 @@
 import type { CfcIntegrityLabel } from "../cfc/label-algebra.ts";
+import type { ReadObservationOp } from "../cfc/read-observation.ts";
 
 /**
  * Metadata marker used to ignore a read for scheduler dependency tracking.
@@ -29,6 +30,8 @@ export interface Metadata {
  */
 export interface ICfcReadAnnotations {
   readonly internalVerifierRead?: true;
+  readonly op?: ReadObservationOp;
+  readonly selector?: string;
   readonly maxConfidentiality?: readonly string[];
   readonly requiredIntegrity?: CfcIntegrityLabel;
   readonly flowPrecisionOutputPath?: string;

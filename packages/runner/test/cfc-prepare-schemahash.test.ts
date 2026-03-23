@@ -198,7 +198,7 @@ describe("CFC prepare schema hash", () => {
     expect(blobSchema).toEqual(ifcObjectSchema);
   });
 
-  it("persists cfc.labels including inherited path classifications", async () => {
+  it("persists explicit path label templates", async () => {
     const tx = runtime.edit();
     const cell = runtime.getCell<{ count: number }>(
       space,
@@ -216,15 +216,19 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/": {
-        classification: [["secret"]],
+        label: {
+          classification: [["secret"]],
+        },
       },
       "/count": {
-        classification: [["secret"]],
+        label: {
+          classification: [["secret"]],
+        },
       },
     });
   });
 
-  it("persists nested path labels with classification joins and integrity", async () => {
+  it("persists nested path labels without ancestor joins", async () => {
     const tx = runtime.edit();
     const cell = runtime.getCell<
       { public: number; secret: number; signed: string }
@@ -248,17 +252,25 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/": {
-        classification: [["confidential"]],
+        label: {
+          classification: [["confidential"]],
+        },
       },
       "/public": {
-        classification: [["confidential"]],
+        label: {
+          classification: [["confidential"]],
+        },
       },
       "/secret": {
-        classification: [["confidential"], ["secret"]],
+        label: {
+          classification: [["secret"]],
+        },
       },
       "/signed": {
-        classification: [["confidential"]],
-        integrity: ["trusted-source"],
+        label: {
+          classification: [["confidential"]],
+          integrity: ["trusted-source"],
+        },
       },
     });
   });
@@ -286,10 +298,14 @@ describe("CFC prepare schema hash", () => {
     const persistedLabels = await readCfcPath(link.id, ["labels"]);
     expect(persistedLabels).toEqual({
       "/variant": {
-        classification: [["secret"]],
+        label: {
+          classification: [["secret"]],
+        },
       },
       "/mirrored": {
-        classification: [["confidential"]],
+        label: {
+          classification: [["confidential"]],
+        },
       },
     });
   });
@@ -487,7 +503,7 @@ describe("CFC prepare schema hash", () => {
         id,
         type: "application/json",
         path: ["cfc", "labels"],
-      }, { "/": { classification: ["secret"] } });
+      }, { "/": { label: { classification: ["secret"] } } });
       const seeded = await seedTx.commit();
       expect(seeded.error).toBeUndefined();
 

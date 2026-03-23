@@ -180,7 +180,7 @@ describe("CFC worked example: fact-check assurance", () => {
     const publishedLabels = await harness.readLabels(
       publishedRun.outputLink.id,
     );
-    expect(publishedLabels["/text"]?.classification).toEqual([
+    expect(publishedLabels["/text"]?.label?.classification).toEqual([
       [publicAudienceAtom],
     ]);
   });

@@ -3,12 +3,14 @@ import type { JSONSchema } from "../builder/types.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  Labels,
 } from "../storage/interface.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "./internal-markers.ts";
-import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
-import { cfcLabelsAddress, normalizePersistedLabels } from "./shared.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedPathLabels,
+  resolveObservationLabel,
+} from "./shared.ts";
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -135,27 +137,22 @@ export function markCfcRelevantForSchema(
 }
 
 function hasEffectiveLabelConstraint(
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: ReturnType<typeof normalizePersistedPathLabels>,
   canonicalPath: string,
+  op: "shape" | "value" | "enumerate" | "count" | "followRef" = "value",
 ): boolean {
-  for (const [labelPath, label] of Object.entries(labelsByPath)) {
-    if (!canonicalLabelPathMatchesReadPath(labelPath, canonicalPath)) {
-      continue;
-    }
-    if ((label.classification?.length ?? 0) > 0) {
-      return true;
-    }
-    if ((label.integrity?.length ?? 0) > 0) {
-      return true;
-    }
-  }
-  return false;
+  const label = resolveObservationLabel(labelsByPath, canonicalPath, op);
+  return Boolean(
+    (label?.classification?.length ?? 0) > 0 ||
+      (label?.integrity?.length ?? 0) > 0,
+  );
 }
 
 export function markCfcRelevantForEffectiveLabels(
   tx: IExtendedStorageTransaction | undefined,
   readAddress: IMemorySpaceAddress,
   reason = "ifc-read-effective-label",
+  op: "shape" | "value" | "enumerate" | "count" | "followRef" = "value",
 ): void {
   if (!tx) {
     return;
@@ -164,13 +161,13 @@ export function markCfcRelevantForEffectiveLabels(
   const labelsValue = tx.readOrThrow(cfcLabelsAddress(readAddress), {
     cfc: internalVerifierReadAnnotations,
   });
-  const labelsByPath = normalizePersistedLabels(labelsValue);
+  const labelsByPath = normalizePersistedPathLabels(labelsValue);
   if (Object.keys(labelsByPath).length === 0) {
     return;
   }
 
   const canonicalPath = canonicalizeStoragePath(readAddress.path);
-  if (hasEffectiveLabelConstraint(labelsByPath, canonicalPath)) {
+  if (hasEffectiveLabelConstraint(labelsByPath, canonicalPath, op)) {
     tx.markCfcRelevant(reason);
   }
 }

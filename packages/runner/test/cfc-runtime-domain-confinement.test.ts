@@ -189,7 +189,7 @@ describe("CFC runtime domain confinement", () => {
     const labels = await readPersistedLabels(
       target.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual(
+    expect(labels["/"]?.label?.classification).toEqual(
       normalizeConfidentialityLabel([[userAliceAtom], [alicePhoneDeviceAtom]]),
     );
   });

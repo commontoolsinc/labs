@@ -25,6 +25,8 @@ interface NormalizedReadMetadata {
 
 interface NormalizedReadCfc {
   readonly internalVerifierRead: boolean;
+  readonly op: string;
+  readonly selector: string | null;
   readonly maxConfidentiality: readonly string[];
   readonly requiredIntegrity: readonly unknown[];
   readonly flowPrecisionOutputPath: string | null;
@@ -76,6 +78,8 @@ function normalizeCfcReadAnnotations(
     [];
   return {
     internalVerifierRead: cfc?.internalVerifierRead === true,
+    op: cfc?.op ?? "value",
+    selector: cfc?.selector ?? null,
     maxConfidentiality,
     requiredIntegrity,
     flowPrecisionOutputPath: cfc?.flowPrecisionOutputPath ?? null,

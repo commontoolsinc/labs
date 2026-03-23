@@ -96,6 +96,29 @@ describe("canonicalizeBoundaryActivity", () => {
     const canonical = canonicalizeBoundaryActivity(activity);
     expect(canonical.reads).toHaveLength(1);
     expect(canonical.reads[0].path).toBe("/secret");
+    expect(canonical.reads[0].op).toBe("value");
     expect(canonical.reads[0].internalVerifierRead).toBe(true);
+  });
+
+  it("preserves observation metadata", () => {
+    const activity: Activity[] = [
+      {
+        read: {
+          space: "did:key:test",
+          id: "of:doc",
+          type: "application/json",
+          path: ["value", "items"],
+          meta: {},
+          cfc: {
+            op: "enumerate",
+            selector: "/items/*",
+          },
+        },
+      },
+    ];
+
+    const canonical = canonicalizeBoundaryActivity(activity);
+    expect(canonical.reads[0].op).toBe("enumerate");
+    expect(canonical.reads[0].selector).toBe("/items/*");
   });
 });

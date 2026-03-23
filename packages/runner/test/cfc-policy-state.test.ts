@@ -160,7 +160,10 @@ describe("CFC policyState guards", () => {
     const labels = await readPersistedLabels(
       target.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userBobAtom, userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[
+      userBobAtom,
+      userAliceAtom,
+    ]]);
   });
 
   it("rejects a share-style declassification when the policyState grant is absent", async () => {

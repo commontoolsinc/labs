@@ -11,6 +11,7 @@ import type {
   INotFoundError,
 } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
 import type { Runtime } from "./runtime.ts";
 
 const logger = getLogger("link-resolution");
@@ -110,7 +111,10 @@ export function resolveLink(
     ) {
       // Read the full value at this path to ensure correct reactivity logging
       // (we need to be reactive to siblings that could invalidate the link)
-      const whole = tx.readValueOrThrow({ ...link, path: link.path });
+      const whole = tx.readValueOrThrow(
+        { ...link, path: link.path },
+        withInternalVerifierRead(),
+      );
       nextLink = parseLink(whole as CellLink, link);
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
@@ -143,7 +147,10 @@ export function resolveLink(
           });
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
-            const whole = tx.readValueOrThrow({ ...link, path: lastValid });
+            const whole = tx.readValueOrThrow(
+              { ...link, path: lastValid },
+              withInternalVerifierRead(),
+            );
             nextLink = parseLink(whole as CellLink, {
               ...link,
               path: lastValid,
@@ -220,7 +227,10 @@ function checkLegacyAt(
   });
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      tx.readValueOrThrow(
+        { ...link, path: atPath },
+        withInternalVerifierRead(),
+      ) as CellLink,
       { ...link, path: atPath },
     );
   }
@@ -231,7 +241,10 @@ function checkLegacyAt(
   });
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      tx.readValueOrThrow(
+        { ...link, path: atPath },
+        withInternalVerifierRead(),
+      ) as CellLink,
       { ...link, path: atPath },
     );
   }
@@ -257,7 +270,10 @@ export function readMaybeLink(
   onlyWriteRedirects = false,
 ): NormalizedFullLink | undefined {
   const readSubPath = (extraPath: string[]) =>
-    tx.readValueOrThrow({ ...link, path: [...link.path, ...extraPath] });
+    tx.readValueOrThrow(
+      { ...link, path: [...link.path, ...extraPath] },
+      withInternalVerifierRead(),
+    );
 
   const maybeSigilLink = readSubPath(["/", LINK_V1_TAG]);
   if (

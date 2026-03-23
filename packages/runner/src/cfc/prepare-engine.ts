@@ -38,9 +38,11 @@ import {
   cfcEntityKey,
   cfcLabelsAddress,
   normalizePersistedLabels,
+  type PathLabelTemplate,
+  type PersistedPathLabels,
+  resolveObservationLabel,
 } from "./shared.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
-import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 import {
   type CfcTrustContext,
@@ -377,7 +379,20 @@ function schemaBlobAddress(
   return cfcSchemaBlobAddress(entity.space, schemaHash);
 }
 
-function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
+function structuredSchema(schema: JSONSchema | undefined): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return false;
+  }
+  if (schema.type === "object" || schema.type === "array") {
+    return true;
+  }
+  if (Array.isArray(schema.type)) {
+    return schema.type.includes("object") || schema.type.includes("array");
+  }
+  return ContextualFlowControl.isTrueSchema(schema);
+}
+
+function computePreparedLabels(schema: JSONSchema): PersistedPathLabels {
   type LabelAccumulator = {
     classification?: CfcConfidentialityLabel;
     integrity?: CfcIntegrityLabel;
@@ -459,14 +474,8 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
       ? normalizeIntegrityLabel((ifc as { integrity?: unknown }).integrity)
       : undefined;
 
-    const classification = joinConfidentialityLabels(
-      inheritedClassification,
-      localClassification,
-    );
-    const integrity = joinIntegrityLabels(
-      inheritedIntegrity,
-      localIntegrity,
-    );
+    const classification = localClassification ?? inheritedClassification;
+    const integrity = localIntegrity ?? inheritedIntegrity;
 
     pushLabelsForPath(path, classification, integrity);
 
@@ -557,14 +566,16 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
 
   collect(schema, "/", undefined, undefined, schema, new Set());
 
-  const result: Record<string, Labels> = {};
+  const result: PersistedPathLabels = {};
   for (const [path, { classification, integrity }] of byPath) {
     if (!classification && !integrity) {
       continue;
     }
     result[path] = {
-      ...(classification ? { classification } : {}),
-      ...(integrity ? { integrity } : {}),
+      label: {
+        ...(classification ? { classification } : {}),
+        ...(integrity ? { integrity } : {}),
+      },
     };
   }
   return result;
@@ -573,7 +584,7 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
 type PreparedWriteSchema = {
   readonly entity: EntityAddress;
   readonly schema: JSONSchema;
-  readonly labels: Record<string, Labels>;
+  readonly labels: PersistedPathLabels;
   readonly actualSchemaHash: string;
   readonly shouldWriteSchemaHash: boolean;
 };
@@ -620,23 +631,85 @@ function mergeLabel(
   };
 }
 
+function mergeLabelTemplate(
+  base: PathLabelTemplate | undefined,
+  dynamic: PathLabelTemplate | undefined,
+): PathLabelTemplate | undefined {
+  if (!base && !dynamic) {
+    return undefined;
+  }
+  const label = mergeLabel(base?.label, dynamic?.label);
+  const shape = mergeLabel(base?.shape, dynamic?.shape);
+  const value = mergeLabel(base?.value, dynamic?.value);
+  const iterateOrder = mergeLabel(
+    base?.iterate?.order,
+    dynamic?.iterate?.order,
+  );
+  const iterateCount = mergeLabel(
+    base?.iterate?.count,
+    dynamic?.iterate?.count,
+  );
+  const children = mergeLabelTemplate(base?.children, dynamic?.children);
+
+  let views: Record<string, PathLabelTemplate> | undefined;
+  for (
+    const key of new Set([
+      ...Object.keys(base?.views ?? {}),
+      ...Object.keys(dynamic?.views ?? {}),
+    ])
+  ) {
+    const merged = mergeLabelTemplate(
+      base?.views?.[key],
+      dynamic?.views?.[key],
+    );
+    if (!merged) {
+      continue;
+    }
+    views ??= {};
+    views[key] = merged;
+  }
+
+  if (
+    !label && !shape && !value && !iterateOrder && !iterateCount && !children &&
+    !views
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(label ? { label } : {}),
+    ...(shape ? { shape } : {}),
+    ...(value ? { value } : {}),
+    ...((iterateOrder || iterateCount)
+      ? {
+        iterate: {
+          ...(iterateOrder ? { order: iterateOrder } : {}),
+          ...(iterateCount ? { count: iterateCount } : {}),
+        },
+      }
+      : {}),
+    ...(children ? { children } : {}),
+    ...(views ? { views } : {}),
+  };
+}
+
 function mergePreparedLabels(
-  baseLabels: Record<string, Labels>,
-  dynamicLabels: Record<string, Labels> | undefined,
-): Record<string, Labels> {
+  baseLabels: PersistedPathLabels,
+  dynamicLabels: PersistedPathLabels | undefined,
+): PersistedPathLabels {
   if (!dynamicLabels) {
     return baseLabels;
   }
 
-  const merged: Record<string, Labels> = { ...baseLabels };
+  const merged: PersistedPathLabels = { ...baseLabels };
   for (
     const path of new Set([
       ...Object.keys(baseLabels),
       ...Object.keys(dynamicLabels),
     ])
   ) {
-    const label = mergeLabel(baseLabels[path], dynamicLabels[path]);
-    if (label) {
+    const label = mergeLabelTemplate(baseLabels[path], dynamicLabels[path]);
+    if (label !== undefined) {
       merged[path] = label;
     }
   }
@@ -657,9 +730,10 @@ function collectDynamicWriteIntegrity(
 }
 
 function recordDynamicWriteIntegrity(
-  labelsByEntity: Map<string, Record<string, Labels>>,
+  labelsByEntity: Map<string, PersistedPathLabels>,
   entity: EntityAddress,
   writePath: string,
+  field: "label" | "value",
   integrity: CfcIntegrityLabel | undefined,
 ): void {
   if (!integrity || integrity.length === 0) {
@@ -668,19 +742,25 @@ function recordDynamicWriteIntegrity(
 
   const entityKey = cfcEntityKey(entity);
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
-  for (const path of canonicalAncestorPaths(writePath)) {
-    const merged = mergeLabel(labels[path], { integrity });
-    if (merged) {
-      labels[path] = merged;
-    }
+  const template = labels[writePath] ?? {};
+  const merged = mergeLabel(template[field], { integrity });
+  if (merged) {
+    labels[writePath] = {
+      ...template,
+      [field]: merged,
+      ...(field === "value"
+        ? { label: mergeLabel(template.label, { integrity }) ?? template.label }
+        : {}),
+    };
   }
   labelsByEntity.set(entityKey, labels);
 }
 
 function recordDynamicWriteClassification(
-  labelsByEntity: Map<string, Record<string, Labels>>,
+  labelsByEntity: Map<string, PersistedPathLabels>,
   entity: EntityAddress,
   writePath: string,
+  field: "label" | "value",
   classification: CfcConfidentialityLabel | undefined,
 ): void {
   if (!classification || classification.length === 0) {
@@ -689,17 +769,25 @@ function recordDynamicWriteClassification(
 
   const entityKey = cfcEntityKey(entity);
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
-  for (const path of canonicalAncestorPaths(writePath)) {
-    const merged = mergeLabel(labels[path], { classification });
-    if (merged) {
-      labels[path] = merged;
-    }
+  const template = labels[writePath] ?? {};
+  const merged = mergeLabel(template[field], { classification });
+  if (merged) {
+    labels[writePath] = {
+      ...template,
+      [field]: merged,
+      ...(field === "value"
+        ? {
+          label: mergeLabel(template.label, { classification }) ??
+            template.label,
+        }
+        : {}),
+    };
   }
   labelsByEntity.set(entityKey, labels);
 }
 
 function recordDynamicContainerClassification(
-  labelsByEntity: Map<string, Record<string, Labels>>,
+  labelsByEntity: Map<string, PersistedPathLabels>,
   entity: EntityAddress,
   writePath: string,
   classification: CfcConfidentialityLabel | undefined,
@@ -716,11 +804,22 @@ function recordDynamicContainerClassification(
   const entityKey = cfcEntityKey(entity);
   const labels = { ...(labelsByEntity.get(entityKey) ?? {}) };
   for (const path of ancestorPaths.slice(0, -1)) {
-    const merged = mergeLabel(labels[path], {
+    const template = labels[path] ?? {};
+    const merged = mergeLabel(template.iterate?.order, {
+      classification,
+    });
+    const mergedCount = mergeLabel(template.iterate?.count, {
       classification,
     });
     if (merged) {
-      labels[path] = merged;
+      labels[path] = {
+        ...template,
+        iterate: {
+          ...(template.iterate ?? {}),
+          order: merged,
+          ...(mergedCount ? { count: mergedCount } : {}),
+        },
+      };
     }
   }
   labelsByEntity.set(entityKey, labels);
@@ -733,7 +832,7 @@ async function resolvePreparedWriteSchemas(
 ): Promise<PreparedWriteSchema[]> {
   const prepared: PreparedWriteSchema[] = [];
   const schemaHashCache = new Map<JSONSchema, string>();
-  const labelsCache = new Map<JSONSchema, Record<string, Labels>>();
+  const labelsCache = new Map<JSONSchema, PersistedPathLabels>();
 
   for (const entity of writtenEntities) {
     const schema = getCfcWriteSchemaContext(tx, {
@@ -819,28 +918,11 @@ function isSameOrDescendantCanonicalPath(
 }
 
 function effectiveLabelForPath(
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: PersistedPathLabels,
   path: string,
+  op: "value" | "shape" | "enumerate" | "count" | "followRef" = "value",
 ): Labels | undefined {
-  let classification: CfcConfidentialityLabel | undefined;
-  let integrity: CfcIntegrityLabel | undefined;
-  for (const [labelPath, label] of Object.entries(labelsByPath)) {
-    if (!canonicalLabelPathMatchesReadPath(labelPath, path)) {
-      continue;
-    }
-    classification = joinConfidentialityLabels(
-      classification,
-      label.classification,
-    );
-    integrity = joinIntegrityLabels(integrity, label.integrity);
-  }
-  if (!classification && !integrity) {
-    return undefined;
-  }
-  return {
-    ...(classification ? { classification } : {}),
-    ...(integrity ? { integrity } : {}),
-  };
+  return resolveObservationLabel(labelsByPath, path, op);
 }
 
 function classificationSatisfiesMaxConfidentiality(
@@ -859,7 +941,7 @@ function classificationSatisfiesMaxConfidentiality(
 }
 
 function findRequiredIntegrityCoherenceViolation(
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: PersistedPathLabels,
   readPath: string,
   requiredIntegrity: CfcIntegrityLabel,
   options: PrepareBoundaryCommitOptions,
@@ -873,7 +955,9 @@ function findRequiredIntegrityCoherenceViolation(
     if (!isSameOrDescendantCanonicalPath(readPath, path)) {
       continue;
     }
-    const actualIntegrity = normalizeIntegrityLabel(label.integrity);
+    const actualIntegrity = normalizeIntegrityLabel(
+      label.value?.integrity ?? label.label?.integrity,
+    );
     if (
       !integritySatisfiesRequiredIntegrity(
         actualIntegrity,
@@ -899,7 +983,7 @@ function verifyInputRequirementsForAttempt(
     partitionConsumedBoundaryReads(
       canonical,
     );
-  const labelsByEntity = new Map<string, Record<string, Labels>>();
+  const labelsByEntity = new Map<string, PersistedPathLabels>();
 
   for (const read of consumedReads) {
     const key = consumedReadEntityKey(read);
@@ -2557,13 +2641,13 @@ function verifyOutputTransitionsForAttempt(
   canonical: CanonicalBoundaryActivity,
   options: PrepareBoundaryCommitOptions = {},
   rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
-): ReadonlyMap<string, Record<string, Labels>> {
+): ReadonlyMap<string, PersistedPathLabels> {
   if (canonical.attemptedWrites.length === 0) {
     return new Map();
   }
   const cfc = new ContextualFlowControl();
-  const dynamicLabelsByEntity = new Map<string, Record<string, Labels>>();
-  const preparedLabelsByEntity = new Map<string, Record<string, Labels>>();
+  const dynamicLabelsByEntity = new Map<string, PersistedPathLabels>();
+  const preparedLabelsByEntity = new Map<string, PersistedPathLabels>();
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -2590,6 +2674,9 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const writeObservation = structuredSchema(schemaAtWritePath)
+      ? "label"
+      : "value";
     const policySchemaAtWritePath =
       nearestPolicyRewriteSchemaForPath(cfc, rootSchema, write.path) ??
         schemaAtWritePath;
@@ -2629,12 +2716,14 @@ function verifyOutputTransitionsForAttempt(
       effectiveLabelForPath(
         preparedLabels,
         write.path,
+        writeObservation === "label" ? "shape" : "value",
       )?.classification,
     );
     const actualIntegrity = normalizeIntegrityLabel(
       effectiveLabelForPath(
         preparedLabels,
         write.path,
+        writeObservation === "label" ? "shape" : "value",
       )?.integrity,
     );
     if (
@@ -2672,6 +2761,7 @@ function verifyOutputTransitionsForAttempt(
           dynamicLabelsByEntity,
           entity,
           write.path,
+          writeObservation,
           decision.synthesizedClassification,
         );
       }
@@ -2685,6 +2775,7 @@ function verifyOutputTransitionsForAttempt(
       dynamicLabelsByEntity,
       entity,
       write.path,
+      writeObservation,
       policyIntegrity,
     );
     if (flowPrecisionSelection.mode === "elementLocalExpansion") {
@@ -2714,6 +2805,7 @@ function verifyOutputTransitionsForAttempt(
       effectiveLabelForPath(
         dynamicLabelsByEntity.get(cfcEntityKey(entity)) ?? {},
         write.path,
+        writeObservation === "label" ? "shape" : "value",
       )?.classification,
     );
     if (
@@ -3031,7 +3123,7 @@ export async function prepareBoundaryCommit(
         mergePreparedLabels(
           prepared.labels,
           dynamicOutputLabels.get(cfcEntityKey(prepared.entity)),
-        ),
+        ) as unknown as never,
       );
     }
   }

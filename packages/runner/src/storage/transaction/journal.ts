@@ -26,6 +26,7 @@ import {
   markReadAsPotentialWriteMarker,
 } from "../read-metadata.ts";
 import { normalizeIntegrityLabel } from "../../cfc/label-algebra.ts";
+import { isReadObservationOp } from "../../cfc/read-observation.ts";
 import * as Chronicle from "./chronicle.ts";
 
 export interface UnknownState {
@@ -223,7 +224,7 @@ function validateCfcAtomList(
 }
 
 function validateCanonicalPathString(
-  key: "flowPrecisionOutputPath" | "flowPrecisionSourcePath",
+  key: "flowPrecisionOutputPath" | "flowPrecisionSourcePath" | "selector",
   raw: unknown,
 ): ValidationResult<string | undefined> {
   if (raw === undefined) {
@@ -252,6 +253,8 @@ function validateCfcAnnotations(
   const stringKeys = Object.keys(cfc as Record<string, unknown>);
   const allowedKeys = new Set([
     "internalVerifierRead",
+    "op",
+    "selector",
     "maxConfidentiality",
     "requiredIntegrity",
     "flowPrecisionOutputPath",
@@ -281,6 +284,16 @@ function validateCfcAnnotations(
       error: InvalidReadOptionsError(
         "cfc",
         "internalVerifierRead must be true when present",
+      ),
+    };
+  }
+
+  const op = (cfc as { op?: unknown }).op;
+  if (op !== undefined && !isReadObservationOp(op)) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        "op must be one of: shape, value, enumerate, count, followRef",
       ),
     };
   }
@@ -318,9 +331,19 @@ function validateCfcAnnotations(
   }
   const flowPrecisionOutputPath = flowPrecisionOutputPathResult.ok;
   const flowPrecisionSourcePath = flowPrecisionSourcePathResult.ok;
+  const selectorResult = validateCanonicalPathString(
+    "selector",
+    (cfc as { selector?: unknown }).selector,
+  );
+  if ("error" in selectorResult) {
+    return { error: selectorResult.error };
+  }
+  const selector = selectorResult.ok;
   return {
     ok: {
       ...(internalVerifierRead === true ? { internalVerifierRead: true } : {}),
+      ...(op ? { op } : {}),
+      ...(selector ? { selector } : {}),
       ...(maxConfidentiality ? { maxConfidentiality } : {}),
       ...(requiredIntegrity ? { requiredIntegrity } : {}),
       ...(flowPrecisionOutputPath ? { flowPrecisionOutputPath } : {}),

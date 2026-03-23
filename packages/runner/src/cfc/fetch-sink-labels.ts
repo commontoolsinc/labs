@@ -21,7 +21,13 @@ import {
   normalizeConfidentialityLabel,
   normalizeIntegrityLabel,
 } from "./label-algebra.ts";
-import { cfcLabelsAddress, normalizePersistedLabels } from "./shared.ts";
+import {
+  cfcLabelsAddress,
+  joinObservedLabels,
+  labelsPresent,
+  normalizePersistedPathLabels,
+  type PersistedPathLabels,
+} from "./shared.ts";
 
 const AUTHORIZED_REQUEST_ATOM =
   "https://commonfabric.org/cfc/atom/AuthorizedRequest";
@@ -48,7 +54,7 @@ export interface DeriveFetchSinkResultLabelsOptions {
 interface FetchSinkRequestContext {
   readonly requestLink: CfcEntityAddress;
   readonly requestSchema: JSONSchema | undefined;
-  readonly labelsByPath: Record<string, Labels>;
+  readonly labelsByPath: PersistedPathLabels;
   readonly aggregate: Labels | undefined;
   readonly rules: readonly FetchSinkRule[];
 }
@@ -259,32 +265,57 @@ async function loadPersistedRequestSchema(
   return schemaValue as JSONSchema;
 }
 
-function labelsPresent(labelsByPath: Record<string, Labels>): boolean {
-  return Object.keys(labelsByPath).length > 0;
+function aggregateRequestLabels(
+  labelsByPath: PersistedPathLabels,
+): Labels | undefined {
+  const observed: Labels[] = [];
+  for (const entry of Object.values(labelsByPath)) {
+    if (entry.label) {
+      observed.push(entry.label);
+    }
+    if (entry.shape) {
+      observed.push(entry.shape);
+    }
+    if (entry.value) {
+      observed.push(entry.value);
+    }
+    if (entry.iterate?.order) {
+      observed.push(entry.iterate.order);
+    }
+    if (entry.iterate?.count) {
+      observed.push(entry.iterate.count);
+    }
+  }
+  return joinObservedLabels(observed);
 }
 
-function aggregateRequestLabels(
-  labelsByPath: Record<string, Labels>,
+function rootWriteLabel(
+  labelsByPath: PersistedPathLabels,
+  path: string,
 ): Labels | undefined {
-  let classification: Labels["classification"];
-  let integrity: Labels["integrity"];
+  const existing = labelsByPath[path];
+  return existing?.value ?? existing?.label;
+}
 
-  for (const label of Object.values(labelsByPath)) {
-    classification = joinConfidentialityLabels(
-      classification,
-      label.classification,
-    );
-    integrity = joinIntegrityLabels(integrity, label.integrity);
-  }
+function toStorableLabelMap(
+  labelsByPath: PersistedPathLabels,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(labelsByPath).map(([path, template]) => [path, template]),
+  );
+}
 
-  if (!classification && !integrity) {
-    return undefined;
-  }
-
-  return {
-    ...(classification ? { classification } : {}),
-    ...(integrity ? { integrity } : {}),
+function withPathValueLabel(
+  labelsByPath: PersistedPathLabels,
+  path: string,
+  label: Labels,
+): PersistedPathLabels {
+  const next: PersistedPathLabels = { ...labelsByPath };
+  next[path] = {
+    ...(next[path] ?? {}),
+    label,
   };
+  return next;
 }
 
 function containsAllAtoms(
@@ -313,7 +344,7 @@ function clauseMatchesRule(
 }
 
 function ruleMatchesAtAllowedPath(
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: PersistedPathLabels,
   rule: FetchSinkRule,
   extraIntegrity: readonly CfcAtom[] | undefined = undefined,
 ): boolean {
@@ -407,7 +438,7 @@ async function loadFetchSinkRequestContext(
       requestCell.asSchemaFromLinks().getAsNormalizedFullLink().schema ??
       requestLink.schema;
   const readTx = runtime.edit();
-  const labelsByPath = normalizePersistedLabels(
+  const labelsByPath = normalizePersistedPathLabels(
     readTx.readOrThrow(cfcLabelsAddress(requestLink)),
   );
   await readTx.abort();
@@ -427,7 +458,7 @@ async function loadFetchSinkRequestContext(
 function rewriteClassificationForPath(
   path: string,
   classification: Labels["classification"],
-  labelsByPath: Record<string, Labels>,
+  labelsByPath: PersistedPathLabels,
   rules: readonly FetchSinkRule[],
   extraIntegrity: readonly CfcAtom[] | undefined,
 ): Labels["classification"] {
@@ -564,15 +595,16 @@ export function writeFetchResultLabels(
   }
 
   const resultLink = resultCell.getAsNormalizedFullLink();
-  const existing = normalizePersistedLabels(
+  const existing = normalizePersistedPathLabels(
     tx.readOrThrow(cfcLabelsAddress(resultLink)),
   );
+  const existingRoot = rootWriteLabel(existing, path);
   const mergedClassification = joinConfidentialityLabels(
-    existing[path]?.classification,
+    existingRoot?.classification,
     labels.classification,
   );
   const mergedIntegrity = joinIntegrityLabels(
-    existing[path]?.integrity,
+    existingRoot?.integrity,
     labels.integrity,
   );
   const mergedRoot: Labels = {
@@ -588,9 +620,12 @@ export function writeFetchResultLabels(
       : {}),
   };
 
-  const next = { ...existing };
   if (mergedRoot.classification || mergedRoot.integrity) {
-    next[path] = mergedRoot;
+    tx.writeOrThrow(
+      cfcLabelsAddress(resultLink),
+      toStorableLabelMap(
+        withPathValueLabel(existing, path, mergedRoot),
+      ) as unknown as never,
+    );
   }
-  tx.writeOrThrow(cfcLabelsAddress(resultLink), next);
 }

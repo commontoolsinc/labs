@@ -138,10 +138,11 @@ describe("CFC policy concept guard trust closure", () => {
       };
     };
 
-    expect(labels["/"]?.classification).toEqual([["confidential"]]);
-    expect(labels["/"]?.integrity).toEqual(["runtime-attested-source"]);
-    expect(labels["/"]?.integrity?.includes(conceptRequiredIntegrity)).toBe(
-      false,
-    );
+    expect(labels["/"]?.label?.classification).toEqual([["confidential"]]);
+    expect(labels["/"]?.label?.integrity).toEqual(["runtime-attested-source"]);
+    expect(labels["/"]?.label?.integrity?.includes(conceptRequiredIntegrity))
+      .toBe(
+        false,
+      );
   });
 });

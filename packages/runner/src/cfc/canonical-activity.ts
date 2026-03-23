@@ -4,6 +4,7 @@ import type {
   Metadata,
 } from "../storage/interface.ts";
 import { hasInternalVerifierReadMarker } from "./internal-markers.ts";
+import type { ReadObservationOp } from "./read-observation.ts";
 import { activityWriteChangedFlag } from "./shared.ts";
 
 export interface CanonicalBoundaryRead {
@@ -11,6 +12,8 @@ export interface CanonicalBoundaryRead {
   readonly id: string;
   readonly type: string;
   readonly path: string;
+  readonly op: ReadObservationOp;
+  readonly selector?: string;
   readonly meta: Metadata;
   readonly cfc?: ICfcReadAnnotations;
   readonly internalVerifierRead: boolean;
@@ -74,6 +77,8 @@ export function canonicalizeBoundaryActivity(
         id: read.id,
         type: read.type,
         path: canonicalizeStoragePath(read.path),
+        op: read.cfc?.op ?? "value",
+        ...(read.cfc?.selector ? { selector: read.cfc.selector } : {}),
         meta: read.meta ?? {},
         ...(read.cfc ? { cfc: read.cfc } : {}),
         internalVerifierRead: hasInternalVerifierReadMarker(read.cfc),

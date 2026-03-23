@@ -96,8 +96,8 @@ describe("CFC policy acting-user variables", () => {
     );
   }
 
-  function clauseKeys(labels: Record<string, Labels>): string[] {
-    const clause = labels["/"]?.classification?.[0];
+  function clauseKeys(labels: Record<string, { label?: Labels }>): string[] {
+    const clause = labels["/"]?.label?.classification?.[0];
     if (!Array.isArray(clause)) {
       return [];
     }

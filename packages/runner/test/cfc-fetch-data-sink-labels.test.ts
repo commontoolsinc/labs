@@ -8,6 +8,7 @@ import { setPatternEnvironment } from "../src/env.ts";
 import {
   cfcLabelsAddress,
   normalizePersistedLabels,
+  type PersistedPathLabels,
 } from "../src/cfc/shared.ts";
 import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -137,7 +138,7 @@ describe("fetchData sink label rewriting", () => {
 
   async function readLabels(
     cell: { getAsNormalizedFullLink: () => NormalizedFullLink },
-  ) {
+  ): Promise<PersistedPathLabels> {
     const readTx = runtime.edit();
     const link = cell.getAsNormalizedFullLink();
     const raw = readTx.readOrThrow(
@@ -198,13 +199,17 @@ describe("fetchData sink label rewriting", () => {
     expect(raw?.pending).toBe(false);
 
     const requestLabels = await readLabels(requestCell);
-    expect(requestLabels["/url"]?.classification).toEqual([[userAliceAtom]]);
-    expect(requestLabels["/options/headers/Authorization"]?.classification)
+    expect(requestLabels["/url"]?.label?.classification).toEqual([[
+      userAliceAtom,
+    ]]);
+    expect(
+      requestLabels["/options/headers/Authorization"]?.label?.classification,
+    )
       .toEqual([[googleAuthAliceAtom]]);
 
     const resultLabels = await readLabels(result.key("result").resolveAsCell());
-    expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(resultLabels["/"]?.integrity).toEqual(
+    expect(resultLabels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+    expect(resultLabels["/"]?.label?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: "https://commonfabric.org/cfc/atom/AuthorizedRequest",
@@ -230,7 +235,7 @@ describe("fetchData sink label rewriting", () => {
 
     expect(raw?.pending).toBe(false);
     const resultLabels = await readLabels(result.key("result").resolveAsCell());
-    expect(resultLabels["/"]?.classification).toEqual([
+    expect(resultLabels["/"]?.label?.classification).toEqual([
       [googleAuthAliceAtom],
       [userAliceAtom],
     ]);

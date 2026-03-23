@@ -274,7 +274,7 @@ describe("CFC direct CAS write substrate", () => {
     const preparedLabels = normalizePersistedLabels(
       tx.readOrThrow(cfcLabelsAddress(link)),
     );
-    expect(preparedLabels["/secret"]).toEqual(aliceLabel);
+    expect(preparedLabels["/secret"]?.label).toEqual(aliceLabel);
 
     const { blobHash } = writeCfcCasBlobFromPreparedPath(tx, {
       space,

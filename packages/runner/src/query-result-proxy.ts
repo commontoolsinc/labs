@@ -3,8 +3,12 @@ import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
+import {
+  recordCfcReadObservation,
+  withInternalVerifierRead,
+} from "./cfc/read-observation-logging.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
@@ -75,12 +79,33 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   toLocaleString: ArrayMethodType.ReadOnly,
 };
 
+type InitialObservationMode = "auto" | "skip";
+
+function observeLink(
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  op: "shape" | "value" | "enumerate" | "count" | "followRef",
+): void {
+  if (tx?.status().status !== "ready") {
+    return;
+  }
+  recordCfcReadObservation(tx, link, { op });
+}
+
+function readValueInternally(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): any {
+  return tx.readValueOrThrow(link, withInternalVerifierRead());
+}
+
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
   writable: boolean = false,
+  initialObservation: InitialObservationMode = "auto",
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -92,18 +117,33 @@ export function createQueryResultProxy<T>(
   // Resolve path and follow links to actual value.
   const txStatus = tx?.status();
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
+  if (readMaybeLink(readTx, link) !== undefined) {
+    observeLink(tx, link, "followRef");
+  }
   link = resolveLink(runtime, readTx, link);
-  const value = readTx.readValueOrThrow(link) as any;
+  const value = readValueInternally(readTx, link) as any;
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
   // pattern's Output type wasn't explicitly specified, causing the capture
   // schema to lose the asStream information.
   if (isStreamValue(value)) {
+    if (initialObservation !== "skip") {
+      observeLink(tx, link, "shape");
+    }
     return createCell(runtime, link, tx, false, "stream") as T;
   }
 
-  if (!isRecord(value)) return value;
+  if (!isRecord(value)) {
+    if (initialObservation !== "skip") {
+      observeLink(tx, link, "value");
+    }
+    return value;
+  }
+
+  if (initialObservation !== "skip") {
+    observeLink(tx, link, "shape");
+  }
 
   // When richStorableValues is OFF, frozen objects are terminal values that
   // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
@@ -171,22 +211,29 @@ export function createQueryResultProxy<T>(
                 const readTx = (tx?.status().status === "ready")
                   ? tx
                   : runtime.edit();
-                const length = readTx.readValueOrThrow({
-                  ...link,
-                  path: [...link.path, "length"],
-                }) as number;
+                observeLink(tx, link, "count");
+                const current = readValueInternally(readTx, link) as any[];
+                const length = current.length;
                 if (index < length) {
+                  const childLink = {
+                    ...link,
+                    path: [...link.path, String(index)],
+                  };
+                  const childValue = readValueInternally(readTx, childLink);
                   const result = {
-                    value: createQueryResultProxy(
-                      runtime,
-                      tx,
-                      {
-                        ...link,
-                        path: [...link.path, String(index)],
-                      },
-                      depth + 1,
-                      writable,
-                    ),
+                    value: !isRecord(childValue)
+                      ? (observeLink(tx, childLink, "shape"),
+                        observeLink(tx, childLink, "value"),
+                        childValue)
+                      : (observeLink(tx, childLink, "shape"),
+                        createQueryResultProxy(
+                          runtime,
+                          tx,
+                          childLink,
+                          depth + 1,
+                          writable,
+                          "skip",
+                        )),
                     done: false,
                   };
                   index++;
@@ -199,7 +246,7 @@ export function createQueryResultProxy<T>(
         }
 
         const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-        const current = readTx.readValueOrThrow(link) as typeof value;
+        const current = readValueInternally(readTx, link) as typeof value;
 
         const returnValue = Reflect.get(current, prop, current);
         if (typeof returnValue === "function") return returnValue.bind(current);
@@ -222,10 +269,10 @@ export function createQueryResultProxy<T>(
             const readTx = (tx?.status().status === "ready")
               ? tx
               : runtime.edit();
-            const length = readTx.readValueOrThrow({
-              ...link,
-              path: [...link.path, "length"],
-            }) as number;
+            observeLink(tx, link, "shape");
+            observeLink(tx, link, "enumerate");
+            observeLink(tx, link, "count");
+            const length = (readValueInternally(readTx, link) as any[]).length;
 
             if (typeof length !== "number") {
               throw new Error(
@@ -272,7 +319,7 @@ export function createQueryResultProxy<T>(
               const readTx = (tx?.status().status === "ready")
                 ? tx
                 : runtime.edit();
-              const currentValue = readTx.readValueOrThrow(link) as any[];
+              const currentValue = readValueInternally(readTx, link) as any[];
               copy = [...currentValue];
             } else {
               copy = value.map((_, index) =>
@@ -359,12 +406,30 @@ export function createQueryResultProxy<T>(
           };
       }
 
+      if (Array.isArray(value) && prop === "length") {
+        observeLink(tx, link, "count");
+        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        return (readValueInternally(readTx, link) as any[]).length;
+      }
+
+      const childLink = {
+        ...link,
+        path: [...link.path, prop],
+      };
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const childValue = readValueInternally(readTx, childLink);
+      observeLink(tx, childLink, "shape");
+      if (!isRecord(childValue)) {
+        observeLink(tx, childLink, "value");
+        return childValue;
+      }
       return createQueryResultProxy(
         runtime,
         tx,
-        { ...link, path: [...link.path, prop] },
+        childLink,
         depth + 1,
         writable,
+        "skip",
       );
     },
     set: (_, prop, value) => {
@@ -396,9 +461,18 @@ export function createQueryResultProxy<T>(
     },
     ownKeys: () => {
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link);
+      observeLink(tx, link, "shape");
+      observeLink(tx, link, "enumerate");
+      const current = readValueInternally(readTx, link);
       if (isRecord(current)) {
-        return Reflect.ownKeys(current);
+        const keys = Reflect.ownKeys(current);
+        for (const key of keys) {
+          if (typeof key !== "string" || key === "length") {
+            continue;
+          }
+          observeLink(tx, { ...link, path: [...link.path, key] }, "shape");
+        }
+        return keys;
       }
       return Reflect.ownKeys(value);
     },
@@ -414,8 +488,13 @@ export function createQueryResultProxy<T>(
         return Object.getOwnPropertyDescriptor(value, prop);
       }
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link) as typeof value;
+      const current = readValueInternally(readTx, link) as typeof value;
       if (isRecord(current) && prop in current) {
+        observeLink(
+          tx,
+          { ...link, path: [...link.path, prop as string] },
+          "shape",
+        );
         return {
           configurable: true,
           enumerable: true,
@@ -426,6 +505,7 @@ export function createQueryResultProxy<T>(
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
             writable,
+            "skip",
           ),
         };
       }
@@ -435,8 +515,9 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return prop in value;
       }
+      observeLink(tx, { ...link, path: [...link.path, String(prop)] }, "shape");
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link);
+      const current = readValueInternally(readTx, link);
       if (isRecord(current)) {
         return prop in current;
       }

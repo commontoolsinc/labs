@@ -164,7 +164,7 @@ describe("CFC worked example: calendar participant release", () => {
     const labels = await readPersistedLabels(
       aliceView.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("fails closed for a non-participant acting user", async () => {

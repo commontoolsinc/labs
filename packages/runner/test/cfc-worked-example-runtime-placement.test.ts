@@ -306,7 +306,7 @@ describe("CFC worked example: runtime placement variants", () => {
     const labels = await readPersistedLabels(
       participantView.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("releases filtered audio only when trigger, filter, and runtime evidence are present", async () => {
@@ -365,7 +365,7 @@ describe("CFC worked example: runtime placement variants", () => {
     const labels = await readPersistedLabels(
       filteredAudio.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("allows exact-device release only on the enrolled device identity", async () => {
@@ -432,7 +432,7 @@ describe("CFC worked example: runtime placement variants", () => {
     const labels = await readPersistedLabels(
       releasedAvailability.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("allows owner-tier release on same-owner managed devices but rejects others", async () => {
@@ -503,6 +503,6 @@ describe("CFC worked example: runtime placement variants", () => {
     const labels = await readPersistedLabels(
       releasedAvailability.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.classification).toEqual([[userAliceAtom]]);
+    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 });

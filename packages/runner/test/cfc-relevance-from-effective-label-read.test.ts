@@ -49,7 +49,9 @@ describe("CFC relevance from effective-label read", () => {
       path: ["cfc", "labels"],
     }, {
       "/": {
-        classification: ["secret"],
+        label: {
+          classification: ["secret"],
+        },
       },
     });
     const seeded = await tx.commit();
@@ -79,7 +81,9 @@ describe("CFC relevance from effective-label read", () => {
       path: ["cfc", "labels"],
     }, {
       "/items/*": {
-        classification: ["secret"],
+        label: {
+          classification: ["secret"],
+        },
       },
     });
     const seeded = await tx.commit();

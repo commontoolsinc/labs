@@ -215,8 +215,8 @@ describe("CFC worked example: agentic email send", () => {
     const resultLabels = await harness.readLabels(
       result.key("result").resolveAsCell().getAsNormalizedFullLink(),
     );
-    expect(resultLabels["/"]?.classification).toEqual([[userAliceAtom]]);
-    expect(resultLabels["/"]?.integrity).toEqual(
+    expect(resultLabels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+    expect(resultLabels["/"]?.label?.integrity).toEqual(
       expect.arrayContaining([
         expect.objectContaining(disclaimerAttachedAtom),
       ]),
