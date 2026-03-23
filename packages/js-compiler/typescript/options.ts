@@ -1,9 +1,17 @@
 import type { CompilerOptions } from "typescript";
-import { JsxEmit, ModuleKind, ScriptTarget } from "typescript";
+import {
+  JsxEmit,
+  ModuleKind,
+  ScriptTarget,
+  versionMajorMinor,
+} from "typescript";
 
 export const TARGET_TYPE_LIB = "es2023";
 export const MODULE_KIND = ModuleKind.AMD;
 export const TARGET = ScriptTarget.ES2023;
+const IGNORE_DEPRECATIONS = Number(versionMajorMinor.split(".")[0] ?? "0") >= 6
+  ? "6.0"
+  : "5.0";
 
 export const getCompilerOptions = (): CompilerOptions => {
   return {
@@ -23,6 +31,9 @@ export const getCompilerOptions = (): CompilerOptions => {
     // a compatible module type (AMD and SystemJS). Using
     // AMD for ease of writing an inline bundler.
     module: MODULE_KIND,
+    // TypeScript warns on the legacy AMD + outFile bundling path. We still
+    // rely on it today, so silence the deprecation for the active major.
+    ignoreDeprecations: IGNORE_DEPRECATIONS,
 
     /**
      * Emit

@@ -1,11 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import ts from "typescript";
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
+import { getCompilerOptions } from "../typescript/mod.ts";
 import { StaticCacheFS } from "@commontools/static";
 
 type TestDef =
@@ -48,6 +50,13 @@ types["commontools.d.ts"] = await staticCache.getText(
 );
 
 describe("TypeScriptCompiler", () => {
+  it("sets ignoreDeprecations for the active TS major", () => {
+    const expected = Number(ts.versionMajorMinor.split(".")[0] ?? "0") >= 6
+      ? "6.0"
+      : "5.0";
+    expect(getCompilerOptions().ignoreDeprecations).toBe(expected);
+  });
+
   it("compiles a filesystem graph", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
