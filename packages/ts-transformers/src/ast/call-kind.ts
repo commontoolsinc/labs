@@ -98,8 +98,9 @@ export type CallKind =
   | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
-const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
-  "builder",
+const REACTIVE_ORIGIN_CALL_KINDS = new Set<
+  Exclude<CallKind["kind"], "builder">
+>([
   "cell-factory",
   "cell-for",
   "derive",
@@ -136,7 +137,13 @@ export function isReactiveOriginCall(
   checker: ts.TypeChecker,
 ): boolean {
   const callKind = detectCallKind(call, checker);
-  return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
+  if (!callKind) {
+    return false;
+  }
+  if (callKind.kind === "builder") {
+    return callKind.builderName !== "pattern";
+  }
+  return REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
 }
 
 function tryGetTypeAtLocation(

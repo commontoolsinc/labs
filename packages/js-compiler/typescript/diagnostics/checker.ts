@@ -21,6 +21,24 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "DEFAULT_MARKER",
 ];
 
+const KNOWN_INTENTIONAL_OPTION_DEPRECATIONS = [
+  "Option 'outFile' is deprecated",
+  "Option 'module=AMD' is deprecated",
+];
+
+function getDiagnosticMessageText(diagnostic: Diagnostic): string {
+  return typeof diagnostic.messageText === "string"
+    ? diagnostic.messageText
+    : diagnostic.messageText.messageText;
+}
+
+function shouldIgnoreDiagnostic(diagnostic: Diagnostic): boolean {
+  const message = getDiagnosticMessageText(diagnostic);
+  return KNOWN_INTENTIONAL_OPTION_DEPRECATIONS.some((snippet) =>
+    message.includes(snippet)
+  );
+}
+
 export class Checker {
   private program: Program;
   private messageTransformer?: DiagnosticMessageTransformer;
@@ -34,6 +52,9 @@ export class Checker {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getSemanticDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
+        if (shouldIgnoreDiagnostic(diagnostic)) {
+          continue;
+        }
         output.push({ diagnostic, source: sourceFile.text });
       }
       return output;
@@ -47,10 +68,11 @@ export class Checker {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
+        if (shouldIgnoreDiagnostic(diagnostic)) {
+          continue;
+        }
         // Skip "private name" errors for known exported symbols
-        const message = typeof diagnostic.messageText === "string"
-          ? diagnostic.messageText
-          : diagnostic.messageText.messageText;
+        const message = getDiagnosticMessageText(diagnostic);
         const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
           message.includes(`private name '${sym}'`) ||
           message.includes(`name '${sym}' from external module`)
@@ -67,11 +89,14 @@ export class Checker {
   }
 
   check(diagnostics: readonly Diagnostic[] | undefined) {
-    if (!diagnostics || diagnostics.length === 0) {
+    const filteredDiagnostics = diagnostics?.filter((diagnostic) =>
+      !shouldIgnoreDiagnostic(diagnostic)
+    );
+    if (!filteredDiagnostics || filteredDiagnostics.length === 0) {
       return;
     }
     throw new CompilerError(
-      diagnostics.map((diagnostic) => ({ diagnostic })),
+      filteredDiagnostics.map((diagnostic) => ({ diagnostic })),
       this.messageTransformer,
     );
   }

@@ -174,6 +174,35 @@ export default pattern<Record<string, never>>(() => {
 });
 `;
 
+const ACTION_PATTERN_OUTPUT_SOURCE = `/// <cts-enable />
+import { action, handler, pattern, UI, Writable } from "commontools";
+
+const increment = handler<void, { value: Writable<number> }>((_, { value }) => {
+  value.set(value.get() + 1);
+});
+
+const Counter = pattern<{ value?: number }, { increment: { send(): void }; [UI]: any }>(
+  ({ value = 0 }) => {
+    const count = Writable.of(value);
+    return {
+      increment: increment({ value: count }),
+      [UI]: <div>{count}</div>,
+    };
+  },
+);
+
+export default pattern(() => {
+  const counter = Counter({});
+  const click = action(() => {
+    counter.increment.send();
+  });
+
+  return {
+    [UI]: <button onClick={click}>Increment</button>,
+  };
+});
+`;
+
 const GUARDED_INLINE_HANDLER_SOURCE = `/// <cts-enable />
 import { pattern, UI, Writable } from "commontools";
 
@@ -310,6 +339,18 @@ describe("OpaqueRef map callbacks", () => {
     assertStringIncludes(
       output,
       'editPreferences.set(p.key("spotPreferences").get().join(", "))',
+    );
+  });
+
+  it("keeps pattern output captures as plain values in action handlers", async () => {
+    const output = await transformSource(ACTION_PATTERN_OUTPUT_SOURCE, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    assertStringIncludes(output, "counter.increment.send()");
+    assert(
+      !output.includes('counter.key("increment")'),
+      "expected captured pattern outputs to stay plain instead of being rewritten as opaque roots",
     );
   });
 

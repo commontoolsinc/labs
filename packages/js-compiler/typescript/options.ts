@@ -29,7 +29,10 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     removeComments: true,
-    noEmitOnError: true,
+    // Semantic and emit diagnostics are checked explicitly in the compiler.
+    // Keep emit enabled so intentional option deprecations do not suppress
+    // output in environments that surface AMD/outFile warnings as errors.
+    noEmitOnError: false,
     // Note: declaration emit is disabled because TypeScript's declaration emit
     // has trouble with unique symbols (CELL_BRAND, CELL_INNER_TYPE) in exported
     // types, causing emit to skip entirely. Declaration checking is done
