@@ -18,7 +18,7 @@ import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
   MapSet,
-  MapSetOfPathSelectors,
+  MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -450,7 +450,7 @@ for (const modernHash of [false, true]) {
           },
         } as const satisfies JSONSchema;
 
-        const schemaTracker = new MapSetOfPathSelectors<string>();
+        const schemaTracker = new MapSetStringToPathSelectors(true);
         const traverser = new SchemaObjectTraverser(
           emulatedStorageTx,
           { path: ["value"], schema },

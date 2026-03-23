@@ -13,7 +13,7 @@ import {
   IMemorySpaceValueAttestation,
   loadSource,
   ManagedStorageTransaction,
-  MapSetOfPathSelectors,
+  MapSetStringToPathSelectors,
   type ObjectStorageManager,
   type PointerCycleTracker,
   type SchemaMemo,
@@ -182,7 +182,7 @@ export interface SelectSchemaStats {
 
 export interface SelectSchemaResult {
   facts: FactSelection;
-  schemaTracker: MapSetOfPathSelectors<string>;
+  schemaTracker: MapSetStringToPathSelectors;
   stats?: SelectSchemaStats;
 }
 
@@ -198,7 +198,7 @@ export interface SelectSchemaOptions {
 export const selectSchema = <Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
-  existingSchemaTracker?: MapSetOfPathSelectors<string>,
+  existingSchemaTracker?: MapSetStringToPathSelectors,
   options?: SelectSchemaOptions,
 ): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
@@ -217,7 +217,7 @@ export const selectSchema = <Space extends MemorySpace>(
   const cfc = new ContextualFlowControl();
   // Use existing tracker if provided, otherwise create new one
   const schemaTracker = existingSchemaTracker ??
-    new MapSetOfPathSelectors<string>();
+    new MapSetStringToPathSelectors(true);
   // Shared memo cache across all loadFactsForDoc calls in this query.
   // Since the traversal only discovers linked docs (populating schemaTracker),
   // memoizing across docs is safe — same doc+path+schema always produces
@@ -390,10 +390,10 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   address: { space: MemorySpace; id: Entity; type: MIME },
   schemaSelector: SchemaPathSelector,
   classification: string[],
-  schemaTracker: MapSetOfPathSelectors<string>,
+  schemaTracker: MapSetStringToPathSelectors,
   sharedManager?: ServerObjectManager,
   sharedMemo?: SchemaMemo,
-): MapSetOfPathSelectors<string> {
+): MapSetStringToPathSelectors {
   const manager = sharedManager ??
     new ServerObjectManager(
       session,
@@ -447,7 +447,7 @@ function loadFactsForDoc(
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
   space: MemorySpace,
-  schemaTracker: MapSetOfPathSelectors<string>,
+  schemaTracker: MapSetStringToPathSelectors,
   sharedMemo?: SchemaMemo,
 ) {
   // A query without a schema context is the same as a query with the minimal schema

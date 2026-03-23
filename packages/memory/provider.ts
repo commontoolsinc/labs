@@ -55,7 +55,7 @@ import { ACL_TYPE, isACL } from "./acl.ts";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 import {
   createSchemaMemo,
-  MapSetOfPathSelectors,
+  MapSetStringToPathSelectors,
 } from "@commontools/runner/traverse";
 import type { SchemaPathSelector } from "./consumer.ts";
 
@@ -337,8 +337,8 @@ class MemoryProviderSession<
   // from re-running a query or part of a query when the underlying docs
   // haven't changed. In this cache role, it lets us know that we already
   // have the current information.
-  sharedSchemaTracker: MapSetOfPathSelectors<string> =
-    new MapSetOfPathSelectors();
+  sharedSchemaTracker: MapSetStringToPathSelectors =
+    new MapSetStringToPathSelectors(true);
   // Shared SchemaMemo across all subscription queries on this connection.
   // Traversal results from one subscription are reused by subsequent
   // subscriptions that traverse the same doc+path+schema combos.

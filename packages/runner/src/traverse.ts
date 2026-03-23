@@ -294,13 +294,17 @@ export class MapSet<K, V> {
 }
 
 /**
- * Convenience subclass of `MapSet` specialized for `SchemaPathSelector`
- * values. Uses `hashSchemaPathSelector` from the schema-hash dispatch
- * layer as the hash function.
+ * Convenience subclass of `MapSet` specialized for `string` keys and
+ * `SchemaPathSelector` values — the common case throughout traverse/query
+ * code. When `hashValues` is `true`, uses `hashSchemaPathSelector` from
+ * the schema-hash dispatch layer as the hash function.
  */
-export class MapSetOfPathSelectors<K> extends MapSet<K, SchemaPathSelector> {
-  constructor() {
-    super(hashSchemaPathSelector);
+export class MapSetStringToPathSelectors extends MapSet<
+  string,
+  SchemaPathSelector
+> {
+  constructor(hashValues: boolean = false) {
+    super(hashValues ? hashSchemaPathSelector : undefined);
   }
 }
 
@@ -621,8 +625,8 @@ export abstract class BaseObjectTraverser {
       Immutable<FabricDatum>,
       JSONSchema | undefined
     >(),
-    protected schemaTracker: MapSetOfPathSelectors<string> =
-      new MapSetOfPathSelectors(),
+    protected schemaTracker: MapSetStringToPathSelectors =
+      new MapSetStringToPathSelectors(true),
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
     public objectCreator: IObjectCreator<FabricDatum> =
       new StandardObjectCreator(),
@@ -1752,7 +1756,8 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       Immutable<FabricDatum>,
       JSONSchema | undefined
     >(),
-    schemaTracker: MapSetOfPathSelectors<string> = new MapSetOfPathSelectors(),
+    schemaTracker: MapSetStringToPathSelectors =
+      new MapSetStringToPathSelectors(true),
     cfc: ContextualFlowControl = new ContextualFlowControl(),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,

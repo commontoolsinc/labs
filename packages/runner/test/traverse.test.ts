@@ -19,7 +19,7 @@ import {
   getAtPath,
   ManagedStorageTransaction,
   MapSet,
-  MapSetOfPathSelectors,
+  MapSetStringToPathSelectors,
   mergeAnyOfBranchSchemas,
   PointerCycleTracker,
   SchemaObjectTraverser,
@@ -821,7 +821,7 @@ for (const modernHash of [false, true]) {
           JSONSchema | undefined
         >();
         const cfc = new ContextualFlowControl();
-        const schemaTracker = new MapSetOfPathSelectors<string>();
+        const schemaTracker = new MapSetStringToPathSelectors(true);
 
         const doc: IMemorySpaceValueAttestation = {
           address: {
