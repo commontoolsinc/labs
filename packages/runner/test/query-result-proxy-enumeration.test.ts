@@ -12,6 +12,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { canonicalizeBoundaryActivity } from "../src/cfc/canonical-activity.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -58,6 +59,58 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect(keys).toContain("b");
     expect(keys).toContain("c");
     expect(keys.length).toBe(3);
+  });
+
+  it("static descendant reads log shape/value without parent enumeration", () => {
+    const cell = runtime.getCell<
+      { error: { code: number; details: { reason: string } } }
+    >(
+      space,
+      "test-static-descendant-observations",
+      undefined,
+      tx,
+    );
+    cell.set({
+      error: {
+        code: 403,
+        details: { reason: "scope-insufficient" },
+      },
+    });
+
+    const proxy = createQueryResultProxy<
+      { error: { code: number; details: { reason: string } } }
+    >(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.error.code).toBe(403);
+
+    const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error" && read.op === "enumerate"
+      ),
+    ).toBe(false);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error" && read.op === "shape"
+      ),
+    ).toBe(true);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error/code" && read.op === "shape"
+      ),
+    ).toBe(true);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error/code" && read.op === "value"
+      ),
+    ).toBe(true);
   });
 
   it("spread copies all properties with correct values", () => {
@@ -116,6 +169,59 @@ describe("CT-1240: query result proxy enumeration", () => {
     const keySet = entries.map(([k]) => k);
     expect(keySet).toContain("x");
     expect(keySet).toContain("y");
+  });
+
+  it("Object.keys() logs parent enumeration plus child shape observations", () => {
+    const cell = runtime.getCell<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      space,
+      "test-enumeration-observations",
+      undefined,
+      tx,
+    );
+    cell.set({
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        details: { reason: "scope-insufficient" },
+      },
+    });
+
+    const proxy = createQueryResultProxy<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(Object.keys(proxy.error)).toEqual(["code", "status", "details"]);
+
+    const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error" && read.op === "enumerate"
+      ),
+    ).toBe(true);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error/code" && read.op === "shape"
+      ),
+    ).toBe(true);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error/status" && read.op === "shape"
+      ),
+    ).toBe(true);
+    expect(
+      canonical.reads.some((read) =>
+        read.path === "/error/details" && read.op === "shape"
+      ),
+    ).toBe(true);
   });
 
   it("nested objects: spreading preserves sub-proxies", () => {

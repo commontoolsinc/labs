@@ -66,6 +66,17 @@ const requiredIntegrityObjectSchema = {
   },
 } as const satisfies JSONSchema;
 
+const publicCodeProjectionSchema = {
+  type: "object",
+  properties: {
+    code: { type: "number" },
+  },
+  required: ["code"],
+  ifc: {
+    maxConfidentiality: ["public"],
+  },
+} as const satisfies JSONSchema;
+
 describe("CFC prepare input requirements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -393,6 +404,45 @@ describe("CFC prepare input requirements", () => {
     const value = sourceCell.withTx(tx).asSchema(requiredIntegrityObjectSchema)
       .get() ?? { a: 0, b: 0 };
     targetCell.withTx(tx).set(Number(value.a) + Number(value.b));
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  });
+
+  it("allows maxConfidentiality on a selective object projection when only the selected descendant is readable", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-maxconf-selective-projection-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithLabels(sourceId, {
+      code: 7,
+      details: "secret sibling",
+    }, {
+      "/": {
+        classification: ["secret"],
+      },
+      "/code": {
+        classification: ["public"],
+      },
+      "/details": {
+        classification: ["secret"],
+      },
+    });
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<{ code: number; details: string }>(
+      space,
+      "cfc-input-maxconf-selective-projection-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-maxconf-selective-projection-target",
+    );
+
+    const value = sourceCell.withTx(tx).asSchema(publicCodeProjectionSchema)
+      .get();
+    targetCell.withTx(tx).set(Number(value.code ?? 0) + 1);
 
     await prepareCfcCommitIfNeeded(tx);
     const { error } = await tx.commit();

@@ -174,4 +174,95 @@ describe("collectConsumedInputLabels", () => {
       ],
     });
   });
+
+  it("resolves recursive children defaults and observation-specific overrides", () => {
+    const reads: CanonicalBoundaryRead[] = [
+      {
+        space: "did:key:test",
+        id: "of:doc",
+        type: "application/json",
+        path: "/foo",
+        op: "shape",
+        meta: {},
+        internalVerifierRead: false,
+      },
+      {
+        space: "did:key:test",
+        id: "of:doc",
+        type: "application/json",
+        path: "/foo",
+        op: "value",
+        meta: {},
+        internalVerifierRead: false,
+      },
+      {
+        space: "did:key:test",
+        id: "of:doc",
+        type: "application/json",
+        path: "/foo/bar",
+        op: "value",
+        meta: {},
+        internalVerifierRead: false,
+      },
+      {
+        space: "did:key:test",
+        id: "of:doc",
+        type: "application/json",
+        path: "/foo/bar",
+        op: "enumerate",
+        meta: {},
+        internalVerifierRead: false,
+      },
+    ];
+
+    const labelsByEntity = new Map<string, PersistedPathLabels>([
+      [
+        consumedReadEntityKey(reads[0]),
+        {
+          "/": {
+            label: {
+              classification: ["root-default"],
+            },
+            children: {
+              label: {
+                classification: ["child-default"],
+              },
+              shape: {
+                classification: ["child-shape"],
+              },
+              children: {
+                label: {
+                  classification: ["grandchild-default"],
+                },
+                iterate: {
+                  order: {
+                    classification: ["grandchild-enumerate"],
+                  },
+                },
+              },
+            },
+          },
+          "/foo": {
+            value: {
+              classification: ["foo-value"],
+            },
+          },
+        },
+      ],
+    ]);
+
+    const labeled = collectConsumedInputLabels(reads, labelsByEntity);
+    expect(labeled[0].effectiveLabel).toEqual({
+      classification: ["child-shape"],
+    });
+    expect(labeled[1].effectiveLabel).toEqual({
+      classification: ["foo-value"],
+    });
+    expect(labeled[2].effectiveLabel).toEqual({
+      classification: ["grandchild-default"],
+    });
+    expect(labeled[3].effectiveLabel).toEqual({
+      classification: ["grandchild-enumerate"],
+    });
+  });
 });

@@ -948,6 +948,15 @@ function isSameOrDescendantCanonicalPath(
   return candidatePath === basePath || candidatePath.startsWith(`${basePath}/`);
 }
 
+function isInternalMetadataCanonicalPath(path: string): boolean {
+  return path === "/$alias" ||
+    path.startsWith("/$alias/") ||
+    path === "/~1" ||
+    path.startsWith("/~1/") ||
+    path === "/cell/~1" ||
+    path.startsWith("/cell/~1/");
+}
+
 function effectiveLabelForPath(
   labelsByPath: PersistedPathLabels,
   path: string,
@@ -974,6 +983,41 @@ function aggregateDescendantValueLabels(
     }
   }
   return joinObservedLabels(descendantLabels);
+}
+
+function effectiveInputRequirementLabel(
+  consumed: ConsumedReadWithEffectiveLabel,
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+): Labels | undefined {
+  const maxConfidentiality = readMaxConfidentialityFromMeta(consumed.read.cfc);
+  const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.cfc);
+  if (
+    (!maxConfidentiality || maxConfidentiality.length === 0) &&
+    (!requiredIntegrity || requiredIntegrity.length === 0)
+  ) {
+    return consumed.effectiveLabel;
+  }
+
+  const descendantObservationLabels = consumedReadLabels
+    .filter((candidate) =>
+      candidate !== consumed &&
+      consumedReadEntityKey(candidate.read) ===
+        consumedReadEntityKey(consumed.read) &&
+      candidate.read.path !== consumed.read.path &&
+      isSameOrDescendantCanonicalPath(consumed.read.path, candidate.read.path) &&
+      !isInternalMetadataCanonicalPath(candidate.read.path)
+    )
+    .map((candidate) => candidate.effectiveLabel);
+
+  if (descendantObservationLabels.length === 0) {
+    return consumed.effectiveLabel;
+  }
+
+  // Schema-driven structured reads materialize a projection via descendant
+  // observations. The root loader read carries requirement metadata, but its
+  // whole-document path label should not override the labels of the actual
+  // consumed descendants.
+  return joinObservedLabels(descendantObservationLabels);
 }
 
 function classificationSatisfiesMaxConfidentiality(
@@ -1059,12 +1103,16 @@ function verifyInputRequirementsForAttempt(
     labelsByEntity,
   );
   for (const consumed of consumedReadLabels) {
+    const effectiveInputLabel = effectiveInputRequirementLabel(
+      consumed,
+      consumedReadLabels,
+    );
     const maxConfidentiality = readMaxConfidentialityFromMeta(
       consumed.read.cfc,
     );
     if (maxConfidentiality && maxConfidentiality.length > 0) {
       const actualClassification = normalizeConfidentialityLabel(
-        consumed.effectiveLabel?.classification,
+        effectiveInputLabel?.classification,
       );
       if (
         !classificationSatisfiesMaxConfidentiality(
@@ -1100,7 +1148,7 @@ function verifyInputRequirementsForAttempt(
         );
       }
       const actualIntegrity = normalizeIntegrityLabel(
-        consumed.effectiveLabel?.integrity,
+        effectiveInputLabel?.integrity,
       );
       if (
         !integritySatisfiesRequiredIntegrity(
