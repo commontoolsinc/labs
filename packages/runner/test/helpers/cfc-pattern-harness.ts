@@ -310,9 +310,18 @@ export class CfcPatternTestHarness {
   ): Promise<T> {
     const attempts = options.attempts ?? 8;
     const delayMs = options.delayMs ?? 50;
+    let sawPendingTrue = false;
     for (let attempt = 0; attempt < attempts; attempt++) {
       const value = await resultCell.pull();
-      if (this.#isSettled(value)) {
+      if (
+        value &&
+        typeof value === "object" &&
+        "pending" in value &&
+        (value as { pending?: unknown }).pending === true
+      ) {
+        sawPendingTrue = true;
+      }
+      if (this.#isSettled(value, sawPendingTrue)) {
         return value;
       }
       await delay(delayMs);
@@ -336,11 +345,21 @@ export class CfcPatternTestHarness {
     }
   }
 
-  #isSettled(value: unknown): boolean {
+  #isSettled(value: unknown, sawPendingTrue: boolean): boolean {
     if (!value || typeof value !== "object" || !("pending" in value)) {
       return true;
     }
-    return (value as { pending?: unknown }).pending === false;
+    const pending = (value as { pending?: unknown }).pending;
+    if (pending !== false) {
+      return false;
+    }
+    const settledObject = value as {
+      pending?: unknown;
+      result?: unknown;
+      error?: unknown;
+    };
+    return sawPendingTrue || settledObject.result !== undefined ||
+      settledObject.error !== undefined;
   }
 
   stubFetch(fetchImpl: typeof globalThis.fetch): void {

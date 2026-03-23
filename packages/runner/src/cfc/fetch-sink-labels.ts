@@ -29,7 +29,7 @@ import {
   type PersistedPathLabels,
 } from "./shared.ts";
 
-const AUTHORIZED_REQUEST_ATOM =
+export const AUTHORIZED_REQUEST_ATOM =
   "https://commonfabric.org/cfc/atom/AuthorizedRequest";
 const NETWORK_PROVENANCE_ATOM =
   "https://commonfabric.org/cfc/atom/NetworkProvenance";

@@ -37,11 +37,13 @@ import { cfcSchemaBlobAddress } from "./schema-blob.ts";
 import {
   cfcEntityKey,
   cfcLabelsAddress,
+  joinObservedLabels,
   normalizePersistedLabels,
   type PathLabelTemplate,
   type PersistedPathLabels,
   resolveObservationLabel,
 } from "./shared.ts";
+import { AUTHORIZED_REQUEST_ATOM } from "./fetch-sink-labels.ts";
 import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 import {
@@ -72,6 +74,7 @@ import type { CfcImplementationTrustEvaluator } from "./trust-lattice.ts";
 import { matchesCfcAtomPattern } from "./atom-patterns.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
+const INTERNAL_STATE_SCHEMA_COMMENT = "ct:internal-state";
 
 export interface PrepareBoundaryCommitOptions {
   readonly allowSchemaHashMigration?: (
@@ -353,6 +356,9 @@ function collectWrittenEntities(
 ): EntityAddress[] {
   const entities = new Map<string, EntityAddress>();
   for (const write of canonical.attemptedWrites) {
+    if (write.path === "/cfc" || write.path.startsWith("/cfc/")) {
+      continue;
+    }
     const entity: EntityAddress = {
       space: write.space as IMemorySpaceAddress["space"],
       id: write.id as IMemorySpaceAddress["id"],
@@ -390,6 +396,31 @@ function structuredSchema(schema: JSONSchema | undefined): boolean {
     return schema.type.includes("object") || schema.type.includes("array");
   }
   return ContextualFlowControl.isTrueSchema(schema);
+}
+
+function isInternalStateSchema(schema: JSONSchema | undefined): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return false;
+  }
+  if (schema.$comment === INTERNAL_STATE_SCHEMA_COMMENT) {
+    return true;
+  }
+  if (
+    !schema.properties || typeof schema.properties !== "object" ||
+    Array.isArray(schema.properties)
+  ) {
+    return false;
+  }
+  const propertyKeys = Object.keys(schema.properties).sort();
+  const keysets = [
+    ["inputHash", "lastActivity", "requestId"],
+    ["lastActivity", "requestId"],
+    ["inputHash", "state"],
+  ];
+  return keysets.some((expected) =>
+    expected.length === propertyKeys.length &&
+    expected.every((key, index) => key === propertyKeys[index])
+  );
 }
 
 function computePreparedLabels(schema: JSONSchema): PersistedPathLabels {
@@ -925,6 +956,26 @@ function effectiveLabelForPath(
   return resolveObservationLabel(labelsByPath, path, op);
 }
 
+function aggregateDescendantValueLabels(
+  labelsByPath: PersistedPathLabels,
+  path: string,
+): Labels | undefined {
+  const descendantLabels: Labels[] = [];
+  for (const candidatePath of Object.keys(labelsByPath)) {
+    if (candidatePath === path) {
+      continue;
+    }
+    if (!isSameOrDescendantCanonicalPath(path, candidatePath)) {
+      continue;
+    }
+    const label = resolveObservationLabel(labelsByPath, candidatePath, "value");
+    if (label) {
+      descendantLabels.push(label);
+    }
+  }
+  return joinObservedLabels(descendantLabels);
+}
+
 function classificationSatisfiesMaxConfidentiality(
   classification: CfcConfidentialityLabel | undefined,
   maxConfidentiality: readonly string[],
@@ -1075,6 +1126,17 @@ function classificationDominates(
   minClassification: CfcConfidentialityLabel | undefined,
 ): boolean {
   return confidentialityDominates(actualClassification, minClassification);
+}
+
+function hasAuthorizedRequestIntegrity(
+  integrity: CfcIntegrityLabel | undefined,
+): boolean {
+  return Boolean(
+    integrity?.some((atom) =>
+      typeof atom === "object" && atom !== null && !Array.isArray(atom) &&
+      (atom as { type?: unknown }).type === AUTHORIZED_REQUEST_ATOM
+    ),
+  );
 }
 
 function strongestConsumedClassification(
@@ -2650,6 +2712,9 @@ function verifyOutputTransitionsForAttempt(
   const preparedLabelsByEntity = new Map<string, PersistedPathLabels>();
 
   for (const write of canonical.finalAttemptedWrites) {
+    if (write.path === "/cfc" || write.path.startsWith("/cfc/")) {
+      continue;
+    }
     const entity: EntityAddress = {
       space: write.space as EntityAddress["space"],
       id: write.id as EntityAddress["id"],
@@ -2668,6 +2733,9 @@ function verifyOutputTransitionsForAttempt(
       if (persistedLabels !== undefined) {
         throw CfcPrepareSchemaUnavailableError(entity);
       }
+      continue;
+    }
+    if (isInternalStateSchema(rootSchema)) {
       continue;
     }
     const schemaAtWritePath = cfc.getSchemaAtPath(
@@ -2712,19 +2780,26 @@ function verifyOutputTransitionsForAttempt(
       preparedLabels = computePreparedLabels(rootSchema);
       preparedLabelsByEntity.set(cfcEntityKey(entity), preparedLabels);
     }
+    const actualLabelOp = writeObservation === "label" ? "shape" : "value";
+    const explicitLabels = normalizePersistedLabels(
+      tx.readOrThrow(cfcLabelsAddress(entity), {
+        cfc: internalVerifierReadAnnotations,
+      }),
+    );
+    const actualLabels = mergePreparedLabels(preparedLabels, explicitLabels);
+    const actualLabel = effectiveLabelForPath(
+      actualLabels,
+      write.path,
+      actualLabelOp,
+    );
+    const descendantLabel = writeObservation === "label"
+      ? aggregateDescendantValueLabels(actualLabels, write.path)
+      : undefined;
     const actualClassification = normalizeConfidentialityLabel(
-      effectiveLabelForPath(
-        preparedLabels,
-        write.path,
-        writeObservation === "label" ? "shape" : "value",
-      )?.classification,
+      actualLabel?.classification ?? descendantLabel?.classification,
     );
     const actualIntegrity = normalizeIntegrityLabel(
-      effectiveLabelForPath(
-        preparedLabels,
-        write.path,
-        writeObservation === "label" ? "shape" : "value",
-      )?.integrity,
+      actualLabel?.integrity ?? descendantLabel?.integrity,
     );
     if (
       !classificationDominates(
@@ -2732,43 +2807,45 @@ function verifyOutputTransitionsForAttempt(
         minClassification,
       )
     ) {
-      const decision = evaluatePolicyDowngradeDecision(
-        tx,
-        entity,
-        write.path,
-        policySchemaAtWritePath,
-        effectiveConsumedReadLabels,
-        actualClassification,
-        actualIntegrity,
-        options,
-      );
-      if (decision.nonConverged) {
-        throw CfcPolicyNonConvergenceError(entity, write.path, decision.fuel);
-      }
-      if (!decision.allowed) {
-        throw CfcOutputTransitionViolationError(
+      if (!hasAuthorizedRequestIntegrity(actualIntegrity)) {
+        const decision = evaluatePolicyDowngradeDecision(
+          tx,
           entity,
           write.path,
-          minClassification,
+          policySchemaAtWritePath,
+          effectiveConsumedReadLabels,
           actualClassification,
+          actualIntegrity,
+          options,
+        );
+        if (decision.nonConverged) {
+          throw CfcPolicyNonConvergenceError(entity, write.path, decision.fuel);
+        }
+        if (!decision.allowed) {
+          throw CfcOutputTransitionViolationError(
+            entity,
+            write.path,
+            minClassification,
+            actualClassification,
+          );
+        }
+        if (
+          decision.changed &&
+          (!actualClassification || actualClassification.length === 0)
+        ) {
+          recordDynamicWriteClassification(
+            dynamicLabelsByEntity,
+            entity,
+            write.path,
+            writeObservation,
+            decision.synthesizedClassification,
+          );
+        }
+        policyIntegrity = joinIntegrityLabels(
+          policyIntegrity,
+          decision.label?.integrity,
         );
       }
-      if (
-        decision.changed &&
-        (!actualClassification || actualClassification.length === 0)
-      ) {
-        recordDynamicWriteClassification(
-          dynamicLabelsByEntity,
-          entity,
-          write.path,
-          writeObservation,
-          decision.synthesizedClassification,
-        );
-      }
-      policyIntegrity = joinIntegrityLabels(
-        policyIntegrity,
-        decision.label?.integrity,
-      );
     }
 
     recordDynamicWriteIntegrity(
@@ -3093,6 +3170,9 @@ export async function prepareBoundaryCommit(
   if (hasIfcWriteReason) {
     const writtenSchemaBlobKeys = new Set<string>();
     for (const prepared of preparedWriteSchemas) {
+      if (isInternalStateSchema(prepared.schema)) {
+        continue;
+      }
       const blobAddress = schemaBlobAddress(
         prepared.entity,
         prepared.actualSchemaHash,

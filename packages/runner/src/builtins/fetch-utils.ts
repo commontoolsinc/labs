@@ -9,6 +9,7 @@ export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 
 export const internalSchema = {
   type: "object",
+  $comment: "ct:internal-state",
   properties: {
     requestId: { type: "string", default: "" },
     lastActivity: { type: "number", default: 0 },

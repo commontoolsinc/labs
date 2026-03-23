@@ -577,6 +577,7 @@ const resultSchema = {
 
 const internalSchema = {
   type: "object",
+  $comment: "ct:internal-state",
   properties: {
     requestId: { type: "string" },
     lastActivity: { type: "number" },

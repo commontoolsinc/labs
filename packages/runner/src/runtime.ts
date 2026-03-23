@@ -68,6 +68,8 @@ import {
   resolveCfcTrustContextSnapshot,
 } from "./cfc/integrity-trust.ts";
 import type { CfcIntegrityLabel } from "./cfc/label-algebra.ts";
+import { prepareCfcCommitIfNeeded } from "./cfc/prepare-shim.ts";
+import { isCfcCommitError } from "./cfc/rejection-log.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -507,24 +509,41 @@ export class Runtime {
         },
       });
     }
-    return tx.commit().then(({ error }) => {
-      if (error) {
-        if (maxRetries > 0) {
-          return this.editWithRetry<T>(fn, maxRetries - 1);
-        } else {
+    return prepareCfcCommitIfNeeded(tx, {
+      enforceBoundary: this.experimental.cfcBoundaryEnforcement,
+    })
+      .then(() => tx.commit())
+      .then(({ error }) => {
+        if (error) {
+          if (!isCfcCommitError(error) && maxRetries > 0) {
+            return this.editWithRetry<T>(fn, maxRetries - 1);
+          }
           return { error };
         }
-      }
-      return { ok: result };
-    }).catch((error) => {
-      return {
-        error: {
-          name: "StorageTransactionAborted" as const,
-          message: `editWithRetry commit rejected: ${error}`,
-          reason: error,
-        },
-      };
-    });
+        return { ok: result };
+      })
+      .catch((error) => {
+        if (tx.status().status === "ready") {
+          tx.abort(error);
+        }
+
+        if (isCfcCommitError(error)) {
+          return { error };
+        }
+
+        const status = tx.status();
+        if (status.status === "error" && isCfcCommitError(status.error)) {
+          return { error: status.error };
+        }
+
+        return {
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: `editWithRetry commit rejected: ${error}`,
+            reason: error,
+          },
+        };
+      });
   }
 
   /**

@@ -32,6 +32,7 @@ interface FetchCacheEntry {
 // incomplete schema-based transformation.
 const cacheSchema = {
   type: "object",
+  $comment: "ct:internal-state",
   default: {},
   additionalProperties: {
     type: "object",

@@ -6,7 +6,7 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
+import type { JSONSchema, Schema } from "../builder/types.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
@@ -32,6 +32,39 @@ import {
   type NormalizedFetchDataInputs,
   snapshotFetchDataInputs,
 } from "./fetch-request.ts";
+import { recordCfcWriteSchemaContext } from "../cfc/schema-context.ts";
+
+const fetchDataResultSchema = {
+  type: "object",
+  properties: {
+    pending: { type: "boolean", default: false },
+    result: {},
+    error: {},
+  },
+  required: ["pending"],
+} as const satisfies JSONSchema;
+
+function recordFetchOutputPathSchema(
+  tx: IExtendedStorageTransaction,
+  cell: Cell<unknown>,
+  field: "result" | "error",
+  fieldSchema: JSONSchema | undefined,
+): void {
+  if (!fieldSchema) {
+    return;
+  }
+  const link = cell.getAsNormalizedFullLink();
+  recordCfcWriteSchemaContext(
+    tx,
+    {
+      space: link.space,
+      id: link.id,
+      type: link.type,
+      path: [field],
+    },
+    fieldSchema,
+  );
+}
 
 /**
  * Fetch data from a URL.
@@ -56,6 +89,8 @@ export function fetchData(
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
   let internal: Cell<Schema<typeof internalSchema>>;
+  let resultValueSchema: JSONSchema | undefined;
+  let errorValueSchema: JSONSchema | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -88,6 +123,13 @@ export function fetchData(
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
+      const rootOutputSchema = parentCell.schema ?? fetchDataResultSchema;
+      const outputFieldSchema = (field: "result" | "error") =>
+        runtime.cfc.getSchemaAtPath(rootOutputSchema, [field]) ??
+          parentCell.key(field).asSchemaFromLinks().schema;
+      resultValueSchema = outputFieldSchema("result");
+      errorValueSchema = outputFieldSchema("error");
+
       pending = runtime.getCell(
         parentCell.space,
         { fetchData: { pending: cause } },
@@ -264,6 +306,8 @@ export function fetchData(
             result,
             error,
             internal,
+            resultValueSchema,
+            errorValueSchema,
             abortController.signal,
           );
         },
@@ -283,6 +327,8 @@ async function startFetch(
   result: Cell<any | undefined>,
   error: Cell<any | undefined>,
   internal: Cell<Schema<typeof internalSchema>>,
+  resultValueSchema: JSONSchema | undefined,
+  errorValueSchema: JSONSchema | undefined,
   abortSignal: AbortSignal,
 ) {
   const { url, mode, options, cfc } = inputs;
@@ -500,13 +546,28 @@ async function startFetch(
           inputsCell,
           inputHash,
           (tx) => {
+            const resultWriter = resultValueSchema
+              ? result.withTx(tx).asSchema(resultValueSchema)
+              : result.withTx(tx);
             pending.withTx(tx).set(false);
-            result.withTx(tx).set(commitResult.result);
+            resultWriter.set(commitResult.result);
             error.withTx(tx).set(undefined);
+            recordFetchOutputPathSchema(
+              tx,
+              parentCell,
+              "result",
+              resultValueSchema,
+            );
             writeFetchResultLabels(tx, result, sinkLabels);
             writeFetchResultLabels(tx, parentCell, sinkLabels, "/result");
             const publicResultCell = parentCell.getSourceCell();
             if (publicResultCell) {
+              recordFetchOutputPathSchema(
+                tx,
+                publicResultCell,
+                "result",
+                resultValueSchema,
+              );
               writeFetchResultLabels(
                 tx,
                 publicResultCell,
@@ -549,13 +610,28 @@ async function startFetch(
       inputsCell,
       inputHash,
       (tx) => {
+        const resultWriter = resultValueSchema
+          ? result.withTx(tx).asSchema(resultValueSchema)
+          : result.withTx(tx);
         pending.withTx(tx).set(false);
-        result.withTx(tx).set(data);
+        resultWriter.set(data);
         error.withTx(tx).set(undefined);
+        recordFetchOutputPathSchema(
+          tx,
+          parentCell,
+          "result",
+          resultValueSchema,
+        );
         writeFetchResultLabels(tx, result, sinkLabels);
         writeFetchResultLabels(tx, parentCell, sinkLabels, "/result");
         const publicResultCell = parentCell.getSourceCell();
         if (publicResultCell) {
+          recordFetchOutputPathSchema(
+            tx,
+            publicResultCell,
+            "result",
+            resultValueSchema,
+          );
           writeFetchResultLabels(tx, publicResultCell, sinkLabels, "/result");
         }
       },
@@ -588,12 +664,22 @@ async function startFetch(
 
       // Only write error and inputHash if inputs still match
       if (currentHash === inputHash) {
-        error.withTx(tx).set(err);
+        const errorWriter = errorValueSchema
+          ? error.withTx(tx).asSchema(errorValueSchema)
+          : error.withTx(tx);
+        errorWriter.set(err);
         internal.withTx(tx).update({ inputHash });
+        recordFetchOutputPathSchema(tx, parentCell, "error", errorValueSchema);
         writeFetchResultLabels(tx, error, sinkLabels);
         writeFetchResultLabels(tx, parentCell, sinkLabels, "/error");
         const publicResultCell = parentCell.getSourceCell();
         if (publicResultCell) {
+          recordFetchOutputPathSchema(
+            tx,
+            publicResultCell,
+            "error",
+            errorValueSchema,
+          );
           writeFetchResultLabels(tx, publicResultCell, sinkLabels, "/error");
         }
       }
