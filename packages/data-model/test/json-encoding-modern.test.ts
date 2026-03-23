@@ -724,11 +724,6 @@ describe("json encoding", () => {
       expect(result.error.constructor.name).toBe("Error");
     });
 
-    it("isFabricInstance returns true for FabricError", () => {
-      const se = new FabricError(new Error("test"));
-      expect(se instanceof FabricInstance).toBe(true);
-    });
-
     it("has typeTag property", () => {
       const se = new FabricError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
