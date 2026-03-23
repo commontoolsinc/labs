@@ -580,6 +580,69 @@ export default pattern<{ label?: string }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: top-level call-argument property access lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+const wrap = <T,>(value: T) => value;
+
+export default pattern<{ user: { name: string } }>((state) => {
+  const label = wrap(state.user.name);
+  return { label };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, 'wrap(state.key("user", "name"))');
+    assert(
+      !output.includes("wrap(state.user.name)"),
+      "expected top-level call-argument property access to lower out of raw dot access",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level object-property arithmetic lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ count: number }>((state) => ({
+  next: state.count + 1,
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assert(
+      !output.includes('next: state.key("count") + 1'),
+      "expected top-level object-property arithmetic to lower to derive()",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: interface defaults keep non-default sibling fields in pattern input schema",
   async () => {
     const source = `/// <cts-enable />
@@ -2595,7 +2658,10 @@ export default pattern<{ count: number; show: boolean }>(({ count, show }) => ({
     });
 
     assertStringIncludes(output, "ifElse(");
-    assertStringIncludes(output, "__ctHelpers.computed((): number => count + 1)");
+    assertStringIncludes(
+      output,
+      "__ctHelpers.computed((): number => count + 1)",
+    );
     assert(
       !output.includes("ifElse(show, count + 1, 0)"),
       "expected authored ifElse arithmetic branch to be compute-wrapped",

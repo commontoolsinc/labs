@@ -537,6 +537,45 @@ Deno.test(
         assertEquals(errors.length, 0);
       },
     );
+
+    await t.step(
+      "allows top-level call-argument property access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const wrap = <T,>(value: T) => value;
+
+      export default pattern<{ user: { name: string } }>((state) => {
+        const label = wrap(state.user.name);
+        return { label };
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property arithmetic in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>((state) => ({
+        next: state.count + 1,
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
   },
 );
 

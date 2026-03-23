@@ -16,6 +16,7 @@ import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
 } from "./opaque-ref/emitters/compute-wrap-invariants.ts";
+import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type {
   ExpressionContainerKind,
   ExpressionSiteHelperBoundaryKind,
@@ -66,6 +67,89 @@ function isControlFlowRewriteExpression(expr: ts.Expression): boolean {
   return ts.isConditionalExpression(expr) || isLogicalBinaryExpression(expr);
 }
 
+function isPostClosureWrapperRewriteExpression(
+  expr: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const expression = unwrapExpression(expr);
+
+  if (
+    ts.isPropertyAccessExpression(expression) ||
+    ts.isTemplateExpression(expression)
+  ) {
+    return true;
+  }
+
+  if (ts.isElementAccessExpression(expression)) {
+    const argument = expression.argumentExpression;
+    return !!argument &&
+      (
+        ts.isLiteralExpression(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument) ||
+        !!getKnownComputedKeyExpression(argument, context)
+      );
+  }
+
+  if (ts.isPrefixUnaryExpression(expression)) {
+    return expression.operator === ts.SyntaxKind.ExclamationToken;
+  }
+
+  if (ts.isBinaryExpression(expression)) {
+    const operator = expression.operatorToken.kind;
+    return operator !== ts.SyntaxKind.AmpersandAmpersandToken &&
+      operator !== ts.SyntaxKind.BarBarToken &&
+      operator !== ts.SyntaxKind.QuestionQuestionToken;
+  }
+
+  return false;
+}
+
+function isDirectDeriveCall(
+  expression: ts.Expression,
+  context: TransformationContext,
+): expression is ts.CallExpression {
+  if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  return detectCallKind(expression, context.checker)?.kind === "derive";
+}
+
+function isEligiblePatternOwnedWrapperCallbackSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (!callbackContext) {
+    return true;
+  }
+
+  if (context.isArrayMethodCallback(callbackContext.callback)) {
+    return true;
+  }
+
+  const callKind = detectCallKind(callbackContext.call, context.checker);
+  if (
+    callKind?.kind === "builder" &&
+    (callKind.builderName === "pattern" || callKind.builderName === "render")
+  ) {
+    return true;
+  }
+
+  if (callKind?.kind !== "array-method") {
+    return false;
+  }
+
+  const callExpression = callbackContext.call.expression;
+  if (!ts.isPropertyAccessExpression(callExpression)) {
+    return false;
+  }
+
+  const receiverAnalysis = analyze(callExpression.expression);
+  return receiverAnalysis.containsOpaqueRef;
+}
+
 export function requiresLegacyJsxControlFlowHandling(
   expression: ts.Expression,
   context: TransformationContext,
@@ -80,8 +164,10 @@ export function requiresLegacyJsxControlFlowHandling(
       if (found) return;
       if (node !== root && ts.isFunctionLike(node)) return;
 
-      if (ts.isExpression(node) &&
-        isDeferredJsxArrayMethodExpression(node, context, analyze)) {
+      if (
+        ts.isExpression(node) &&
+        isDeferredJsxArrayMethodExpression(node, context, analyze)
+      ) {
         found = true;
         return;
       }
@@ -105,7 +191,11 @@ export function requiresLegacyJsxControlFlowHandling(
   }
 
   if (isLogicalBinaryExpression(expression)) {
-    return !!findPendingComputeWrapCandidate(expression.right, analyze, context) ||
+    return !!findPendingComputeWrapCandidate(
+      expression.right,
+      analyze,
+      context,
+    ) ||
       (
         !isJsxLocalRewriteContainer(expression.right) &&
         containsDeferredJsxArrayMethodSubexpression(expression.right)
@@ -347,7 +437,27 @@ function canRewriteExpressionSite(
     return false;
   }
 
-  if (containerKind !== "jsx-expression" && !siteInfo.controlFlowRewriteRoot) {
+  if (
+    containerKind !== "jsx-expression" &&
+    !siteInfo.controlFlowRewriteRoot &&
+    siteInfo.arrayMethodOwned
+  ) {
+    return false;
+  }
+
+  if (
+    containerKind !== "jsx-expression" &&
+    !siteInfo.controlFlowRewriteRoot &&
+    !isPostClosureWrapperRewriteExpression(expression, context)
+  ) {
+    return false;
+  }
+
+  if (
+    containerKind !== "jsx-expression" &&
+    !siteInfo.controlFlowRewriteRoot &&
+    !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze)
+  ) {
     return false;
   }
 
@@ -369,7 +479,9 @@ function canDeferExpressionSiteToHelperBoundary(
     return false;
   }
 
-  if (!siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute) {
+  if (
+    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
+  ) {
     return false;
   }
 
@@ -408,7 +520,9 @@ function canRewriteHelperOwnedExpressionSite(
     return false;
   }
 
-  if (!siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute) {
+  if (
+    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
+  ) {
     return false;
   }
 
@@ -532,6 +646,10 @@ export function rewriteExpressionSite(
     return undefined;
   }
 
+  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+    return result;
+  }
+
   return visitEachChildWithJsx(
     result,
     visit,
@@ -635,6 +753,7 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
           context,
           analyze,
           visit,
+          preferDeriveWrappers: true,
         });
         if (rewritten) {
           return rewritten;
