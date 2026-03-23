@@ -35,7 +35,7 @@ export default pattern((config: Config) => {
         config: {
             multiplier: config.key("multiplier")
         }
-    }, ({ value: v, config }) => v.get() * (config.multiplier ?? 1));
+    }, ({ value: v, config }) => v * (config.multiplier ?? 1));
     return result;
 }, {
     type: "object",

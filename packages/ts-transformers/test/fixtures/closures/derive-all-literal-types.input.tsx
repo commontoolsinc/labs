@@ -17,7 +17,7 @@ export default pattern(() => {
 
   const result = derive(value, (v) => {
     // Use all captured literals to ensure they're all widened
-    const combined = v.get() + numLiteral + floatLiteral;
+    const combined = v + numLiteral + floatLiteral;
     return boolLiteral ? strLiteral + combined : "";
   });
 

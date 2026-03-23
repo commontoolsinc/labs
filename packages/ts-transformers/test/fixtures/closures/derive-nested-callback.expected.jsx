@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { Writable, derive, pattern } from "commontools";
 // FIXTURE: derive-nested-callback
-// Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
+// Verifies: capture extraction works with nested plain-array .map() inside derive
 //   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)
-//   inner nums.map(fn) → nums.mapWithPattern(pattern(...), { multiplier })
-// Context: `multiplier` is captured by both derive and the inner map; inner map receives it via params
+//   inner nums.map(fn) stays as plain .map(fn)
+// Context: inside derive, `nums` is a plain array, so nested array methods are not rewritten
 export default pattern(() => {
     const numbers = Writable.of([1, 2, 3], {
         type: "array",
@@ -40,33 +40,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-        const n = __ct_pattern_input.key("element");
-        const multiplier = __ct_pattern_input.key("params", "multiplier");
-        return n * multiplier.get();
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: true
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["element", "params"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema), {
-        multiplier: multiplier
-    }));
+    }, ({ numbers: nums, multiplier }) => nums.map(n => n * multiplier.get()));
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "array",

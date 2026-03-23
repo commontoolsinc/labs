@@ -36,7 +36,7 @@ export default pattern(() => {
         value,
         multiplier: multiplier,
         offset: offset
-    }, ({ value: v, multiplier, offset }) => (v.get() * multiplier.get()) + offset.get());
+    }, ({ value: v, multiplier, offset }) => (v * multiplier.get()) + offset.get());
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"

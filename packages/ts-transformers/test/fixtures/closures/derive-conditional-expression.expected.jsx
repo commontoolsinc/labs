@@ -36,7 +36,7 @@ export default pattern(() => {
         value,
         threshold: threshold,
         multiplier: multiplier
-    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v.get());
+    }, ({ value: v, threshold, multiplier }) => v > threshold.get() ? v * multiplier.get() : v);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"

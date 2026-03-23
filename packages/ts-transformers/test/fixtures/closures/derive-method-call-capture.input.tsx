@@ -13,7 +13,7 @@ export default pattern((state: State) => {
   const value = Writable.of(10);
 
   // Capture property before method call
-  const result = derive(value, (v) => v.get() + state.counter.value);
+  const result = derive(value, (v) => v + state.counter.value);
 
   return result;
 });

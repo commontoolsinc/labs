@@ -11,7 +11,7 @@ export default pattern(() => {
   const c = Writable.of(30);
 
   const result = derive(a, (aVal) => {
-    const sum = aVal.get() + b.get();
+    const sum = aVal + b.get();
     return sum * c.get();
   });
 

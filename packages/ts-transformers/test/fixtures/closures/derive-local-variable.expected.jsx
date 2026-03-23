@@ -38,7 +38,7 @@ export default pattern(() => {
         b: b,
         c: c
     }, ({ a: aVal, b, c }) => {
-        const sum = aVal.get() + b.get();
+        const sum = aVal + b.get();
         return sum * c.get();
     });
     return result;

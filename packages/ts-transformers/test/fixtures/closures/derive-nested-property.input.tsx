@@ -14,7 +14,7 @@ interface State {
 export default pattern((state: State) => {
   const value = Writable.of(10);
 
-  const result = derive(value, (v) => v.get() * state.config.multiplier);
+  const result = derive(value, (v) => v * state.config.multiplier);
 
   return result;
 });

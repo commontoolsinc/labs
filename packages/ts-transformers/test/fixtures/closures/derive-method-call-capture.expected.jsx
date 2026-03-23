@@ -47,7 +47,7 @@ export default pattern((state: State) => {
                 value: state.key("counter").value
             }
         }
-    }, ({ value: v, state }) => v.get() + state.counter.value);
+    }, ({ value: v, state }) => v + state.counter.value);
     return result;
 }, {
     type: "object",

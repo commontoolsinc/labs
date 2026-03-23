@@ -9,7 +9,7 @@ export default pattern(() => {
   const multiplier = Writable.of(2);
   const offset = Writable.of(5);
 
-  const result = derive(value, (v) => (v.get() * multiplier.get()) + offset.get());
+  const result = derive(value, (v) => (v * multiplier.get()) + offset.get());
 
   return result;
 });

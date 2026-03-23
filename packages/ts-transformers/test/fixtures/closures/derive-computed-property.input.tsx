@@ -10,7 +10,7 @@ export default pattern(() => {
   const config = { multiplier: 2, divisor: 5 };
   const key = "multiplier";
 
-  const result = derive(value, (v) => v.get() * config[key]);
+  const result = derive(value, (v) => v * config[key]);
 
   return result;
 });

@@ -41,7 +41,7 @@ export default pattern((config: Config) => {
             required: config.key("required"),
             unionUndefined: config.key("unionUndefined")
         }
-    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0));
+    }, ({ value: v, config }) => v + config.required + (config.unionUndefined ?? 0));
     return result;
 }, {
     type: "object",

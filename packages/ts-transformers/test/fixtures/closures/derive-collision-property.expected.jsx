@@ -41,7 +41,7 @@ export default pattern(() => {
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => ({
         multiplier: multiplier_1.get(),
-        value: m.get() * 3,
+        value: m * 3,
     }));
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {

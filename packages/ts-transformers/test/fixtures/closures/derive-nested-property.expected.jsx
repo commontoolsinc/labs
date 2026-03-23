@@ -46,7 +46,7 @@ export default pattern((state: State) => {
                 multiplier: state.key("config").multiplier
             }
         }
-    }, ({ value: v, state }) => v.get() * state.config.multiplier);
+    }, ({ value: v, state }) => v * state.config.multiplier);
     return result;
 }, {
     type: "object",

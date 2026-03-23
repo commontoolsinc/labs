@@ -40,7 +40,7 @@ export default pattern(() => {
         value,
         config: config,
         key: key
-    }, ({ value: v, config, key }) => v.get() * config[key]);
+    }, ({ value: v, config, key }) => v * config[key]);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"

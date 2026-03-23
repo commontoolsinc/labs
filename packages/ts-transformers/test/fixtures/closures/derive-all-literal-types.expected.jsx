@@ -45,7 +45,7 @@ export default pattern(() => {
         strLiteral: strLiteral
     }, ({ value: v, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
         // Use all captured literals to ensure they're all widened
-        const combined = v.get() + numLiteral + floatLiteral;
+        const combined = v + numLiteral + floatLiteral;
         return boolLiteral ? strLiteral + combined : "";
     });
     return result;

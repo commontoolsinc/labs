@@ -28,7 +28,7 @@ export default pattern(() => {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         multiplier: multiplier
-    }, ({ value: v, multiplier }) => v.get() * multiplier.get());
+    }, ({ value: v, multiplier }) => v * multiplier.get());
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"

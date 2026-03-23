@@ -47,7 +47,7 @@ export default pattern(() => {
         multiplier,
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => ({
-        value: m.get() * 3,
+        value: m * 3,
         data: { multiplier: multiplier_1 },
     }));
     return result;

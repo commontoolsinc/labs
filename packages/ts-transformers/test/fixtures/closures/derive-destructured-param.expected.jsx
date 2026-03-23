@@ -7,7 +7,7 @@ interface Point {
 // FIXTURE: derive-destructured-param
 // Verifies: a captured cell works alongside destructuring inside the callback body
 //   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
-// Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
+// Context: `const { x, y } = p` destructures inside the body, not the parameter
 export default pattern(() => {
     const point = Writable.of({ x: 10, y: 20 } as Point, {
         type: "object",
@@ -24,7 +24,6 @@ export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    // Destructuring requires .get() first since derive doesn't unwrap Cell
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -58,7 +57,7 @@ export default pattern(() => {
         point,
         multiplier: multiplier
     }, ({ point: p, multiplier }) => {
-        const { x, y } = p.get();
+        const { x, y } = p;
         return (x + y) * multiplier.get();
     });
     return result;
