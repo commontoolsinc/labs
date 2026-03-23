@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-16
+2026-03-23
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -80,9 +80,10 @@ SES (Secure ECMAScript) provides:
 - **Import Hooks**: Control over module resolution and loading
 
 `harden()` is necessary but not sufficient for this threat model. It preserves
-behavioral objects as-is, including functions and objects with hidden
-mutability. This spec therefore requires an additional runtime module-safe-data
-checker/freezer for top-level non-function values.
+behavioral objects as-is, including functions and collection types whose
+mutator methods remain live unless they are handled specially. This spec
+therefore requires an additional runtime module-safe-data checker/freezer for
+top-level non-function values.
 
 Alternative considered: QuickJS (via `js-sandbox` package). SES is preferred because:
 - Runs in the same V8/SpiderMonkey engine (no serialization overhead)
@@ -378,20 +379,22 @@ Version 1 of the allowed domain is a deliberate subset of
 - `bigint`
 - arrays of allowed values
 - plain object records with allowed values
+- exact intrinsic `Map` instances whose keys and values are allowed values
+- exact intrinsic `Set` instances whose elements are allowed values
 
-Future widening of this set, including support for `Map`, `Set`, temporal
-primitives, or other richer `StorableValue` members, requires an explicit spec
-revision and validator version bump. The v1 verifier MUST NOT silently widen
-with upstream `StorableValue` changes.
+Future widening of this set beyond the above, including temporal primitives or
+other richer `StorableValue` members, requires an explicit spec revision and
+validator version bump. The v1 verifier MUST NOT silently widen with upstream
+`StorableValue` changes.
 
 The default rejected domain includes:
 
 - functions
 - `Promise`
 - `Error`
-- `Map` / `Set`
 - `Date`
 - class instances
+- `Map` / `Set` subclasses
 - proxies
 - objects with symbol keys
 - objects with accessors
@@ -407,6 +410,11 @@ graph construction during active builder execution is allowed as part of pattern
 assembly, but data-category initializers must remain inert apart from console
 output. This is enforced by giving authored code a narrower module-load
 authority surface than the runtime's later execution environment.
+
+For `Map` and `Set`, the checker/freezer must not rely on `harden()` alone.
+The surviving value must have immutable collection semantics: mutators such as
+`set`, `add`, `delete`, and `clear` must not remain usable on the object that
+survives module load.
 
 `__ct_data(...)` validates the result that survives module load, not the full
 semantics of the computation that produced it. This is acceptable under the
@@ -845,15 +853,25 @@ imports. Host-visible effects happen later, under the runtime's node execution
 model, not during authored module evaluation. These imports are not valid from
 within `__ct_data(...)` initializers.
 
-### 5.4 No Separate Authored String-Evaluation Path
+### 5.4 Smaller-Compartment String Rehydration
 
-Untrusted authored pattern code reaches execution only through the compiled
-bundle preflight plus AMD-factory verification pipeline. There is no separate
-string-eval fallback for authored pattern execution in this baseline.
+Untrusted authored pattern code normally reaches execution through the compiled
+bundle preflight plus AMD-factory verification pipeline. The only exception is
+the lazy rehydration of serialized nested-pattern or module implementations that
+exist only as function strings when first invoked.
+
+That path must use SES, but not the full pattern-load authority surface. It
+must execute inside a smaller Compartment with:
+
+- only the minimal globals required to call the function
+- no AMD loader state
+- no runtime-module dependency injection
+- no ambient host capabilities
+- no shared mutable state other than explicit trusted runtime objects passed in
 
 A standalone `evaluateStringSync()` utility may still exist for trusted
 internal tooling or diagnostics, but it is outside this threat model and MUST
-NOT be used to run untrusted authored pattern code.
+NOT be used as a general authored-module execution path.
 
 ---
 
@@ -987,7 +1005,9 @@ type ModuleSafeValueV1 =
   | string
   | bigint
   | ModuleSafeValueV1[]
-  | { [key: string]: ModuleSafeValueV1 };
+  | { [key: string]: ModuleSafeValueV1 }
+  | ReadonlyMap<ModuleSafeValueV1, ModuleSafeValueV1>
+  | ReadonlySet<ModuleSafeValueV1>;
 
 function assertPlainData(
   value: unknown,
@@ -996,7 +1016,7 @@ function assertPlainData(
 
 function freezeVerifiedPlainData<T>(value: T): T {
   assertPlainData(value);
-  return harden(value);
+  return hardenModuleSafeData(value);
 }
 ```
 
@@ -1006,26 +1026,46 @@ behavior. In particular, the checker must:
 - inspect own property descriptors before reading property values
 - reject accessor properties without invoking getters
 - reject symbol keys
-- reject any object whose prototype is neither `Object.prototype` nor `null`
+- reject any object whose prototype is neither `Object.prototype`, `null`,
+  `Map.prototype`, nor `Set.prototype`
 - reject arrays with holes or extra own properties
+- reject `Map` / `Set` subclasses and reject extra own properties on collection
+  instances
+- recursively validate `Map` keys and values and `Set` values
 - reject cycles in v1
 - reject reserved keys such as `__proto__`, `constructor`, and `prototype`
 - reject any `StorableValue` members outside the approved v1 subset
+
+`freezeVerifiedPlainData()` MUST preserve the accepted `Map` / `Set` contents
+while removing mutability from the surviving collection object. A plain
+`harden(new Map(...))` or `harden(new Set(...))` is insufficient because those
+mutators remain callable.
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is
 then hardened.
 
-#### 7.2.5 No Unverified String Execution for Pattern Code
+#### 7.2.5 Constrained String Execution for Lazy Nested Patterns
 
-Any pattern implementation represented as a string must either:
+Most authored pattern code must enter through the compiled-bundle preflight plus
+AMD-factory verification pipeline. However, lazily invoked nested-pattern and
+module implementations may still exist only as serialized function strings at
+the point they are first called.
 
-- be reintroduced through the same compiled-bundle preflight and AMD-factory
-  verification pipeline, or
-- be rejected when SES verification is enabled
+That secondary path is allowed only under all of the following constraints:
 
-A fresh Compartment utility may still exist for trusted internal tooling, but it
-does not satisfy the authored-pattern security model by itself.
+- it evaluates function source only, not arbitrary module/program strings
+- it runs inside a smaller SES Compartment than the main pattern-load path
+- that smaller Compartment receives a narrower authority surface than the main
+  verified module Compartment
+- it must not expose AMD loader hooks, runtime-module injection, or host
+  capabilities beyond the minimal callback invocation surface
+- it must not share mutable module-scope state across independently evaluated
+  string-backed implementations except through explicit trusted runtime objects
+
+A fresh Compartment utility may still exist for trusted internal tooling, but
+the lazy string-backed callback path above is the only authored-code exception
+to the main verified-bundle entry rule.
 
 ---
 
@@ -1744,7 +1784,10 @@ Implement a runtime helper that proves a value is a versioned, recursively inert
 subset of `StorableValue` and then hardens it. This helper is stricter than
 `harden()` alone and stricter than Endo pass-style checks. It must inspect
 descriptors without triggering getters and reject cycles, symbol keys, exotic
-prototypes, reserved keys, and all non-approved `StorableValue` members.
+prototypes, reserved keys, and all non-approved `StorableValue` members. It
+must also preserve accepted `Map` / `Set` contents while converting the
+surviving collection object to immutable semantics rather than relying on
+`harden()` alone.
 
 **Likely files:**
 - new `packages/runner/src/sandbox/plain-data.ts`
@@ -1781,8 +1824,9 @@ one authoritative verified SES execution path.
 The runtime should execute each loaded pattern in its own Compartment. That
 Compartment is a containment boundary, not the primary mechanism that prevents
 callback collusion. Future dynamic-import isolation may introduce additional
-Compartments later, but authored pattern execution in v1 has no separate
-string-eval fallback.
+Compartments later. In v1, the only separate string-based path is the smaller
+lazy-callback Compartment described in Section 5.4, not a general authored
+module fallback.
 
 #### 3.3 Minimal globals plus trusted runtime modules (Priority: Medium)
 
@@ -1823,9 +1867,9 @@ private instantiateJavaScriptNode(
   let fn: Function;
 
   if (typeof module.implementation === "string") {
-    // String-backed implementations must resolve to a previously verified
-    // frozen export from the authoritative SES pipeline.
-    fn = getVerifiedFunction(module);
+    // String-backed implementations may be rehydrated lazily, but only inside
+    // the narrow SES callback compartment.
+    fn = evaluateInCallbackCompartment(module.implementation);
   } else {
     fn = assertVerifiedFunctionObject(module.implementation);
   }
@@ -1840,15 +1884,19 @@ private instantiateJavaScriptNode(
 #### 4.2 Remove UnsafeEvalIsolate Usage
 
 Remove the legacy fallback to `harness.getInvocation()` / `UnsafeEvalIsolate`.
-The runtime may keep a harness abstraction, but it must no longer route pattern
-execution through raw eval once SES verification is enabled.
+The runtime may keep a harness abstraction, but once SES verification is
+enabled it must route either:
+
+- verified module load through the main SES module path, or
+- lazy string-backed callback rehydration through the smaller SES callback
+  Compartment described above.
 
 ```typescript
 // Before
 fn = this.runtime.harness.getInvocation(module.implementation);
 
 // After
-fn = getVerifiedFunction(module);
+fn = evaluateInCallbackCompartment(module.implementation);
 ```
 
 **Files to modify:**
@@ -1922,6 +1970,25 @@ describe('SES Sandbox Security', () => {
     `;
 
     await expect(loadPattern(pattern)).rejects.toThrow();
+  });
+
+  it('accepts immutable Map and Set module-safe data', async () => {
+    const pattern = `
+      const LOOKUP = freezeVerifiedPlainData(new Map([
+        ['open', 'Open'],
+        ['closed', 'Closed'],
+      ]));
+      const TAGS = freezeVerifiedPlainData(new Set(['a', 'b']));
+    `;
+
+    const compartment = await loadPattern(pattern);
+    const lookup = compartment.exports.get('LOOKUP');
+    const tags = compartment.exports.get('TAGS');
+
+    expect(lookup.get('open')).toBe('Open');
+    expect(tags.has('a')).toBe(true);
+    expect(() => lookup.set('draft', 'Draft')).toThrow();
+    expect(() => tags.add('c')).toThrow();
   });
 
   it('rejects bundle code outside AMD define calls', async () => {
