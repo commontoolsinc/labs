@@ -21,7 +21,7 @@ const _hashCache = new WeakMap<object, string>();
  * objects always hash identically. Results are cached per object identity
  * via WeakMap, so repeated hashing of the same schema object is O(1).
  */
-export function stableStringify(value: unknown): string {
+function stableStringify(value: unknown): string {
   if (value === null) return "n";
   if (value === undefined) return "u";
   const t = typeof value;
