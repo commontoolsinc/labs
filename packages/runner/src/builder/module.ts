@@ -26,7 +26,7 @@ import { getLogger } from "@commontools/utils/logger";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
-  level: "debug",
+  level: "warn",
   logCountEvery: 0,
 });
 const MAX_SOURCE_LOCATION_FLAGS = 40;

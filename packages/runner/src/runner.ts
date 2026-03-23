@@ -73,7 +73,7 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
 });
 const sourceLocationLogger = getLogger("runner.source-location", {
   enabled: false,
-  level: "debug",
+  level: "warn",
   logCountEvery: 0,
 });
 
