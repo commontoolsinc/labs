@@ -17,6 +17,7 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";
+import { resetSchemaHashConfig } from "@commontools/data-model/schema-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -30,6 +31,7 @@ describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
     resetCanonicalHashConfig();
+    resetSchemaHashConfig();
   });
 
   describe("Runtime construction", () => {
@@ -42,12 +44,14 @@ describe("ExperimentalOptions", () => {
           modernDataModel: false,
           unifiedJsonEncoding: false,
           modernHash: false,
+          modernSchemaHash: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
         unifiedJsonEncoding: false,
         modernHash: false,
+        modernSchemaHash: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -62,12 +66,14 @@ describe("ExperimentalOptions", () => {
           modernDataModel: true,
           unifiedJsonEncoding: true,
           modernHash: true,
+          modernSchemaHash: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         unifiedJsonEncoding: true,
         modernHash: true,
+        modernSchemaHash: true,
       });
       await runtime.dispose();
       await sm.close();

@@ -26,6 +26,10 @@ import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commontools/data-model/json-encoding";
+import {
+  resetSchemaHashConfig,
+  setSchemaHashConfig,
+} from "@commontools/data-model/schema-hash";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -100,6 +104,8 @@ export interface ExperimentalOptions {
   unifiedJsonEncoding?: boolean;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
   modernHash?: boolean;
+  /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
+  modernSchemaHash?: boolean;
 }
 
 export interface RuntimeOptions {
@@ -211,6 +217,7 @@ export class Runtime {
       modernDataModel: false,
       unifiedJsonEncoding: false,
       modernHash: false,
+      modernSchemaHash: false,
       ...options.experimental,
     };
 
@@ -238,6 +245,7 @@ export class Runtime {
     setDataModelConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
+    setSchemaHashConfig(this.experimental.modernSchemaHash);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -402,6 +410,7 @@ export class Runtime {
     resetDataModelConfig();
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();
+    resetSchemaHashConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
