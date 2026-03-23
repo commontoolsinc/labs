@@ -45,6 +45,12 @@ const METHOD_TO_WITH_PATTERN: Record<string, string> = {
   flatMap: "flatMapWithPattern",
 };
 
+const WITH_PATTERN_METHOD_NAMES = new Set([
+  "mapWithPattern",
+  "filterWithPattern",
+  "flatMapWithPattern",
+]);
+
 export class ArrayMethodStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
@@ -111,6 +117,61 @@ function getEnclosingFunctionLike(
     current = current.parent;
   }
   return undefined;
+}
+
+function isConsumedByTerminalChain(
+  expression: ts.Expression,
+): boolean {
+  let current: ts.Expression = expression;
+
+  while (true) {
+    const parent = current.parent;
+    if (!parent) {
+      return false;
+    }
+
+    if (
+      ts.isParenthesizedExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isTypeAssertionExpression(parent) ||
+      ts.isNonNullExpression(parent) ||
+      ts.isSatisfiesExpression(parent)
+    ) {
+      current = parent;
+      continue;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(parent) && parent.expression === current
+    ) {
+      const memberName = parent.name.text;
+      if (
+        Object.hasOwn(METHOD_TO_WITH_PATTERN, memberName) ||
+        WITH_PATTERN_METHOD_NAMES.has(memberName)
+      ) {
+        const callParent = parent.parent;
+        if (
+          callParent &&
+          ts.isCallExpression(callParent) &&
+          callParent.expression === parent
+        ) {
+          current = callParent;
+          continue;
+        }
+      }
+      return true;
+    }
+
+    if (ts.isElementAccessExpression(parent) && parent.expression === current) {
+      return true;
+    }
+
+    if (ts.isCallExpression(parent) && parent.expression === current) {
+      return true;
+    }
+
+    return false;
+  }
 }
 
 function createsReactiveCollectionInPlace(
@@ -273,6 +334,10 @@ function shouldTransformArrayMethod(
 
   const methodName = methodCall.expression.name.text;
   if (!Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName)) {
+    return false;
+  }
+
+  if (isConsumedByTerminalChain(methodCall)) {
     return false;
   }
 

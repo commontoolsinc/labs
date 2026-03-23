@@ -127,6 +127,39 @@ export default pattern<State>((state) => {
 });
 `;
 
+const DESTRUCTURE_ALIAS_NESTED_PLAIN_MAP_SOURCE = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Person {
+  name: string;
+  spotPreferences: string[];
+}
+
+interface State {
+  people: Person[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <ul>
+        {state.people.map((person) => {
+          const { name, spotPreferences } = person;
+          return (
+            <li>
+              <span>{name}</span>
+              {spotPreferences.length > 0
+                ? <span>{spotPreferences.map((n) => "#" + n).join(", ")}</span>
+                : null}
+            </li>
+          );
+        })}
+      </ul>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -173,6 +206,25 @@ describe("OpaqueRef map callbacks", () => {
       'spotPreferences = person.key("spotPreferences")',
     );
     assertStringIncludes(output, 'spotPreferences.key("length") > 0');
+  });
+
+  it("does not re-derive nested plain-array callbacks inside derive-owned joins", async () => {
+    const output = await transformSource(
+      DESTRUCTURE_ALIAS_NESTED_PLAIN_MAP_SOURCE,
+      {
+        types: { "commontools.d.ts": commontools },
+      },
+    );
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertStringIncludes(
+      normalized,
+      'spotPreferences.map((n) => "#" + n).join(", ")',
+    );
+    assert(
+      !normalized.includes("spotPreferences.map((n) => __ctHelpers.derive("),
+      "nested plain-array callbacks inside derive-owned joins should stay plain",
+    );
   });
 
   it("derives map callback parameters and unary negations (capability-first)", async () => {

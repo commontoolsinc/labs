@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  classifyReactiveContext,
   type DataFlowAnalysis,
   detectCallKind,
   type NormalizedDataFlow,
@@ -42,13 +43,23 @@ function originatesFromIgnoredParameter(
     if (ts.isIdentifier(expr)) {
       const symbol = checker.getSymbolAtLocation(expr);
 
-      // Don't filter identifiers without symbols here - they might be synthetic
-      // identifiers created by transformers (like map callback parameters), or
-      // they might be legitimate identifiers that lost their symbols. Let
-      // filterRelevantDataFlows handle this with more context about all the
-      // dataflows being analyzed together.
       if (!symbol) {
-        return false;
+        return scope.parameters.some((parameter) => {
+          if (parameter.name !== expr.text) {
+            return false;
+          }
+          if (
+            parameter.declaration &&
+            getOpaqueCallKindForParameter(
+              parameter.declaration,
+              checker,
+              context,
+            )
+          ) {
+            return false;
+          }
+          return true;
+        });
       }
 
       return isIgnoredSymbol(symbol);
@@ -89,12 +100,15 @@ function getOpaqueCallKindForParameter(
     return "builder";
   }
   if (callKind?.kind === "array-method") {
-    // For array method calls, only treat parameters as opaque if the callback
-    // was actually transformed (marked in mapCallbackRegistry)
-    // Untransformed calls (plain .map inside derives) should have regular parameters
-    if (context && !context.isArrayMethodCallback(functionNode)) {
-      // Callback was not transformed, parameters are not opaque
-      return undefined;
+    if (context) {
+      const reactiveContext = classifyReactiveContext(
+        candidate,
+        checker,
+        context,
+      );
+      if (reactiveContext.kind !== "pattern") {
+        return undefined;
+      }
     }
     return "array-method";
   }
