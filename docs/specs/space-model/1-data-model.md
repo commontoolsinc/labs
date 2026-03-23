@@ -387,19 +387,19 @@ be **passed through** rather than rejected, preserving forward compatibility.
 This requires a generic `FabricInstance` to hold unrecognized types:
 
 ```typescript
-class UnknownValue implements FabricInstance {
+class UnknownValue extends FabricInstance {
   constructor(
     readonly typeTag: string,   // e.g., "FutureType@2"
-    readonly state: unknown,    // the raw state, already recursively processed
-  ) {}
+    readonly state: FabricValue, // the raw state, already recursively processed
+  ) { super(); }
 
   [DECONSTRUCT]() {
     return { type: this.typeTag, state: this.state };
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: unknown },
-    _runtime: Runtime,
+    state: { type: string; state: FabricValue },
+    _context: ReconstructionContext,
   ): UnknownValue {
     return new UnknownValue(state.type, state.state);
   }
