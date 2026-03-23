@@ -33,8 +33,9 @@ can run their own spaces or use hosted versions.
 
 1. Install [Deno 2](https://docs.deno.com/runtime/getting_started/installation/)
 2. Clone this repo
-3. Start local dev servers: `./scripts/start-local-dev.sh`
-4. Access the application at <http://localhost:8000>
+3. Install the Git hooks: `deno task install-hooks`
+4. Start local dev servers: `./scripts/start-local-dev.sh`
+5. Access the application at <http://localhost:8000>
 
 For Claude Code users, run `/deps` to verify prerequisites and
 `/start-local-dev` to start the dev servers. See

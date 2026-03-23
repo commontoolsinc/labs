@@ -41,6 +41,7 @@
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
+    "install-hooks": "./scripts/install-git-hooks.sh",
     "initialize-db": "./tasks/initialize-db.sh",
     "integration": "./tasks/integration.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
