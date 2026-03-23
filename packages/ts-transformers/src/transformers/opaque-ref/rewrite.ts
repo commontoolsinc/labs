@@ -41,6 +41,7 @@ function rewriteChildExpressions(
   reactiveContextKind: RewriteParams["reactiveContextKind"],
   containerKind: RewriteParams["containerKind"],
   inSafeContext?: boolean,
+  preferDeriveWrappers?: boolean,
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
@@ -60,6 +61,7 @@ function rewriteChildExpressions(
           reactiveContextKind,
           containerKind,
           inSafeContext,
+          preferDeriveWrappers,
         });
         if (result) {
           return result;
@@ -81,6 +83,7 @@ export function rewriteExpression(
 ): ts.Expression | undefined {
   const inSafeContext = params.inSafeContext ?? false;
   const reactiveContextKind = params.reactiveContextKind ?? "neutral";
+  const preferDeriveWrappers = params.preferDeriveWrappers ?? false;
   const emitterContext: EmitterContext = {
     rewriteChildren(node: ts.Expression): ts.Expression {
       return rewriteChildExpressions(
@@ -90,10 +93,12 @@ export function rewriteExpression(
         reactiveContextKind,
         params.containerKind,
         inSafeContext,
+        preferDeriveWrappers,
       );
     },
     ...params,
     inSafeContext,
+    preferDeriveWrappers,
     reactiveContextKind,
     containerKind: params.containerKind,
     dataFlows: normalizeDataFlows(

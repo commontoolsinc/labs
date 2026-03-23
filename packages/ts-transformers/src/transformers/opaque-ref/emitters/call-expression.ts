@@ -35,6 +35,7 @@ export const emitCallExpression: Emitter = ({
   rewriteChildren,
   inSafeContext,
   reactiveContextKind,
+  preferDeriveWrappers,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
@@ -130,5 +131,7 @@ export const emitCallExpression: Emitter = ({
   if (relevantDataFlows.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 };

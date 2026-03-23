@@ -24,6 +24,7 @@ function processBranch(
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
+  preferDeriveWrappers: boolean,
 ): ts.Expression {
   // JSX containers can lower their dynamic slots independently, so the branch
   // does not need a whole-expression compute wrapper just because one child JSX
@@ -61,7 +62,9 @@ function processBranch(
     );
 
     const plan = createBindingPlan(branchDataFlows);
-    const derived = createComputedCallForExpression(expr, plan, context);
+    const derived = createComputedCallForExpression(expr, plan, context, {
+      preferDeriveWrapper: preferDeriveWrappers,
+    });
     if (derived) {
       return derived;
     }
@@ -77,6 +80,7 @@ export const emitConditionalExpression: Emitter = ({
   analyze,
   rewriteChildren,
   inSafeContext,
+  preferDeriveWrappers,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
 
@@ -99,6 +103,7 @@ export const emitConditionalExpression: Emitter = ({
       expression.condition,
       plan,
       context,
+      { preferDeriveWrapper: preferDeriveWrappers },
     );
     if (derivedPredicate) {
       predicate = derivedPredicate;
@@ -110,6 +115,7 @@ export const emitConditionalExpression: Emitter = ({
     context,
     analyze,
     rewriteChildren,
+    preferDeriveWrappers,
   );
 
   const whenFalse = processBranch(
@@ -117,6 +123,7 @@ export const emitConditionalExpression: Emitter = ({
     context,
     analyze,
     rewriteChildren,
+    preferDeriveWrappers,
   );
 
   const ifElseCall = createIfElseCall({

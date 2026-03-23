@@ -11,7 +11,13 @@ import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
 export function emitPropertyAccess(
   params: EmitterContext,
 ): ts.Expression | undefined {
-  const { expression, dataFlows, context, inSafeContext } = params;
+  const {
+    expression,
+    dataFlows,
+    context,
+    inSafeContext,
+    preferDeriveWrappers,
+  } = params;
   if (!ts.isPropertyAccessExpression(expression)) return undefined;
 
   // Skip derive wrapping in safe contexts - they don't need it
@@ -36,5 +42,7 @@ export function emitPropertyAccess(
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 }

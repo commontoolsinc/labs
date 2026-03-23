@@ -29,6 +29,12 @@ export interface RewriteParams {
    * semantic transformations (&&->when, ||->unless) but NOT derive() wrappers.
    */
   readonly inSafeContext?: boolean;
+  /**
+   * When true, reactive compute wrappers introduced during rewriting should be
+   * emitted directly as derive() calls rather than computed() calls. This is
+   * needed for post-closure lowering passes that run after ComputedTransformer.
+   */
+  readonly preferDeriveWrappers?: boolean;
 }
 
 export interface EmitterContext extends RewriteParams {
@@ -36,6 +42,7 @@ export interface EmitterContext extends RewriteParams {
   readonly inSafeContext: boolean;
   readonly reactiveContextKind: ReactiveContextKind;
   readonly containerKind?: ExpressionContainerKind;
+  readonly preferDeriveWrappers: boolean;
   rewriteChildren(node: ts.Expression): ts.Expression;
 }
 

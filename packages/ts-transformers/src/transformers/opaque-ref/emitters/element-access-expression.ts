@@ -13,6 +13,7 @@ export const emitElementAccessExpression = ({
   analysis,
   context,
   inSafeContext,
+  preferDeriveWrappers,
 }: EmitterContext) => {
   if (!ts.isElementAccessExpression(expression)) return undefined;
 
@@ -42,5 +43,7 @@ export const emitElementAccessExpression = ({
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 };

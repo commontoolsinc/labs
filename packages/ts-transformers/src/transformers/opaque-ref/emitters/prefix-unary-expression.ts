@@ -15,6 +15,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
   analysis,
   analyze,
   inSafeContext,
+  preferDeriveWrappers,
 }) => {
   if (!ts.isPrefixUnaryExpression(expression)) return undefined;
 
@@ -50,5 +51,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 };

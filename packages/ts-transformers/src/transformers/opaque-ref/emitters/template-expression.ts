@@ -13,6 +13,7 @@ export const emitTemplateExpression = ({
   analysis,
   context,
   inSafeContext,
+  preferDeriveWrappers,
 }: EmitterContext) => {
   if (!ts.isTemplateExpression(expression)) return undefined;
 
@@ -29,5 +30,7 @@ export const emitTemplateExpression = ({
   if (relevantDataFlows.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 };

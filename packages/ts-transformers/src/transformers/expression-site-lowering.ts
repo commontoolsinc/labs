@@ -12,6 +12,10 @@ import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 import type { AnalyzeFn } from "./opaque-ref/types.ts";
+import {
+  findPendingComputeWrapCandidate,
+  isJsxLocalRewriteContainer,
+} from "./opaque-ref/emitters/compute-wrap-invariants.ts";
 import type {
   ExpressionContainerKind,
   ExpressionSiteHelperBoundaryKind,
@@ -24,6 +28,7 @@ interface RewriteExpressionSiteParams {
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
   readonly visit: ts.Visitor;
+  readonly preferDeriveWrappers?: boolean;
 }
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
@@ -59,6 +64,55 @@ function isLogicalBinaryExpression(
 
 function isControlFlowRewriteExpression(expr: ts.Expression): boolean {
   return ts.isConditionalExpression(expr) || isLogicalBinaryExpression(expr);
+}
+
+export function requiresLegacyJsxControlFlowHandling(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const containsDeferredJsxArrayMethodSubexpression = (
+    root: ts.Expression,
+  ): boolean => {
+    let found = false;
+
+    const visit = (node: ts.Node): void => {
+      if (found) return;
+      if (node !== root && ts.isFunctionLike(node)) return;
+
+      if (ts.isExpression(node) &&
+        isDeferredJsxArrayMethodExpression(node, context, analyze)) {
+        found = true;
+        return;
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(root);
+    return found;
+  };
+
+  if (ts.isConditionalExpression(expression)) {
+    const branches = [expression.whenTrue, expression.whenFalse];
+    return branches.some((branch) =>
+      !!findPendingComputeWrapCandidate(branch, analyze, context) ||
+      (
+        !isJsxLocalRewriteContainer(branch) &&
+        containsDeferredJsxArrayMethodSubexpression(branch)
+      )
+    );
+  }
+
+  if (isLogicalBinaryExpression(expression)) {
+    return !!findPendingComputeWrapCandidate(expression.right, analyze, context) ||
+      (
+        !isJsxLocalRewriteContainer(expression.right) &&
+        containsDeferredJsxArrayMethodSubexpression(expression.right)
+      );
+  }
+
+  return false;
 }
 
 export function getExpressionContainerKind(
@@ -281,12 +335,30 @@ function canRewriteExpressionSite(
     return false;
   }
 
+  if (containerKind === "jsx-expression" && siteInfo.arrayMethodOwned) {
+    return false;
+  }
+
+  if (
+    containerKind === "jsx-expression" &&
+    siteInfo.controlFlowRewriteRoot &&
+    requiresLegacyJsxControlFlowHandling(expression, context, analyze)
+  ) {
+    return false;
+  }
+
   if (containerKind !== "jsx-expression" && !siteInfo.controlFlowRewriteRoot) {
     return false;
   }
 
   const analysis = analyze(expression);
-  return analysis.requiresRewrite || isLogicalBinaryExpression(expression);
+  return analysis.requiresRewrite ||
+    isLogicalBinaryExpression(expression) ||
+    (
+      containerKind === "jsx-expression" &&
+      siteInfo.controlFlowRewriteRoot &&
+      analysis.containsOpaqueRef
+    );
 }
 
 function canDeferExpressionSiteToHelperBoundary(
@@ -406,7 +478,14 @@ export function findLowerableExpressionSite(
 export function rewriteExpressionSite(
   params: RewriteExpressionSiteParams,
 ): ts.Expression | undefined {
-  const { expression, containerKind, context, analyze, visit } = params;
+  const {
+    expression,
+    containerKind,
+    context,
+    analyze,
+    visit,
+    preferDeriveWrappers = false,
+  } = params;
 
   if (!canRewriteExpressionSite(expression, containerKind, context, analyze)) {
     return undefined;
@@ -419,8 +498,11 @@ export function rewriteExpressionSite(
   );
   const analysis = analyze(expression);
   const hasLogicalOps = containsLogicalBinaryOperator(expression);
+  const controlFlowNeedsRewrite = containerKind === "jsx-expression" &&
+    isControlFlowRewriteExpression(expression) &&
+    analysis.containsOpaqueRef;
 
-  if (!analysis.requiresRewrite && !hasLogicalOps) {
+  if (!analysis.requiresRewrite && !hasLogicalOps && !controlFlowNeedsRewrite) {
     return undefined;
   }
 
@@ -443,6 +525,7 @@ export function rewriteExpressionSite(
     reactiveContextKind: contextInfo.kind,
     inSafeContext: contextInfo.kind === "compute",
     containerKind,
+    preferDeriveWrappers,
   });
 
   if (!result) {
@@ -505,13 +588,49 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   const analyze = createDataFlowAnalyzer(context.checker);
 
   const visit: ts.Visitor = (node) => {
-    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+    if (ts.isJsxExpression(node)) {
+      if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
 
-    if (ts.isExpression(visited)) {
-      const containerKind = getExpressionContainerKind(visited);
-      if (containerKind && containerKind !== "jsx-expression") {
+      const siteInfo = getExpressionSitePolicyInfo(
+        node.expression,
+        "jsx-expression",
+        context,
+        analyze,
+      );
+
+      if (!siteInfo.controlFlowRewriteRoot) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const rewritten = rewriteExpressionSite({
+        expression: node.expression,
+        containerKind: "jsx-expression",
+        context,
+        analyze,
+        visit,
+        preferDeriveWrappers: true,
+      });
+      if (rewritten) {
+        return context.factory.createJsxExpression(
+          node.dotDotDotToken,
+          rewritten,
+        );
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isExpression(node)) {
+      const containerKind = getExpressionContainerKind(node);
+      if (containerKind) {
+        if (containerKind === "jsx-expression") {
+          return visitEachChildWithJsx(node, visit, context.tsContext);
+        }
+
         const rewritten = rewriteExpressionSite({
-          expression: visited,
+          expression: node,
           containerKind,
           context,
           analyze,
@@ -523,7 +642,7 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
       }
     }
 
-    return visited;
+    return visitEachChildWithJsx(node, visit, context.tsContext);
   };
 
   return ts.visitNode(root, visit) as T;

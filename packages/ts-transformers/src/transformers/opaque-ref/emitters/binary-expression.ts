@@ -63,6 +63,7 @@ export const emitBinaryExpression: Emitter = ({
   inSafeContext,
   reactiveContextKind,
   containerKind,
+  preferDeriveWrappers,
 }) => {
   if (!ts.isBinaryExpression(expression)) return undefined;
   const operator = expression.operatorToken.kind;
@@ -123,6 +124,7 @@ export const emitBinaryExpression: Emitter = ({
             expression.left,
             plan,
             context,
+            { preferDeriveWrapper: preferDeriveWrappers },
           );
           if (computedCondition) {
             condition = computedCondition;
@@ -187,6 +189,7 @@ export const emitBinaryExpression: Emitter = ({
             expression.left,
             plan,
             context,
+            { preferDeriveWrapper: preferDeriveWrappers },
           );
           if (computedCondition) {
             condition = computedCondition;
@@ -262,5 +265,7 @@ export const emitBinaryExpression: Emitter = ({
   );
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context, {
+    preferDeriveWrapper: preferDeriveWrappers,
+  });
 };

@@ -24,7 +24,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["Active", "Inactive"]
+            "enum": ["Inactive", "Active"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), "Active", "Inactive")}</span>
         <span>{__ctHelpers.ifElse({
             type: "boolean"
@@ -168,7 +168,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["Inactive", "Premium Active", "Regular Active"]
+            "enum": ["Premium Active", "Regular Active", "Inactive"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), __ctHelpers.derive({
             type: "object",
             properties: {

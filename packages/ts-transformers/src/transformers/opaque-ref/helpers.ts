@@ -9,6 +9,7 @@ import {
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
 import { TransformationContext } from "../../core/mod.ts";
+import { createDeriveCall } from "../builtins/derive.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
@@ -258,7 +259,10 @@ export function createComputedCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
   context: TransformationContext,
-  options: { allowDirectExpressionWrap?: boolean } = {},
+  options: {
+    allowDirectExpressionWrap?: boolean;
+    preferDeriveWrapper?: boolean;
+  } = {},
 ): ts.Expression | undefined {
   if (plan.entries.length === 0) return undefined;
 
@@ -285,6 +289,16 @@ export function createComputedCallForExpression(
     if (entry && entry.dataFlow.expression === expression) {
       return undefined;
     }
+  }
+
+  if (options.preferDeriveWrapper) {
+    const refs = plan.entries.map((entry) => entry.dataFlow.expression);
+    return createDeriveCall(expression, refs, {
+      factory: context.factory,
+      tsContext: context.tsContext,
+      ctHelpers: context.ctHelpers,
+      context,
+    });
   }
 
   const { factory, checker, sourceFile } = context;
