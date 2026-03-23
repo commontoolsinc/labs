@@ -104,4 +104,17 @@ declare const collection: {
 
     assertEquals(detectCallKind(call, checker), undefined);
   });
+
+  it("recognises fetchData as a reactive origin call", () => {
+    const { call, checker } = getCallExpression(
+      'fetchData({ url: "https://example.com", result: [] })',
+      {
+        prelude:
+          "declare function fetchData<T>(args: { url: string; result: T }): T;",
+      },
+    );
+
+    assertEquals(detectCallKind(call, checker)?.kind, "runtime-call");
+    assertEquals(isReactiveOriginCall(call, checker), true);
+  });
 });

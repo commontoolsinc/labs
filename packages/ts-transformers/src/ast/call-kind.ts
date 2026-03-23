@@ -29,6 +29,13 @@
 import ts from "typescript";
 
 import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
+import {
+  COMMONTOOLS_BUILDER_EXPORT_NAMES,
+  COMMONTOOLS_CALL_EXPORT_NAMES,
+  COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES,
+  COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
+  COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME,
+} from "../core/commontools-runtime-registry.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 const ARRAY_METHOD_NAMES = new Set([
@@ -40,14 +47,7 @@ const ARRAY_METHOD_NAMES = new Set([
   "flatMapWithPattern",
 ]);
 
-const BUILDER_SYMBOL_NAMES = new Set([
-  "pattern",
-  "handler",
-  "action",
-  "lift",
-  "computed",
-  "render",
-]);
+const BUILDER_SYMBOL_NAMES = COMMONTOOLS_BUILDER_EXPORT_NAMES;
 
 const ARRAY_OWNER_NAMES = new Set([
   "Array",
@@ -72,17 +72,7 @@ const CELL_LIKE_CLASSES = new Set([
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
-const COMMONTOOLS_CALL_NAMES = new Set([
-  "derive",
-  "ifElse",
-  "when",
-  "unless",
-  "cell",
-  "wish",
-  "generateText",
-  "generateObject",
-  "patternTool",
-]);
+const COMMONTOOLS_CALL_NAMES = COMMONTOOLS_CALL_EXPORT_NAMES;
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
@@ -96,20 +86,13 @@ export type CallKind =
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
-  | { kind: "pattern-tool"; symbol?: ts.Symbol };
-
-const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
-  "builder",
-  "cell-factory",
-  "cell-for",
-  "derive",
-  "generate-text",
-  "generate-object",
-  "ifElse",
-  "unless",
-  "when",
-  "wish",
-]);
+  | { kind: "pattern-tool"; symbol?: ts.Symbol }
+  | {
+    kind: "runtime-call";
+    symbol?: ts.Symbol;
+    exportName: string;
+    reactiveOrigin: boolean;
+  };
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -136,7 +119,39 @@ export function isReactiveOriginCall(
   checker: ts.TypeChecker,
 ): boolean {
   const callKind = detectCallKind(call, checker);
-  return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
+  return !!callKind && isReactiveOriginKind(callKind);
+}
+
+function isReactiveOriginKind(callKind: CallKind): boolean {
+  switch (callKind.kind) {
+    case "builder":
+      return COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES.has(
+        callKind.builderName,
+      );
+    case "cell-factory":
+    case "cell-for":
+      return true;
+    case "derive":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
+    case "ifElse":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
+    case "when":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("when");
+    case "unless":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("unless");
+    case "wish":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("wish");
+    case "generate-text":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("generateText");
+    case "generate-object":
+      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has(
+        "generateObject",
+      );
+    case "runtime-call":
+      return callKind.reactiveOrigin;
+    default:
+      return false;
+  }
 }
 
 export function isReactiveValueSymbol(
@@ -720,7 +735,12 @@ function createNamedCallKind(
 ):
   | Exclude<CallKind, { kind: "builder" | "array-method" | "cell-for" }>
   | undefined {
-  switch (name) {
+  const spec = COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME.get(name);
+  if (!spec || spec.category !== "call") {
+    return undefined;
+  }
+
+  switch (spec.callKind) {
     case "derive":
       return symbol ? { kind: "derive", symbol } : { kind: "derive" };
     case "ifElse":
@@ -729,26 +749,37 @@ function createNamedCallKind(
       return symbol ? { kind: "when", symbol } : { kind: "when" };
     case "unless":
       return symbol ? { kind: "unless", symbol } : { kind: "unless" };
-    case "cell":
+    case "cell-factory":
       return symbol
-        ? { kind: "cell-factory", symbol, factoryName: "cell" }
-        : { kind: "cell-factory", factoryName: "cell" };
+        ? { kind: "cell-factory", symbol, factoryName: name }
+        : { kind: "cell-factory", factoryName: name };
     case "wish":
       return symbol ? { kind: "wish", symbol } : { kind: "wish" };
-    case "generateText":
+    case "generate-text":
       return symbol
         ? { kind: "generate-text", symbol }
         : { kind: "generate-text" };
-    case "generateObject":
+    case "generate-object":
       return symbol
         ? { kind: "generate-object", symbol }
         : { kind: "generate-object" };
-    case "patternTool":
+    case "pattern-tool":
       return symbol
         ? { kind: "pattern-tool", symbol }
         : { kind: "pattern-tool" };
-    default:
-      return undefined;
+    case "runtime-call":
+      return symbol
+        ? {
+          kind: "runtime-call",
+          symbol,
+          exportName: name,
+          reactiveOrigin: spec.reactiveOrigin,
+        }
+        : {
+          kind: "runtime-call",
+          exportName: name,
+          reactiveOrigin: spec.reactiveOrigin,
+        };
   }
 }
 

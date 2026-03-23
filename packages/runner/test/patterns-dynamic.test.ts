@@ -569,10 +569,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isPositivePattern as any,
-          {},
-        ),
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
       };
     });
 
@@ -641,10 +642,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isPositivePattern as any,
-          {},
-        ),
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
       };
     });
 
@@ -739,10 +741,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isPositivePattern as any,
-          {},
-        ),
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
       };
     });
 
@@ -814,10 +817,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isPositivePattern as any,
-          {},
-        ),
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
       };
     });
 
@@ -873,10 +877,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isPositivePattern as any,
-          {},
-        ),
+        positives: (values as unknown as OpaqueCell<number[]>)
+          .filterWithPattern(
+            isPositivePattern as any,
+            {},
+          ),
       };
     });
 
