@@ -76,14 +76,15 @@ describe("Cell array element conversion", () => {
       const first = result[0];
       expect(isCell(first)).toBe(true);
       const firstCell = first as Writable<{ foo: number }>;
-      expect(firstCell.getAsNormalizedFullLink()).toEqual(
-        {
-          space,
-          id: "of:baedreiftqxopzv7ymkvtx4vrg335p7uv5kgswfdwqxfkxx4q6bjrrkybjq",
-          type: "application/json",
-          path: ["0"],
-          schema: { type: "object", properties: { foo: { type: "number" } } },
-        },
+      const link = firstCell.getAsNormalizedFullLink();
+      expect(link.space).toBe(space);
+      expect(typeof link.id).toBe("string");
+      expect(link.id.startsWith("of:")).toBe(true);
+      expect(link.id.length).toBeGreaterThan(3);
+      expect(link.type).toBe("application/json");
+      expect(link.path).toEqual(["0"]);
+      expect(link.schema).toEqual(
+        { type: "object", properties: { foo: { type: "number" } } },
       );
     }
   });

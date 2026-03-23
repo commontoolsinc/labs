@@ -670,6 +670,15 @@ describe("runPattern", () => {
   });
 
   it("should create separate copies of initial values for each pattern instance", async () => {
+    // Use a local runtime with modernDataModel OFF so getRaw() returns
+    // mutable objects (the legacy behavior this test was written for).
+    const sm = StorageManager.emulate({ as: signer });
+    const localRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+
     const pattern: Pattern = {
       argumentSchema: {
         type: "object",
@@ -705,11 +714,11 @@ describe("runPattern", () => {
     };
 
     // Create first instance
-    const result1Cell = runtime.getCell(
+    const result1Cell = localRuntime.getCell(
       space,
       "should create separate copies of initial values 1",
     );
-    const result1 = runtime.run(
+    const result1 = localRuntime.run(
       undefined,
       pattern,
       { input: 5 },
@@ -718,11 +727,11 @@ describe("runPattern", () => {
     await result1.pull();
 
     // Create second instance
-    const result2Cell = runtime.getCell(
+    const result2Cell = localRuntime.getCell(
       space,
       "should create separate copies of initial values 2",
     );
-    const result2 = runtime.run(
+    const result2 = localRuntime.run(
       undefined,
       pattern,
       { input: 10 },
@@ -746,6 +755,103 @@ describe("runPattern", () => {
     expect(internal2.nested.value).toBe("initial");
     const result2Value = await result2.pull() as any;
     expect(result2Value.nested.value).toBe("initial");
+
+    await localRuntime.storageManager.synced();
+    await localRuntime.dispose();
+    await sm.close();
+  });
+
+  it("should create separate copies of initial values (modern, frozen)", async () => {
+    // With modernDataModel ON, getRaw() returns frozen objects. Verify
+    // independence via getRawUntyped({ frozen: false }) for mutable access.
+    const sm = StorageManager.emulate({ as: signer });
+    const localRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true, modernHash: true },
+    });
+
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          counter: 10,
+          nested: { value: "initial" },
+        },
+      },
+      resultSchema: {},
+      result: {
+        counter: { $alias: { path: ["internal", "counter"] } },
+        nested: { $alias: { path: ["internal", "nested"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => {
+              return {
+                counter: args.input,
+              };
+            },
+          },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["internal", "counter"] } },
+        },
+      ],
+    };
+
+    // Create first instance
+    const result1Cell = localRuntime.getCell(
+      space,
+      "separate copies modern 1",
+    );
+    const result1 = localRuntime.run(
+      undefined,
+      pattern,
+      { input: 5 },
+      result1Cell,
+    );
+    await result1.pull();
+
+    // Create second instance
+    const result2Cell = localRuntime.getCell(
+      space,
+      "separate copies modern 2",
+    );
+    const result2 = localRuntime.run(
+      undefined,
+      pattern,
+      { input: 10 },
+      result2Cell,
+    );
+    await result2.pull();
+
+    // Use getRawUntyped({ frozen: false }) for mutable copies
+    const raw1 = result1.getSourceCell()?.getRawUntyped({
+      frozen: false,
+    }) as any;
+    const raw2 = result2.getSourceCell()?.getRawUntyped({
+      frozen: false,
+    }) as any;
+
+    // Verify they are different objects
+    expect(raw1.internal).not.toBe(raw2.internal);
+    expect(raw1.internal.nested).not.toBe(raw2.internal.nested);
+
+    // Modify nested object in first instance's mutable copy
+    raw1.internal.nested.value = "modified";
+
+    // Verify second instance is unaffected
+    expect(raw2.internal.nested.value).toBe("initial");
+
+    await localRuntime.storageManager.synced();
+    await localRuntime.dispose();
+    await sm.close();
   });
 });
 

@@ -424,10 +424,11 @@ describe("frozen proxy target: legacy behavior with modernDataModel OFF", () => 
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    // No experimental flags -- modernDataModel defaults to false.
+    // Explicitly set modernDataModel OFF for legacy behavior test.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      experimental: { modernDataModel: false },
     });
     tx = runtime.edit();
   });

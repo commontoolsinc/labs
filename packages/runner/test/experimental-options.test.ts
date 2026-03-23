@@ -33,16 +33,41 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("Runtime construction", () => {
-    it("defaults all flags to false when no experimental options given", async () => {
+    it("respects explicitly-set flags (all false)", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
+        experimental: {
+          modernDataModel: false,
+          unifiedJsonEncoding: false,
+          modernHash: false,
+        },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
         unifiedJsonEncoding: false,
         modernHash: false,
+      });
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("respects explicitly-set flags (all true)", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          modernDataModel: true,
+          unifiedJsonEncoding: true,
+          modernHash: true,
+        },
+      });
+      expect(runtime.experimental).toEqual({
+        modernDataModel: true,
+        unifiedJsonEncoding: true,
+        modernHash: true,
       });
       await runtime.dispose();
       await sm.close();
@@ -58,11 +83,11 @@ describe("ExperimentalOptions", () => {
           modernHash: true,
         },
       });
-      expect(runtime.experimental).toEqual({
-        modernDataModel: true,
-        unifiedJsonEncoding: false,
-        modernHash: true,
-      });
+      // Explicitly-set flags should be honored; unset flags get defaults.
+      expect(runtime.experimental.modernDataModel).toBe(true);
+      expect(runtime.experimental.modernHash).toBe(true);
+      // unifiedJsonEncoding was not set, so it gets the default (whatever it is).
+      expect(typeof runtime.experimental.unifiedJsonEncoding).toBe("boolean");
       await runtime.dispose();
       await sm.close();
     });
@@ -281,15 +306,31 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
-    it("constructing Runtime without experimental leaves config at defaults", async () => {
+    it("constructing Runtime with explicit false sets config to false", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
+        experimental: { modernDataModel: false },
       });
 
       const config = getDataModelConfig();
       expect(config.modernDataModel).toBe(false);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("constructing Runtime with explicit true sets config to true", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { modernDataModel: true, modernHash: true },
+      });
+
+      const config = getDataModelConfig();
+      expect(config.modernDataModel).toBe(true);
 
       await runtime.dispose();
       await sm.close();

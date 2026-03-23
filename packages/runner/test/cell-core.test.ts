@@ -146,12 +146,19 @@ describe("Cell", () => {
     expect(result?.arr.length).toBe(3);
   });
 
-  it("should preserve shared sparse arrays and preserve sharing", () => {
-    const c = runtime.getCell<unknown>(
+  it("should preserve shared sparse arrays and preserve sharing (legacy)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should preserve shared sparse arrays and preserve sharing",
+      "sparse sharing legacy",
       undefined,
-      tx,
+      localTx,
     );
     const sparse: unknown[] = [];
     sparse[0] = 1;
@@ -166,8 +173,45 @@ describe("Cell", () => {
     expect(2 in (result?.[0] ?? [])).toBe(false);
     expect(result?.[0][3]).toBe(2);
     expect(result?.[0].length).toBe(4);
-    // Both should reference the same array (sharing preserved)
+    // With modernDataModel OFF, both should reference the same array
     expect(result?.[0]).toBe(result?.[1]);
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("should preserve shared sparse arrays with structural equality (modern)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true, modernHash: true },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
+      space,
+      "sparse sharing modern",
+      undefined,
+      localTx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = 1;
+    sparse[3] = 2; // holes at indices 1 and 2
+    // Same sparse array referenced twice
+    c.set([sparse, sparse]);
+
+    const result = c.get() as unknown[][] | undefined;
+    // Both should preserve holes
+    expect(result?.[0][0]).toBe(1);
+    expect(1 in (result?.[0] ?? [])).toBe(false);
+    expect(2 in (result?.[0] ?? [])).toBe(false);
+    expect(result?.[0][3]).toBe(2);
+    expect(result?.[0].length).toBe(4);
+    // With modernDataModel ON, both should be structurally equal
+    expect(result?.[0]).toEqual(result?.[1]);
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {
@@ -268,15 +312,29 @@ describe("Cell", () => {
     );
   });
 
-  it("should throw when setting BigInt", () => {
-    const c = runtime.getCell<unknown>(
+  it("should throw when setting BigInt with modernDataModel OFF", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should throw when setting BigInt",
+      "should throw when setting BigInt legacy",
       undefined,
-      tx,
+      localTx,
     );
     expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
+
+  // Note: A complementary test for BigInt with modernDataModel ON is deferred.
+  // The cell layer accepts BigInt, but the storage layer's JSON.stringify
+  // cannot serialize it yet, causing an uncaught async error.
 
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
