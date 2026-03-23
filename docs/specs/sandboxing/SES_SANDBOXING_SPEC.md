@@ -378,7 +378,8 @@ Version 1 of the allowed domain is a deliberate subset of
 - `string`
 - `bigint`
 - arrays of allowed values
-- plain object records with allowed values
+- plain object records whose string-keyed or symbol-keyed own data properties
+  are allowed values
 - exact intrinsic `Map` instances whose keys and values are allowed values
 - exact intrinsic `Set` instances whose elements are allowed values
 
@@ -386,6 +387,13 @@ Future widening of this set beyond the above, including temporal primitives or
 other richer `StorableValue` members, requires an explicit spec revision and
 validator version bump. The v1 verifier MUST NOT silently widen with upstream
 `StorableValue` changes.
+
+This boundary is about executable behavior and authority, not about forcing
+author data into a JSON-like normal form. Sparse arrays, symbol keys, cyclic
+graphs, reserved property names, non-finite numbers, and extra own data
+properties are not security failures by themselves and MUST NOT be rejected
+solely for shape reasons if the runtime can preserve and freeze them without
+invoking user-defined behavior.
 
 The default rejected domain includes:
 
@@ -396,11 +404,7 @@ The default rejected domain includes:
 - class instances
 - `Map` / `Set` subclasses
 - proxies
-- objects with symbol keys
 - objects with accessors
-- sparse arrays
-- cyclic object graphs
-- records with reserved keys such as `__proto__`, `constructor`, or `prototype`
 - platform capability objects
 
 Externally observable module-load side effects are disallowed except for
@@ -997,6 +1001,11 @@ This spec introduces a runtime helper dedicated to non-function top-level
 values:
 
 ```typescript
+interface ModuleSafeRecordV1 {
+  [key: string]: ModuleSafeValueV1;
+  [key: symbol]: ModuleSafeValueV1;
+}
+
 type ModuleSafeValueV1 =
   | null
   | undefined
@@ -1005,7 +1014,7 @@ type ModuleSafeValueV1 =
   | string
   | bigint
   | ModuleSafeValueV1[]
-  | { [key: string]: ModuleSafeValueV1 }
+  | ModuleSafeRecordV1
   | ReadonlyMap<ModuleSafeValueV1, ModuleSafeValueV1>
   | ReadonlySet<ModuleSafeValueV1>;
 
@@ -1020,26 +1029,33 @@ function freezeVerifiedPlainData<T>(value: T): T {
 }
 ```
 
+The type sketch above is illustrative rather than exhaustive for JavaScript
+edge cases. Runtime acceptance may still include cyclic graphs, sparse arrays,
+symbol-keyed properties, extra own data properties, and non-finite numbers so
+long as the surviving value remains inert and freezable.
+
 `assertPlainData()` MUST validate structure without triggering user-defined
 behavior. In particular, the checker must:
 
 - inspect own property descriptors before reading property values
 - reject accessor properties without invoking getters
-- reject symbol keys
-- reject any object whose prototype is neither `Object.prototype`, `null`,
-  `Map.prototype`, nor `Set.prototype`
-- reject arrays with holes or extra own properties
-- reject `Map` / `Set` subclasses and reject extra own properties on collection
-  instances
+- reject proxies or other exotic objects that cannot be inspected and frozen
+  without invoking user-defined behavior
+- reject any object whose runtime kind is neither a plain object, an array, an
+  exact intrinsic `Map`, nor an exact intrinsic `Set`
 - recursively validate `Map` keys and values and `Set` values
-- reject cycles in v1
-- reject reserved keys such as `__proto__`, `constructor`, and `prototype`
 - reject any `StorableValue` members outside the approved v1 subset
+- allow shape-level cases such as sparse arrays, symbol keys, cycles, reserved
+  property names, non-finite numbers, and extra own data properties if they can
+  be preserved and frozen without introducing executable behavior
 
 `freezeVerifiedPlainData()` MUST preserve the accepted `Map` / `Set` contents
 while removing mutability from the surviving collection object. A plain
 `harden(new Map(...))` or `harden(new Set(...))` is insufficient because those
-mutators remain callable.
+mutators remain callable. The freezer MAY preserve sparse arrays, symbol-keyed
+properties, cyclic graphs, non-finite numbers, reserved property names, and
+extra own data properties; those are semantic/storage concerns, not sandboxing
+concerns, so long as the resulting graph is inert.
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is
@@ -1783,11 +1799,13 @@ fail closed.
 Implement a runtime helper that proves a value is a versioned, recursively inert
 subset of `StorableValue` and then hardens it. This helper is stricter than
 `harden()` alone and stricter than Endo pass-style checks. It must inspect
-descriptors without triggering getters and reject cycles, symbol keys, exotic
-prototypes, reserved keys, and all non-approved `StorableValue` members. It
-must also preserve accepted `Map` / `Set` contents while converting the
-surviving collection object to immutable semantics rather than relying on
-`harden()` alone.
+descriptors without triggering getters and reject executable or authority-bearing
+structures such as accessors, proxies, exotic/custom prototypes, and all
+non-approved `StorableValue` members. It must also preserve accepted `Map` /
+`Set` contents while converting the surviving collection object to immutable
+semantics rather than relying on `harden()` alone. Shape-level cases such as
+cycles, symbol keys, sparse arrays, reserved property names, non-finite
+numbers, and extra own data properties are not sandbox failures by themselves.
 
 **Likely files:**
 - new `packages/runner/src/sandbox/plain-data.ts`
@@ -1972,6 +1990,31 @@ describe('SES Sandbox Security', () => {
     await expect(loadPattern(pattern)).rejects.toThrow();
   });
 
+  it('accepts inert non-canonical JS data shapes', async () => {
+    const pattern = `
+      export const DATA = freezeVerifiedPlainData((() => {
+        const tag = Symbol('tag');
+        const list = [1, , 3];
+        list[tag] = NaN;
+        list.meta = Infinity;
+
+        const root = { list };
+        root.self = root;
+        return root;
+      })());
+    `;
+
+    const compartment = await loadPattern(pattern);
+    const data = compartment.exports.get('DATA');
+    const symbols = Object.getOwnPropertySymbols(data.list);
+
+    expect(data.self).toBe(data);
+    expect(1 in data.list).toBe(false);
+    expect(symbols.length).toBe(1);
+    expect(Number.isNaN(data.list[symbols[0]])).toBe(true);
+    expect(data.list.meta).toBe(Infinity);
+  });
+
   it('accepts immutable Map and Set module-safe data', async () => {
     const pattern = `
       const LOOKUP = freezeVerifiedPlainData(new Map([
@@ -2143,8 +2186,6 @@ Potential escape routes and their status:
 | Prototype access | Blocked | Frozen prototypes |
 | ambient `fetch` | Blocked in v1 | Not injected into authored module Compartment globals |
 | `globalThis` | Controlled | Custom minimal Compartment globals |
-| `__proto__` | Blocked | Frozen Object.prototype |
-| `constructor` | Blocked | Frozen constructors |
 
 ---
 
