@@ -230,6 +230,126 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   });
 });
 
+Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
+  await t.step(
+    "errors on early return in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ flag: boolean }>(({ flag }) => {
+        if (flag) {
+          return "yes";
+        }
+        return "no";
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:early-return");
+    },
+  );
+
+  await t.step(
+    "allows early return inside computed callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ flag: boolean }>(({ flag }) => {
+        return computed(() => {
+          if (flag) {
+            return "yes";
+          }
+          return "no";
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() callbacks should retain their own control-flow semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on reassignment in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      let lastSeen = "";
+
+      export default pattern<{ name: string }>(({ name }) => {
+        lastSeen = name;
+        return lastSeen;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:assignment");
+    },
+  );
+
+  await t.step(
+    "allows reassignment inside computed callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        const next = computed(() => {
+          let total = 0;
+          total = count + 1;
+          return total;
+        });
+        return next;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() callbacks should still allow local reassignment",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on var declaration in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        var display = count;
+        return display;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:var-declaration");
+    },
+  );
+});
+
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step("allows reading opaques inside computed()", async () => {
     const source = `/// <cts-enable />

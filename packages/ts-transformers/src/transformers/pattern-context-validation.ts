@@ -36,6 +36,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
   detectDirectBuilderCall,
@@ -83,6 +84,10 @@ export class PatternContextValidationTransformer extends Transformer {
           this.isComputedLikeCallback(node, checker)
         ) {
           this.validateLocalReactiveAliasUsage(node, context);
+        }
+
+        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+          this.validateSupportedPatternStatements(node, context, checker);
         }
       }
 
@@ -384,6 +389,106 @@ export class PatternContextValidationTransformer extends Transformer {
           ts.isElementAccessExpression(parent)) &&
         parent.expression === node
       );
+  }
+
+  /**
+   * Validates statement-level constructs in top-level pattern/render callbacks.
+   * For now, the supported subset is intentionally narrow:
+   * - a single terminal return statement
+   * - no reassignment
+   * - no var declarations
+   *
+   * We scope this to authored pattern/render callback bodies only, not safe
+   * wrappers or array-method callbacks, so we can tighten the language boundary
+   * incrementally without breaking callback-local compute patterns.
+   */
+  private validateSupportedPatternStatements(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isBlock(func.body)) return;
+
+    const bodyContext = classifyReactiveContext(func.body, checker, context);
+    if (
+      bodyContext.kind !== "pattern" ||
+      (bodyContext.owner !== "pattern" && bodyContext.owner !== "render")
+    ) {
+      return;
+    }
+
+    const lastStatement = func.body.statements.at(-1);
+    const diagnosticsSeen = new Set<number>();
+    const reportOnce = (
+      node: ts.Node,
+      type:
+        | "pattern-context:assignment"
+        | "pattern-context:early-return"
+        | "pattern-context:var-declaration",
+      message: string,
+    ) => {
+      const start = node.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(start)) return;
+      diagnosticsSeen.add(start);
+      context.reportDiagnostic({
+        severity: "error",
+        type,
+        message,
+        node,
+      });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isReturnStatement(node)) {
+        const isTerminalReturn = node.parent === func.body && node === lastStatement;
+        if (!isTerminalReturn) {
+          reportOnce(
+            node,
+            "pattern-context:early-return",
+            `Early returns are not supported in pattern bodies. ` +
+              `Use a single terminal return statement and move conditional branching into expressions or helper wrappers.`,
+          );
+        }
+        return;
+      }
+
+      if (
+        ts.isVariableDeclarationList(node) &&
+        (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:var-declaration",
+          `var declarations are not supported in pattern bodies. ` +
+            `Use const, or move mutable logic into computed(), derive(), or a module-scope helper.`,
+        );
+      }
+
+      if (
+        ts.isBinaryExpression(node) &&
+        this.isAssignmentOperator(node.operatorToken.kind)
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:assignment",
+          `Reassignment is not supported in pattern bodies. ` +
+            `Use straight-line data construction, or move mutable logic into computed(), derive(), or a helper.`,
+        );
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(func.body);
+  }
+
+  private isAssignmentOperator(kind: ts.SyntaxKind): boolean {
+    return kind >= ts.SyntaxKind.FirstAssignment &&
+      kind <= ts.SyntaxKind.LastAssignment;
   }
 
   /**
