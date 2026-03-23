@@ -10,8 +10,7 @@
  * replaced by canonical hashing (via `modernHash`) behind a flag.
  */
 
-import type { JSONSchema } from "@commontools/api";
-import type { SchemaPathSelector } from "./interface.ts";
+import type { JSONSchema, SchemaPathSelector } from "@commontools/api";
 
 const _hashCache = new WeakMap<object, string>();
 

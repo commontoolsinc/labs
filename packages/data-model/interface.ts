@@ -289,9 +289,3 @@ export interface ExperimentalDataModelConfig {
    *  (bigint, Map, Set, Uint8Array, Date, etc.). */
   modernDataModel: boolean;
 }
-
-// ===========================================================================
-// Schema path selector (canonical definition in @commontools/api)
-// ===========================================================================
-
-export type { SchemaPathSelector } from "@commontools/api";
