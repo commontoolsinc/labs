@@ -484,7 +484,7 @@ async function setupMapScenario(
   const mapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: (values as any).mapWithPattern(doublePattern as any, {}),
     }),
     numberListInputSchema,
     mappedResultSchema,
@@ -532,7 +532,7 @@ async function setupFilterScenario(
   const filterPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: (values as any).filterWithPattern(filterPatternFn as any, {}),
     }),
     numberListInputSchema,
     filteredResultSchema,
@@ -580,7 +580,7 @@ async function setupFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: (values as any).flatMapWithPattern(flatMapPatternFn as any, {}),
     }),
     numberListInputSchema,
     flatMappedResultSchema,
@@ -624,7 +624,7 @@ async function setupObjectMapScenario(
   const mapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      mapped: values.mapWithPattern(doublePattern as any, {}),
+      mapped: (values as any).mapWithPattern(doublePattern as any, {}),
     }),
     numberObjectListInputSchema,
     mappedResultSchema,
@@ -673,7 +673,7 @@ async function setupObjectFilterScenario(
   const filterPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      filtered: values.filterWithPattern(filterPatternFn as any, {}),
+      filtered: (values as any).filterWithPattern(filterPatternFn as any, {}),
     }),
     numberObjectListInputSchema,
     filteredResultSchema,
@@ -722,7 +722,7 @@ async function setupObjectFlatMapScenario(
   const flatMapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
       // deno-lint-ignore no-explicit-any
-      flat: values.flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: (values as any).flatMapWithPattern(flatMapPatternFn as any, {}),
     }),
     numberObjectListInputSchema,
     flatMappedResultSchema,

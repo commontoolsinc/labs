@@ -3,6 +3,7 @@ import {
   getCellKind,
   isOpaqueRefType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isReactiveValueExpression } from "../ast/call-kind.ts";
 import type { ReactiveContextKind } from "../ast/reactive-context.ts";
 import type { ExpressionContainerKind } from "../transformers/expression-site-types.ts";
 
@@ -12,20 +13,23 @@ export type ReactiveReceiverKind =
   | "celllike_requires_rewrite";
 
 export function classifyReactiveReceiverKind(
+  expression: ts.Expression,
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
 ): ReactiveReceiverKind {
-  if (!type || !isOpaqueRefType(type, checker)) {
-    return "plain";
+  if (type && isOpaqueRefType(type, checker)) {
+    const kind = getCellKind(type, checker);
+    if (kind === "cell" || kind === "stream") {
+      return "celllike_requires_rewrite";
+    }
+
+    // Opaque values auto-unwrap in compute callbacks.
+    return "opaque_autounwrapped";
   }
 
-  const kind = getCellKind(type, checker);
-  if (kind === "cell" || kind === "stream") {
-    return "celllike_requires_rewrite";
-  }
-
-  // Opaque values auto-unwrap in compute callbacks.
-  return "opaque_autounwrapped";
+  return isReactiveValueExpression(expression, checker)
+    ? "opaque_autounwrapped"
+    : "plain";
 }
 
 export function shouldLowerLogicalExpression(

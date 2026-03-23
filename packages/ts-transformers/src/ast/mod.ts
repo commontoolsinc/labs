@@ -3,6 +3,9 @@ export {
   detectCallKind,
   detectDirectBuilderCall,
   isReactiveOriginCall,
+  isReactiveValueExpression,
+  isReactiveValueSymbol,
+  isSimpleReactiveAccessExpression,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

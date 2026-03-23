@@ -3,11 +3,11 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
+  isSimpleReactiveAccessExpression,
   normalizeDataFlows,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createComputedCallForExpression,
@@ -90,7 +90,7 @@ export const emitConditionalExpression: Emitter = ({
     expression.condition,
   );
   const shouldDerivePredicate = predicateDataFlows.length > 0 &&
-    !isSimpleOpaqueRefAccess(expression.condition, context.checker);
+    !isSimpleReactiveAccessExpression(expression.condition, context.checker);
 
   let predicate: ts.Expression = expression.condition;
   if (shouldDerivePredicate) {

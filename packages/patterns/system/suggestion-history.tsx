@@ -62,13 +62,14 @@ const SuggestionHistory = pattern<Input, Output>(() => {
   const { result: entries } = wish<Default<SuggestionHistoryEntry[], []>>({
     query: "#suggestions",
   });
+  const allEntries = computed(() => entries ?? []);
 
   return {
     [NAME]: "Suggestion History",
     [UI]: (
       <ct-screen>
         <ct-grid columns="3" gap="4" padding="4">
-          {entries.map((entry: SuggestionHistoryEntry) => (
+          {allEntries.map((entry: SuggestionHistoryEntry) => (
             <div
               style={{
                 border: "1px solid var(--ct-color-border, #e5e5e7)",
@@ -112,8 +113,8 @@ const SuggestionHistory = pattern<Input, Output>(() => {
         </ct-grid>
       </ct-screen>
     ),
-    entries,
-    search: patternTool(searchPattern, { entries }),
+    entries: allEntries,
+    search: patternTool(searchPattern, { entries: allEntries }),
   };
 });
 

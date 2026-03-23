@@ -9,7 +9,11 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { detectCallKind, isReactiveOriginCall } from "./call-kind.ts";
+import {
+  detectCallKind,
+  isReactiveValueExpression,
+  isReactiveValueSymbol,
+} from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
@@ -281,117 +285,11 @@ export function createDataFlowAnalyzer(
       }
     };
 
-    const getOpaqueParameterCallKind = (
-      symbol: ts.Symbol | undefined,
-    ): "builder" | "array-method" | undefined => {
-      if (!symbol) return undefined;
-      const declarations = symbol.getDeclarations();
-      if (!declarations) return undefined;
-      for (const declaration of declarations) {
-        // Walk up from BindingElements to find the enclosing Parameter
-        let paramNode: ts.Node = declaration;
-        while (
-          ts.isBindingElement(paramNode) ||
-          ts.isObjectBindingPattern(paramNode) ||
-          ts.isArrayBindingPattern(paramNode)
-        ) {
-          paramNode = paramNode.parent;
-        }
-        if (!ts.isParameter(paramNode)) continue;
-        let functionNode: ts.Node | undefined = paramNode.parent;
-        while (functionNode && !ts.isFunctionLike(functionNode)) {
-          functionNode = functionNode.parent;
-        }
-        if (!functionNode) continue;
-        let candidate: ts.Node | undefined = functionNode.parent;
-        while (candidate && !ts.isCallExpression(candidate)) {
-          candidate = candidate.parent;
-        }
-        if (!candidate) continue;
-        const callExpression = candidate as ts.CallExpression;
-        const callKind = detectCallKind(callExpression, checker);
-        if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
-          return callKind.kind;
-        }
-      }
-      return undefined;
-    };
-
-    const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean =>
-      getOpaqueParameterCallKind(symbol) !== undefined;
-
-    /** Check if a symbol is a local variable initialized from a reactive call
-     *  (e.g. `const bar = computed(...)`, `const items = wish(...).result!`).
-     *  Walks through NonNull, property access, and type assertions to find
-     *  the underlying call expression. */
-    const isVariableFromReactiveCall = (
-      symbol: ts.Symbol | undefined,
-    ): boolean => {
-      if (!symbol) return false;
-      const declarations = symbol.getDeclarations();
-      if (!declarations) return false;
-      for (const decl of declarations) {
-        let initExpr: ts.Expression | undefined;
-        if (ts.isVariableDeclaration(decl) && decl.initializer) {
-          initExpr = decl.initializer;
-        } else if (ts.isBindingElement(decl)) {
-          // Walk up from BindingElement to the VariableDeclaration
-          let parent: ts.Node = decl;
-          while (
-            ts.isBindingElement(parent) ||
-            ts.isObjectBindingPattern(parent) ||
-            ts.isArrayBindingPattern(parent)
-          ) {
-            parent = parent.parent;
-          }
-          if (ts.isVariableDeclaration(parent) && parent.initializer) {
-            initExpr = parent.initializer;
-          }
-        }
-        if (!initExpr) continue;
-        // Walk through wrappers to find the call expression
-        let current: ts.Expression = initExpr;
-        while (true) {
-          if (
-            ts.isNonNullExpression(current) ||
-            ts.isParenthesizedExpression(current) ||
-            ts.isAsExpression(current) ||
-            ts.isTypeAssertionExpression(current)
-          ) {
-            current = current.expression;
-            continue;
-          }
-          if (ts.isPropertyAccessExpression(current)) {
-            current = current.expression;
-            continue;
-          }
-          break;
-        }
-        if (
-          ts.isCallExpression(current) && isReactiveOriginCall(current, checker)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const isImplicitOpaqueRefExpression = (
-      expr: ts.Expression,
-    ): boolean => {
-      const root = findRootIdentifier(expr);
-      if (!root) return false;
-      const symbol = tryGetSymbol(root);
-      return isRootOpaqueParameter(symbol) ||
-        isVariableFromReactiveCall(symbol);
-    };
-
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
       const aggregated = getAggregatedSymbols(scope, context.scopes);
       if (
-        aggregated.has(symbol) &&
-        (isRootOpaqueParameter(symbol) || isVariableFromReactiveCall(symbol))
+        aggregated.has(symbol) && isReactiveValueSymbol(symbol, checker)
       ) {
         return false;
       }
@@ -446,7 +344,10 @@ export function createDataFlowAnalyzer(
       }
 
       const type = tryGetType(expression);
-      if (type && isOpaqueRefType(type, checker)) {
+      if (
+        (type && isOpaqueRefType(type, checker)) ||
+        isReactiveValueExpression(expression, checker)
+      ) {
         recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
           containsOpaqueRef: true,
@@ -464,24 +365,6 @@ export function createDataFlowAnalyzer(
       }
       // Check if this identifier is a parameter to a builder or array-map call (like pattern)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
-      if (isRootOpaqueParameter(symbol)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
-        return {
-          containsOpaqueRef: true,
-          requiresRewrite: false,
-          dataFlows: [expression],
-        };
-      }
-      // Check if this identifier is a variable assigned from a reactive call
-      // (e.g. const bar = computed(...), const items = wish(...).result!)
-      if (isVariableFromReactiveCall(symbol)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: reactive call result
-        return {
-          containsOpaqueRef: true,
-          requiresRewrite: false,
-          dataFlows: [expression],
-        };
-      }
       return emptyAnalysis();
     }
 
@@ -527,7 +410,7 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
-      if (isImplicitOpaqueRefExpression(expression)) {
+      if (isReactiveValueExpression(expression, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -540,16 +423,15 @@ export function createDataFlowAnalyzer(
 
         // If the target is a complex expression requiring rewrite (ElementAccess or Call),
         // propagate its dataFlows. Otherwise add this property access as a dataFlow.
-        if (
-          isPropertyOnCall ||
-          (target.requiresRewrite && target.dataFlows.length > 0)
-        ) {
+        if (isPropertyOnCall || target.requiresRewrite) {
           // This is a computed expression - use the dependencies from the target
           recordDataFlow(expression, scope, parentId, false);
           return {
             containsOpaqueRef: true,
             requiresRewrite: true,
-            dataFlows: target.dataFlows,
+            dataFlows: target.dataFlows.length > 0
+              ? target.dataFlows
+              : [expression],
           };
         }
 
@@ -558,7 +440,7 @@ export function createDataFlowAnalyzer(
         recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
-          requiresRewrite: true,
+          requiresRewrite: false,
           dataFlows: [expression],
         };
       }
@@ -569,9 +451,8 @@ export function createDataFlowAnalyzer(
         if (root && ts.isIdentifier(root)) {
           const rootSymbol = tryGetSymbol(root);
           if (rootSymbol) {
-            // Root symbol found - check if it's from builder/array-map
-            const callKind = getOpaqueParameterCallKind(rootSymbol);
-            if (callKind) {
+            // Root symbol found - check if it's structurally reactive.
+            if (isReactiveValueSymbol(rootSymbol, checker)) {
               // This is element.price or similar - treat as opaque property access
               const parentId =
                 context.expressionToNodeId.get(expression.expression) ?? null;
@@ -638,7 +519,7 @@ export function createDataFlowAnalyzer(
       }
 
       if (
-        isImplicitOpaqueRefExpression(expression.expression) &&
+        isReactiveValueExpression(expression.expression, checker) &&
         target.dataFlows.length === 0
       ) {
         if (originatesFromIgnored(expression.expression)) {

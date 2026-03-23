@@ -137,7 +137,8 @@ function createsReactiveCollectionInPlace(
     context.options.logger,
   );
   if (
-    classifyReactiveReceiverKind(currentType, context.checker) !== "plain"
+    classifyReactiveReceiverKind(current, currentType, context.checker) ===
+      "celllike_requires_rewrite"
   ) {
     return true;
   }
@@ -294,6 +295,7 @@ function shouldTransformArrayMethod(
     context.options.logger,
   );
   const receiverKind = classifyReactiveReceiverKind(
+    mapTarget,
     targetType,
     context.checker,
   );
@@ -568,7 +570,9 @@ function isReactiveMapOrigin(
     context.options.typeRegistry,
     context.options.logger,
   );
-  if (classifyReactiveReceiverKind(type, context.checker) !== "plain") {
+  if (
+    classifyReactiveReceiverKind(current, type, context.checker) !== "plain"
+  ) {
     return true;
   }
 

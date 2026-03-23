@@ -79,6 +79,7 @@ const COMMONTOOLS_CALL_NAMES = new Set([
   "unless",
   "cell",
   "wish",
+  "generateText",
   "generateObject",
   "patternTool",
 ]);
@@ -93,6 +94,7 @@ export type CallKind =
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
+  | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
   | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
@@ -101,6 +103,7 @@ const REACTIVE_ORIGIN_CALL_KINDS = new Set<CallKind["kind"]>([
   "cell-factory",
   "cell-for",
   "derive",
+  "generate-text",
   "generate-object",
   "ifElse",
   "unless",
@@ -134,6 +137,77 @@ export function isReactiveOriginCall(
 ): boolean {
   const callKind = detectCallKind(call, checker);
   return !!callKind && REACTIVE_ORIGIN_CALL_KINDS.has(callKind.kind);
+}
+
+export function isReactiveValueSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  return !!getImplicitReactiveParameterCallKind(symbol, checker) ||
+    isVariableFromReactiveCallSymbol(symbol, checker);
+}
+
+export function isReactiveValueExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(expression);
+
+  try {
+    const type = checker.getTypeAtLocation(target);
+    if (isOpaqueRefType(type, checker)) {
+      return true;
+    }
+  } catch {
+    // Fall through to structural analysis.
+  }
+
+  if (ts.isIdentifier(target)) {
+    return isReactiveValueSymbol(checker.getSymbolAtLocation(target), checker);
+  }
+
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    return isReactiveValueExpression(target.expression, checker);
+  }
+
+  if (ts.isCallExpression(target)) {
+    if (isReactiveOriginCall(target, checker)) {
+      return true;
+    }
+    return isLoweredReactiveArrayMethodCall(target, checker);
+  }
+
+  return false;
+}
+
+export function isSimpleReactiveAccessExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(expression);
+
+  if (ts.isIdentifier(target)) {
+    return isReactiveValueExpression(target, checker);
+  }
+
+  if (ts.isPropertyAccessExpression(target)) {
+    return isSimpleReactiveAccessExpression(target.expression, checker);
+  }
+
+  if (ts.isElementAccessExpression(target)) {
+    const argument = target.argumentExpression;
+    return !!argument &&
+      (
+        ts.isLiteralExpression(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument)
+      ) &&
+      isSimpleReactiveAccessExpression(target.expression, checker);
+  }
+
+  return false;
 }
 
 function resolveExpressionKind(
@@ -179,8 +253,10 @@ function resolveExpressionKind(
     if (ARRAY_METHOD_NAMES.has(name)) {
       // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
       // Plain Array.prototype methods should not be treated as reactive.
-      const receiverType = checker.getTypeAtLocation(target.expression);
-      if (isOpaqueRefType(receiverType, checker)) {
+      if (
+        isReactiveValueExpression(target.expression, checker) ||
+        isReactiveArrayMethodChain(target.expression, checker)
+      ) {
         return { kind: "array-method" };
       }
     }
@@ -218,6 +294,123 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
   }
 
   return current;
+}
+
+function stripInitializerAccess(expression: ts.Expression): ts.Expression {
+  let current = stripWrappers(expression);
+
+  while (true) {
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = stripWrappers(current.expression);
+      continue;
+    }
+    break;
+  }
+
+  return current;
+}
+
+function isReactiveArrayMethodChain(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(expression);
+  return ts.isCallExpression(target) &&
+    detectCallKind(target, checker)?.kind === "array-method";
+}
+
+function isLoweredReactiveArrayMethodCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(call.expression);
+  return ts.isPropertyAccessExpression(target) &&
+    target.name.text.endsWith("WithPattern") &&
+    detectCallKind(call, checker)?.kind === "array-method";
+}
+
+function getImplicitReactiveParameterCallKind(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): "builder" | "array-method" | undefined {
+  if (!symbol) return undefined;
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return undefined;
+
+  for (const declaration of declarations) {
+    let paramNode: ts.Node = declaration;
+    while (
+      ts.isBindingElement(paramNode) ||
+      ts.isObjectBindingPattern(paramNode) ||
+      ts.isArrayBindingPattern(paramNode)
+    ) {
+      paramNode = paramNode.parent;
+    }
+    if (!ts.isParameter(paramNode)) continue;
+
+    let functionNode: ts.Node | undefined = paramNode.parent;
+    while (functionNode && !ts.isFunctionLike(functionNode)) {
+      functionNode = functionNode.parent;
+    }
+    if (!functionNode) continue;
+
+    let candidate: ts.Node | undefined = functionNode.parent;
+    while (candidate && !ts.isCallExpression(candidate)) {
+      candidate = candidate.parent;
+    }
+    if (!candidate) continue;
+
+    const callKind = detectCallKind(candidate as ts.CallExpression, checker);
+    if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
+      return callKind.kind;
+    }
+  }
+
+  return undefined;
+}
+
+function isVariableFromReactiveCallSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!symbol) return false;
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return false;
+
+  for (const decl of declarations) {
+    let initExpr: ts.Expression | undefined;
+    if (ts.isVariableDeclaration(decl) && decl.initializer) {
+      initExpr = decl.initializer;
+    } else if (ts.isBindingElement(decl)) {
+      let parent: ts.Node = decl;
+      while (
+        ts.isBindingElement(parent) ||
+        ts.isObjectBindingPattern(parent) ||
+        ts.isArrayBindingPattern(parent)
+      ) {
+        parent = parent.parent;
+      }
+      if (ts.isVariableDeclaration(parent) && parent.initializer) {
+        initExpr = parent.initializer;
+      }
+    }
+    if (!initExpr) continue;
+
+    const current = stripInitializerAccess(initExpr);
+    if (!ts.isCallExpression(current)) continue;
+
+    if (
+      isReactiveOriginCall(current, checker) ||
+      isLoweredReactiveArrayMethodCall(current, checker)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function resolveBuilderExpressionKind(
@@ -542,6 +735,10 @@ function createNamedCallKind(
         : { kind: "cell-factory", factoryName: "cell" };
     case "wish":
       return symbol ? { kind: "wish", symbol } : { kind: "wish" };
+    case "generateText":
+      return symbol
+        ? { kind: "generate-text", symbol }
+        : { kind: "generate-text" };
     case "generateObject":
       return symbol
         ? { kind: "generate-object", symbol }

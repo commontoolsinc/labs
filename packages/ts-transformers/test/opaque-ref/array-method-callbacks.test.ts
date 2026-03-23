@@ -162,7 +162,7 @@ describe("OpaqueRef map callbacks", () => {
     assertStringIncludes(output, "), {})");
   });
 
-  it("lowers destructured array aliases in map callback bodies to key bindings", async () => {
+  it("lowers destructured array aliases in map callback bodies to key access", async () => {
     const output = await transformSource(DESTRUCTURE_ALIAS_LENGTH_SOURCE, {
       types: { "commontools.d.ts": commontools },
     });
@@ -172,7 +172,7 @@ describe("OpaqueRef map callbacks", () => {
       output,
       'spotPreferences = person.key("spotPreferences")',
     );
-    assertStringIncludes(output, 'length: spotPreferences.key("length")');
+    assertStringIncludes(output, 'spotPreferences.key("length") > 0');
   });
 
   it("derives map callback parameters and unary negations (capability-first)", async () => {

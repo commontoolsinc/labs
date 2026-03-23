@@ -11,7 +11,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
-import { isReactiveOriginCall } from "../ast/call-kind.ts";
+import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
 
 export class OpaqueGetValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -90,13 +90,14 @@ export class OpaqueGetValidationTransformer extends Transformer {
   }
 
   /**
-   * Check if an expression is reactive via structural analysis (not type-based).
-   * This handles cases where OpaqueRef<T> = T and the type loses its brand.
+   * Structural fallback for cases where OpaqueRef<T> = T and the brand is gone.
    *
-   * Important: this only infers reactivity from values produced by reactive
-   * calls, not from callback parameters to builder definitions. Builder
-   * callbacks keep their declared input semantics; only the values produced by
-   * invoking the resulting factories should be treated as structurally reactive.
+   * We intentionally only infer reactivity from:
+   * - pattern/render callback inputs
+   * - local variables initialized from reactive origin calls
+   *
+   * Lift/handler/action/derive callback parameters keep their declared cell
+   * semantics and must not be inferred as opaque from structure alone.
    */
   private isReactiveExpression(
     expr: ts.Expression,
@@ -107,15 +108,26 @@ export class OpaqueGetValidationTransformer extends Transformer {
       if (!symbol) return false;
 
       for (const decl of symbol.declarations ?? []) {
-        // Check if it's a variable initialized from a reactive call
+        if (
+          ts.isParameter(decl) && this.isPatternCallbackParameter(decl, checker)
+        ) {
+          return true;
+        }
+
         if (ts.isVariableDeclaration(decl) && decl.initializer) {
           if (this.isReactiveInitializer(decl.initializer, checker)) {
             return true;
           }
         }
 
-        // Check binding elements (destructured variables)
         if (ts.isBindingElement(decl)) {
+          const parameter = this.getOwningParameter(decl);
+          if (
+            parameter && this.isPatternCallbackParameter(parameter, checker)
+          ) {
+            return true;
+          }
+
           let parent: ts.Node = decl;
           while (
             ts.isBindingElement(parent) ||
@@ -133,17 +145,50 @@ export class OpaqueGetValidationTransformer extends Transformer {
       }
     }
 
-    // Property access on reactive expression
-    if (ts.isPropertyAccessExpression(expr)) {
+    if (
+      ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)
+    ) {
       return this.isReactiveExpression(expr.expression, checker);
     }
 
     return false;
   }
 
-  /**
-   * Check if an initializer expression comes from a reactive call.
-   */
+  private getOwningParameter(
+    node: ts.BindingElement,
+  ): ts.ParameterDeclaration | undefined {
+    let current: ts.Node = node;
+    while (
+      ts.isBindingElement(current) ||
+      ts.isObjectBindingPattern(current) ||
+      ts.isArrayBindingPattern(current)
+    ) {
+      current = current.parent;
+    }
+    return ts.isParameter(current) ? current : undefined;
+  }
+
+  private isPatternCallbackParameter(
+    param: ts.ParameterDeclaration,
+    checker: ts.TypeChecker,
+  ): boolean {
+    let functionNode: ts.Node | undefined = param.parent;
+    while (functionNode && !ts.isFunctionLike(functionNode)) {
+      functionNode = functionNode.parent;
+    }
+    if (!functionNode) return false;
+
+    let candidate: ts.Node | undefined = functionNode.parent;
+    while (candidate && !ts.isCallExpression(candidate)) {
+      candidate = candidate.parent;
+    }
+    if (!candidate) return false;
+
+    const callKind = detectCallKind(candidate as ts.CallExpression, checker);
+    return callKind?.kind === "builder" &&
+      (callKind.builderName === "pattern" || callKind.builderName === "render");
+  }
+
   private isReactiveInitializer(
     expr: ts.Expression,
     checker: ts.TypeChecker,
@@ -159,12 +204,16 @@ export class OpaqueGetValidationTransformer extends Transformer {
         current = current.expression;
         continue;
       }
-      if (ts.isPropertyAccessExpression(current)) {
+      if (
+        ts.isPropertyAccessExpression(current) ||
+        ts.isElementAccessExpression(current)
+      ) {
         current = current.expression;
         continue;
       }
       break;
     }
+
     return ts.isCallExpression(current) &&
       isReactiveOriginCall(current, checker);
   }
