@@ -690,7 +690,7 @@ Section 4.5.
 #### 1.4.12 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
-> genuinely implements `FabricInstance`, so `isFabricInstance()` returns `true` for
+> genuinely implements `FabricInstance`, so `instanceof FabricInstance` is `true` for
 > them. The serialization system dispatches all `FabricInstance` values through
 > a single `FabricInstanceHandler` path — no per-type branches. This gives the
 > serialization layer a uniform, simpler structure: it handles
@@ -874,8 +874,8 @@ export abstract class FabricInstance {
 > frozenness-management contract (clone-if-necessary, freeze-if-requested) in
 > one place. Subclasses implement only `shallowUnfrozenClone()` (the
 > type-specific copy logic) and `[DECONSTRUCT]` (the serialization state
-> extraction). The `isFabricInstance()` type guard (Section 2.6) uses
-> `instanceof FabricInstance` instead of a property-brand check.
+> extraction). Brand detection uses `instanceof FabricInstance` directly —
+> no type guard function is needed (see Section 2.6).
 
 ### 2.4 Class Protocol
 
@@ -937,17 +937,16 @@ export interface ReconstructionContext {
 
 ### 2.6 Brand Detection
 
-```typescript
-// file: packages/data-model/fabric-protocol.ts
+Because `FabricInstance` is an abstract class, the idiomatic brand check is
+`instanceof`:
 
-/**
- * Type guard: checks whether a value is a `FabricInstance`.
- * Uses `instanceof` against the abstract base class.
- */
-export function isFabricInstance(value: unknown): value is FabricInstance {
-  return value instanceof FabricInstance;
+```typescript
+if (value instanceof FabricInstance) {
+  // value is a FabricInstance
 }
 ```
+
+No dedicated type guard function is needed.
 
 > **`instanceof` vs. property-brand check.** The earlier spec used a
 > property-brand check (`DECONSTRUCT in value`) because `FabricInstance` was
@@ -1399,7 +1398,7 @@ The built-in type handlers are:
 Handler registration order matters for serialization: `EpochNsec` and
 `EpochDays` are checked first (they are direct `FabricDatum` members matched
 by `instanceof` and must be found before the generic `FabricInstanceHandler`),
-then `FabricInstance` (generic protocol types via `isFabricInstance`), then
+then `FabricInstance` (generic protocol types via `instanceof FabricInstance`), then
 `bigint` and `undefined`. Primitives, arrays, and plain objects are handled as
 fallthrough after no handler matches.
 

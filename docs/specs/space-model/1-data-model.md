@@ -320,13 +320,12 @@ constructor for two reasons:
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
 
-The presence of `[DECONSTRUCT]` doubles as the brand — no separate marker needed:
+Since `FabricInstance` is an abstract class, the natural brand check is
+`instanceof` — no separate type guard function is needed:
 
 ```typescript
-function isFabricInstance(value: unknown): value is FabricInstance {
-  return value != null &&
-         typeof value === 'object' &&
-         DECONSTRUCT in value;
+if (value instanceof FabricInstance) {
+  // value is a FabricInstance
 }
 ```
 
@@ -460,7 +459,7 @@ Each boundary would use a serialization context:
 ```typescript
 // At boundary exit
 function serialize(value: FabricValue, context: SerializationContext): SerializedForm {
-  if (isFabricInstance(value)) {
+  if (value instanceof FabricInstance) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
     return context.wrap(tag, state);
