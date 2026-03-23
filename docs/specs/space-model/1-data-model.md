@@ -301,21 +301,21 @@ const RECONSTRUCT = Symbol.for('common.reconstruct');
 // If protocol evolution is needed: Symbol.for('common.deconstruct@2')
 
 // Instance protocol: "here's my essential state"
-interface FabricInstance {
-  [DECONSTRUCT](): unknown;
+abstract class FabricInstance {
+  abstract [DECONSTRUCT](): FabricValue;
 }
 
 // Class protocol: "here's how to bring one back"
 interface FabricClass<T extends FabricInstance> {
-  [RECONSTRUCT](state: unknown, runtime: Runtime): T;
+  [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
 ```
 
 `[RECONSTRUCT]` is a dedicated static method rather than using the class
 constructor for two reasons:
 
-1. **Reconstruction-specific context**: It receives the `Runtime` (and
-   potentially other context) which shouldn't be mandated in a regular
+1. **Reconstruction-specific context**: It receives a `ReconstructionContext`
+   (and potentially other context) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
@@ -332,13 +332,13 @@ if (value instanceof FabricInstance) {
 Example implementation:
 
 ```typescript
-class Cell<T> implements FabricInstance {
+class Cell<T> extends FabricInstance {
   [DECONSTRUCT]() {
     return { id: this.entityId, path: this.path, space: this.space };
   }
 
-  static [RECONSTRUCT](state: CellState, runtime: Runtime): Cell<unknown> {
-    return runtime.getCell(state);
+  static [RECONSTRUCT](state: CellState, context: ReconstructionContext): Cell<unknown> {
+    return context.getCell(state);
   }
 }
 ```
