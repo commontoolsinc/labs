@@ -1,9 +1,8 @@
 import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import {
@@ -73,16 +72,16 @@ export const emitBinaryExpression: Emitter = ({
     operator,
   );
 
-  // Check if the left side of && or || has an OpaqueRef type.
+  // Check if the left side of && or || has a reactive type.
   // This is important for cases like `computed(() => plainValue) && <JSX>`
-  // where the computed() returns an OpaqueRef but doesn't contain opaques in its inputs.
-  // OpaqueRefs are always truthy as objects, so we need when/unless for correct semantics.
+  // where the computed() returns a reactive value but doesn't contain reactive
+  // refs in its inputs.
   const leftIsOpaqueRef = isReactiveValueExpression(
     expression.left,
     context.checker,
   );
 
-  // Skip if no dataflows AND left side isn't an OpaqueRef type
+  // Skip if no dataflows AND left side isn't reactive
   if (
     dataFlows.all.length === 0 &&
     !leftIsOpaqueRef &&
@@ -91,19 +90,8 @@ export const emitBinaryExpression: Emitter = ({
     return undefined;
   }
 
-  // Optimize && operator: convert to when instead of wrapping entire expression in derive
-  // Example: showPanel && <Panel/>
-  // Becomes: when(showPanel, <Panel/>) or when(derive(condition), <Panel/>)
-  //
-  // The when/unless optimization is beneficial when the right side (value) is expensive
-  // to construct, like JSX. This allows short-circuit evaluation to skip constructing
-  // the value when the condition is falsy.
-  //
-  // If the right side is simple (not JSX, no reactive deps), using when/unless is just
-  // overhead - better to wrap the whole expression in derive.
   if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
     if (!shouldLowerByContextPolicy) {
-      // Outside pattern context we do not lower && in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -113,16 +101,14 @@ export const emitBinaryExpression: Emitter = ({
     );
 
     if (shouldLowerByContextPolicy) {
-      // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
         if (
           !isSimpleReactiveAccessExpression(expression.left, context.checker)
         ) {
-          const plan = createBindingPlan(leftDataFlows);
-          const computedCondition = createComputedCallForExpression(
+          const computedCondition = createReactiveWrapperForExpression(
             expression.left,
-            plan,
+            leftDataFlows,
             context,
             { preferDeriveWrapper: preferDeriveWrappers },
           );
@@ -130,15 +116,10 @@ export const emitBinaryExpression: Emitter = ({
             condition = computedCondition;
           }
         }
-        // If it's a simple opaque ref, pass it directly (no derive needed)
       }
 
-      // Process right side - rewrite children to handle nested opaque refs
       const value = rewriteChildren(expression.right) || expression.right;
 
-      // Create when(condition, value)
-      // This is equivalent to: ifElse(condition, value, condition)
-      // Preserves && semantics where falsy values are returned as-is
       const whenCall = createWhenCall({
         condition,
         value,
@@ -146,8 +127,6 @@ export const emitBinaryExpression: Emitter = ({
         ctHelpers: context.ctHelpers,
       });
 
-      // Register the result type for schema injection
-      // The result type is the union of condition and value types (from the original && expression)
       if (context.options.typeRegistry) {
         const resultType = context.checker.getTypeAtLocation(expression);
         registerSyntheticCallType(
@@ -161,14 +140,8 @@ export const emitBinaryExpression: Emitter = ({
     }
   }
 
-  // Optimize || operator: convert to unless instead of wrapping entire expression in derive
-  // Example: value || <Fallback/>
-  // Becomes: unless(value, <Fallback/>) or unless(derive(condition), <Fallback/>)
-  //
-  // Same rationale as &&: only beneficial when right side is expensive.
   if (operator === ts.SyntaxKind.BarBarToken) {
     if (!shouldLowerByContextPolicy) {
-      // Outside pattern context we do not lower || in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -178,16 +151,14 @@ export const emitBinaryExpression: Emitter = ({
     );
 
     if (shouldLowerByContextPolicy) {
-      // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
         if (
           !isSimpleReactiveAccessExpression(expression.left, context.checker)
         ) {
-          const plan = createBindingPlan(leftDataFlows);
-          const computedCondition = createComputedCallForExpression(
+          const computedCondition = createReactiveWrapperForExpression(
             expression.left,
-            plan,
+            leftDataFlows,
             context,
             { preferDeriveWrapper: preferDeriveWrappers },
           );
@@ -195,15 +166,10 @@ export const emitBinaryExpression: Emitter = ({
             condition = computedCondition;
           }
         }
-        // If it's a simple opaque ref, pass it directly (no derive needed)
       }
 
-      // Process right side - rewrite children to handle nested opaque refs
       const value = rewriteChildren(expression.right) || expression.right;
 
-      // Create unless(condition, value)
-      // This is equivalent to: ifElse(condition, condition, value)
-      // Preserves || semantics where truthy values are returned as-is
       const unlessCall = createUnlessCall({
         condition,
         value,
@@ -211,8 +177,6 @@ export const emitBinaryExpression: Emitter = ({
         ctHelpers: context.ctHelpers,
       });
 
-      // Register the result type for schema injection
-      // The result type is the union of condition and fallback types (from the original || expression)
       if (context.options.typeRegistry) {
         const resultType = context.checker.getTypeAtLocation(expression);
         registerSyntheticCallType(
@@ -226,8 +190,6 @@ export const emitBinaryExpression: Emitter = ({
     }
   }
 
-  // Fallback: wrap entire expression in derive (original behavior)
-  // Skip in safe contexts - they don't need derive wrappers, only when/unless
   if (inSafeContext) {
     return undefined;
   }
@@ -239,9 +201,6 @@ export const emitBinaryExpression: Emitter = ({
   );
   if (relevantDataFlows.length === 0) return undefined;
 
-  // Keep fallback receiver expressions intact in pattern context so
-  // ClosureTransformer can lower `(x ?? y).map(...)` / `(x || y).map(...)`
-  // into mapWithPattern with proper capture handling.
   if (
     reactiveContextKind === "pattern" &&
     isMapReceiverBinary(expression) &&
@@ -264,8 +223,12 @@ export const emitBinaryExpression: Emitter = ({
     context,
   );
 
-  const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context, {
-    preferDeriveWrapper: preferDeriveWrappers,
-  });
+  return createReactiveWrapperForExpression(
+    expression,
+    relevantDataFlows,
+    context,
+    {
+      preferDeriveWrapper: preferDeriveWrappers,
+    },
+  );
 };

@@ -8,9 +8,8 @@ import {
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import {
@@ -26,19 +25,10 @@ function processBranch(
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
   preferDeriveWrappers: boolean,
 ): ts.Expression {
-  // JSX containers can lower their dynamic slots independently, so the branch
-  // does not need a whole-expression compute wrapper just because one child JSX
-  // expression needs a local derive.
   if (isJsxLocalRewriteContainer(expr)) {
     return rewriteChildren(expr) || expr;
   }
 
-  // Branch wrapping needs a branch-local view of data flow, so we intentionally
-  // re-analyze the authored branch here instead of reusing the outer
-  // conditional's aggregate analysis. The important invariant is that the wrap
-  // decision still runs on the authored subtree before recursive rewriting;
-  // otherwise we start reasoning about a partially lowered branch and can
-  // introduce nested derives or mixed pattern/compute lowering.
   const branchAnalysis = analyze(expr);
   const branchDataFlows = filterRelevantDataFlows(
     normalizeDataFlows(
@@ -61,10 +51,14 @@ function processBranch(
       context,
     );
 
-    const plan = createBindingPlan(branchDataFlows);
-    const derived = createComputedCallForExpression(expr, plan, context, {
-      preferDeriveWrapper: preferDeriveWrappers,
-    });
+    const derived = createReactiveWrapperForExpression(
+      expr,
+      branchDataFlows,
+      context,
+      {
+        preferDeriveWrapper: preferDeriveWrappers,
+      },
+    );
     if (derived) {
       return derived;
     }
@@ -84,9 +78,7 @@ export const emitConditionalExpression: Emitter = ({
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
 
-  // Skip ternary transformation in safe contexts - they don't need ifElse wrapping
   if (inSafeContext) return undefined;
-
   if (dataFlows.all.length === 0) return undefined;
 
   const predicateDataFlows = selectDataFlowsReferencedIn(
@@ -98,10 +90,9 @@ export const emitConditionalExpression: Emitter = ({
 
   let predicate: ts.Expression = expression.condition;
   if (shouldDerivePredicate) {
-    const plan = createBindingPlan(predicateDataFlows);
-    const derivedPredicate = createComputedCallForExpression(
+    const derivedPredicate = createReactiveWrapperForExpression(
       expression.condition,
-      plan,
+      predicateDataFlows,
       context,
       { preferDeriveWrapper: preferDeriveWrappers },
     );

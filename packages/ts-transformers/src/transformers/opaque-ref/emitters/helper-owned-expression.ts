@@ -1,9 +1,8 @@
 import ts from "typescript";
 
 import { normalizeDataFlows } from "../../../ast/mod.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import {
@@ -63,9 +62,6 @@ export function rewriteHelperOwnedExpression(
   const pendingRewrite = relevantDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expression, analyze, context)
     : undefined;
-  const plan = relevantDataFlows.length > 0
-    ? createBindingPlan(relevantDataFlows)
-    : undefined;
 
   if (pendingRewrite) {
     assertValidComputeWrapCandidate(
@@ -75,19 +71,28 @@ export function rewriteHelperOwnedExpression(
       context,
     );
 
-    const derived = createComputedCallForExpression(expression, plan!, context);
+    const derived = createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+    );
     if (derived) {
       return derived;
     }
   }
 
   if (
-    plan &&
+    relevantDataFlows.length > 0 &&
     isHelperOwnedComputationExpression(expression)
   ) {
-    const forced = createComputedCallForExpression(expression, plan, context, {
-      allowDirectExpressionWrap: true,
-    });
+    const forced = createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+      {
+        allowDirectExpressionWrap: true,
+      },
+    );
     if (forced) {
       return forced;
     }

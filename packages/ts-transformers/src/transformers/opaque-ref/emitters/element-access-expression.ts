@@ -1,9 +1,8 @@
 import ts from "typescript";
 
 import type { EmitterContext } from "../types.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 
@@ -42,8 +41,12 @@ export const emitElementAccessExpression = ({
     return undefined;
   }
 
-  const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context, {
-    preferDeriveWrapper: preferDeriveWrappers,
-  });
+  return createReactiveWrapperForExpression(
+    expression,
+    relevantDataFlows,
+    context,
+    {
+      preferDeriveWrapper: preferDeriveWrappers,
+    },
+  );
 };

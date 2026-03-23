@@ -25,9 +25,8 @@ import {
   type DestructureBinding,
   type PathSegment,
 } from "./destructuring-lowering.ts";
-import { createBindingPlan } from "./opaque-ref/bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "./opaque-ref/helpers.ts";
 import {
@@ -305,8 +304,11 @@ function rewritePatternBody(
       context,
     );
 
-    const plan = createBindingPlan(relevantDataFlows);
-    return createComputedCallForExpression(initializer, plan, context);
+    return createReactiveWrapperForExpression(
+      initializer,
+      relevantDataFlows,
+      context,
+    );
   };
 
   const lowerOpaqueDestructuredVariableStatement = (

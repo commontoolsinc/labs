@@ -2,9 +2,8 @@ import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
 import { detectCallKind } from "../../../ast/mod.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
@@ -130,8 +129,12 @@ export const emitCallExpression: Emitter = ({
   );
   if (relevantDataFlows.length === 0) return undefined;
 
-  const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context, {
-    preferDeriveWrapper: preferDeriveWrappers,
-  });
+  return createReactiveWrapperForExpression(
+    expression,
+    relevantDataFlows,
+    context,
+    {
+      preferDeriveWrapper: preferDeriveWrappers,
+    },
+  );
 };

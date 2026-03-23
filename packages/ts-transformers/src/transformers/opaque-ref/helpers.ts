@@ -7,7 +7,7 @@ import {
   type NormalizedDataFlow,
   setParentPointers,
 } from "../../ast/mod.ts";
-import type { BindingPlan } from "./bindings.ts";
+import { createBindingPlan } from "./bindings.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createDeriveCall } from "../builtins/derive.ts";
 
@@ -255,16 +255,16 @@ export function filterRelevantDataFlows(
   });
 }
 
-export function createComputedCallForExpression(
+export function createReactiveWrapperForExpression(
   expression: ts.Expression,
-  plan: BindingPlan,
+  relevantDataFlows: readonly NormalizedDataFlow[],
   context: TransformationContext,
   options: {
     allowDirectExpressionWrap?: boolean;
     preferDeriveWrapper?: boolean;
   } = {},
 ): ts.Expression | undefined {
-  if (plan.entries.length === 0) return undefined;
+  if (relevantDataFlows.length === 0) return undefined;
 
   // Don't wrap expressions that are already derive, computed, when, or unless calls
   // These are already reactive and wrapping them would create unnecessary nesting
@@ -282,17 +282,16 @@ export function createComputedCallForExpression(
 
   if (
     !options.allowDirectExpressionWrap &&
-    !plan.usesObjectBinding &&
-    plan.entries.length === 1
+    relevantDataFlows.length === 1
   ) {
-    const [entry] = plan.entries;
-    if (entry && entry.dataFlow.expression === expression) {
+    const [dataFlow] = relevantDataFlows;
+    if (dataFlow && dataFlow.expression === expression) {
       return undefined;
     }
   }
 
   if (options.preferDeriveWrapper) {
-    const refs = plan.entries.map((entry) => entry.dataFlow.expression);
+    const refs = relevantDataFlows.map((dataFlow) => dataFlow.expression);
     return createDeriveCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
@@ -300,6 +299,8 @@ export function createComputedCallForExpression(
       context,
     });
   }
+
+  const plan = createBindingPlan(relevantDataFlows);
 
   const { factory, checker, sourceFile } = context;
 

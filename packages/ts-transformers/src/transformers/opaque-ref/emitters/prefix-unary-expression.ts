@@ -1,9 +1,8 @@
 import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
-import { createBindingPlan } from "../bindings.ts";
 import {
-  createComputedCallForExpression,
+  createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { normalizeDataFlows } from "../../../ast/mod.ts";
@@ -50,8 +49,12 @@ export const emitPrefixUnaryExpression: Emitter = ({
     return undefined;
   }
 
-  const plan = createBindingPlan(relevantDataFlows);
-  return createComputedCallForExpression(expression, plan, context, {
-    preferDeriveWrapper: preferDeriveWrappers,
-  });
+  return createReactiveWrapperForExpression(
+    expression,
+    relevantDataFlows,
+    context,
+    {
+      preferDeriveWrapper: preferDeriveWrappers,
+    },
+  );
 };
