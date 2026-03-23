@@ -1,6 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertNotStrictEquals } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertNotStrictEquals,
+  assertStrictEquals,
+} from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
+import { deepFreeze } from "../deep-freeze.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
@@ -29,6 +35,16 @@ describe("SchemaAndHash", () => {
       };
       SchemaAndHash.from(schema);
       assertEquals(Object.isFrozen(schema), false);
+    });
+
+    it("uses an already-deep-frozen schema by reference", () => {
+      const schema = deepFreeze({
+        type: "object",
+        properties: { name: deepFreeze({ type: "string" }) },
+      }) as JSONSchemaObj;
+      assert(isDeepFrozen(schema));
+      const sah = SchemaAndHash.from(schema);
+      assertStrictEquals(sah.schema, schema);
     });
 
     it("handles boolean schema true", () => {
@@ -62,6 +78,17 @@ describe("SchemaAndHash", () => {
       let threw = false;
       try {
         (sah as unknown as Record<string, unknown>).schema = true;
+      } catch {
+        threw = true;
+      }
+      assert(threw);
+    });
+
+    it("hash property is not writable", () => {
+      const sah = SchemaAndHash.from({ type: "string" });
+      let threw = false;
+      try {
+        (sah as unknown as Record<string, unknown>).hash = "tampered";
       } catch {
         threw = true;
       }
