@@ -53,7 +53,7 @@ step, and we'll ratchet targets down as we improve.
 ## What We Know (and Don't Know)
 
 **What exists today:**
-- 16 micro-benchmark files across runner, memory, utils
+- 14 micro-benchmark files across runner, memory, utils
 - CI benchmarks on every push to main (64-core runner), JSON artifacts with
   90-day retention
 - Regression detector every 4 hours (median + 2σ, auto-creates GitHub issues)
@@ -91,16 +91,42 @@ decides priority relative to correctness, capabilities, and other work.
 
 ### Getting Started: First Profile
 
-The first step is profiling a real user flow. Open a representative pattern
-in Chrome DevTools, record a performance trace, and read it. This takes an
-hour and tells us whether traversal, compilation, storage, or rendering
-dominates. No infrastructure required — just do it once and write down the
-findings.
+The first step is profiling a real user flow end-to-end. A user-visible flow
+spans both the client (browser) and the server (toolshed), and bottlenecks
+can live in either. These are two separate profiling sessions with different
+setup, but both use Chrome DevTools flame charts and both benefit from
+[INFRA-1: Performance marks](#performance-infrastructure) once those exist.
+
+#### Client Profile
+
+Open a representative pattern in Chrome DevTools, record a performance
+trace, and read it. This takes an hour and tells us whether compilation,
+traversal, rendering, or storage I/O dominates on the client side. No
+infrastructure required — just do it once and write down the findings.
+
+#### Server Profile
+
+Many past bottlenecks stem from excessive server queries — these won't
+appear in a client trace. To profile toolshed, start it with
+`deno run --inspect` and attach Chrome DevTools to the Deno process
+(`chrome://inspect`). This gives you the same flame chart experience as
+client profiling, just for the server.
+
+For more structured server tracing, toolshed already has OpenTelemetry
+instrumentation (request-level spans in `middlewares/opentelemetry.ts`,
+memory operation spans in `packages/memory/telemetry.ts`). It's disabled by
+default (`OTEL_ENABLED=false`) and requires a collector (Jaeger, etc.), so
+`--inspect` is the lower-friction starting point. OTEL becomes valuable
+when you want queryable traces ("show me the 10 slowest storage reads")
+rather than one-off flame charts.
+
+#### Documenting the Process
 
 We don't have profiling documentation yet (the debugging docs cover logging
-and pattern-level tips, but not runtime profiling). Whoever does this first
-should document the concrete steps — which pattern to use, how to start the
-local dev server, how to record the trace, what to look for — in
+and pattern-level tips, but not runtime profiling). Whoever does the first
+client or server profile should document the concrete steps — which pattern
+to use, how to start the local dev server, how to record the trace, how to
+attach to the Deno process, what to look for — in
 `docs/development/debugging/profiling.md` so the next person can repeat it.
 This is something we'll need to do periodically; it shouldn't require tribal
 knowledge.
@@ -154,7 +180,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with string concat. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. See `link-resolution-key.bench.ts`. [Tests needed.](#perf-3-link-resolution) |
 
 ### Likely High-Impact (pending profiling confirmation)
 
@@ -187,7 +213,9 @@ are untested. Nested anyOf has benchmarks but no correctness tests. **Write
 these tests first.**
 
 **<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Good existing coverage (28 tests). Add 2-3 tests for
-cross-space cycles and separator edge cases. **Can ship alongside the fix.**
+cross-space cycles and separator edge cases. The replacement key function must
+not collide on path segments containing the separator (confirmed via
+`link-resolution-key.bench.ts`). **Can ship alongside the fix.**
 
 **<a id="perf-4-engine-files"></a>PERF-4 (engine files):** No test verifies the sandbox receives all needed files —
 current tests pass because the superset always includes everything. **Add
