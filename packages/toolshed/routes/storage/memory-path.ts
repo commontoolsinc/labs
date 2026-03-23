@@ -9,8 +9,8 @@ export const resolveMemoryEngineStoreRootUrl = (
   const rootPath = isSingleFile
     ? Path.join(
       Path.dirname(storePath),
-      `${Path.basename(storePath, Path.extname(storePath))}.engine`,
+      `${Path.basename(storePath, Path.extname(storePath))}.engine-v3`,
     )
-    : Path.join(storePath, "engine");
+    : Path.join(storePath, "engine-v3");
   return Path.toFileUrl(`${rootPath}/`);
 };

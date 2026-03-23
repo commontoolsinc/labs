@@ -3,10 +3,13 @@ import {
   type EntitySnapshot,
   type GraphQuery,
   type GraphQueryResult,
-  type GraphUpdateMessage,
   MEMORY_V2_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
+  type SessionEffectMessage,
+  type SessionSync,
+  type WatchSetResult,
+  type WatchSpec,
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
@@ -45,12 +48,10 @@ const reconnectDelayMs = (attempt: number): number => {
   );
 };
 
+const watchKey = (branch: string, id: string): string => `${branch}\0${id}`;
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
-  #subscriptions = new Map<string, {
-    session: SpaceSession;
-    view: QueryView;
-  }>();
   #spaces = new Set<SpaceSession>();
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
@@ -75,7 +76,6 @@ export class Client {
     this.rejectPending(new Error("memory/v2 client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
     this.#spaces.clear();
-    this.#subscriptions.clear();
     await this.transport.close();
     await this.#reconnecting?.catch(() => undefined);
   }
@@ -122,20 +122,6 @@ export class Client {
     });
   }
 
-  registerSubscription(
-    id: string,
-    session: SpaceSession,
-    view: QueryView,
-  ): void {
-    this.#subscriptions.set(id, { session, view });
-  }
-
-  unregisterSubscription(id: string | null | undefined): void {
-    if (id) {
-      this.#subscriptions.delete(id);
-    }
-  }
-
   isConnected(): boolean {
     return this.#connected;
   }
@@ -165,16 +151,14 @@ export class Client {
       this.#helloPending?.resolve();
       return;
     }
-    if (isGraphUpdate(message)) {
-      const subscriptionIds = message.subscriptionIds ??
-        (message.subscriptionId ? [message.subscriptionId] : []);
-      for (const subscriptionId of subscriptionIds) {
-        const subscription = this.#subscriptions.get(subscriptionId);
-        if (!subscription) {
-          continue;
+    if (isSessionEffect(message)) {
+      for (const session of this.#spaces) {
+        if (
+          session.sessionId === message.sessionId &&
+          session.space === message.space
+        ) {
+          session.handleEffect(message.effect);
         }
-        subscription.session.noteResult(message.result);
-        subscription.view.push(message.result);
       }
       return;
     }
@@ -265,18 +249,17 @@ export class Client {
 }
 
 export class SpaceSession {
-  #subscriptions = new Set<{
-    query: GraphQuery;
-    subscriptionId: string | null;
-    view: QueryView;
-  }>();
   #outstandingCommits = new Map<number, {
     commit: ClientCommit;
     pending: PromiseWithResolvers<AppliedCommit>;
   }>();
   #flushing: Promise<void> | null = null;
+  #watchSpecs: WatchSpec[] = [];
+  #watchCache = new Map<string, EntitySnapshot>();
+  #watchView: QueryView | null = null;
   #sessionId: string;
   #serverSeq: number;
+  #ackedSeq = 0;
 
   constructor(
     private readonly client: Client,
@@ -286,6 +269,7 @@ export class SpaceSession {
   ) {
     this.#sessionId = sessionId;
     this.#serverSeq = serverSeq;
+    this.#ackedSeq = serverSeq;
   }
 
   get sessionId(): string {
@@ -316,9 +300,6 @@ export class SpaceSession {
 
     const applied = await pending.promise;
     await this.#flushing;
-    // The commit is already durably applied once pending.promise resolves.
-    // Keep the background reconnect attempt, but don't let a later close or
-    // transport failure mask a successful commit result.
     void this.client.restoreConnection().catch(() => undefined);
     return applied;
   }
@@ -332,27 +313,98 @@ export class SpaceSession {
       query,
     });
 
-    this.noteResult(result);
-    const view = new QueryView(result);
-    if (result.subscriptionId) {
-      this.#subscriptions.add({
-        query,
-        subscriptionId: result.subscriptionId,
-        view,
-      });
-      this.client.registerSubscription(result.subscriptionId, this, view);
-    }
-    return view;
+    this.noteResult(result.serverSeq);
+    return new QueryView(result);
   }
 
-  noteResult(result: GraphQueryResult): void {
-    this.#serverSeq = Math.max(this.#serverSeq, result.serverSeq);
+  async watchSet(watches: WatchSpec[]): Promise<QueryView> {
+    const result = await this.client.request<WatchSetResult>({
+      type: "session.watch.set",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      watches,
+    });
+    this.#watchSpecs = watches;
+    this.applySync(result.sync, false);
+    const snapshot = this.currentWatchResult();
+    if (this.#watchView === null) {
+      this.#watchView = new QueryView(snapshot);
+    } else {
+      this.#watchView.reconnect(snapshot);
+    }
+    void this.ack(result.serverSeq).catch(() => undefined);
+    return this.#watchView;
+  }
+
+  async ack(seenSeq: number): Promise<void> {
+    if (!this.client.isConnected() || seenSeq <= this.#ackedSeq) {
+      this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+      return;
+    }
+    await this.client.request({
+      type: "session.ack",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      seenSeq,
+    });
+    this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+  }
+
+  handleEffect(effect: SessionSync): void {
+    this.applySync(effect, true);
+    void this.ack(effect.toSeq).catch(() => undefined);
   }
 
   async restore(): Promise<void> {
     await this.reopen();
     await this.replayOutstandingCommits();
-    await this.restoreSubscriptions();
+    if (this.#watchSpecs.length > 0) {
+      await this.watchSet(this.#watchSpecs);
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.#flushing;
+    for (const pending of this.#outstandingCommits.values()) {
+      pending.pending.reject(new Error("memory/v2 session closed"));
+    }
+    this.#outstandingCommits.clear();
+    this.#watchView?.close();
+    this.#watchView = null;
+  }
+
+  private noteResult(serverSeq: number): void {
+    this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
+  }
+
+  private applySync(sync: SessionSync, emit: boolean): void {
+    for (const upsert of sync.upserts) {
+      this.#watchCache.set(watchKey(upsert.branch, upsert.id), {
+        branch: upsert.branch,
+        id: upsert.id,
+        seq: upsert.seq,
+        document: upsert.doc ?? null,
+      });
+    }
+    for (const remove of sync.removes) {
+      this.#watchCache.delete(watchKey(remove.branch, remove.id));
+    }
+    this.noteResult(sync.toSeq);
+    if (emit && this.#watchView !== null) {
+      this.#watchView.push(this.currentWatchResult());
+    }
+  }
+
+  private currentWatchResult(): GraphQueryResult {
+    return {
+      serverSeq: this.#serverSeq,
+      entities: [...this.#watchCache.values()].sort((left, right) =>
+        left.branch.localeCompare(right.branch) ||
+        left.id.localeCompare(right.id)
+      ),
+    };
   }
 
   private async reopen(): Promise<void> {
@@ -361,33 +413,7 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
     });
     this.#sessionId = restored.sessionId;
-    this.#serverSeq = Math.max(this.#serverSeq, restored.serverSeq);
-  }
-
-  private async restoreSubscriptions(): Promise<void> {
-    for (const subscription of this.#subscriptions) {
-      this.client.unregisterSubscription(subscription.subscriptionId);
-      const result = await this.client.request<GraphQueryResult>({
-        type: "graph.query",
-        requestId: crypto.randomUUID(),
-        space: this.space,
-        sessionId: this.#sessionId,
-        query: {
-          ...subscription.query,
-          subscribe: true,
-        },
-      });
-      this.noteResult(result);
-      subscription.subscriptionId = result.subscriptionId ?? null;
-      if (subscription.subscriptionId) {
-        this.client.registerSubscription(
-          subscription.subscriptionId,
-          this,
-          subscription.view,
-        );
-      }
-      subscription.view.reconnect(result);
-    }
+    this.noteResult(restored.serverSeq);
   }
 
   private async replayOutstandingCommits(): Promise<void> {
@@ -422,11 +448,12 @@ export class SpaceSession {
             sessionId: this.#sessionId,
             commit: pendingCommit.commit,
           });
-          this.#serverSeq = Math.max(this.#serverSeq, applied.seq);
+          this.noteResult(applied.seq);
           if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
             this.#outstandingCommits.delete(localSeq);
           }
           pendingCommit.pending.resolve(applied);
+          void this.ack(applied.seq).catch(() => undefined);
         } catch (error) {
           if (isConnectionError(error)) {
             return;
@@ -456,19 +483,6 @@ export class SpaceSession {
     this.#flushing = flushing;
 
     return await this.#flushing;
-  }
-
-  async close(): Promise<void> {
-    await this.#flushing;
-    for (const pending of this.#outstandingCommits.values()) {
-      pending.pending.reject(new Error("memory/v2 session closed"));
-    }
-    this.#outstandingCommits.clear();
-    for (const subscription of this.#subscriptions) {
-      this.client.unregisterSubscription(subscription.subscriptionId);
-      subscription.view.close();
-    }
-    this.#subscriptions.clear();
   }
 }
 
@@ -508,6 +522,11 @@ export class QueryView {
 
   push(result: GraphQueryResult): void {
     if (this.#closed) {
+      return;
+    }
+    if (sameQueryResult(this, result)) {
+      this.entities = result.entities;
+      this.serverSeq = result.serverSeq;
       return;
     }
     this.entities = result.entities;
@@ -593,9 +612,11 @@ const isHelloOk = (
     (message as { type?: string }).type === "hello.ok";
 };
 
-const isGraphUpdate = (message: unknown): message is GraphUpdateMessage => {
+const isSessionEffect = (
+  message: unknown,
+): message is SessionEffectMessage => {
   return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "graph.update";
+    (message as { type?: string }).type === "session/effect";
 };
 
 const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
@@ -617,9 +638,9 @@ const sameQueryResult = (
   return current.entities.every((entity, index) => {
     const other = next.entities[index];
     return other !== undefined &&
+      entity.branch === other.branch &&
       entity.id === other.id &&
       entity.seq === other.seq &&
-      entity.hash === other.hash &&
       JSON.stringify(entity.document) === JSON.stringify(other.document);
   });
 };

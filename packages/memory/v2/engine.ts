@@ -1,8 +1,8 @@
 import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
-import { refer } from "../reference.ts";
-import type { JSONValue } from "../interface.ts";
 import { sha256 } from "@commontools/data-model/sha256-impl";
+import type { JSONValue } from "../interface.ts";
+import { refer } from "../reference.ts";
 import { applyPatch, parsePointer } from "./patch.ts";
 import {
   type Blob,
@@ -10,7 +10,6 @@ import {
   type ClientCommit,
   decodeWireEntityDocument,
   DEFAULT_BRANCH,
-  EMPTY_VALUE_REF,
   encodeWireEntityDocument,
   type EntityDocument,
   type EntityId,
@@ -39,12 +38,6 @@ const NEW_DB_PRAGMAS = `
 const INIT = `
 BEGIN TRANSACTION;
 
-CREATE TABLE IF NOT EXISTS value (
-  hash  TEXT NOT NULL PRIMARY KEY,
-  data  JSON
-);
-INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
-
 CREATE TABLE IF NOT EXISTS authorization (
   ref            TEXT    NOT NULL PRIMARY KEY,
   authorization  JSON    NOT NULL,
@@ -66,7 +59,6 @@ CREATE INDEX IF NOT EXISTS idx_invocation_iss ON invocation (iss);
 
 CREATE TABLE IF NOT EXISTS "commit" (
   seq                INTEGER NOT NULL PRIMARY KEY,
-  hash               TEXT    NOT NULL,
   branch             TEXT    NOT NULL DEFAULT '',
   session_id         TEXT    NOT NULL,
   local_seq          INTEGER NOT NULL,
@@ -78,50 +70,45 @@ CREATE TABLE IF NOT EXISTS "commit" (
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
   FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
-CREATE INDEX IF NOT EXISTS idx_commit_hash ON "commit" (hash);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
   ON "commit" (session_id, local_seq);
-DROP INDEX IF EXISTS idx_commit_invocation_ref;
 CREATE INDEX IF NOT EXISTS idx_commit_invocation_ref
   ON "commit" (invocation_ref);
 
-CREATE TABLE IF NOT EXISTS fact (
-  hash        TEXT    NOT NULL PRIMARY KEY,
-  id          TEXT    NOT NULL,
-  value_ref   TEXT    NOT NULL,
-  parent      TEXT,
+CREATE TABLE IF NOT EXISTS revision (
   branch      TEXT    NOT NULL DEFAULT '',
+  id          TEXT    NOT NULL,
   seq         INTEGER NOT NULL,
+  op_index    INTEGER NOT NULL,
+  op          TEXT    NOT NULL,
+  data        JSON,
   commit_seq  INTEGER NOT NULL,
-  fact_type   TEXT    NOT NULL,
-  FOREIGN KEY (value_ref) REFERENCES value(hash),
+  PRIMARY KEY (branch, id, seq, op_index),
   FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
 );
-CREATE INDEX IF NOT EXISTS idx_fact_seq ON fact (seq);
-CREATE INDEX IF NOT EXISTS idx_fact_id ON fact (id);
-CREATE INDEX IF NOT EXISTS idx_fact_id_seq ON fact (id, seq);
-CREATE INDEX IF NOT EXISTS idx_fact_branch_id_seq ON fact (branch, id, seq);
-CREATE INDEX IF NOT EXISTS idx_fact_commit ON fact (commit_seq);
-CREATE INDEX IF NOT EXISTS idx_fact_branch ON fact (branch);
+CREATE INDEX IF NOT EXISTS idx_revision_branch_id_seq
+  ON revision (branch, id, seq, op_index);
+CREATE INDEX IF NOT EXISTS idx_revision_commit
+  ON revision (commit_seq);
+CREATE INDEX IF NOT EXISTS idx_revision_branch
+  ON revision (branch, seq);
 
 CREATE TABLE IF NOT EXISTS head (
   branch    TEXT    NOT NULL,
   id        TEXT    NOT NULL,
-  fact_hash TEXT    NOT NULL,
   seq       INTEGER NOT NULL,
-  PRIMARY KEY (branch, id),
-  FOREIGN KEY (fact_hash) REFERENCES fact(hash)
+  op_index  INTEGER NOT NULL,
+  PRIMARY KEY (branch, id)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
 
 CREATE TABLE IF NOT EXISTS snapshot (
-  id         TEXT    NOT NULL,
-  seq        INTEGER NOT NULL,
-  value_ref  TEXT    NOT NULL,
-  branch     TEXT    NOT NULL DEFAULT '',
-  PRIMARY KEY (branch, id, seq),
-  FOREIGN KEY (value_ref) REFERENCES value(hash)
+  branch  TEXT    NOT NULL DEFAULT '',
+  id      TEXT    NOT NULL,
+  seq     INTEGER NOT NULL,
+  value   JSON    NOT NULL,
+  PRIMARY KEY (branch, id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, seq);
 
@@ -146,18 +133,7 @@ CREATE TABLE IF NOT EXISTS blob_store (
   size          INTEGER NOT NULL
 );
 
-CREATE VIEW IF NOT EXISTS state AS
-SELECT h.branch, h.id, f.fact_type, f.seq, v.data AS value
-FROM head h
-JOIN fact f ON f.hash = h.fact_hash
-JOIN value v ON v.hash = f.value_ref;
-
 COMMIT;
-`;
-
-const INSERT_VALUE = `
-INSERT OR IGNORE INTO value (hash, data)
-VALUES (:hash, :data)
 `;
 
 const INSERT_AUTHORIZATION = `
@@ -173,7 +149,6 @@ VALUES (:ref, :iss, :aud, :cmd, :sub, :invocation)
 const INSERT_COMMIT = `
 INSERT INTO "commit" (
   seq,
-  hash,
   branch,
   session_id,
   local_seq,
@@ -184,7 +159,6 @@ INSERT INTO "commit" (
 )
 VALUES (
   :seq,
-  :hash,
   :branch,
   :session_id,
   :local_seq,
@@ -195,39 +169,37 @@ VALUES (
 )
 `;
 
-const INSERT_FACT = `
-INSERT INTO fact (
-  hash,
-  id,
-  value_ref,
-  parent,
+const INSERT_REVISION = `
+INSERT INTO revision (
   branch,
+  id,
   seq,
-  commit_seq,
-  fact_type
+  op_index,
+  op,
+  data,
+  commit_seq
 )
 VALUES (
-  :hash,
-  :id,
-  :value_ref,
-  :parent,
   :branch,
+  :id,
   :seq,
-  :commit_seq,
-  :fact_type
+  :op_index,
+  :op,
+  :data,
+  :commit_seq
 )
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, fact_hash, seq)
-VALUES (:branch, :id, :fact_hash, :seq)
+INSERT INTO head (branch, id, seq, op_index)
+VALUES (:branch, :id, :seq, :op_index)
 ON CONFLICT (branch, id) DO UPDATE
-SET fact_hash = :fact_hash, seq = :seq
+SET seq = :seq, op_index = :op_index
 `;
 
 const INSERT_SNAPSHOT = `
-INSERT OR REPLACE INTO snapshot (id, seq, value_ref, branch)
-VALUES (:id, :seq, :value_ref, :branch)
+INSERT OR REPLACE INTO snapshot (branch, id, seq, value)
+VALUES (:branch, :id, :seq, :value)
 `;
 
 const DELETE_OLD_SNAPSHOTS = `
@@ -246,77 +218,87 @@ WHERE branch = :branch
 
 const UPDATE_BRANCH_HEAD = `
 UPDATE branch
-SET head_seq = :seq
+SET head_seq = CASE
+  WHEN head_seq < :seq THEN :seq
+  ELSE head_seq
+END
 WHERE name = :branch
-  AND status = 'active'
 `;
 
 const SELECT_HEAD = `
-SELECT fact_hash, seq
+SELECT seq, op_index
 FROM head
 WHERE branch = :branch AND id = :id
 `;
 
-const SELECT_CURRENT = `
-SELECT f.hash, f.fact_type, f.seq, v.data
+const SELECT_CURRENT_LOCAL = `
+SELECT r.seq, r.op_index, r.op, r.data
 FROM head h
-JOIN fact f ON f.hash = h.fact_hash
-JOIN value v ON v.hash = f.value_ref
+JOIN revision r
+  ON r.branch = h.branch
+ AND r.id = h.id
+ AND r.seq = h.seq
+ AND r.op_index = h.op_index
 WHERE h.branch = :branch AND h.id = :id
 `;
 
-const SELECT_AT_SEQ = `
-SELECT f.hash, f.fact_type, f.seq, v.data
-FROM fact f
-JOIN value v ON v.hash = f.value_ref
-WHERE f.branch = :branch
-  AND f.id = :id
-  AND f.seq <= :seq
-ORDER BY f.seq DESC
+const SELECT_AT_SEQ_LOCAL = `
+SELECT seq, op_index, op, data
+FROM revision
+WHERE branch = :branch
+  AND id = :id
+  AND seq <= :seq
+ORDER BY seq DESC, op_index DESC
 LIMIT 1
 `;
 
 const SELECT_LATEST_BASE = `
-SELECT f.fact_type, f.seq, v.data
-FROM fact f
-JOIN value v ON v.hash = f.value_ref
-WHERE f.branch = :branch
-  AND f.id = :id
-  AND f.fact_type IN ('set', 'delete')
-  AND f.seq <= :seq
-ORDER BY f.seq DESC
+SELECT seq, op_index, op, data
+FROM revision
+WHERE branch = :branch
+  AND id = :id
+  AND op IN ('set', 'delete')
+  AND (
+    seq < :seq OR
+    (seq = :seq AND op_index <= :op_index)
+  )
+ORDER BY seq DESC, op_index DESC
 LIMIT 1
 `;
 
 const SELECT_LATEST_SNAPSHOT = `
-SELECT s.seq, v.data
-FROM snapshot s
-JOIN value v ON v.hash = s.value_ref
-WHERE s.branch = :branch
-  AND s.id = :id
-  AND s.seq <= :seq
-ORDER BY s.seq DESC
+SELECT seq, value
+FROM snapshot
+WHERE branch = :branch
+  AND id = :id
+  AND seq <= :seq
+ORDER BY seq DESC
 LIMIT 1
 `;
 
 const SELECT_PATCHES = `
-SELECT v.data AS patch_ops, f.seq
-FROM fact f
-JOIN value v ON v.hash = f.value_ref
-WHERE f.branch = :branch
-  AND f.id = :id
-  AND f.fact_type = 'patch'
-  AND f.seq > :base_seq
-  AND f.seq <= :seq
-ORDER BY f.seq ASC
+SELECT seq, op_index, data
+FROM revision
+WHERE branch = :branch
+  AND id = :id
+  AND op = 'patch'
+  AND (
+    seq > :base_seq OR
+    (seq = :base_seq AND op_index > :base_op_index)
+  )
+  AND (
+    seq < :seq OR
+    (seq = :seq AND op_index <= :op_index)
+  )
+ORDER BY seq ASC, op_index ASC
 `;
 
 const SELECT_PATCH_COUNT = `
 SELECT COUNT(*) AS count
-FROM fact
+FROM revision
 WHERE branch = :branch
   AND id = :id
-  AND fact_type = 'patch'
+  AND op = 'patch'
   AND seq > :after_seq
   AND seq <= :seq
 `;
@@ -326,8 +308,13 @@ SELECT COALESCE(MAX(seq), 0) + 1 AS seq
 FROM "commit"
 `;
 
+const SELECT_SERVER_SEQ = `
+SELECT COALESCE(MAX(seq), 0) AS seq
+FROM "commit"
+`;
+
 const SELECT_EXISTING_COMMIT = `
-SELECT seq, hash, branch, resolution
+SELECT seq, branch, original, resolution
 FROM "commit"
 WHERE session_id = :session_id
   AND local_seq = :local_seq
@@ -335,38 +322,43 @@ WHERE session_id = :session_id
 
 const SELECT_SET_DELETE_CONFLICT = `
 SELECT seq
-FROM fact
+FROM revision
 WHERE branch = :branch
   AND id = :id
   AND seq > :after_seq
-  AND fact_type IN ('set', 'delete')
-ORDER BY seq DESC
+  AND op IN ('set', 'delete')
+ORDER BY seq DESC, op_index DESC
 LIMIT 1
 `;
 
 const SELECT_PATCH_CONFLICTS = `
-SELECT f.seq, v.data
-FROM fact f
-JOIN value v ON v.hash = f.value_ref
-WHERE f.branch = :branch
+SELECT seq, op_index, data
+FROM revision
+WHERE branch = :branch
   AND id = :id
-  AND f.seq > :after_seq
-  AND f.fact_type = 'patch'
-ORDER BY f.seq DESC
+  AND seq > :after_seq
+  AND op = 'patch'
+ORDER BY seq DESC, op_index DESC
 `;
 
 const SELECT_PENDING_RESOLUTION = `
-SELECT hash, seq
+SELECT seq
 FROM "commit"
 WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
-const SELECT_COMMIT_FACTS = `
-SELECT hash, id, value_ref, parent, branch, seq, commit_seq, fact_type
-FROM fact
+const SELECT_COMMIT_REVISIONS = `
+SELECT branch, id, seq, op_index, op, data, commit_seq
+FROM revision
 WHERE commit_seq = :commit_seq
-ORDER BY rowid ASC
+ORDER BY op_index ASC
+`;
+
+const SELECT_BRANCH = `
+SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
+FROM branch
+WHERE name = :branch
 `;
 
 const SELECT_BRANCH_STATUS = `
@@ -381,6 +373,39 @@ FROM branch
 WHERE name = :branch
 `;
 
+const SELECT_BRANCHES = `
+SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
+FROM branch
+ORDER BY name ASC
+`;
+
+const INSERT_BRANCH = `
+INSERT INTO branch (
+  name,
+  parent_branch,
+  fork_seq,
+  created_seq,
+  head_seq,
+  status
+)
+VALUES (
+  :name,
+  :parent_branch,
+  :fork_seq,
+  :created_seq,
+  :head_seq,
+  'active'
+)
+`;
+
+const DELETE_BRANCH = `
+UPDATE branch
+SET status = 'deleted',
+    deleted_at = datetime('now')
+WHERE name = :branch
+  AND name <> ''
+`;
+
 const INSERT_BLOB = `
 INSERT OR IGNORE INTO blob_store (hash, data, content_type, size)
 VALUES (:hash, :data, :content_type, :size)
@@ -392,30 +417,24 @@ FROM blob_store
 WHERE hash = :hash
 `;
 
-export interface Engine {
-  url: URL;
-  database: Database;
-  snapshotInterval: number;
-  snapshotRetention: number;
-  statements: PreparedStatements;
-}
-
 type PreparedStatement = ReturnType<Database["prepare"]>;
 
 interface PreparedStatements {
   insertAuthorization: PreparedStatement;
   insertBlob: PreparedStatement;
+  insertBranch: PreparedStatement;
   insertCommit: PreparedStatement;
-  insertFact: PreparedStatement;
   insertInvocation: PreparedStatement;
+  insertRevision: PreparedStatement;
   insertSnapshot: PreparedStatement;
-  insertValue: PreparedStatement;
-  selectAtSeq: PreparedStatement;
+  selectAtSeqLocal: PreparedStatement;
   selectBlob: PreparedStatement;
+  selectBranch: PreparedStatement;
+  selectBranches: PreparedStatement;
   selectBranchHeadSeq: PreparedStatement;
   selectBranchStatus: PreparedStatement;
-  selectCommitFacts: PreparedStatement;
-  selectCurrent: PreparedStatement;
+  selectCommitRevisions: PreparedStatement;
+  selectCurrentLocal: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
@@ -425,16 +444,33 @@ interface PreparedStatements {
   selectPatchCount: PreparedStatement;
   selectPatches: PreparedStatement;
   selectPendingResolution: PreparedStatement;
+  selectServerSeq: PreparedStatement;
   selectSetDeleteConflict: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
+  deleteBranch: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
+}
+
+export interface Engine {
+  url: URL;
+  database: Database;
+  snapshotInterval: number;
+  snapshotRetention: number;
+  statements: PreparedStatements;
 }
 
 export class ConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ConflictError";
+  }
+}
+
+export class ProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProtocolError";
   }
 }
 
@@ -462,22 +498,21 @@ export interface ApplyCommitOptions {
   commit: ClientCommit;
 }
 
-export interface AppliedFact {
-  hash: Reference;
+export interface AppliedRevision {
   id: EntityId;
-  valueRef: string;
-  parent: Reference | null;
   branch: BranchName;
   seq: number;
+  opIndex: number;
   commitSeq: number;
-  factType: Operation["op"];
+  op: Operation["op"];
+  document?: WireEntityDocument;
+  patches?: PatchOp[];
 }
 
 export interface AppliedCommit {
   seq: number;
-  hash: Reference;
   branch: BranchName;
-  facts: AppliedFact[];
+  revisions: AppliedRevision[];
 }
 
 export interface ReadOptions {
@@ -489,9 +524,9 @@ export interface ReadOptions {
 export interface EntityState {
   id: EntityId;
   branch: BranchName;
-  hash: Reference;
   seq: number;
-  factType: Operation["op"];
+  opIndex: number;
+  op: Operation["op"];
   document: EntityDocument | null;
 }
 
@@ -500,44 +535,47 @@ export interface PutBlobOptions {
   contentType: string;
 }
 
+export interface BranchState {
+  name: BranchName;
+  parentBranch: BranchName | null;
+  forkSeq: number | null;
+  createdSeq: number;
+  headSeq: number;
+  status: string;
+}
+
 type HeadRow = {
-  fact_hash: string;
   seq: number;
+  op_index: number;
 };
 
 type CommitRow = {
   seq: number;
-  hash: string;
   branch: string;
+  original: string;
   resolution: string;
 };
 
-type FactRow = {
-  hash: string;
-  id: string;
-  value_ref: string;
-  parent: string | null;
+type RevisionRow = {
   branch: string;
+  id: string;
   seq: number;
+  op_index: number;
+  op: Operation["op"];
+  data: string | null;
   commit_seq: number;
-  fact_type: Operation["op"];
 };
 
 type ReadRow = {
-  hash: string;
-  fact_type: Operation["op"];
   seq: number;
+  op_index: number;
+  op: Operation["op"];
   data: string | null;
-};
-
-type PatchRow = {
-  patch_ops: string;
-  seq: number;
 };
 
 type SnapshotRow = {
   seq: number;
-  data: string | null;
+  value: string;
 };
 
 type BlobRow = {
@@ -546,23 +584,34 @@ type BlobRow = {
   size: number;
 };
 
+type BranchRow = {
+  name: string;
+  parent_branch: string | null;
+  fork_seq: number | null;
+  created_seq: number;
+  head_seq: number;
+  status: string;
+};
+
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
   insertBlob: database.prepare(INSERT_BLOB),
+  insertBranch: database.prepare(INSERT_BRANCH),
   insertCommit: database.prepare(INSERT_COMMIT),
-  insertFact: database.prepare(INSERT_FACT),
   insertInvocation: database.prepare(INSERT_INVOCATION),
+  insertRevision: database.prepare(INSERT_REVISION),
   insertSnapshot: database.prepare(INSERT_SNAPSHOT),
-  insertValue: database.prepare(INSERT_VALUE),
-  selectAtSeq: database.prepare(SELECT_AT_SEQ),
+  selectAtSeqLocal: database.prepare(SELECT_AT_SEQ_LOCAL),
   selectBlob: database.prepare(SELECT_BLOB),
+  selectBranch: database.prepare(SELECT_BRANCH),
+  selectBranches: database.prepare(SELECT_BRANCHES),
   selectBranchHeadSeq: database.prepare(SELECT_BRANCH_HEAD_SEQ),
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
-  selectCommitFacts: database.prepare(SELECT_COMMIT_FACTS),
-  selectCurrent: database.prepare(SELECT_CURRENT),
+  selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
+  selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
@@ -572,9 +621,11 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
   selectPatches: database.prepare(SELECT_PATCHES),
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
+  selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
+  deleteBranch: database.prepare(DELETE_BRANCH),
   deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
 });
 
@@ -602,6 +653,49 @@ export const close = (engine: Engine): void => {
   engine.database.close();
 };
 
+export const createBranch = (
+  engine: Engine,
+  name: BranchName,
+  options: {
+    parentBranch?: BranchName;
+    forkSeq?: number;
+  } = {},
+): BranchState =>
+  engine.database.transaction((txEngine: Engine) => {
+    if (name === DEFAULT_BRANCH) {
+      return getBranch(txEngine, DEFAULT_BRANCH)!;
+    }
+    const existing = getBranch(txEngine, name);
+    if (existing !== null) {
+      return existing;
+    }
+    const parentBranch = options.parentBranch ?? DEFAULT_BRANCH;
+    ensureReadableBranch(txEngine, parentBranch);
+    const forkSeq = options.forkSeq ?? headSeq(txEngine, parentBranch);
+    txEngine.statements.insertBranch.run({
+      name,
+      parent_branch: parentBranch,
+      fork_seq: forkSeq,
+      created_seq: forkSeq,
+      head_seq: forkSeq,
+    });
+    return getBranch(txEngine, name)!;
+  }).immediate(engine);
+
+export const deleteBranch = (
+  engine: Engine,
+  branch: BranchName,
+): void => {
+  ensureReadableBranch(engine, branch);
+  engine.statements.deleteBranch.run({ branch });
+};
+
+export const listBranches = (engine: Engine): BranchState[] => {
+  return (engine.statements.selectBranches.all() as BranchRow[]).map(
+    toBranchState,
+  );
+};
+
 export const read = (
   engine: Engine,
   { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
@@ -613,20 +707,15 @@ export const readState = (
   engine: Engine,
   { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
 ): EntityState | null => {
-  const statement = seq === undefined
-    ? engine.statements.selectCurrent
-    : engine.statements.selectAtSeq;
-  const row =
-    (seq === undefined
-      ? statement.get({ branch, id })
-      : statement.get({ branch, id, seq })) as ReadRow | undefined;
-
-  if (!row) {
+  const targetSeq = seq ?? headSeq(engine, branch);
+  const resolved = readRowForBranch(engine, { id, branch, seq: targetSeq });
+  if (resolved === null) {
     return null;
   }
 
+  const { row, branch: resolvedBranch } = resolved;
   let document: EntityDocument | null;
-  switch (row.fact_type) {
+  switch (row.op) {
     case "set":
       document = decodeStoredDocument(row.data);
       break;
@@ -636,18 +725,19 @@ export const readState = (
     case "patch":
       document = reconstructPatchedDocument(engine, {
         id,
-        branch,
+        branch: resolvedBranch,
         seq: row.seq,
+        opIndex: row.op_index,
       });
       break;
   }
 
   return {
     id,
-    branch,
-    hash: row.hash as Reference,
+    branch: resolvedBranch,
     seq: row.seq,
-    factType: row.fact_type,
+    opIndex: row.op_index,
+    op: row.op,
     document,
   };
 };
@@ -660,6 +750,10 @@ export const headSeq = (
     branch,
   }) as { head_seq: number } | undefined;
   return row?.head_seq ?? 0;
+};
+
+export const serverSeq = (engine: Engine): number => {
+  return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
 
 export const putBlob = (
@@ -682,9 +776,7 @@ export const putBlob = (
 };
 
 export const getBlob = (engine: Engine, hash: Reference): Blob | null => {
-  const row = engine.statements.selectBlob.get({
-    hash,
-  }) as BlobRow | undefined;
+  const row = engine.statements.selectBlob.get({ hash }) as BlobRow | undefined;
   if (!row) {
     return null;
   }
@@ -722,11 +814,15 @@ const applyCommitTransaction = (
     local_seq: commit.localSeq,
   }) as CommitRow | undefined;
   if (existing) {
+    if (!sameStoredOriginal(existing.original, commit)) {
+      throw new ProtocolError(
+        `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
+      );
+    }
     return {
       seq: existing.seq,
-      hash: existing.hash as Reference,
       branch: existing.branch,
-      facts: selectCommitFacts(engine, existing.seq),
+      revisions: selectCommitRevisions(engine, existing.seq),
     };
   }
 
@@ -739,9 +835,12 @@ const applyCommitTransaction = (
   );
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
-  const hash = toReference(commit);
   const invocationRef = toReference(invocation);
   const authorizationRef = toReference(authorization);
+  const original = JSON.stringify(commit);
+  const resolution = JSON.stringify(
+    resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
+  );
 
   engine.statements.insertAuthorization.run({
     ref: authorizationRef,
@@ -757,59 +856,127 @@ const applyCommitTransaction = (
   });
   engine.statements.insertCommit.run({
     seq,
-    hash,
     branch,
     session_id: sessionId,
     local_seq: commit.localSeq,
     invocation_ref: invocationRef,
     authorization_ref: authorizationRef,
-    original: JSON.stringify(commit),
-    resolution: JSON.stringify(
-      resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
-    ),
+    original,
+    resolution,
   });
 
-  const facts: AppliedFact[] = [];
-  const heads = new Map<string, HeadRow | null>();
-  for (const operation of commit.operations) {
-    const head = resolveHead(engine, heads, branch, operation.id);
-    const next = writeOperation(engine, {
+  const revisions: AppliedRevision[] = [];
+  for (const [opIndex, operation] of commit.operations.entries()) {
+    const revision = writeOperation(engine, {
       branch,
       seq,
-      head,
+      opIndex,
       operation,
     });
-    heads.set(headKey(branch, operation.id), {
-      fact_hash: next.hash,
-      seq,
-    });
-    facts.push({
-      hash: next.hash,
-      id: operation.id,
-      valueRef: next.valueRef,
-      parent: next.parent,
-      branch,
-      seq,
-      commitSeq: seq,
-      factType: next.factType,
-    });
+    revisions.push(revision);
   }
 
   engine.statements.updateBranchHead.run({ branch, seq });
-  materializeSnapshots(engine, branch, facts);
+  materializeSnapshots(engine, branch, revisions);
 
-  return { seq, hash, branch, facts };
+  return { seq, branch, revisions };
 };
 
-const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
-  const row = engine.statements.selectBranchStatus.get({
-    branch,
-  }) as { status: string } | undefined;
-  if (!row) {
-    throw new Error(`unknown branch: ${branch}`);
-  }
-  if (row.status !== "active") {
-    throw new Error(`branch is not active: ${branch}`);
+const writeOperation = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    seq: number;
+    opIndex: number;
+    operation: Operation;
+  },
+): AppliedRevision => {
+  const { branch, seq, opIndex, operation } = options;
+  switch (operation.op) {
+    case "set": {
+      if (!isWireEntityDocument(operation.value)) {
+        throw new Error(
+          "memory v2 set operations require explicit document objects",
+        );
+      }
+      const document = decodeWireEntityDocument(operation.value);
+      const stored = encodeWireEntityDocument(document);
+      engine.statements.insertRevision.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+        op: "set",
+        data: JSON.stringify(stored),
+        commit_seq: seq,
+      });
+      engine.statements.upsertHead.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+      });
+      return {
+        id: operation.id,
+        branch,
+        seq,
+        opIndex,
+        commitSeq: seq,
+        op: "set",
+        document: stored,
+      };
+    }
+    case "patch": {
+      engine.statements.insertRevision.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+        op: "patch",
+        data: JSON.stringify(operation.patches),
+        commit_seq: seq,
+      });
+      engine.statements.upsertHead.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+      });
+      return {
+        id: operation.id,
+        branch,
+        seq,
+        opIndex,
+        commitSeq: seq,
+        op: "patch",
+        patches: operation.patches,
+      };
+    }
+    case "delete": {
+      engine.statements.insertRevision.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+        op: "delete",
+        data: null,
+        commit_seq: seq,
+      });
+      engine.statements.upsertHead.run({
+        branch,
+        id: operation.id,
+        seq,
+        op_index: opIndex,
+      });
+      return {
+        id: operation.id,
+        branch,
+        seq,
+        opIndex,
+        commitSeq: seq,
+        op: "delete",
+      };
+    }
   }
 };
 
@@ -820,7 +987,7 @@ const validateConfirmedReads = (
 ): void => {
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
-    ensureActiveBranch(engine, readBranch);
+    ensureReadableBranch(engine, readBranch);
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -834,6 +1001,50 @@ const validateConfirmedReads = (
       );
     }
   }
+};
+
+const resolvePendingReads = (
+  engine: Engine,
+  sessionId: SessionId,
+  branch: BranchName,
+  commit: ClientCommit,
+): Array<{ localSeq: number; seq: number }> => {
+  const resolutions = new Map<number, { localSeq: number; seq: number }>();
+
+  for (const read of commit.reads.pending) {
+    let resolution = resolutions.get(read.localSeq);
+    if (!resolution) {
+      const row = engine.statements.selectPendingResolution.get({
+        session_id: sessionId,
+        local_seq: read.localSeq,
+      }) as { seq: number } | undefined;
+      if (!row) {
+        throw new ConflictError(
+          `pending dependency not resolved: ${read.localSeq}`,
+        );
+      }
+      resolution = {
+        localSeq: read.localSeq,
+        seq: row.seq,
+      };
+      resolutions.set(read.localSeq, resolution);
+    }
+
+    const conflictSeq = findConflictSeq(
+      engine,
+      branch,
+      read.id,
+      resolution.seq,
+      read.path,
+    );
+    if (conflictSeq !== null) {
+      throw new ConflictError(
+        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+      );
+    }
+  }
+
+  return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
 };
 
 const findConflictSeq = (
@@ -922,280 +1133,55 @@ const parentPath = (path: readonly string[]): string[] => {
   return path.length === 0 ? [] : [...path.slice(0, -1)];
 };
 
-const resolvePendingReads = (
-  engine: Engine,
-  sessionId: SessionId,
-  branch: BranchName,
-  commit: ClientCommit,
-): Array<{ localSeq: number; hash: Reference; seq: number }> => {
-  const resolutions = new Map<
-    number,
-    { localSeq: number; hash: Reference; seq: number }
-  >();
-
-  for (const read of commit.reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionId,
-        local_seq: read.localSeq,
-      }) as { hash: string; seq: number } | undefined;
-      if (!row) {
-        throw new ConflictError(
-          `pending dependency not resolved: ${read.localSeq}`,
-        );
-      }
-      resolution = {
-        localSeq: read.localSeq,
-        hash: row.hash as Reference,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
-    }
-
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolution.seq,
-      read.path,
-    );
-    if (conflictSeq !== null) {
-      throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
-      );
-    }
-  }
-
-  return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
-};
-
-const selectCommitFacts = (
+const selectCommitRevisions = (
   engine: Engine,
   commitSeq: number,
-): AppliedFact[] => {
-  const rows = engine.statements.selectCommitFacts.all({
+): AppliedRevision[] => {
+  const rows = engine.statements.selectCommitRevisions.all({
     commit_seq: commitSeq,
-  }) as FactRow[];
-  return rows.map((row) => ({
-    hash: row.hash as Reference,
-    id: row.id,
-    valueRef: row.value_ref,
-    parent: row.parent as Reference | null,
-    branch: row.branch,
-    seq: row.seq,
-    commitSeq: row.commit_seq,
-    factType: row.fact_type,
-  }));
-};
-
-const resolveHead = (
-  engine: Engine,
-  heads: Map<string, HeadRow | null>,
-  branch: BranchName,
-  id: EntityId,
-): HeadRow | null => {
-  const key = headKey(branch, id);
-  if (heads.has(key)) {
-    return heads.get(key) ?? null;
-  }
-
-  const row = engine.statements.selectHead.get({
-    branch,
-    id,
-  }) as HeadRow | undefined;
-  const head = row ?? null;
-  heads.set(key, head);
-  return head;
-};
-
-const writeOperation = (
-  engine: Engine,
-  options: {
-    branch: BranchName;
-    seq: number;
-    head: HeadRow | null;
-    operation: Operation;
-  },
-): {
-  hash: Reference;
-  parent: Reference | null;
-  valueRef: string;
-  factType: Operation["op"];
-} => {
-  const { branch, seq, head, operation } = options;
-  const parent = head?.fact_hash as Reference | undefined;
-  const parentRef = parent ?? emptyReferenceFor(operation.id);
-
-  switch (operation.op) {
-    case "set": {
-      if (!isWireEntityDocument(operation.value)) {
-        throw new Error(
-          "memory v2 set operations require explicit document objects",
-        );
-      }
-      const value = decodeWireEntityDocument(operation.value);
-      const stored = encodeWireEntityDocument(value);
-      const valueRef = toReference(stored);
-      engine.statements.insertValue.run({
-        hash: valueRef,
-        data: JSON.stringify(stored),
-      });
-
-      const hash = toReference({
-        type: "set",
-        id: operation.id,
-        value: stored,
-        parent: parentRef,
-      });
-
-      engine.statements.insertFact.run({
-        hash,
-        id: operation.id,
-        value_ref: valueRef,
-        parent: parent ?? null,
-        branch,
-        seq,
-        commit_seq: seq,
-        fact_type: "set",
-      });
-      engine.statements.upsertHead.run({
-        branch,
-        id: operation.id,
-        fact_hash: hash,
-        seq,
-      });
-      return { hash, parent: parent ?? null, valueRef, factType: "set" };
-    }
-    case "patch": {
-      const valueRef = toReference(operation.patches);
-      engine.statements.insertValue.run({
-        hash: valueRef,
-        data: JSON.stringify(operation.patches),
-      });
-
-      const hash = toReference({
-        type: "patch",
-        id: operation.id,
-        ops: operation.patches,
-        parent: parentRef,
-      });
-      engine.statements.insertFact.run({
-        hash,
-        id: operation.id,
-        value_ref: valueRef,
-        parent: parent ?? null,
-        branch,
-        seq,
-        commit_seq: seq,
-        fact_type: "patch",
-      });
-      engine.statements.upsertHead.run({
-        branch,
-        id: operation.id,
-        fact_hash: hash,
-        seq,
-      });
-      return { hash, parent: parent ?? null, valueRef, factType: "patch" };
-    }
-    case "delete": {
-      const hash = toReference({
-        type: "delete",
-        id: operation.id,
-        parent: parentRef,
-      });
-      engine.statements.insertFact.run({
-        hash,
-        id: operation.id,
-        value_ref: EMPTY_VALUE_REF,
-        parent: parent ?? null,
-        branch,
-        seq,
-        commit_seq: seq,
-        fact_type: "delete",
-      });
-      engine.statements.upsertHead.run({
-        branch,
-        id: operation.id,
-        fact_hash: hash,
-        seq,
-      });
+  }) as RevisionRow[];
+  return rows.map((row) => {
+    const base = {
+      id: row.id,
+      branch: row.branch,
+      seq: row.seq,
+      opIndex: row.op_index,
+      commitSeq: row.commit_seq,
+      op: row.op,
+    } satisfies Omit<AppliedRevision, "document" | "patches">;
+    if (row.op === "set") {
       return {
-        hash,
-        parent: parent ?? null,
-        valueRef: EMPTY_VALUE_REF,
-        factType: "delete",
-      };
+        ...base,
+        document: decodeStoredWireDocument(row.data),
+      } satisfies AppliedRevision;
     }
-  }
-};
-
-const reconstructPatchedDocument = (
-  engine: Engine,
-  options: {
-    id: EntityId;
-    branch: BranchName;
-    seq: number;
-  },
-): EntityDocument => {
-  const { id, branch, seq } = options;
-  const baseRow = engine.statements.selectLatestBase.get({
-    branch,
-    id,
-    seq,
-  }) as ReadRow | undefined;
-  const snapshotRow = engine.statements.selectLatestSnapshot.get({
-    branch,
-    id,
-    seq,
-  }) as SnapshotRow | undefined;
-
-  let baseSeq = 0;
-  let document = emptyEntityDocument();
-  if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
-    baseSeq = snapshotRow.seq;
-    document = decodeStoredDocument(snapshotRow.data);
-  } else if (baseRow) {
-    baseSeq = baseRow.seq;
-    if (baseRow.fact_type === "set") {
-      document = decodeStoredDocument(baseRow.data);
+    if (row.op === "patch") {
+      return {
+        ...base,
+        patches: JSON.parse(row.data ?? "[]") as PatchOp[],
+      } satisfies AppliedRevision;
     }
-  }
-
-  const patches = engine.statements.selectPatches.all({
-    branch,
-    id,
-    base_seq: baseSeq,
-    seq,
-  }) as PatchRow[];
-
-  for (const patch of patches) {
-    document = applyPatchDocument(
-      document,
-      JSON.parse(patch.patch_ops) as PatchOp[],
-    );
-  }
-
-  return document;
+    return base as AppliedRevision;
+  });
 };
 
 const materializeSnapshots = (
   engine: Engine,
   branch: BranchName,
-  facts: readonly AppliedFact[],
+  revisions: readonly AppliedRevision[],
 ): void => {
   if (engine.snapshotInterval <= 0) {
     return;
   }
 
   const seen = new Set<string>();
-  for (const fact of facts) {
-    const key = headKey(branch, fact.id);
+  for (const revision of revisions) {
+    const key = revisionKey(branch, revision.id);
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
-    maybeMaterializeSnapshot(engine, branch, fact.id);
+    maybeMaterializeSnapshot(engine, branch, revision.id);
   }
 };
 
@@ -1204,10 +1190,8 @@ const maybeMaterializeSnapshot = (
   branch: BranchName,
   id: EntityId,
 ): void => {
-  const current = engine.statements.selectCurrent.get({ branch, id }) as
-    | ReadRow
-    | undefined;
-  if (current === undefined || current.fact_type !== "patch") {
+  const current = readState(engine, { id, branch });
+  if (current === null || current.document === null || current.op !== "patch") {
     return;
   }
 
@@ -1220,27 +1204,15 @@ const maybeMaterializeSnapshot = (
       seq: current.seq,
     }) as { count: number }
   ).count;
-
   if (patchCount < engine.snapshotInterval) {
     return;
   }
 
-  const state = readState(engine, { id, branch, seq: current.seq });
-  if (state === null || state.document === null || state.factType !== "patch") {
-    return;
-  }
-
-  const stored = encodeWireEntityDocument(state.document);
-  const valueRef = toReference(stored);
-  engine.statements.insertValue.run({
-    hash: valueRef,
-    data: JSON.stringify(stored),
-  });
   engine.statements.insertSnapshot.run({
-    id,
-    seq: state.seq,
-    value_ref: valueRef,
     branch,
+    id,
+    seq: current.seq,
+    value: JSON.stringify(encodeWireEntityDocument(current.document)),
   });
   compactSnapshots(engine, branch, id);
 };
@@ -1253,7 +1225,6 @@ const compactSnapshots = (
   if (engine.snapshotRetention <= 0) {
     return;
   }
-
   engine.statements.deleteOldSnapshots.run({
     branch,
     id,
@@ -1271,6 +1242,31 @@ const latestMaterializationSeq = (
     branch,
     id,
     seq,
+    op_index: Number.MAX_SAFE_INTEGER,
+  }) as ReadRow | undefined;
+  const snapshotRow = engine.statements.selectLatestSnapshot.get({
+    branch,
+    id,
+    seq,
+  }) as SnapshotRow | undefined;
+  return Math.max(baseRow?.seq ?? 0, snapshotRow?.seq ?? 0);
+};
+
+const reconstructPatchedDocument = (
+  engine: Engine,
+  options: {
+    id: EntityId;
+    branch: BranchName;
+    seq: number;
+    opIndex: number;
+  },
+): EntityDocument => {
+  const { id, branch, seq, opIndex } = options;
+  const baseRow = engine.statements.selectLatestBase.get({
+    branch,
+    id,
+    seq,
+    op_index: opIndex,
   }) as ReadRow | undefined;
   const snapshotRow = engine.statements.selectLatestSnapshot.get({
     branch,
@@ -1278,14 +1274,113 @@ const latestMaterializationSeq = (
     seq,
   }) as SnapshotRow | undefined;
 
-  return Math.max(baseRow?.seq ?? 0, snapshotRow?.seq ?? 0);
+  let baseSeq = 0;
+  let baseOpIndex = -1;
+  let document = emptyEntityDocument();
+  if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
+    baseSeq = snapshotRow.seq;
+    baseOpIndex = Number.MAX_SAFE_INTEGER;
+    document = decodeStoredDocument(snapshotRow.value);
+  } else if (baseRow) {
+    baseSeq = baseRow.seq;
+    baseOpIndex = baseRow.op_index;
+    if (baseRow.op === "set") {
+      document = decodeStoredDocument(baseRow.data);
+    }
+  }
+
+  const patches = engine.statements.selectPatches.all({
+    branch,
+    id,
+    base_seq: baseSeq,
+    base_op_index: baseOpIndex,
+    seq,
+    op_index: opIndex,
+  }) as Array<{ data: string; seq: number; op_index: number }>;
+
+  for (const patch of patches) {
+    document = applyPatchDocument(
+      document,
+      JSON.parse(patch.data ?? "[]") as PatchOp[],
+    );
+  }
+
+  return document;
 };
 
-const applyPatchDocument = (
-  document: EntityDocument,
-  patches: PatchOp[],
-): EntityDocument =>
-  applyPatch(document as JSONValue, patches) as EntityDocument;
+const readRowForBranch = (
+  engine: Engine,
+  options: {
+    id: EntityId;
+    branch: BranchName;
+    seq: number;
+  },
+): { row: ReadRow; branch: BranchName } | null => {
+  ensureReadableBranch(engine, options.branch);
+
+  const currentRow =
+    (options.seq === headSeq(engine, options.branch)
+      ? engine.statements.selectCurrentLocal.get({
+        branch: options.branch,
+        id: options.id,
+      })
+      : engine.statements.selectAtSeqLocal.get({
+        branch: options.branch,
+        id: options.id,
+        seq: options.seq,
+      })) as ReadRow | undefined;
+  if (currentRow !== undefined) {
+    return { row: currentRow, branch: options.branch };
+  }
+
+  const branch = getBranch(engine, options.branch);
+  if (branch?.parentBranch === null || branch?.parentBranch === undefined) {
+    return null;
+  }
+  const inheritedSeq = Math.min(options.seq, branch.forkSeq ?? 0);
+  return readRowForBranch(engine, {
+    id: options.id,
+    branch: branch.parentBranch,
+    seq: inheritedSeq,
+  });
+};
+
+const getBranch = (engine: Engine, branch: BranchName): BranchState | null => {
+  const row = engine.statements.selectBranch.get({
+    branch,
+  }) as BranchRow | undefined;
+  return row ? toBranchState(row) : null;
+};
+
+const toBranchState = (row: BranchRow): BranchState => ({
+  name: row.name,
+  parentBranch: row.parent_branch,
+  forkSeq: row.fork_seq,
+  createdSeq: row.created_seq,
+  headSeq: row.head_seq,
+  status: row.status,
+});
+
+const ensureReadableBranch = (engine: Engine, branch: BranchName): void => {
+  const row = engine.statements.selectBranchStatus.get({
+    branch,
+  }) as { status: string } | undefined;
+  if (!row) {
+    throw new Error(`unknown branch: ${branch}`);
+  }
+};
+
+const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
+  const row = engine.statements.selectBranchStatus.get({
+    branch,
+  }) as { status: string } | undefined;
+  if (!row) {
+    throw new Error(`unknown branch: ${branch}`);
+  }
+  if (row.status !== "active") {
+    throw new Error(`branch is not active: ${branch}`);
+  }
+};
 
 const emptyEntityDocument = (): EntityDocument => ({});
 
@@ -1294,22 +1389,44 @@ const decodeStoredDocument = (data: string | null): EntityDocument => {
   if (!isWireEntityDocument(parsed)) {
     throw new Error("memory v2 stored documents must be plain object roots");
   }
-  return decodeWireEntityDocument(parsed as WireEntityDocument);
+  return decodeWireEntityDocument(parsed);
 };
 
-export const hashBlobBytes = (value: Uint8Array): Reference => {
-  return fromDigest(sha256(value)).toString() as Reference;
+const decodeStoredWireDocument = (
+  data: string | null,
+): WireEntityDocument | undefined => {
+  if (data === null) {
+    return undefined;
+  }
+  const parsed = JSON.parse(data) as unknown;
+  if (!isWireEntityDocument(parsed)) {
+    throw new Error("memory v2 stored documents must be plain object roots");
+  }
+  return parsed;
 };
 
-const emptyReferenceFor = (id: EntityId): Reference => {
-  return toReference({ id });
+const applyPatchDocument = (
+  document: EntityDocument,
+  patches: PatchOp[],
+): EntityDocument =>
+  applyPatch(document as JSONValue, patches) as EntityDocument;
+
+const sameStoredOriginal = (
+  stored: string,
+  incoming: ClientCommit,
+): boolean => {
+  return stored === JSON.stringify(incoming);
 };
 
-const headKey = (branch: BranchName, id: EntityId): string =>
+const revisionKey = (branch: BranchName, id: EntityId): string =>
   `${branch}\0${id}`;
 
 const toReference = (value: unknown): Reference => {
   return refer(value as NonNullable<unknown> | null).toString() as Reference;
+};
+
+export const hashBlobBytes = (value: Uint8Array): Reference => {
+  return fromDigest(sha256(value)).toString() as Reference;
 };
 
 const toDatabaseAddress = (url: URL): URL | string => {

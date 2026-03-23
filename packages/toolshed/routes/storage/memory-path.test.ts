@@ -6,7 +6,7 @@ Deno.test("resolveMemoryEngineStoreRootUrl derives a sibling engine directory fo
 
   assertEquals(
     resolveMemoryEngineStoreRootUrl(file, { singleFileMode: true }).href,
-    new URL("file:///tmp/ct-memory/space.engine/").href,
+    new URL("file:///tmp/ct-memory/space.engine-v3/").href,
   );
 });
 
@@ -15,7 +15,7 @@ Deno.test("resolveMemoryEngineStoreRootUrl derives a nested engine directory for
 
   assertEquals(
     resolveMemoryEngineStoreRootUrl(root, { singleFileMode: false }).href,
-    new URL("file:///tmp/ct-memory/engine/").href,
+    new URL("file:///tmp/ct-memory/engine-v3/").href,
   );
 });
 
@@ -24,6 +24,6 @@ Deno.test("resolveMemoryEngineStoreRootUrl treats extensionless DB_PATH values a
 
   assertEquals(
     resolveMemoryEngineStoreRootUrl(file, { singleFileMode: true }).href,
-    new URL("file:///tmp/ct-memory/space.engine/").href,
+    new URL("file:///tmp/ct-memory/space.engine-v3/").href,
   );
 });

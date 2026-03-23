@@ -12,7 +12,6 @@ import type { ReconstructionContext } from "@commontools/data-model/interface";
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
 export const DEFAULT_BRANCH = "" as const;
-export const EMPTY_VALUE_REF = "__empty__" as const;
 
 export type EntityId = string;
 export type BranchName = string;
@@ -160,23 +159,66 @@ export interface GraphQueryRoot {
 
 export interface GraphQuery {
   roots: GraphQueryRoot[];
-  subscribe?: boolean;
   since?: number;
+  atSeq?: number;
   branch?: BranchName;
   excludeSent?: boolean;
 }
 
 export interface EntitySnapshot {
+  branch: BranchName;
   id: EntityId;
   seq: number;
-  hash?: Reference;
   document: WireEntityDocument | null;
 }
 
 export interface GraphQueryResult {
   serverSeq: number;
   entities: EntitySnapshot[];
-  subscriptionId?: string;
+}
+
+export interface QueryWatchSpec {
+  id: string;
+  kind: "query";
+  query: GraphQuery;
+}
+
+export interface GraphWatchSpec {
+  id: string;
+  kind: "graph";
+  query: GraphQuery;
+}
+
+export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
+
+export interface SessionSyncUpsert {
+  branch: BranchName;
+  id: EntityId;
+  seq: number;
+  doc?: WireEntityDocument;
+  deleted?: true;
+}
+
+export interface SessionSyncRemove {
+  branch: BranchName;
+  id: EntityId;
+}
+
+export interface SessionSync {
+  type: "sync";
+  fromSeq: number;
+  toSeq: number;
+  upserts: SessionSyncUpsert[];
+  removes: SessionSyncRemove[];
+}
+
+export interface WatchSetResult {
+  serverSeq: number;
+  sync: SessionSync;
+}
+
+export interface SessionAckResult {
+  serverSeq: number;
 }
 
 export interface TransactRequest {
@@ -197,12 +239,20 @@ export interface GraphQueryRequest {
   query: GraphQuery;
 }
 
-export interface GraphUnsubscribeRequest {
-  type: "graph.unsubscribe";
+export interface WatchSetRequest {
+  type: "session.watch.set";
   requestId: string;
   space: string;
   sessionId: SessionId;
-  subscriptionId: string;
+  watches: WatchSpec[];
+}
+
+export interface SessionAckRequest {
+  type: "session.ack";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  seenSeq: number;
 }
 
 export interface ResponseMessage<Result> {
@@ -212,12 +262,11 @@ export interface ResponseMessage<Result> {
   error?: V2Error;
 }
 
-export interface GraphUpdateMessage {
-  type: "graph.update";
-  subscriptionId?: string;
-  subscriptionIds?: string[];
+export interface SessionEffectMessage {
+  type: "session/effect";
   space: string;
-  result: GraphQueryResult;
+  sessionId: SessionId;
+  effect: SessionSync;
 }
 
 export interface V2Error {
@@ -233,13 +282,7 @@ export interface TaskReturn<Result> {
   is: Result;
 }
 
-export interface TaskEffect<Effect> {
-  the: "task/effect";
-  of: JobId;
-  is: Effect;
-}
-
-export type Receipt<Result, Effect> = TaskReturn<Result> | TaskEffect<Effect>;
+export type Receipt<Result> = TaskReturn<Result>;
 export type LegacyClientMessage = SessionOpenCommand;
 export type LegacyServerMessage = TaskReturn<V2Result<unknown>>;
 export type ClientMessage =
@@ -247,11 +290,12 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
-  | GraphUnsubscribeRequest;
+  | WatchSetRequest
+  | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<unknown>
-  | GraphUpdateMessage;
+  | SessionEffectMessage;
 
 const memoryV2ReconstructionContext: ReconstructionContext = {
   getCell() {

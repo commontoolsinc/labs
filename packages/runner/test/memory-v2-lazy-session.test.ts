@@ -51,17 +51,14 @@ class TestEmulatedStorageManager extends EmulatedStorageManager {
 
 const appliedCommitFor = (ids: URI[]): AppliedCommit => ({
   seq: 1,
-  hash: "bafyreifakecommit" as AppliedCommit["hash"],
-  branch: "main",
-  facts: ids.map((id) => ({
+  branch: "",
+  revisions: ids.map((id, index) => ({
     id,
-    hash: `bafyreifake-${id}` as AppliedCommit["hash"],
-    valueRef: `value:${id}`,
-    parent: null,
-    branch: "main",
+    branch: "",
     seq: 1,
+    opIndex: index,
     commitSeq: 1,
-    factType: "set",
+    op: "set",
   })),
 });
 

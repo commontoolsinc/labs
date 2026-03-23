@@ -341,7 +341,7 @@ export const resolveSpaceStoreUrl = (
 
   if (!isFile) {
     if (memoryVersion === "v2") {
-      return new URL(`./engine/${subject}.sqlite`, store);
+      return new URL(`./engine-v3/${subject}.sqlite`, store);
     }
 
     return new URL(`./${subject}.sqlite`, store);
@@ -350,7 +350,7 @@ export const resolveSpaceStoreUrl = (
   if (memoryVersion === "v2") {
     const ext = Path.extname(storePath);
     const stem = ext === "" ? storePath : storePath.slice(0, -ext.length);
-    return Path.toFileUrl(Path.join(`${stem}.engine`, `${subject}.sqlite`));
+    return Path.toFileUrl(Path.join(`${stem}.engine-v3`, `${subject}.sqlite`));
   }
 
   return store;

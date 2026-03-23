@@ -271,21 +271,18 @@ class ScriptedServerModel {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
-    const facts = commit.operations.map((operation, index) => ({
-      hash: `fact:${commit.localSeq}:${index}`,
+    const revisions = commit.operations.map((operation, index) => ({
       id: operation.id,
-      valueRef: `value:${commit.localSeq}:${index}`,
-      parent: null,
       branch: "",
       seq: this.serverSeq + 1,
+      opIndex: index,
       commitSeq: this.serverSeq + 1,
-      factType: operation.op,
+      op: operation.op,
     }));
     const applied = {
       seq: ++this.serverSeq,
-      hash: `commit:${commit.localSeq}:${this.serverSeq}`,
       branch: "",
-      facts,
+      revisions,
     } as AppliedCommit;
 
     for (const operation of commit.operations) {
@@ -361,6 +358,31 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
           requestId: message.requestId!,
           ok: {
             sessionId: message.session?.sessionId ?? this.model.sessionId,
+            serverSeq: this.model.serverSeq,
+          },
+        });
+        break;
+      case "session.watch.set":
+        this.respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: this.model.serverSeq,
+            sync: {
+              type: "sync",
+              fromSeq: this.model.serverSeq,
+              toSeq: this.model.serverSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        });
+        break;
+      case "session.ack":
+        this.respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
             serverSeq: this.model.serverSeq,
           },
         });

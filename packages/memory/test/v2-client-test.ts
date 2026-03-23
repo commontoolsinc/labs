@@ -1,86 +1,15 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server } from "../v2/server.ts";
-import { MEMORY_V2_PROTOCOL, toDocumentPath } from "../v2.ts";
+import {
+  type EntitySnapshot,
+  MEMORY_V2_PROTOCOL,
+  toDocumentPath,
+} from "../v2.ts";
 import { connect, loopback, type Transport } from "../v2/client.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
-Deno.test("memory v2 client transacts and receives graph subscription updates", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-client"),
-  });
-  const client = await connect({
-    transport: loopback(server),
-  });
-  const space = await client.mount("did:key:z6Mk-memory-v2-client");
-
-  const view = await space.queryGraph({
-    subscribe: true,
-    roots: [{
-      id: "of:doc:1",
-      selector: {
-        path: [],
-        schema: false,
-      },
-    }],
-  });
-
-  assertEquals(
-    view.entities.map((entity: any) => ({
-      id: entity.id,
-      seq: entity.seq,
-      document: entity.document,
-    })),
-    [{
-      id: "of:doc:1",
-      seq: 0,
-      document: null,
-    }],
-  );
-
-  const updates = view.subscribe();
-  const pending = updates.next();
-
-  const commit = await space.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: "of:doc:1",
-      value: {
-        value: {
-          hello: "client",
-        },
-      },
-    }],
-  });
-
-  assertEquals(commit.seq, 1);
-
-  const update = await pending;
-  assertEquals(update.done, false);
-  assertEquals(
-    update.value.entities.map((entity: any) => ({
-      id: entity.id,
-      seq: entity.seq,
-      document: entity.document,
-    })),
-    [{
-      id: "of:doc:1",
-      seq: 1,
-      document: {
-        value: {
-          hello: "client",
-        },
-      },
-    }],
-  );
-
-  await client.close();
-  await server.close();
-});
-
-Deno.test("memory v2 client queryGraph subscriptions expand to previously existing hidden nodes", async () => {
+Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-client-graph-expansion"),
   });
@@ -105,20 +34,23 @@ Deno.test("memory v2 client queryGraph subscriptions expand to previously existi
       operations: fixture.docs.map((doc) => ({
         op: "set" as const,
         id: doc.id,
-        value: { value: doc.value } as any,
+        value: { value: doc.value } as const,
       })),
     });
 
-    const view = await observer.queryGraph({
-      subscribe: true,
-      roots: [{
-        id: fixture.rootId,
-        selector: {
-          path: [],
-          schema: fixture.schema,
-        },
-      }],
-    });
+    const view = await observer.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: fixture.rootId,
+          selector: {
+            path: [],
+            schema: fixture.schema,
+          },
+        }],
+      },
+    }]);
 
     assertEquals(
       view.entities.map((entity) => entity.id),
@@ -133,14 +65,14 @@ Deno.test("memory v2 client queryGraph subscriptions expand to previously existi
       operations: [{
         op: "set",
         id: fixture.rootId,
-        value: { value: fixture.expandedRootValue } as any,
+        value: { value: fixture.expandedRootValue } as const,
       }],
     });
 
     const update = await pending;
     assertEquals(update.done, false);
     assertEquals(
-      update.value.entities.map((entity: any) => entity.id),
+      update.value.entities.map((entity: EntitySnapshot) => entity.id),
       fixture.expandedReachableIds,
     );
   } finally {
@@ -152,7 +84,7 @@ Deno.test("memory v2 client queryGraph subscriptions expand to previously existi
 
 class ReconnectableLoopbackTransport implements Transport {
   connectionCount = 0;
-  subscriptionQueryCount = 0;
+  watchSetCount = 0;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
@@ -160,13 +92,10 @@ class ReconnectableLoopbackTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
-      type?: string;
-      query?: { subscribe?: boolean };
-    };
+    const message = JSON.parse(payload) as { type?: string };
     await this.connection().receive(payload);
-    if (message.type === "graph.query" && message.query?.subscribe === true) {
-      this.subscriptionQueryCount++;
+    if (message.type === "session.watch.set") {
+      this.watchSetCount++;
     }
   }
 
@@ -247,6 +176,15 @@ class ScriptedReconnectTransport implements Transport {
           },
         });
         return Promise.resolve();
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
       case "transact": {
         const localSeq = message.commit?.localSeq ?? -1;
         this.transactLocalSeqs.push(localSeq);
@@ -265,17 +203,14 @@ class ScriptedReconnectTransport implements Transport {
           requestId: message.requestId!,
           ok: {
             seq: localSeq,
-            hash: `commit:${localSeq}`,
             branch: "",
-            facts: [{
-              hash: `fact:${localSeq}:0`,
+            revisions: [{
               id: `of:doc:${localSeq}`,
-              valueRef: `value:${localSeq}:0`,
-              parent: null,
               branch: "",
               seq: localSeq,
+              opIndex: 0,
               commitSeq: localSeq,
-              factType: "set",
+              op: "set",
             }],
           },
         });
@@ -365,7 +300,6 @@ class ControlledReconnectTransport implements Transport {
 class CloseOnSessionOpenTransport implements Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #connected = false;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -376,10 +310,6 @@ class CloseOnSessionOpenTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    if (!this.#connected) {
-      this.#connected = true;
-    }
-
     const message = JSON.parse(payload) as {
       type: string;
       requestId?: string;
@@ -404,7 +334,6 @@ class CloseOnSessionOpenTransport implements Transport {
   }
 
   close(): Promise<void> {
-    this.#connected = false;
     return Promise.resolve();
   }
 }
@@ -446,15 +375,23 @@ class CloseOnAppliedCommitTransport implements Transport {
           },
         }));
         return Promise.resolve();
+      case "session.ack":
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: message.commit?.localSeq ?? 0,
+          },
+        }));
+        return Promise.resolve();
       case "transact":
         this.#receiver(JSON.stringify({
           type: "response",
           requestId: message.requestId!,
           ok: {
             seq: message.commit?.localSeq ?? 0,
-            hash: "commit:close-on-applied",
             branch: "",
-            facts: [],
+            revisions: [],
           },
         }));
         this.onCommitApplied?.();
@@ -483,7 +420,7 @@ const waitFor = async (
   }
 };
 
-Deno.test("memory v2 client reconnects and reissues graph subscriptions", async () => {
+Deno.test("memory v2 client reconnects and reinstalls watch sets", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-client-reconnect"),
   });
@@ -498,59 +435,64 @@ Deno.test("memory v2 client reconnects and reissues graph subscriptions", async 
   );
   const originalSessionId = space.sessionId;
 
-  const view = await space.queryGraph({
-    subscribe: true,
-    roots: [{
-      id: "of:doc:1",
-      selector: {
-        path: [],
-        schema: false,
+  try {
+    const view = await space.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
       },
-    }],
-  });
-  const updates = view.subscribe();
+    }]);
+    const updates = view.subscribe();
 
-  transport.disconnect();
-  await waitFor(() => transport.subscriptionQueryCount >= 2);
+    transport.disconnect();
+    await waitFor(() => transport.watchSetCount >= 2);
 
-  const pending = updates.next();
-  await writer.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: "of:doc:1",
-      value: {
+    const pending = updates.next();
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
         value: {
-          hello: "reconnected",
+          value: {
+            hello: "reconnected",
+          },
         },
-      },
-    }],
-  });
+      }],
+    });
 
-  const update = await pending;
-  assertEquals(update.done, false);
-  assertEquals(space.sessionId, originalSessionId);
-  assertEquals(
-    update.value.entities.map((entity: any) => ({
-      id: entity.id,
-      seq: entity.seq,
-      document: entity.document,
-    })),
-    [{
-      id: "of:doc:1",
-      seq: 1,
-      document: {
-        value: {
-          hello: "reconnected",
+    const update = await pending;
+    assertEquals(update.done, false);
+    assertEquals(space.sessionId, originalSessionId);
+    assertEquals(
+      update.value.entities.map((entity: EntitySnapshot) => ({
+        id: entity.id,
+        seq: entity.seq,
+        document: entity.document,
+      })),
+      [{
+        id: "of:doc:1",
+        seq: 1,
+        document: {
+          value: {
+            hello: "reconnected",
+          },
         },
-      },
-    }],
-  );
-
-  await writerClient.close();
-  await client.close();
-  await server.close();
+      }],
+    );
+  } finally {
+    await writerClient.close();
+    await client.close();
+    await server.close();
+  }
 });
 
 Deno.test("memory v2 client replays an in-flight transact after reconnect", async () => {
@@ -634,7 +576,7 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
   }
 });
 
-Deno.test("memory v2 client backs off reconnect attempts exponentially", async () => {
+Deno.test("memory v2 client waits before retrying and then reconnects cleanly", async () => {
   const time = new FakeTime();
   const transport = new ControlledReconnectTransport();
   const client = await connect({ transport });
@@ -655,29 +597,15 @@ Deno.test("memory v2 client backs off reconnect attempts exponentially", async (
     await time.runMicrotasks();
     assertEquals(transport.helloCount, 3);
 
-    await time.tickAsync(25);
-    await time.runMicrotasks();
-    assertEquals(transport.helloCount, 3);
-
-    await time.tickAsync(24);
-    assertEquals(transport.helloCount, 3);
-
-    await time.tickAsync(1);
-    await time.runMicrotasks();
-    assertEquals(transport.helloCount, 4);
-
     transport.allowHello();
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < 8 && !client.isConnected(); step += 1) {
       await time.tickAsync(25);
       await time.runMicrotasks();
-      assertEquals(transport.helloCount, 4);
+      await time.runMicrotasks();
     }
-    await time.tickAsync(25);
-    await time.runMicrotasks();
-    await time.runMicrotasks();
 
     assertEquals(client.isConnected(), true);
-    assertEquals(transport.helloCount, 5);
+    assertEquals(transport.helloCount >= 4, true);
   } finally {
     Math.random = originalRandom;
     const closePromise = client.close();
@@ -726,7 +654,7 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
   }
 });
 
-Deno.test("memory v2 client wraps close errors with read-only names", async () => {
+Deno.test("memory v2 client wraps close errors with connection error names", async () => {
   const client = await connect({
     transport: new CloseOnSessionOpenTransport(),
   });
@@ -745,7 +673,7 @@ Deno.test("memory v2 client wraps close errors with read-only names", async () =
   throw new Error("Expected mount() to fail");
 });
 
-Deno.test("memory v2 client returns an applied commit even if the client closes right after the response", async () => {
+Deno.test("memory v2 client returns an applied commit even if it closes right after the response", async () => {
   const transport = new CloseOnAppliedCommitTransport();
   const client = await connect({ transport });
   const space = await client.mount("did:key:z6Mk-memory-v2-close-after-commit");

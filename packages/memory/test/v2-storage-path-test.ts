@@ -17,7 +17,7 @@ Deno.test("resolveSpaceStoreUrl uses a dedicated engine subdirectory in director
 
   assertEquals(
     resolveSpaceStoreUrl(root, subject, "v2").href,
-    new URL(`./engine/${subject}.sqlite`, root).href,
+    new URL(`./engine-v3/${subject}.sqlite`, root).href,
   );
 });
 
@@ -27,6 +27,6 @@ Deno.test("resolveSpaceStoreUrl uses a sibling engine directory in single-file m
 
   assertEquals(
     resolveSpaceStoreUrl(file, subject, "v2").href,
-    new URL(`file:///tmp/ct-memory/space.engine/${subject}.sqlite`).href,
+    new URL(`file:///tmp/ct-memory/space.engine-v3/${subject}.sqlite`).href,
   );
 });

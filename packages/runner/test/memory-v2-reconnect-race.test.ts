@@ -16,6 +16,7 @@ import {
   type SessionFactory,
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
+import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
@@ -31,6 +32,10 @@ type TestProvider = IStorageProviderWithReplica & {
       error?: { name?: string; message?: string };
     }
   >;
+  sync(
+    uri: URI,
+    selector?: { path: string[]; schema: unknown },
+  ): Promise<unknown>;
 };
 
 class NotificationRecorder implements IStorageNotification {
@@ -174,6 +179,31 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           },
         });
         return;
+      case "session.watch.set":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 0,
+            sync: {
+              type: "sync",
+              fromSeq: 0,
+              toSeq: 0,
+              upserts: [],
+              removes: [],
+            },
+          },
+        });
+        return;
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 0,
+          },
+        });
+        return;
       case "transact": {
         const localSeq = message.commit?.localSeq ?? -1;
         if (localSeq === 1) {
@@ -193,17 +223,14 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           requestId: message.requestId!,
           ok: {
             seq: localSeq,
-            hash: `commit:${localSeq}`,
             branch: "",
-            facts: [{
-              hash: `fact:${localSeq}:0`,
+            revisions: [{
               id: `of:doc:${localSeq}`,
-              valueRef: `value:${localSeq}:0`,
-              parent: null,
               branch: "",
               seq: localSeq,
+              opIndex: 0,
               commitSeq: localSeq,
-              factType: "set",
+              op: "set",
             }],
           },
         });
@@ -266,6 +293,11 @@ const getObjectValue = (
     ? value as Record<string, unknown>
     : undefined;
 };
+
+const visibleIds = (
+  provider: TestProvider,
+  ids: readonly URI[],
+) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
 Deno.test("memory v2 runner does not integrate its own replayed commit after reconnect", async () => {
   const server = new MemoryV2Server.Server({
@@ -434,6 +466,91 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
     );
     assertEquals(provider.get(localUri), { value: { local: 2 } });
     assertEquals(provider.get(remoteUri), { value: { remote: 9 } });
+  } finally {
+    await writerClient.close();
+    await storageManager.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 runner restores watched graph state after reconnect and keeps retarget updates flowing", async () => {
+  const server = new MemoryV2Server.Server({
+    store: new URL(`memory://runner-v2-watch-reconnect-${crypto.randomUUID()}`),
+  });
+  const transport = new SabotagedReconnectTransport(server);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-watch-reconnect"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const notifications = new NotificationRecorder();
+  const writerClient = await MemoryV2Client.connect({
+    transport: MemoryV2Client.loopback(server),
+  });
+  const writer = await writerClient.mount(space);
+  const provider = storageManager.open(space) as TestProvider;
+  const fixture = createGraphFixture(space);
+
+  storageManager.subscribe(notifications);
+
+  try {
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map((doc) => ({
+        op: "set" as const,
+        id: doc.id,
+        value: { value: doc.value },
+      })),
+    });
+
+    await provider.sync(fixture.rootId, {
+      path: [],
+      schema: fixture.schema,
+    });
+    await storageManager.synced();
+    await waitFor(
+      () =>
+        visibleIds(provider, fixture.expandedReachableIds).length ===
+          fixture.initialReachableIds.length,
+      1_000,
+    );
+    assertEquals(
+      visibleIds(provider, fixture.expandedReachableIds),
+      fixture.initialReachableIds,
+    );
+
+    notifications.clear();
+    transport.disconnect();
+    await waitFor(() => transport.connectionCount >= 2, 1_000);
+
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    });
+
+    await waitFor(
+      () =>
+        visibleIds(provider, fixture.expandedReachableIds).length ===
+          fixture.expandedReachableIds.length,
+      1_000,
+    );
+    assertEquals(
+      visibleIds(provider, fixture.expandedReachableIds),
+      fixture.expandedReachableIds,
+    );
+    assertEquals(
+      notificationChanges(notifications.notifications, "integrate").some(
+        (change) => change.address.id === fixture.hiddenRootId,
+      ),
+      true,
+    );
   } finally {
     await writerClient.close();
     await storageManager.close();

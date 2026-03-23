@@ -19,7 +19,6 @@ import {
   encodeWireEntityDocument,
   type EntitySnapshot,
   type GraphQuery,
-  type Reference,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
@@ -29,7 +28,6 @@ export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
   #details = new Map<string, {
     seq: number;
-    hash: Reference;
     document: NonNullable<Engine.EntityState["document"]>;
   }>();
   #missing = new Set<string>();
@@ -72,7 +70,6 @@ export class EngineObjectManager implements ObjectStorageManager {
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
       seq: state.seq,
-      hash: state.hash,
       document: state.document,
     });
     return attestation;
@@ -151,9 +148,9 @@ export const queryGraph = (
         })
         : null;
       return {
+        branch,
         id,
         seq: detail?.seq ?? state?.seq ?? 0,
-        hash: detail?.hash ?? state?.hash,
         document: detail?.document === undefined
           ? state?.document === null || state?.document === undefined
             ? null
@@ -164,7 +161,7 @@ export const queryGraph = (
     .sort((left, right) => left.id.localeCompare(right.id));
 
   return {
-    serverSeq: Engine.headSeq(engine, branch),
+    serverSeq: Engine.serverSeq(engine),
     entities,
   };
 };

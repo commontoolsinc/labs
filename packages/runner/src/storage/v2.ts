@@ -91,7 +91,6 @@ type PendingVersion = {
 
 type ConfirmedVersion = {
   seq: number;
-  hash?: string;
   value: WireEntityDocument | undefined;
   transactionValue: CachedTransactionValue;
 };
@@ -127,11 +126,9 @@ const pendingVersion = (
 const confirmedVersion = (
   seq: number,
   value: WireEntityDocument | undefined,
-  hash?: string,
 ): ConfirmedVersion => ({
   seq,
   value,
-  ...(hash !== undefined ? { hash } : {}),
   transactionValue: UNCACHED_TRANSACTION_VALUE,
 });
 
@@ -675,9 +672,8 @@ class Provider implements IStorageProviderWithReplica {
 }
 
 type SyncTask = {
+  entries: [{ id: URI; type: MIME }, SchemaPathSelector][];
   promise: Promise<Result<Unit, PullError>>;
-  iterator?: AsyncIterator<GraphQueryResult>;
-  updates?: Promise<void>;
 };
 
 const normalizeSyncSelector = (
@@ -718,6 +714,8 @@ class SpaceReplica implements ISpaceReplica {
     URI,
     Set<(value: StorageValue | undefined) => void>
   >();
+  #watchView: MemoryV2Client.QueryView | null = null;
+  #watchedIds = new Set<URI>();
   #nextLocalSeq = 1;
 
   constructor(options: ProviderOptions) {
@@ -831,12 +829,13 @@ class SpaceReplica implements ISpaceReplica {
       return await existing.promise;
     }
 
-    const task = {
+    const task: SyncTask = {
+      entries: normalizedEntries,
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
-    const promise = this.startSync(normalizedEntries, task);
-    task.promise = promise;
     this.#syncTasks.set(key, task);
+    const promise = this.refreshWatchSet("pull");
+    task.promise = promise;
     this.#syncPromises.add(promise);
     try {
       return await promise;
@@ -902,33 +901,46 @@ class SpaceReplica implements ISpaceReplica {
 
   reset(): void {
     this.#docs.clear();
+    this.#watchedIds.clear();
     this.#subscription.next({
       type: "reset",
       space: this.#space,
     });
   }
 
-  private async startSync(
-    entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
-    task: SyncTask,
+  private async refreshWatchSet(
+    type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
-      const view = await session.queryGraph({
-        subscribe: true,
-        roots: entries.map(([address, selector]) => ({
-          id: address.id,
-          selector,
-        })),
-      });
+      const uniqueEntries = new Map<
+        string,
+        [{ id: URI; type: MIME }, SchemaPathSelector]
+      >();
+      for (const task of this.#syncTasks.values()) {
+        for (const entry of task.entries) {
+          uniqueEntries.set(JSON.stringify(entry), entry);
+        }
+      }
 
-      this.applyQueryResult(view.entities, "pull");
-      const iterator = view.subscribe();
-      task.iterator = iterator;
-      const updates = this.consumeUpdates(iterator)
-        .finally(() => this.#updatePromises.delete(updates));
-      this.#updatePromises.add(updates);
-      task.updates = updates;
+      const view = await session.watchSet([{
+        id: "replica",
+        kind: "graph",
+        query: {
+          roots: [...uniqueEntries.values()].map(([address, selector]) => ({
+            id: address.id,
+            selector,
+          })),
+        },
+      }]);
+
+      this.#watchView = view;
+      this.applyQueryResult(view.entities, type);
+      if (this.#updatePromises.size === 0) {
+        const updates = this.consumeUpdates(view.subscribe())
+          .finally(() => this.#updatePromises.delete(updates));
+        this.#updatePromises.add(updates);
+      }
       return { ok: {} };
     } catch (error) {
       return { error: toConnectionError(error) };
@@ -1111,9 +1123,15 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
+    const incomingIds = new Set(entities.map((entity) => entity.id as URI));
+    const touchedIds = new Set<URI>([
+      ...incomingIds,
+      ...this.#watchedIds,
+    ]);
+
     const before = Differential.checkout(
       this,
-      entities.map((entity) => snapshotState(this, entity.id as URI)),
+      [...touchedIds].map((id) => snapshotState(this, id)),
     );
 
     for (const entity of entities) {
@@ -1121,9 +1139,16 @@ class SpaceReplica implements ISpaceReplica {
       record.confirmed = confirmedVersion(
         entity.seq,
         entity.document ?? undefined,
-        entity.hash,
       );
     }
+    for (const id of this.#watchedIds) {
+      if (incomingIds.has(id)) {
+        continue;
+      }
+      const record = this.record(id);
+      record.confirmed = confirmedVersion(0, undefined);
+    }
+    this.#watchedIds = incomingIds;
 
     const changes = before.compare(this);
     if (type === "pull" || [...changes].length > 0) {
@@ -1168,7 +1193,6 @@ class SpaceReplica implements ISpaceReplica {
   ): void {
     for (const operation of operations) {
       const record = this.record(operation.id);
-      const fact = applied.facts.find((entry) => entry.id === operation.id);
       const pending = record.pending.find((entry) =>
         entry.localSeq === localSeq
       );
@@ -1178,7 +1202,6 @@ class SpaceReplica implements ISpaceReplica {
       record.confirmed = confirmedVersion(
         applied.seq,
         pending.value,
-        fact?.hash,
       );
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
@@ -1254,11 +1277,15 @@ class SpaceReplica implements ISpaceReplica {
   private isDuplicateConfirmedResult(
     entities: readonly EntitySnapshot[],
   ): boolean {
+    if (entities.length !== this.#watchedIds.size) {
+      return false;
+    }
     return entities.every((entity) => {
       const confirmed = this.#docs.get(entity.id as URI)?.confirmed;
       return confirmed !== undefined &&
         confirmed.seq === entity.seq &&
-        confirmed.hash === entity.hash;
+        JSON.stringify(confirmed.value ?? null) ===
+          JSON.stringify(entity.document ?? null);
     });
   }
 

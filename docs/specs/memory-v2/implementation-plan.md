@@ -1,184 +1,179 @@
 # Memory v2 Implementation Plan
 
 ## Summary
-- [x] Write this plan into [implementation-plan.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/implementation-plan.md).
-- [x] Keep Memory v2 inside the existing packages rather than creating a new workspace package.
-- [x] Treat the phase-1 cutover as: a `Runtime` configured with `memoryVersion: "v2"` uses v2 implementations for `IStorageProvider` and `IExtendedStorageTransaction`, while runner and scheduler call sites remain unchanged.
-- [x] Execute the rollout with red/green TDD and commit in small slices, including red commits when they clarify the intended behavior.
-- [x] Keep v1 and v2 running in parallel during migration, but keep storage physically separate. V2 uses its own SQLite layout and emulation path.
-- [x] Keep the plan file at [implementation-plan.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/implementation-plan.md) and update it to match the plan currently being executed on `codex/memory-v2`.
 
-## Historical Completed Items
-- [x] Add v2 code inside the existing packages rather than creating a new workspace package: shared/server code under [packages/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/memory), client wiring under [packages/runner/src/storage](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/storage), and route/transport dispatch under [packages/toolshed/routes/storage/memory](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory).
-- [x] Treat the cutover target as non-branching v1 parity first: current runtime usage is centered on `syncCell()`, schema traversal, subscriptions, reconnect, optimistic pending writes, and scheduler notification ordering.
-- [x] Treat immutable blob payload storage as lower priority than provider/query parity. The v1 cutover path does not currently depend on dedicated blob upload/download routes, but the v2 engine now has the foundational `blob_store` support.
-- [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts), default it to `"v1"`, and thread the resolved value into storage-manager construction and emulation.
-- [x] Introduce `IStorageNotification` / `StorageNotificationRelay` as the canonical internal names for scheduler notifications, and export temporary aliases for `IStorageSubscription` / `StorageSubscription` until v1 is removed.
-- [x] Keep compatibility-only fields such as classification and labels accepted at the cutover boundary, but treat them as ignored inputs on the v2 path and stop creating label side-writes in v2.
-- [x] Define v2 shared types and codecs around explicit full-document `EntityDocument` / `WireEntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`; keep low-level commit/read paths full-document rooted while query/schema selectors remain value-relative.
-- [x] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, plus the required pragmas, prepared statements, and default-branch bootstrap.
-- [x] Implement the phase-1 logical session model: the first WebSocket message negotiates `memory/v2`, `session.open` returns or resumes `sessionId`, the server keeps only lightweight session state, and the client owns replay of outstanding commits and subscriptions after reconnect.
-- [x] Keep the existing `/api/storage/memory` route, but dispatch v2 WebSocket traffic through the new session protocol and keep PATCH transact/query handlers as thin compatibility adapters for tests and one-shot tooling.
-- [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
-- [x] Initially reused the existing `Journal` / `Chronicle` / `StorageTransaction` stack for the first cutover seam before replacing it with a v2-native transaction core.
+This implementation pass rewrites the current Memory v2 engine from
+hash-addressed JSON facts plus subscription-id live updates to:
 
-## Current Status
-- [x] Establish the runtime cutover seam with `memoryVersion: "v2"` in [runtime.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/runtime.ts) and the runner storage manager.
-- [x] Build the spec-native v2 engine as a clean-room implementation under [packages/memory/v2](/Users/berni/src/labs.exp-memory-impl-4/packages/memory/v2), without reusing v1 storage internals.
-- [x] Hard-cut the websocket protocol to `memory/v2` for v2 runtimes instead of preserving the old query/transact/subscription wire shape.
-- [x] Route v2 runtime traffic through the spec-native engine on both the real toolshed route and the emulated path.
-- [x] Reach parity for the main v1-used reactive flows already exercised on this branch: schema sync, linked-document propagation, deep link chains, reconnect resubscribe, scheduler pull reactivity, alias schema round-trip, and alias retargeting.
-- [x] Add runner-level v2 integration coverage for remote link reactivity: new link discovery, linked-document updates, and deep link chains against a real toolshed app instance.
-- [x] Pin tests that intentionally depend on v1-only storage internals to explicit `memoryVersion: "v1"` construction and typed v1 helpers, so a future default flip does not confuse harness debt with real v2 regressions.
-- [x] Finish the client/session replay path for reconnect when there is still outstanding local optimistic work, including in-flight and queued commit replay by `localSeq`.
-- [x] Replace the old reconnect harness with a real v2 runner integration test that survives an actual server restart and resumes subscribed runtime updates.
-- [x] Centralize the default memory version in `DEFAULT_MEMORY_VERSION` and set it to `"v2"`, while keeping explicit `memoryVersion: "v1"` opt-ins only where tests intentionally depend on v1 internals.
-- [x] Align the v2 runner/toolshed test suites with the cleaned-up storage interfaces on current `main`, including test-local provider helpers and `setRawUntyped()` for storage-layer link writes.
-- [x] Reproduce the remaining CLI notebook case with the same `ct test --timeout 180000 --root packages/patterns` harness used by repo integration and confirm it passes in isolation, so it is not currently a proven Memory v2 blocker.
-- [x] Add explicit harness-level memory-version selection for pattern-native tests: `ct test --memory-version {v1|v2}` in [packages/cli/commands/test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/cli/commands/test.ts) and `CT_TEST_MEMORY_VERSION` passthrough for [tasks/integration.ts](/Users/berni/src/labs.exp-memory-impl-4/tasks/integration.ts), so aggregate and per-test v1/v2 comparisons no longer depend on default flips.
-- [x] Run an initial v1/v2 benchmark survey across the runner benches and record the current outlier clusters before deliberate tuning. The main regressions currently cluster in no-op/equal-value commits, repeated small `Cell.set()` updates, and subscription-heavy scheduler fan-out.
-- [x] Fix the last real default-v2 product regression by registering same-space navigated pieces from the shell-side navigate handler, rather than papering over the piece list in the default-app pattern.
-- [x] Complete clean repo-wide `deno task test` and `deno task integration` sweeps with `DEFAULT_MEMORY_VERSION = "v2"`.
-- [x] Keep `CT_INTEGRATION_MEMORY_VERSION` functional as a real repo-wide default flip. Both `deno task test` and `deno task integration` now pass with `CT_INTEGRATION_MEMORY_VERSION=v1`, so the branch can still exercise the old path without reverting the default.
-- [x] Materialize v2 snapshots for patch-heavy entities and use them during current and point-in-time reads, so the engine no longer depends on pure replay for long patch chains.
-- [x] Tighten confirmed-read validation from whole-entity conflicts to path-aware overlap checks for later patch writes, while keeping conservative `set` and `delete` invalidation.
-- [x] Add minimal v2 blob upload/download routes and pin the phase-1 split between immutable blob payloads and ordinary `urn:blob-meta:<hash>` entity metadata.
-- [x] Preserve rich-storable immutability on the v2 transaction path by isolating caller-owned writes and freezing raw transaction reads at the boundary, while keeping the internal working copy mutable.
-- [x] Forward the v2-native transaction inspection hooks through `ExtendedStorageTransaction` and `TransactionWrapper`, so callers do not need to unwrap `.tx` to reach `getReactivityLog()`, `getReadActivities()`, or `getWriteDetails()`.
-- [x] Drop equal-value v2 writes at write time so no-op transactions do not accumulate synthetic write-details, reactivity-log entries, or avoidable commit-time dirty-doc scans.
-- [x] Hard-break the v2 document model to explicit full-document objects at the protocol/storage boundary. Native v2 `set` operations now require full documents, the old marker / raw-payload normalization path is gone, and whole-document encode/decode now happens only at the network/sqlite boundaries.
-- [x] Keep storage-layer patch/read paths rooted at the full document while leaving schema/query traversal value-relative. `source` remains query/server-special for lineage, but the lower storage/engine layer now patches the whole document generically, including future top-level metadata fields.
-- [ ] Finish the remaining engine-native pieces that are not required for v1 parity but are still part of the v2 design, especially post-cutover optimizations and advanced features beyond v1 parity.
+- seq-addressed commit history
+- per-entity revision rows and inline snapshots
+- logical session resume keyed by `sessionId`
+- session-scoped watch sets
+- session-scoped catch-up sync frames
 
-## Test Split For Default Flip
-- [x] Keep the old v1-internal tests explicitly on v1 when they depend on structures that do not exist in v2, such as `StorageManagerEmulator.mount()`, `StorageManager.openConnection(...).provider`, or `Provider.replica.heap`.
-- [x] Treat linked-document propagation and deep link-chain reactivity as already covered on the v2 path by [memory-v2.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/toolshed/routes/storage/memory/memory-v2.test.ts).
-- [x] Treat provider-visible non-branching behavior as already covered on the v2 path by [memory-v2-comparison.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-comparison.test.ts).
-- [x] Treat notification ordering and conflict-before-revert behavior as already covered on the v2 path by [memory-v2-subscription.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-subscription.test.ts).
-- [x] Add the true v2 counterpart for the pending-nursery-style cases that still matter: stacked optimistic local commits, reconnect with outstanding local work, own-commit de-duplication, and retry-after-revert behavior.
+This is a clean break:
 
-## Reprioritized For V1 Parity
-- [x] Treat non-branching v1 parity as the actual cutover target. The current runtime depends on `syncCell()`, schema traversal, subscriptions, reconnect, optimistic writes, and notification ordering.
-- [x] Treat branch lifecycle, branch-scoped reads, merges, and branch-aware subscriptions as explicitly post-cutover work. There is no current v1 branch surface to preserve.
-- [x] Treat direct patch emission from `Cell.set()` as post-cutover work. Phase 1 can continue materializing full entity documents before commit.
-- [x] Treat dedicated blob transport and metadata policy as lower priority than provider/query/runtime parity. Existing v1 runtime flows do not depend on blob endpoints.
-- [x] Reuse shared traversal behavior from [traverse.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/src/traverse.ts) for v2 graph queries and subscriptions rather than rebuilding that logic in the server.
-- [x] Preserve the v1-visible notification contract at the runtime boundary: optimistic `"commit"`, synchronous `"revert"` before the promise resolves, and async `"integrate"` for remote updates.
+- no in-place migration from the current v2 engine store
+- no dual-read compatibility for the old SQLite layout
+- no compatibility shim for the current `graph.query subscribe` live protocol
 
-## Immediate Next Slice
-- [x] Add focused tests for reconnect with outstanding local commits, including disconnect during an in-flight commit and replay after reconnect.
-- [x] Preserve notification ordering when reconnect replay, remote integrate, and local optimistic state all interact in the same space.
-- [x] Add coverage for stacked pending commits plus remote updates to prove own-commit de-duplication and retry-after-revert behavior.
-- [x] Resolve the remaining high-value runner integration gap by porting the real v2 reactivity/reconnect suites and pinning the intentionally v1-internal harnesses to explicit `memoryVersion: "v1"`.
+The runner/storage public surface remains stable. The change happens under
+`packages/memory/v2`, `packages/runner/src/storage/v2.ts`, and the toolshed
+memory route.
 
-## Public Interfaces And Cutover Boundary
-- [x] Add `memoryVersion?: "v1" | "v2"` to `RuntimeOptions` and thread the resolved value into storage-manager construction and emulation.
-- [x] Keep `IStorageManager`, `IStorageProvider`, `IExtendedStorageTransaction`, `StorageValue`, `syncCell()`, and `subscribe()` stable at the runtime boundary for phase 1.
-- [x] Introduce `IStorageNotification` / `StorageNotificationRelay` as the canonical internal names for scheduler notifications, while keeping temporary aliases for `IStorageSubscription` / `StorageSubscription`.
-- [x] Keep compatibility-only fields such as classification and labels accepted at the cutover boundary, but ignore them on the v2 path and stop creating label side-writes in v2.
-- [x] Add explicit v1 guard assertions at the remaining v1 provider, transaction, consumer, and server entry points so a runtime configured for v2 fails immediately if it ever reaches a v1-only path.
+## Constraints
 
-## Phase 1: Core V2 Stack Required Before Cutover
-- [x] Define the shared v2 types and codecs around `EntityDocument`, `Operation`, `ClientCommit`, `ConfirmedRead`, `PendingRead`, `PatchOp`, `SessionOpen`, `Receipt`, and `merkle-reference/json`.
-- [x] Bootstrap the v2 per-space SQLite schema with `value`, `fact`, `head`, `commit`, `invocation`, `authorization`, `snapshot`, `branch`, and minimal blob tables, including pragmas and default-branch bootstrap.
-- [x] Implement the core read path for current v1-parity needs: head lookup, point-in-time reconstruction by `seq`, patch replay, `source` link traversal, and schema-driven `graph.query` using the shared traversal code path.
-- [x] Make `graph.query` follow write redirects for plain alias sync as well as schema-bearing selectors, so live alias retargeting stays subscription-safe.
-- [x] Add snapshot creation and lookup to the read engine so point-in-time reads do not depend entirely on replay.
-- [x] Implement the core commit path for current v1-parity needs: parent resolution, global `seq` assignment, atomic fact/head/commit writes, and pending-read resolution from `(sessionId, localSeq)`.
-- [x] Reject stale confirmed reads conservatively on the v2 path.
-- [x] Tighten overlap-path conflict analysis beyond the current conservative confirmed-read checks where existing v1 behavior requires more precision.
-- [x] Implement the phase-1 logical session model: websocket `hello`, `session.open`, resume by `sessionId`, and client-owned replay/resubscribe after reconnect.
-- [x] Keep the existing `/api/storage/memory` route, but dispatch v2 traffic through the new protocol while keeping one-shot compatibility handlers only for tests and tooling.
-- [x] Add foundational blob storage in the engine for immutable payload persistence.
-- [x] Add the phase-1 mutable blob metadata split and any transport endpoints actually needed for runtime cutover.
-- [x] Build v2 emulation on top of the real v2 server code rather than maintaining a fake-only v2 test backend.
+- Keep `Runtime`, `StorageManager`, `IStorageProvider`,
+  `IExtendedStorageTransaction`, scheduler notifications, and `syncCell()`
+  semantics stable.
+- Use red/green TDD for each implementation slice: write the focused failing
+  test first, make it pass with the smallest viable change, then refactor.
+- Keep the lightweight WebSocket protocol already used by the current v2 code:
+  `hello`, `session.open`, `transact`, `graph.query`, `session.watch.set`,
+  `session.ack`, `response`, and `session/effect`.
+- Do not switch this pass to full UCAN transport framing.
+- Keep invocation/auth persistence for write-class commands only.
+- Keep blob payload storage content-addressed. The seq rewrite applies to JSON
+  entity storage, not blob data.
+- Include basic branches now: create/delete/list, branch-aware reads/writes, and
+  branch-aware watch scopes. Defer merge proposals and advanced branch sync.
 
-## Phase 1: Client Provider And Transaction Adapter
-- [x] Cut runtime `memoryVersion: "v2"` over to a real v2 storage path in the runner rather than the old compatibility-backed route.
-- [x] Preserve the current provider/transaction surface so runner and scheduler call sites remain unchanged.
-- [x] Keep `syncCell()` and schema sync on `graph.query`; one-shot query remains only a compatibility and testing path.
-- [x] Replace the temporary v1-style transaction adapter with a v2-native transaction core and narrow inspection hooks (`getReactivityLog()`, `getReadActivities()`, `getWriteDetails()`) so v2 no longer depends on `Journal` / `Chronicle` internally.
-- [x] Preserve basic notification timing for optimistic commit, revert, integrate, `load`, `pull`, and `reset`, with explicit coverage for conflict-before-revert ordering.
-- [x] Reconnect the shared v2 client and resubscribe active `graph.query` views after websocket loss.
-- [x] Preserve alias/schema/link-heavy reactive behavior through the v2 path, including deep links and alias retargeting.
-- [x] Finish pending-first replica behavior for reconnect with outstanding local commits, including replay of in-flight and queued local writes.
-- [x] Add stronger proof for own-commit de-duplication when local replay and remote integrate race after reconnect.
-- [x] Keep cutover independent of direct patch emission from `Cell.set()`. True patch generation remains a post-cutover phase.
+## Phase 0: Spec Maintenance
 
-## Cutover Exit Criteria
-- [x] A runtime instantiated with `memoryVersion: "v2"` can run existing runner, pattern, and CLI flows without reaching any v1 code path.
-- [x] The remaining runner integration suites that matter for v1 behavior pass against a real toolshed server with v2 enabled, while the intentionally v1-internal suites stay pinned to explicit v1.
-- [x] Add a randomized v1/v2 comparison test that drives the same non-branching, non-classified workload through both implementations and compares only behavior visible at `IStorageProvider` and `IExtendedStorageTransaction`.
-- [x] Add server integration tests for version negotiation, `session.open`, transact success, transact rejection and revert ordering, graph-query subscriptions, reconnect replay, and live alias retargeting.
-- [x] Extend server integration coverage to any runtime-critical blob behavior once the blob transport shape is finalized.
-- [x] Add the focused client and provider tests for stacked pending commits plus remote integrates, own-commit de-duplication, and retry-after-revert behavior.
-- [x] Finish an uninterrupted, completely clean repo-wide `deno task integration` pass under the v2 default. The previously suspicious CLI notebook case now also passes in the aggregate runner.
+- Rewrite this file to reflect the actual execution plan.
+- Rewrite
+  [10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+  so it no longer points implementers at `fact` / `value` tables, commit hashes,
+  or invocation-id-scoped subscriptions.
+- Keep sections 01-06, 10, and this file aligned enough that the code can use
+  them as the implementation source of truth.
 
-## Phase 2: Post-Cutover Optimizations
-- [x] Add snapshot-retention-based compaction so the engine keeps only a configurable number of recent snapshots per entity/branch after materialization.
-- [ ] Continue tuning snapshot cadence and retention defaults beyond the current interval-plus-retention policy.
-- [x] Extend the v2-native transaction core with a direct reactivity-log export and remove native `journal.activity()` replay from the hot path. Native v2 callers now rely on direct hooks (`getReactivityLog()`, `getReadActivities()`, `getWriteDetails()`), and unexpected journal fallback should fail loudly instead of silently rebuilding v1-shaped activity streams.
-- [x] Route v2 transactions to v2 replicas through a native commit-draft hook, so the hot path no longer has to round-trip through legacy `{ the, of, is }` facts before building `ClientCommit`.
-- [x] Compact redundant descendant confirmed/pending read dependencies before sending v2 commits, while preserving distinct `nonRecursive` read scopes.
-- [x] Add a native v2 batched-write hook behind `IExtendedStorageTransaction` and teach `applyChangeSet()` to prefer `writeValuesOrThrow()` when it is available, while keeping the one-write-at-a-time fallback for older or non-v2 transaction paths.
-- [x] Change the transaction adapter so `Cell.set()` and path writes emit v2 patch operations directly when safe. The current fast path covers stable object-path `replace` / `add` / `remove`, plus array-structural writes normalized to `replace` on the containing array path; overlapping writes still fall back to full `set`.
-- [ ] Add position-independent patch and remove helpers, and only relax claim tracking for patch classes that remain safe under optimistic pipelining.
-- [ ] Decide whether array-structural writes should stay on containing-array `replace` patches or graduate to a dedicated wire op such as `set-length` / richer `splice`, based on measured workload evidence rather than speculation.
-- [x] Add a short-lived server-side subscription and session resume cache so reconnecting clients can reuse unchanged subscribed query results without changing the `session.open` / `graph.query` contract.
-- [x] Seed conflict-triggered subscription flushes with the failed commit's touched document IDs (operation IDs plus confirmed/pending read IDs) instead of forcing no-context full-space refreshes. On this machine, the worst CLI/default-pattern sessions dropped from about `~388-607` full refresh queries down to about `~46-69` after this change.
-- [x] Add prepared-statement caching to the hot v2 engine read/commit path so repeated SQLite `prepare(...)` calls are no longer part of normal commit-heavy workloads.
-- [x] Make v2 provider sessions lazy so local-only transaction paths do not pay websocket/session setup until the first real sync or commit. The focused `storage-transaction-path.bench.ts` cases dropped from roughly `~7.5 / 6.9 / 7.3 ms` to `~5.5 / 5.4 / 6.0 ms` for `root read / single sibling write / five sibling writes` on this machine after removing eager session construction from `StorageManager.open(...)`.
-- [x] Short-circuit the v2 manager-wide close path when there are no providers, instead of paying the global `synced()` timer path on an idle manager. This removed the remaining setup/teardown-only gap in the new immutable/setup split bench.
-- [ ] Continue tuning blob I/O once benchmark evidence shows it is still a meaningful outlier.
-- [ ] Revisit any future bulk-write shortcut only after benchmark evidence shows it clearly beats the existing `writeValueOrThrow()` compatibility path.
+## Phase 1: Engine Root and Storage Rewrite
 
-## Future Performance Follow-Ups
-- [x] Reduce the remaining `storage-subscription-refresh.bench.ts` gap for many active path subscriptions on one document with repeated same-doc updates. The v2 path now canonicalizes schemaless same-document syncs down to one document-level subscription, and the focused bench is well ahead of the current v1 baseline (`~36-39 ms` on v2 vs `~157 ms` on v1 for the plain-doc variant on this machine).
-- [x] Skip full reevaluation for sigil-only topology changes on plain-root queries when the changed document is not itself a root write redirect. This preserves source-lineage and alias-retarget correctness while converting inert plain-root sigil changes back to direct patches. On `pass-and-play/main.test.tsx` this cut the v2 storage slice from about `5.45s` to about `5.03s`, and reduced plain-root full-query fallbacks by roughly `415` on this machine.
-- [x] Recompute plain-root source-lineage subscriptions directly when a source chain retargets, instead of falling back to full `graph.query`. The new focused bench in [storage-source-topology-refresh.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-source-topology-refresh.bench.ts) now shows v2 ahead of v1 for this workload on this machine (`~41.5 ms` vs `~71.7 ms` for plain roots and `~70.7 ms` vs `~153.0 ms` for pattern-linked roots over 256 subscriptions and 5 retargets), and the real `room.test.tsx` pattern test dropped from about `4.3s` total / `4.1s` storage to about `3.4s` total / `3.1s` storage.
-- [x] Scope root-doc sigil topology invalidation to the actual selector path and schema-covered branches instead of comparing the whole document. The new regression coverage in [v2-server-test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/memory/test/v2-server-test.ts) now pins both path-scoped and root-schema-scoped false positives, and on this machine `store-mapper.test.tsx` dropped from about `~1543` full-query fallbacks to about `~1059`, while `notebook.test.tsx` dropped from about `~1654` to about `~832-834` with matching increases in direct patches.
-- [x] Add a focused sigil-topology refresh benchmark in [storage-sigil-topology-refresh.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-sigil-topology-refresh.bench.ts). The current v2 path is ahead of v1 on this machine for that workload (`~436.6 ms` vs `~720.5 ms` over 48 docs, 8 selectors/doc, and 5 topology-changing updates), which means the remaining user-facing lag is now narrower than the original topology-outlier cluster suggested.
-- [x] Stop re-reading already-loaded entities when building v2 `graph.query` results. The hot path now reuses the document/seq/hash cached in `EngineObjectManager`, which cut `store-mapper.test.tsx` from about `5.8s` total / `5.5s` storage to about `4.0s` total / `4.0s` storage on this machine, and brought the full `pattern-tests` aggregate down to about `22.5s` on v2 versus about `26.4s` on the v1-default comparison worktree.
-- [ ] Re-profile `cell.bench.ts` hotspots such as `Cell get - simple value with schema` and `Cell creation - immutable`, which still suggest extra v2 overhead in schema-aware materialization, frozen rich-storable reads, or query-result wrapper setup.
-- [x] Cache repeated rich-storable frozen transaction reads per document/path and invalidate that cache on writes. The new rich warm-read cases in [storage-transaction-internals.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-internals.bench.ts) now show v2 ahead of v1 for the repeated-live-read microcase (`~4.1 ms` vs `~6.6 ms` for 10,000 rich warm root reads on this machine), even though the colder per-transaction benches still show setup-heavy overhead elsewhere.
-- [ ] Keep pushing the large single-transaction `Cell.set()` write-count cases toward or past v1 without dropping back to document-wide `set`. The remaining target cluster is the large-object / small-array / repeated-update family in [cell-set.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-set.bench.ts).
-- [ ] Close the remaining direct `IExtendedStorageTransaction` path gap measured by [storage-transaction-path.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-path.bench.ts). After making provider sessions lazy, the same-document cases are down to roughly `~5.5 / 5.4 / 6.0 ms` on v2 versus `~4.1 / 3.4 / 3.8 ms` on v1 on this machine for `root read / single sibling write / five sibling writes`, so the remaining cost is no longer mostly eager session startup.
-- [ ] Use [storage-transaction-internals.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-internals.bench.ts) as the next diagnostic benchmark for raw transaction-core tuning. Current results still put raw v1 `StorageTransaction` around `~1.3-1.4 ms` and raw v2 `V2StorageTransaction` around `~2.7-2.8 ms` for the same 100 root reads or sibling writes, so the remaining gap is inside the v2 transaction core itself rather than in the higher-level `Cell` wrapper or provider session startup.
-- [x] Rule out `ExtendedStorageTransaction` itself as the main remaining transaction-path bottleneck. The new wrapper-level cases in [storage-transaction-internals.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-internals.bench.ts) are effectively tied with the direct raw-transaction cases on both v1 and v2, so the remaining gap is not coming from the `readValueOrThrow()` / `writeValueOrThrow()` compatibility shell.
-- [ ] Treat simple same-document lookup caches and `writer()` indirection as largely exhausted for the default transaction path. A last-document cache helps warm repeated-read microcases, and direct `writeWithinSpace(...)` benches were effectively identical to public `write(...)`, so the next likely gains are in per-operation bookkeeping (`activity`, `writeDetails`, repeated attestation traversal) rather than doc-map lookup or write-space checks alone.
-- [x] Recheck the current pattern-test outliers with explicit harness selection instead of default flips. On this machine, [note.test.tsx](/Users/berni/src/labs.exp-memory-impl-4/packages/patterns/notes/note.test.tsx), [notebook.test.tsx](/Users/berni/src/labs.exp-memory-impl-4/packages/patterns/notes/notebook.test.tsx), and [store-mapper.test.tsx](/Users/berni/src/labs.exp-memory-impl-4/packages/patterns/store-mapper.test.tsx) are now clearly faster on v2 than v1, while [reading-list.test.tsx](/Users/berni/src/labs.exp-memory-impl-4/packages/patterns/reading-list/reading-list.test.tsx) is effectively tied and remains traversal-heavy rather than storage-refresh-heavy.
-- [x] Split v2 direct transaction inspection state away from eager `Activity` wrapper allocation. The v2 core now keeps canonical read/write records, derives the scheduler-facing reactivity log lazily, and no longer maintains native v1-style journal replay state just to satisfy `journal.activity()`.
-- [x] Re-profile the immutable/setup path with a split bench instead of treating it as an immutable-cell operation regression. The new [cell-immutable.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-immutable.bench.ts) rows showed the earlier `~3.8 ms` v2 outlier was almost entirely idle setup/teardown cost. After short-circuiting v2 manager close for the zero-provider case, the focused v2 rows are back in line with v1 on this machine: runtime setup/cleanup is about `~0.83 ms`, empty-tx abort/commit is about `~0.83-0.86 ms`, and immutable-cell variants are about `~0.85-0.88 ms`.
-- [x] Add focused post-commit fallback-read coverage and keep repeated fresh v2 read transactions close to parity without relying on ambient transaction reuse. The dedicated [runtime-v2-read-tx-fallback.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/runtime-v2-read-tx-fallback.test.ts) and [runtime-read-tx-fallback.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/runtime-read-tx-fallback.bench.ts) now track that path directly, and the v2 replica caches decoded transaction values so fresh fallback reads do not keep re-decoding the same documents.
-- [x] Add [cell-read-path.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-read-path.bench.ts) to separate plain post-commit read costs from broader file-level noise. On this machine, the focused schemaless array-key and schema/asCell read cases are now at rough parity or faster on v2, so any remaining full-file `cell.bench.ts` regressions likely come from other setup/materialization paths rather than plain `runtime.readTx()` churn.
-- [x] Add [cell-set-shape.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-set-shape.bench.ts) to split `Cell.set()` into `recursivelyAddIDIfNeeded()`, `normalizeAndDiff()`, `diffAndUpdate()`, and full-loop costs for the common no-`asCell` object shape. On this machine, that focused bench shows `recursivelyAddIDIfNeeded()` at parity, with the remaining v2 gap concentrated in `normalizeAndDiff()` (`~1.38x`) and especially `diffAndUpdate()` / batch writes (`~1.64x`), so future work should target the transaction write path and diff-driven bookkeeping rather than more ID-annotation work.
-- [x] Add [cell-set-array-shape.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/cell-set-array-shape.bench.ts) for the current top full-suite array outlier. In the isolated 10-item array shape, `normalizeAndDiff()` is already at parity or slightly faster on v2, full `cell.set()` is effectively tied, and the only repeatable lag is the fine-grained `diffAndUpdate()` write phase (`~1.44x` on this machine). That means the scary full-file `cell-set.bench.ts` array ratio does not reproduce cleanly in isolation, so future work should keep checking for harness/file-level interactions before landing complexity aimed only at that aggregate number.
-- [x] Keep contiguous same-document `writeBatch()` runs on one mutable v2 draft while preserving fine-grained `writeDetails` and native patch emission. The new batch regression coverage in [memory-v2-native-commit.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/memory-v2-native-commit.test.ts) keeps same-document object and array batches honest, and the latest focused benches moved object-shape `diffAndUpdate()` from roughly `~1.64x` down toward `~1.56-1.59x` versus v1 on this machine without falling back to document-wide `set`.
-- [x] Skip frozen rich-storable reads for the internal diff-only path used by `normalizeAndDiff()`. The v2 transaction core now honors an internal mutable-read marker for that path, which shaved a bit more off the object-shape `diffAndUpdate()` / `Cell.set()` ratios, but did not erase the remaining `normalizeAndDiff()` gap. That makes root diff traversal and same-document bookkeeping, not public frozen-read semantics, the clearest next hotspot.
-- [ ] Use the attestation-vs-transaction delta in [storage-transaction-internals.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-internals.bench.ts) to keep the next tuning pass honest. On this machine, direct attestation sibling `read+write` is only about `~9 µs` for 100 iterations, while the full v2 transaction sibling-write loop is still about `~2.5-2.6 ms`, so most of the remaining default-path cost is above raw attestation traversal.
-- [ ] Keep the planned v2-internal transaction-core rewrite focused on simplifying the implementation behind `IExtendedStorageTransaction` instead of layering more caches onto the current shape. Recent speculative path-attestation caches did not move the benchmark, so future work should target simpler read/write bookkeeping rather than extra invalidation machinery.
-- [ ] Continue using fair semantic document-value benches, not raw root-envelope writes, whenever comparing v1 and v2 storage paths. Benchmark shape mismatches already hid real progress once and should not steer future tuning.
-- [ ] Investigate whether remaining scheduler/subscription outliers are dominated by wrapper/proxy fan-out costs above storage rather than the v2 engine itself before doing deeper storage-path surgery.
-- [ ] Use the new `ct test --storage-stats` count-key output to chase the remaining pattern-test outliers by query shape, not just aggregate time. Current `store-mapper.test.tsx` diagnostics show the remaining v2-heavy work is dominated by subscription refresh fan-out (`~3985` considered subscriptions over `13` refreshes, with `~1760` full queries and `~1758` direct patches), especially schema-bearing internal stream paths, so future work should focus on collapsing or indexing those subscription shapes rather than only micro-optimizing commit cost.
-- [ ] Keep chasing the remaining schema-bearing sigil-topology outlier in `store-mapper.test.tsx`. After the source-retarget fix, the remaining heavy keys are still `subscription-refresh/patch-skip/topology-change/sigil` (`~1342`) and schema-bearing full-query shapes like `argument.element:schema` / `internal.__#0stream:schema`, while the plain-root source subset has already fallen materially. Future work should focus on reducing the cost or count of those schema-bearing sigil reevaluations rather than revisiting the already-fixed plain source lineage case.
-- [x] Remove the old default-pattern prestart from `PieceManager.add(...)` and keep piece registration semantic by letting the stream/event path start the pattern if needed. The fresh-runtime regression in [default-pattern-persistence.test.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/piece/test/default-pattern-persistence.test.ts) now covers this path, and current CLI timings on this machine moved `ct piece new` ahead of the earlier v1 baseline (`~2573 ms` vs `~2671 ms`) while also pulling `newPiece.ensureDefaultPattern` down from roughly `~1981 ms` to `~1502 ms`.
-- [x] Add cold-runtime piece registration benches in [piece-cold-runtime.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/piece/test/piece-cold-runtime.bench.ts) and [piece-registration.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/piece/test/piece-registration.bench.ts) so the CLI-shaped default-pattern and add flows stay directly measurable. On this machine, the fresh-runtime rows now show v2 far ahead of v1 for `getDefaultPattern(runIt=true)` (`~6.2 ms` vs `~192.1 ms`), while the more isolated per-iteration `add(single persisted piece, fresh runtime)` case is still a little slower on v2 (`~541.5 ms` vs `~506.8 ms`) even though the end-to-end CLI `piece new` flow is now faster overall after the prestart removal.
-- [ ] Use the new cold-runtime piece benches and CLI timing logs to chase the next remaining CLI-sized deltas semantically. Current command-level comparisons on this machine show `piece get`, `piece step`, and `piece new` at parity or better on v2, while `piece set` remains slightly above the earlier v1 baseline, so future work should focus on direct mutation/update flows rather than default-pattern startup.
-- [ ] Re-run a small v1/v2 package-level timing survey after each major storage-path optimization now that the v1 default flip is green again. The flag is usable for whole-repo comparisons, so remaining runner/shell/cli deltas should be tracked at both the micro-bench and package-runtime levels.
-- [ ] Revisit the remaining schema-bearing sigil shapes with explicit entity-membership evidence before relaxing them further. The recent root-path/root-schema scoping win was safe because it ignored sigils outside the selected shape, but an attempted `asCell` relaxation was wrong: even those selector paths can still change which entities belong in the subscription result. Future work should only skip reevaluation when a failing regression test proves entity membership stays stable.
-- [ ] If performance work returns to `reading-list.test.tsx`, treat it as a traversal hot path, not a storage-refresh regression. The latest v1/v2 storage totals are effectively tied there (`~13.7s` total in both defaults on this machine), with most of the time showing up under `traverse/traverse` and `traversePointerWithSchema` rather than extra v2 query fan-out.
-- [ ] Keep the raw v2 transaction-path gap in view even while pattern tests are healthy. After the recent lightweight `inspectPath(...)` read shortcut and direct write-space preparation cleanup, the focused [storage-transaction-path.bench.ts](/Users/berni/src/labs.exp-memory-impl-4/packages/runner/test/storage-transaction-path.bench.ts) rows are only modestly better on this machine (`root read x100 ~4.3 ms`, `single sibling write x100 ~4.0 ms`, `five sibling writes x100 ~4.6 ms`) and still sit well above the current v1 rows (`~2.7 / 2.5 / 2.7 ms`), so the remaining work is still inside v2 per-operation bookkeeping and update application rather than pattern-test harness noise.
-- [ ] Decide whether the new schemaless same-document sync canonicalization should widen beyond `schema: false` roots, and only do so with explicit coverage for linked-doc / schema-driven query cases so we do not collapse meaningfully different subscriptions by accident.
-- [ ] Treat structured in-process loopback transport as a non-priority unless new evidence appears. The focused v2 client transport bench showed effectively no win over JSON loopback, so the remaining hot path is elsewhere.
+- Introduce a new engine root version:
+  - directory mode: `<memory-root>/engine-v3/`
+  - single-file mode: sibling `<basename>.engine-v3/`
+- Route both toolshed-backed and emulated v2 engines to that new root.
+- Replace the old SQLite JSON schema:
+  - remove `value`
+  - remove `fact`
+  - add `revision(branch,id,seq,op_index,op,data,commit_seq)`
+  - change `head` to `(branch,id,seq,op_index)`
+  - change `commit` to drop semantic `hash`
+  - inline full JSON document values in `snapshot.value`
+  - keep `branch`, `invocation`, `authorization`, and `blob_store`
+- Make current and point-in-time reads use `snapshot + revision replay`.
+- Store patch arrays inline on `revision.data`.
+- Deduplicate replay by `(session_id, local_seq)` plus canonical equality of the
+  stored `original` payload.
+- Remove parent-hash resolution from JSON commit handling entirely.
 
-## Phase 3: Advanced Features After The Cutover
-- [ ] Wire up branches end to end using the already-created `branch` table: create/delete/list, branch-scoped head resolution, merge proposals, branch-aware queries/subscriptions, and point-in-time reads on branches.
-- [ ] Add garbage-collection scheduling for facts, snapshots, blobs, and deleted branches once retention rules are defined.
-- [ ] Reintroduce classification and redaction only through the redesigned metadata model. Do not revive v1 label entities on the v2 path.
-- [ ] Add richer patch classes such as CRDT/OT text operations only after the branch and conflict model is stable.
+## Phase 2: Server Protocol and Session Watches
 
-## Assumptions And Defaults
-- [x] The cutover switch is a `RuntimeOptions` setting, not an environment variable or repo-global constant.
-- [x] Phase 1 includes the schema/query/commit/session foundations needed for real runtime cutover, but not branching, classification/redaction redesign, or direct patch generation.
-- [x] Phase 1 preserves current runner-facing APIs and uses adapters underneath them instead of rewriting scheduler and cell call sites first.
-- [x] The current branch plan prioritizes v1-used runtime behavior over completeness of the full long-term v2 design.
+- Replace server-side subscription tracking with per-session watch state:
+  - `seenSeq`
+  - current watch set
+  - current relevant entity keys
+  - last synced entity cache
+- Add `session.watch.set` to replace the current watch set for a session.
+- Add `session.ack` to advance server-side `seenSeq`.
+- Emit `session/effect` sync messages instead of `graph.update`.
+- Keep one-shot `graph.query` for non-live reads.
+- Recompute watch-union results per session and emit:
+  - `upserts` for relevant current entity state
+  - `removes` when an entity leaves the watch union
+- Flush already-committed relevant sync before returning `ConflictError`, so the
+  client can retry on fresh state.
+
+## Phase 3: Client Rewrite
+
+- Rewrite `packages/memory/v2/client.ts` around:
+  - session-scoped watch sets
+  - a session cache of watched entity state
+  - reconnect by `seenSeq`
+- Add client APIs for:
+  - `watchSet(watches)`
+  - `ack(seenSeq)`
+  - one-shot `queryGraph(query)`
+- On reconnect:
+  - reopen the session with `seenSeq`
+  - replay outstanding commits in `localSeq` order
+  - reinstall the watch set
+  - integrate catch-up sync frames
+- Remove subscription-id handling and seq/hash-based duplicate-confirm logic.
+
+## Phase 4: Runner / Toolshed Integration
+
+- Update `packages/runner/src/storage/v2.ts` to use session watch installation
+  instead of `queryGraph({ subscribe: true })`.
+- Keep the runner/storage public API unchanged.
+- Keep current notification semantics:
+  - optimistic `commit`
+  - synchronous `revert` before promise resolution on conflict
+  - async `integrate` for remote sync
+- Update toolshed route handling to reject the old live `graph.query subscribe`
+  path.
+- Keep emulation on the same code path as the real v2 server/client pair.
+
+## Phase 5: Basic Branches
+
+- Include:
+  - branch create/delete/list
+  - branch-aware writes
+  - branch-aware current reads
+  - branch-aware point-in-time reads
+  - branch-aware watch scopes
+- Defer:
+  - merge proposal generation
+  - merge conflict workflow
+  - advanced branch-specific live sync optimizations
+  - deleted-branch refinements beyond historical reads
+
+## Phase 6: Remove Old Assumptions
+
+- Delete the old hash/fact/subscription-oriented v2 internals.
+- Do not keep compatibility shims for:
+  - old v2 wire messages
+  - old v2 SQLite engine files
+  - `commit.hash`, `fact.hash`, `value_ref`, or `head.fact_hash`
+- Update diagnostics and benches to use `watch`, `sync`, and `revision`
+  terminology where they describe v2 internals.
+
+## Focused Test Plan
+
+### Engine
+
+- new engine-root resolution in directory and single-file modes
+- current reads from `head + snapshot + revision replay`
+- point-in-time reads through patch chains
+- set / patch / delete revision replay
+- idempotent replay by `(sessionId, localSeq)` with identical `original`
+- protocol error on replay with different `original`
+- branch create/delete/list and branch-aware reads
+
+### Server / Client
+
+- `hello` then `session.open` ordering
+- `session.watch.set` installs or replaces the current watch set
+- `session/effect` emits correct `upserts` and `removes`
+- `session.ack` advances server-side `seenSeq`
+- reconnect restores watch set and replays outstanding commits
+- old live `graph.query subscribe` is rejected
+
+### Runner / Provider
+
+- optimistic commit notification ordering remains unchanged
+- revert-before-promise-resolution on conflict remains unchanged
+- integrate notifications stay suppressed while newer pending state shadows the
+  same path
+- reconnect still deduplicates replayed outstanding local work
+- retry-after-revert succeeds after subscribed state refresh
+- overlapping watched graphs dedupe correctly
+
+### Route / Integration
+
+- toolshed v2 websocket handshake on the new protocol
+- end-to-end runtime sync across fresh runtimes using watch sync
+- root retarget and deep-link propagation through session sync
+- server restart + resume with watch restoration
+- basic branch reads/writes against the real toolshed route

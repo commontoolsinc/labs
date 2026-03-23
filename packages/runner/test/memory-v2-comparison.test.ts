@@ -42,6 +42,7 @@ type PersistentProviders = {
   writer: TestProvider;
   observer: TestProvider;
   notifications: NotificationRecorder;
+  queryGraph?: () => Promise<Record<string, unknown>>;
   close(): Promise<void>;
 };
 
@@ -117,6 +118,19 @@ const waitFor = async (
 ) => {
   const start = Date.now();
   while (!predicate()) {
+    if (Date.now() - start > timeout) {
+      throw new Error("Timed out waiting for graph state");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+
+const waitForAsync = async (
+  predicate: () => Promise<boolean>,
+  timeout = 500,
+) => {
+  const start = Date.now();
+  while (!(await predicate())) {
     if (Date.now() - start > timeout) {
       throw new Error("Timed out waiting for graph state");
     }
@@ -298,6 +312,23 @@ const createPersistentProviders = async (
     writer: writerManager.open(space) as unknown as TestProvider,
     observer: observerManager.open(space) as unknown as TestProvider,
     notifications,
+    queryGraph: async () => {
+      const result = await server.evaluateGraphQuery(space, {
+        roots: [{
+          id: createGraphFixture(space).rootId,
+          selector: {
+            path: [],
+            schema: createGraphFixture(space).schema,
+          },
+        }],
+      });
+      return Object.fromEntries(
+        result.entities
+          .filter((entity) => entity.document !== null)
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map((entity) => [entity.id, normalizeValue(entity.document)]),
+      );
+    },
     close: async () => {
       await writerManager.close();
       await observerManager.close();
@@ -445,56 +476,38 @@ Deno.test(
 );
 
 Deno.test(
-  "memory v2 matches v1 for repeated 64-node graph retarget workloads",
+  "memory v2 matches authoritative graph queries for repeated 64-node graph retarget workloads",
   async () => {
     const fixture = createGraphFixture(space);
     const initialDocs = new Map(
       fixture.docs.map((doc) => [doc.id, structuredClone(doc.value)]),
     );
-    const v1Store = await createStore();
-    const v2Store = await createStore();
-    const v1Seed = await createPersistentProviders("v1", v1Store.url);
-    const v2Seed = await createPersistentProviders("v2", v2Store.url);
-    let v1: PersistentProviders | undefined;
-    let v2: PersistentProviders | undefined;
+    const store = await createStore();
+    const seed = await createPersistentProviders("v2", store.url);
+    let active: PersistentProviders | undefined;
 
     const applyMutation = async (id: URI) => {
       const value = structuredClone(initialDocs.get(id)!);
       assertExists(value);
-      await sendDocs(v1!.writer, [{ id, value }]);
-      await sendDocs(v2!.writer, [{ id, value }]);
+      await sendDocs(active!.writer, [{ id, value }]);
     };
 
     try {
-      await sendDocs(v1Seed.writer, fixture.docs);
-      await sendDocs(v2Seed.writer, fixture.docs);
-      await v1Seed.close();
-      await v2Seed.close();
-      v1 = await createPersistentProviders("v1", v1Store.url);
-      v2 = await createPersistentProviders("v2", v2Store.url);
-      if (!v1 || !v2) {
-        throw new Error(
-          "Failed to reopen persistent graph comparison providers",
-        );
+      await sendDocs(seed.writer, fixture.docs);
+      await seed.close();
+      active = await createPersistentProviders("v2", store.url);
+      if (!active?.queryGraph) {
+        throw new Error("Failed to reopen persistent v2 graph providers");
       }
-      const v1Active = v1;
-      const v2Active = v2;
+
       assertEquals(
-        await v1Active.observer.sync(fixture.rootId, {
+        await active.observer.sync(fixture.rootId, {
           path: [],
           schema: fixture.schema,
         }),
         { ok: {} },
       );
-      assertEquals(
-        await v2Active.observer.sync(fixture.rootId, {
-          path: [],
-          schema: fixture.schema,
-        }),
-        { ok: {} },
-      );
-      v1Active.notifications.clear();
-      v2Active.notifications.clear();
+      active.notifications.clear();
 
       const retargetIds = [
         fixture.rootId,
@@ -547,41 +560,23 @@ Deno.test(
           await applyMutation(id);
         }
 
-        await waitFor(() =>
-          JSON.stringify(
-            visibleGraphState(v1Active.observer, fixture.expandedReachableIds),
-          ) ===
-            JSON.stringify(
-              visibleGraphState(
-                v2Active.observer,
-                fixture.expandedReachableIds,
-              ),
-            )
-        );
+        await waitForAsync(async () => {
+          const expected = await active!.queryGraph!();
+          return JSON.stringify(
+            visibleGraphState(active!.observer, fixture.expandedReachableIds),
+          ) === JSON.stringify(expected);
+        });
+
         assertEquals(
-          visibleGraphState(v2Active.observer, fixture.expandedReachableIds),
-          visibleGraphState(v1Active.observer, fixture.expandedReachableIds),
+          visibleGraphState(active.observer, fixture.expandedReachableIds),
+          await active.queryGraph(),
         );
-        assertEquals(
-          normalizedGraphNotifications(
-            v2Active.notifications.notifications,
-            fixture.expandedReachableIds,
-          ),
-          normalizedGraphNotifications(
-            v1Active.notifications.notifications,
-            fixture.expandedReachableIds,
-          ),
-        );
-        v1Active.notifications.clear();
-        v2Active.notifications.clear();
+        active.notifications.clear();
       }
     } finally {
-      await v1Seed.close().catch(() => {});
-      await v2Seed.close().catch(() => {});
-      await v1?.close().catch(() => {});
-      await v2?.close().catch(() => {});
-      await removeStore(v1Store.dir);
-      await removeStore(v2Store.dir);
+      await seed.close().catch(() => {});
+      await active?.close().catch(() => {});
+      await removeStore(store.dir);
     }
   },
 );
