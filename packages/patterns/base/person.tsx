@@ -218,11 +218,18 @@ interface Output {
 // UI Helpers
 // ============================================================================
 
-function sectionHeader(
+function buildSectionHeaderLabel(
   label: string,
-  expanded: Writable<boolean>,
-  count?: () => number,
-) {
+  expanded: boolean,
+  count = 0,
+  showCount = false,
+): string {
+  const arrow = expanded ? "▾" : "▸";
+  const suffix = showCount && count > 0 ? ` (${count})` : "";
+  return `${arrow} ${label}${suffix}`;
+}
+
+function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
   return (
     <ct-hstack
       style={{
@@ -235,12 +242,7 @@ function sectionHeader(
       onClick={toggleSection({ section: expanded })}
     >
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
-        {computed(() => {
-          const arrow = expanded.get() ? "▾" : "▸";
-          const c = count ? count() : 0;
-          const suffix = count && c > 0 ? ` (${c})` : "";
-          return `${arrow} ${label}${suffix}`;
-        })}
+        {labelContent}
       </label>
     </ct-hstack>
   );
@@ -282,6 +284,32 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   const showAddresses = Writable.of(false);
   const showSocial = Writable.of(false);
   const showNotes = Writable.of(false);
+
+  const nameDetailsHeader = computed(() =>
+    buildSectionHeaderLabel("Name Details", showNameDetails.get())
+  );
+  const contactInfoHeader = computed(() =>
+    buildSectionHeaderLabel("Contact Info", showContactInfo.get())
+  );
+  const addressesHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Addresses",
+      showAddresses.get(),
+      (person.key("addresses").get() || []).length,
+      true,
+    )
+  );
+  const socialHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Social Profiles",
+      showSocial.get(),
+      (person.key("socialProfiles").get() || []).length,
+      true,
+    )
+  );
+  const notesHeader = computed(() =>
+    buildSectionHeaderLabel("Notes", showNotes.get())
+  );
 
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
@@ -365,7 +393,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Name Details Section */}
           <div>
-            {sectionHeader("Name Details", showNameDetails)}
+            {sectionHeader(nameDetailsHeader, showNameDetails)}
             {computed(() => {
               if (!showNameDetails.get()) return null;
               return (
@@ -470,7 +498,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
            */
           }
           <div>
-            {sectionHeader("Contact Info", showContactInfo)}
+            {sectionHeader(contactInfoHeader, showContactInfo)}
             {computed(() => {
               if (!showContactInfo.get()) return null;
               return (
@@ -502,11 +530,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Addresses Section */}
           <div>
-            {sectionHeader(
-              "Addresses",
-              showAddresses,
-              () => (person.key("addresses").get() || []).length,
-            )}
+            {sectionHeader(addressesHeader, showAddresses)}
             {computed(() => {
               if (!showAddresses.get()) return null;
               const addresses = person.key("addresses").get() || [];
@@ -590,11 +614,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Social Profiles Section */}
           <div>
-            {sectionHeader(
-              "Social Profiles",
-              showSocial,
-              () => (person.key("socialProfiles").get() || []).length,
-            )}
+            {sectionHeader(socialHeader, showSocial)}
             {computed(() => {
               if (!showSocial.get()) return null;
               const profiles = person.key("socialProfiles").get() || [];
@@ -640,7 +660,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {sectionHeader("Notes", showNotes)}
+            {sectionHeader(notesHeader, showNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

@@ -156,11 +156,18 @@ const toggleSection = handler<unknown, { section: Writable<boolean> }>(
 // UI Helpers
 // ============================================================================
 
-function sectionHeader(
+function buildSectionHeaderLabel(
   label: string,
-  expanded: Writable<boolean>,
-  count?: () => number,
-) {
+  expanded: boolean,
+  count = 0,
+  showCount = false,
+): string {
+  const arrow = expanded ? "▾" : "▸";
+  const suffix = showCount && count > 0 ? ` (${count})` : "";
+  return `${arrow} ${label}${suffix}`;
+}
+
+function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
   return (
     <ct-hstack
       style={{
@@ -173,12 +180,7 @@ function sectionHeader(
       onClick={toggleSection({ section: expanded })}
     >
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
-        {computed(() => {
-          const arrow = expanded.get() ? "▾" : "▸";
-          const c = count ? count() : 0;
-          const suffix = count && c > 0 ? ` (${c})` : "";
-          return `${arrow} ${label}${suffix}`;
-        })}
+        {labelContent}
       </label>
     </ct-hstack>
   );
@@ -225,6 +227,30 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
   const showHealth = Writable.of(false);
   const showGifts = Writable.of(false);
   const showNotes = Writable.of(false);
+
+  const familyInfoHeader = computed(() =>
+    buildSectionHeaderLabel("Family Info", showFamilyInfo.get())
+  );
+  const healthHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Health & Diet",
+      showHealth.get(),
+      (member.key("dietaryRestrictions").get() || []).length +
+        (member.key("allergies").get() || []).length,
+      true,
+    )
+  );
+  const giftIdeasHeader = computed(() =>
+    buildSectionHeaderLabel(
+      "Gift Ideas",
+      showGifts.get(),
+      (member.key("giftIdeas").get() || []).length,
+      true,
+    )
+  );
+  const notesHeader = computed(() =>
+    buildSectionHeaderLabel("Notes", showNotes.get())
+  );
 
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
@@ -303,7 +329,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
            */
           }
           <div>
-            {sectionHeader("Family Info", showFamilyInfo)}
+            {sectionHeader(familyInfoHeader, showFamilyInfo)}
             {computed(() => {
               if (!showFamilyInfo.get()) return null;
               return (
@@ -330,13 +356,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Health & Diet Section */}
           <div>
-            {sectionHeader(
-              "Health & Diet",
-              showHealth,
-              () =>
-                (member.key("dietaryRestrictions").get() || []).length +
-                (member.key("allergies").get() || []).length,
-            )}
+            {sectionHeader(healthHeader, showHealth)}
             {computed(() => {
               if (!showHealth.get()) return null;
               return (
@@ -366,11 +386,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Gift Ideas Section */}
           <div>
-            {sectionHeader(
-              "Gift Ideas",
-              showGifts,
-              () => (member.key("giftIdeas").get() || []).length,
-            )}
+            {sectionHeader(giftIdeasHeader, showGifts)}
             {computed(() => {
               if (!showGifts.get()) return null;
               return (
@@ -386,7 +402,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {sectionHeader("Notes", showNotes)}
+            {sectionHeader(notesHeader, showNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (
