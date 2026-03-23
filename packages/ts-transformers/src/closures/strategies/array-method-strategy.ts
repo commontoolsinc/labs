@@ -37,6 +37,7 @@ import {
   isCommonToolsKeyIdentifier,
   isFallbackOperator,
 } from "../../utils/reactive-keys.ts";
+import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
 
 const METHOD_TO_WITH_PATTERN: Record<string, string> = {
   map: "mapWithPattern",
@@ -737,7 +738,7 @@ function createPatternCallWithParams(
     });
 
   const rewrittenBody = rewriteCallbackBody(
-    transformedBody,
+    rewriteArrayMethodCallbackExpressionSites(transformedBody, context),
     {
       bindingName: elementAnalysis.bindingName,
       elementIdentifier: elementAnalysis.elementIdentifier,

@@ -15,7 +15,7 @@
  *   - derive()
  *   - lift()
  *   - handler()
- *   - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *   - JSX expressions and other lowerable expression sites
  * - Local values created by computed()/derive() inside the current
  *   computed()/derive() callback remain reactive and cannot be used as plain
  *   values until a nested computed()/derive() consumes them.
@@ -50,6 +50,7 @@ import {
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
+import { findLowerableExpressionSite } from "./expression-site-lowering.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
@@ -59,7 +60,7 @@ export class PatternContextValidationTransformer extends Transformer {
     const analyze = createDataFlowAnalyzer(checker);
 
     const visit = (node: ts.Node): ts.Node => {
-      // Skip JSX - OpaqueRefJSXTransformer handles those
+      // Skip JSX element containers; expression-level handling is shared.
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
@@ -86,9 +87,8 @@ export class PatternContextValidationTransformer extends Transformer {
       }
 
       // Check for optional chaining in reactive context
-      // Note: isInRestrictedReactiveContext returns false for JSX expressions
-      // (they are handled by OpaqueRefJSXTransformer), so this won't flag
-      // optional chaining inside JSX like <div>{user?.name}</div>
+      // Note: isInRestrictedReactiveContext returns false for JSX expressions,
+      // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
       if (
         ts.isPropertyAccessExpression(node) &&
         node.questionDotToken
@@ -191,13 +191,12 @@ export class PatternContextValidationTransformer extends Transformer {
       return;
     }
 
-    // Skip if inside JSX
-    if (this.isInsideJsx(node)) {
+    const expression = node as ts.Expression;
+    if (findLowerableExpressionSite(expression, context, analyze)) {
       return;
     }
 
     // Analyze the expression for reactive dependencies
-    const expression = node as ts.Expression;
     const analysis = analyze(expression);
 
     // If this computation contains reactive refs, it should be wrapped in computed()

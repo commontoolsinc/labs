@@ -40,17 +40,25 @@ describe("default-app flow test", () => {
     // Wait for the note page to load by checking for the note title
     console.log("Look for '📝 New Note'...");
     await waitFor(async () => {
-      const link = await page.waitForSelector("#header-piece-link", {
+      const el = await page.waitForSelector(".header-piece-trigger", {
         strategy: "pierce",
       });
-      const innerText = await link.innerText();
-      return innerText === "📝 New Note";
+      const innerText = await el.innerText();
+      return innerText?.includes("📝 New Note");
     });
 
-    // Navigate back to the space page and wait for new note to appear
+    // Navigate back to the space page via header breadcrumb
     console.log("Navigate back to space page...");
     await waitFor(async () => {
-      return await clickPieceLinkWithText(page, spaceName);
+      const el = await page.waitForSelector(".header-space", {
+        strategy: "pierce",
+      });
+      const text = await el.innerText();
+      if (text?.trim() === spaceName) {
+        await el.click();
+        return true;
+      }
+      return false;
     });
     await shell.waitForState({ view: { spaceName }, identity });
 
@@ -112,44 +120,6 @@ async function findNoteInList(page: Page): Promise<boolean> {
       }
       return search(document);
     });
-  } catch (_) {
-    return false;
-  }
-}
-
-async function clickPieceLinkWithText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  try {
-    return await page.evaluate((text) => {
-      function search(root: Document | ShadowRoot): boolean {
-        const pieceLinks = root.querySelectorAll("x-piece-link");
-        for (const el of pieceLinks) {
-          const content = el.textContent?.trim();
-          const anchor = el.shadowRoot?.querySelector("a");
-          if (
-            content?.includes(text) &&
-            anchor instanceof HTMLAnchorElement
-          ) {
-            anchor.click();
-            return true;
-          }
-        }
-
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          if (el.shadowRoot) {
-            if (search(el.shadowRoot)) {
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-
-      return search(document);
-    }, { args: [searchText] });
   } catch (_) {
     return false;
   }

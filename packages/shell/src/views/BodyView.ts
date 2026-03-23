@@ -38,7 +38,7 @@ export class XBodyView extends BaseView {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      padding: 1rem;
+      padding: 0 1.5rem;
       box-sizing: border-box;
     }
 

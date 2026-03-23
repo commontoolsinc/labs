@@ -4,6 +4,7 @@ import {
   isOpaqueRefType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
 import type { ReactiveContextKind } from "../ast/reactive-context.ts";
+import type { ExpressionContainerKind } from "../transformers/expression-site-types.ts";
 
 export type ReactiveReceiverKind =
   | "plain"
@@ -27,8 +28,9 @@ export function classifyReactiveReceiverKind(
   return "opaque_autounwrapped";
 }
 
-export function shouldLowerLogicalInJsx(
+export function shouldLowerLogicalExpression(
   contextKind: ReactiveContextKind,
+  _containerKind: ExpressionContainerKind,
   operator: ts.SyntaxKind,
 ): boolean {
   if (
@@ -38,7 +40,7 @@ export function shouldLowerLogicalInJsx(
     return false;
   }
 
-  // Policy: lower always in pattern JSX, never in compute/neutral JSX.
+  // Policy: lower always in pattern-owned expression sites, never in compute/neutral sites.
   return contextKind === "pattern";
 }
 

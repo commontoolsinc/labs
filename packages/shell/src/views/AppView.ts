@@ -25,16 +25,16 @@ export class XAppView extends BaseView {
       flex-direction: column;
       height: 100%;
       background-color: white;
-      border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
     .content-area {
       flex: 1;
       display: flex;
       flex-direction: column;
-      overflow-y: auto;
+      overflow: hidden;
       background-color: white;
       min-height: 0; /* Important for flex children */
+      isolation: isolate; /* Contain pattern z-indexes */
     }
   `;
 
@@ -211,11 +211,6 @@ export class XAppView extends BaseView {
     }
   }
 
-  #handlePatternRecreated = () => {
-    // Re-run the space root pattern task to pick up the newly recreated pattern
-    this._spaceRootPattern.run();
-  };
-
   // Always defer to the loaded active pattern for the ID,
   // but until that loads, use an ID in the view if available.
   private getActivePatternId(): string | undefined {
@@ -248,6 +243,9 @@ export class XAppView extends BaseView {
     const pieceId = this.getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
+      : this.rt?.spaceName();
+    const spaceDid = this.app && "spaceDid" in this.app.view
+      ? this.app.view.spaceDid
       : undefined;
     // We're viewing the default pattern if there's no pieceId in the current view
     const isViewingDefaultPattern = !("pieceId" in this.app.view &&
@@ -258,15 +256,13 @@ export class XAppView extends BaseView {
         <x-header-view
           .isLoggedIn="${!!this.app.identity}"
           .spaceName="${spaceName}"
+          .spaceDid="${spaceDid}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .pieceTitle="${this.pieceTitle}"
           .pieceId="${pieceId}"
           .isViewingDefaultPattern="${isViewingDefaultPattern}"
-          .showShellPieceListView="${config.showShellPieceListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
-          .showSidebar="${config.showSidebar ?? false}"
-          @pattern-recreated="${this.#handlePatternRecreated}"
         ></x-header-view>
         <div class="content-area">
           ${content}

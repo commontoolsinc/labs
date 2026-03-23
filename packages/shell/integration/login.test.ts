@@ -50,7 +50,9 @@ describe("shell login tests", () => {
     handle.click();
 
     await sleep(1);
-    handle = await page.waitForSelector("#page-title", { strategy: "pierce" });
+    handle = await page.waitForSelector(".header-space", {
+      strategy: "pierce",
+    });
     const title = await handle.evaluate((el: Element) => el.textContent);
     assert(
       title?.trim() === spaceName,
