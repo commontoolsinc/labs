@@ -1,5 +1,10 @@
 import type { CompilerOptions } from "typescript";
-import { JsxEmit, ModuleKind, ScriptTarget, versionMajorMinor } from "typescript";
+import {
+  JsxEmit,
+  ModuleKind,
+  ScriptTarget,
+  versionMajorMinor,
+} from "typescript";
 
 export const TARGET_TYPE_LIB = "es2023";
 export const MODULE_KIND = ModuleKind.AMD;
