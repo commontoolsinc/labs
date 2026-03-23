@@ -246,18 +246,6 @@ export const unmarkAsPaidHandler = handler<
   },
 );
 
-/**
- * Backward-compatible alias for older factory-style imports.
- * Prefer `markAsPaidHandler` directly for new code.
- */
-export const createMarkAsPaidHandler = () => markAsPaidHandler;
-
-/**
- * Backward-compatible alias for older factory-style imports.
- * Prefer `unmarkAsPaidHandler` directly for new code.
- */
-export const createUnmarkAsPaidHandler = () => unmarkAsPaidHandler;
-
 // =============================================================================
 // BILL PROCESSING (exported for pattern-scope computed)
 // =============================================================================
