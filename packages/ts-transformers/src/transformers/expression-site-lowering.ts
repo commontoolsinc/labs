@@ -277,10 +277,6 @@ function canRewriteExpressionSite(
     return false;
   }
 
-  if (containerKind !== "jsx-expression" && !siteInfo.arrayMethodOwned) {
-    return false;
-  }
-
   if (siteInfo.deferredJsxArrayMethod) {
     return false;
   }
@@ -492,6 +488,37 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
         });
         if (result) {
           return result;
+        }
+      }
+    }
+
+    return visited;
+  };
+
+  return ts.visitNode(root, visit) as T;
+}
+
+export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
+  root: T,
+  context: TransformationContext,
+): T {
+  const analyze = createDataFlowAnalyzer(context.checker);
+
+  const visit: ts.Visitor = (node) => {
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+
+    if (ts.isExpression(visited)) {
+      const containerKind = getExpressionContainerKind(visited);
+      if (containerKind && containerKind !== "jsx-expression") {
+        const rewritten = rewriteExpressionSite({
+          expression: visited,
+          containerKind,
+          context,
+          analyze,
+          visit,
+        });
+        if (rewritten) {
+          return rewritten;
         }
       }
     }

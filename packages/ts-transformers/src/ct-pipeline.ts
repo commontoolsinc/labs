@@ -6,6 +6,7 @@ import {
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
+  PatternOwnedExpressionSiteLoweringTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
@@ -53,6 +54,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new OpaqueRefJSXTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
+      new PatternOwnedExpressionSiteLoweringTransformer(sharedOps),
       new HelperOwnedExpressionSiteLoweringTransformer(sharedOps),
     );
 

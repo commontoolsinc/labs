@@ -496,6 +496,50 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   );
 });
 
+Deno.test(
+  "Pattern Context Validation - Lowerable Non-JSX Expression Sites",
+  async (t) => {
+    await t.step(
+      "allows top-level call-argument ternary in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const wrap = <T,>(value: T) => value;
+
+      export default pattern<{ done: boolean }>((state) => {
+        const label = wrap(state.done ? "Done" : "Pending");
+        return { label };
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property logical-or in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ label?: string }>((state) => ({
+        label: state.label || "Pending",
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+  },
+);
+
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step("allows reading opaques inside computed()", async () => {
     const source = `/// <cts-enable />

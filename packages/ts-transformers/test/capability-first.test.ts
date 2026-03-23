@@ -517,6 +517,69 @@ const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}
 );
 
 Deno.test(
+  "Capability-first: top-level call-argument ternary lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+const wrap = <T,>(value: T) => value;
+
+export default pattern<{ done: boolean }>((state) => {
+  const label = wrap(state.done ? "Done" : "Pending");
+  return { label };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "wrap(__ctHelpers.ifElse(");
+    assert(
+      !output.includes('wrap(state.key("done") ? "Done" : "Pending")'),
+      "expected top-level call-argument ternary to lower to ifElse()",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level object-property logical-or lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ label?: string }>((state) => ({
+  label: state.label || "Pending",
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.unless(");
+    assert(
+      !output.includes('label: state.key("label") || "Pending"'),
+      "expected top-level object-property logical-or to lower to unless()",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: interface defaults keep non-default sibling fields in pattern input schema",
   async () => {
     const source = `/// <cts-enable />
