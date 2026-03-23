@@ -324,10 +324,11 @@ export function mergeDefaults(
  * cell, if possible. This only takes any action if `value` is an object type
  * and isn't itself a cell-related thing.
  *
- * If this function decides to add properties but `value` is frozen (or
- * generally non-extensible), then it is first shallow-cloned. It is up to
- * callers to ensure that mutable `value`s are indeed appropriate to be
- * mutated.
+ * If this function decides to add properties but `value` is either frozen (or
+ * generally non-extensible) or already bound into some (other) context, then it
+ * is first shallow-cloned. It is up to callers to ensure that mutable and
+ * unbound `value`s are indeed appropriate to be mutated.
+ *
  */
 function annotateWithBackToCellSymbols(
   value: any,
@@ -336,26 +337,31 @@ function annotateWithBackToCellSymbols(
   tx: IExtendedStorageTransaction | undefined,
   synced = false,
 ) {
-  if (
-    isRecord(value) && !isCell(value) && !isCellResultForDereferencing(value)
-  ) {
-    if (!Object.isExtensible(value)) {
-      // See function header comment.
-      value = cloneIfNecessary(value as FabricValue, {
-        frozen: false,
-        deep: false,
-      });
-    }
-    // Non-enumerable, so that {...obj} won't copy these symbols
-    Object.defineProperty(value, toCell, {
-      // Use getTransactionForChildCells so that if this was called from sample(),
-      // the resulting cell is still reactive
-      value: () =>
-        createCell(runtime, link, getTransactionForChildCells(tx), synced),
-      enumerable: false,
-    });
-    Object.freeze(value);
+  if (!isRecord(value) || isCell(value)) {
+    // We only possibly annotate objects or arrays that _aren't_ cells.
+    return value;
   }
+
+  const extensible = Object.isExtensible(value);
+  if (!extensible || isCellResultForDereferencing(value)) {
+    // We have to do a shallow clone of `value`. See function header comment
+    // for details.
+    value = cloneIfNecessary(value as FabricValue, {
+      frozen: false,
+      deep: false,
+    });
+  }
+
+  // Non-enumerable, so that {...obj} won't copy these symbols
+  Object.defineProperty(value, toCell, {
+    // Use getTransactionForChildCells so that if this was called from sample(),
+    // the resulting cell is still reactive
+    value: () =>
+      createCell(runtime, link, getTransactionForChildCells(tx), synced),
+    enumerable: false,
+  });
+
+  Object.freeze(value);
   return value;
 }
 
