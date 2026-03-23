@@ -32,6 +32,7 @@ import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 import {
   evaluateFunctionSourceInSES,
+  preflightCompiledBundle,
   SESIsolate,
   SESRuntime,
   verifyProgramModuleScope,
@@ -144,13 +145,6 @@ export class Engine extends EventTarget implements Harness {
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<CompileResult> {
-    if (
-      this.ctRuntime.sandbox.mode === "ses" &&
-      this.ctRuntime.sandbox.verifyModules
-    ) {
-      verifyProgramModuleScope(program);
-    }
-
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
@@ -160,6 +154,7 @@ export class Engine extends EventTarget implements Harness {
     );
 
     const { compiler } = await this.getInternals();
+    let transformedProgram: Program | undefined;
     const resolvedProgram = await this.resolve(resolver);
 
     const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
@@ -172,7 +167,10 @@ export class Engine extends EventTarget implements Harness {
       injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
-      getTransformedProgram: options.getTransformedProgram,
+      getTransformedProgram: (nextProgram) => {
+        transformedProgram = nextProgram;
+        options.getTransformedProgram?.(nextProgram);
+      },
       diagnosticMessageTransformer,
       beforeTransformers: (program) => {
         const pipeline = new CommonFabricTransformerPipeline();
@@ -182,6 +180,14 @@ export class Engine extends EventTarget implements Harness {
         };
       },
     });
+
+    if (
+      this.ctRuntime.sandbox.mode === "ses" &&
+      this.ctRuntime.sandbox.verifyModules
+    ) {
+      verifyProgramModuleScope(transformedProgram ?? resolvedProgram);
+      preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
+    }
 
     return { id, jsScript };
   }

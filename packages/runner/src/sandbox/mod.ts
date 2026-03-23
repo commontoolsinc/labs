@@ -1,4 +1,8 @@
 export {
+  BundlePreflightError,
+  preflightCompiledBundle,
+} from "./bundle-preflight.ts";
+export {
   evaluateFunctionSourceInSES,
   SESIsolate,
   SESRuntime,
