@@ -186,9 +186,9 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-2 | anyOf discriminator fast-path | Critical | M | `traverse.ts:2023` tries every union branch. Discriminated unions (with `const` property) could resolve in O(1). Compounds multiplicatively for nested unions. [Tests needed.](#perf-2-anyof-discriminator) |
+| PERF-2 | anyOf discriminator fast-path | High | M | `traverse.ts:2023` tries every union branch. Discriminated unions (with `const` property) could resolve in O(1). However: our schemas may not have many discriminated unions in practice, and there's already a type-based pre-pass that rejects non-matching branches early. Actual impact depends on profiling. [Tests needed.](#perf-2-anyof-discriminator) |
 | PERF-4 | Engine.evaluate file filtering | High | M | `engine.ts:198` sends all compiled files to sandbox. Filter to only transitively imported files. [Tests needed.](#perf-4-engine-files) |
-| PERF-1 | Client-side document caching | Critical | L | IDB cache disabled 8+ months (`cache.ts:1815`). Core issue is invalidation — server selects docs via schema traversal, client can't know what's stale. CAS-only caching sidesteps this for content-addressed objects. **Needs measurement first:** how much session data is CAS-addressable? [Tests needed.](#perf-1-document-caching) |
+| PERF-1 | Client-side document caching | Critical | L | IDB cache disabled 8+ months (`cache.ts:1815`). Core issue is invalidation — server selects docs via schema traversal, client can't know what's stale. Candidate strategies: (a) CAS-only caching for content-addressed objects, (b) full space replication with `since`-based incremental sync, (c) local schema query against cached snapshot to produce doc/since pairs, letting the server skip unchanged docs. **Needs measurement first:** how much session data is CAS-addressable, and does the query-local-then-sync approach pay for the extra upstream data and local query? [Tests needed.](#perf-1-document-caching) |
 
 ### Address If Bottleneck Emerges
 
