@@ -5,7 +5,7 @@ import type {
 import type { JSONValue } from "@commontools/api";
 
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
-import type { SchemaPathSelector } from "@commontools/data-model/interface";
+import type { SchemaPathSelector } from "@commontools/api";
 export type { SchemaPathSelector };
 
 export type { JSONValue };

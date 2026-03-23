@@ -1365,6 +1365,16 @@ export type JSONSchemaObj = {
   };
 };
 
+/**
+ * Selects a sub-path within a document, optionally paired with a schema
+ * that describes the value at that path. Used by the storage/sync layer
+ * to track which slices of a document are being observed.
+ */
+export type SchemaPathSelector = {
+  path: readonly string[];
+  schema?: JSONSchema;
+};
+
 // LLM types matching Vercel AI SDK structure
 export type BuiltInLLMTextPart = {
   type: "text";
