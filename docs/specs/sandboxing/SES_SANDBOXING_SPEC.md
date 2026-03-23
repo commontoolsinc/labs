@@ -29,10 +29,10 @@ hardening of module-scope definitions at load time.
 
 1. **Invocation Isolation**: Each callback invocation must be isolated from
    any other invocation except through trusted runtime abstractions such as
-   `Cell`, `lift`, `handler`, `pattern`, and `recipe`.
+   `Cell`, `lift`, `handler`, and `pattern`.
 2. **Verified Module Load**: Every top-level module item must be classified and
    verified before it may execute or become observable.
-3. **Direct Callback Builders**: `pattern`, `recipe`, `lift`, `handler`, and
+3. **Direct Callback Builders**: `pattern`, `lift`, `handler`, and
    similar trusted builders must receive direct callbacks, not IIFE-produced or
    otherwise computed callables.
 4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
@@ -230,13 +230,13 @@ A callback is "direct" when it is:
 The following are allowed:
 
 ```typescript
-import { pattern, recipe, lift, handler } from "commontools";
+import { pattern, lift, handler } from "commontools";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   return { value: props.value };
 });
 
-export const MyRecipe = recipe<Input, Output>("name", (props) => {
+export const SecondaryPattern = pattern<Input, Output>((props) => {
   return { value: props.value };
 });
 
@@ -362,7 +362,7 @@ pattern construction. A data initializer may use:
 
 A data initializer MUST NOT call:
 
-- trusted builder entrypoints such as `pattern`, `recipe`, `lift`, or `handler`
+- trusted builder entrypoints such as `pattern`, `lift`, or `handler`
 - graph-construction built-ins such as `fetchData`, `compileAndRun`,
   `navigateTo`, or `wish`
 - arbitrary imported runtime-module functions
@@ -829,7 +829,7 @@ In v1, the trusted runtime module identifiers are:
 
 These runtime modules may export:
 
-- builder entrypoints: `recipe`, `pattern`, `patternTool`, `lift`, `handler`,
+- builder entrypoints: `pattern`, `patternTool`, `lift`, `handler`,
   `action`, `derive`, `computed`
 - cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
   `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
@@ -922,7 +922,7 @@ const CONFIG = freezeVerifiedPlainData({ key: "value" });
 
 #### 7.2.2 Pattern/Recipe Inner Functions Run at Load Time
 
-When `pattern()` or `recipe()` is called, the inner function executes immediately:
+When `pattern()` is called, the inner function executes immediately:
 
 ```typescript
 export const MyPattern = pattern((props) => {
@@ -1211,32 +1211,39 @@ if (inputSourceMap) {
 
 ### 8.4 Error Mapping Implementation
 
-#### 8.4.1 ErrorMapper Lifecycle
+#### 8.4.1 Shared Source-Map State
 
 Error mapping is synchronous and centered on
-`@commontools/js-compiler`'s `SourceMapParser`:
+`@commontools/js-compiler`'s `SourceMapParser`, but SES must **reuse** the same
+runtime-owned source-map state shape that already exists in the current harness
+rather than introducing a second parallel `ErrorMapper` object model.
+
+The existing shared surface is the right baseline:
 
 ```typescript
-class ErrorMapper {
-  private readonly sourceMapParser = new SourceMapParser();
-  private readonly debug: boolean;
-
-  constructor(debug = false) {
-    this.debug = debug;
-  }
-
-  loadSourceMap(filename: string, sourceMap: SourceMap): void { ... }
-  mapError(error: Error, options: ErrorMappingOptions = {}): MappedError { ... }
-  mapPosition(filename: string, line: number, column: number): MappedPosition | null { ... }
-  parseStack(stack: string): string { ... }
-  clear(): void { ... }
+interface StackMapper {
+  loadSourceMap(filename: string, sourceMap: SourceMap): void;
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null;
+  parseStack(stack: string): string;
+  clear(): void;
 }
 ```
 
-- mapping is synchronous
-- source maps are loaded by filename into the mapper, not required to live on
-  every `PatternCompartment`
-- the same mapper also supports direct `parseStack()` and `mapPosition()` calls
+Implementation guidance:
+
+- keep `SourceMapParser` ownership on the runtime / isolate / sandbox instance,
+  not on individual errors
+- if the current `UnsafeEvalIsolate` / `IsolateInternals` abstraction is
+  generalized or extracted, SES should use that shared helper rather than
+  re-specifying stack parsing and source-map caching behavior
+- source maps are loaded by filename into the shared mapper and do not need to
+  live on every `PatternCompartment`
+- the same mapper supports direct `parseStack()` and `mapPosition()` calls for
+  both the existing harness and the SES runtime
 
 #### 8.4.2 ErrorMappingOptions and MappedError
 
@@ -1259,24 +1266,34 @@ interface MappedError {
 
 Required behavior:
 
-- if `filename` and `sourceMap` are present, the mapper loads that map before
-  parsing the stack
+- if `filename` and `sourceMap` are present, the shared mapper loads that map
+  before parsing the stack
 - `mappedStack` is the formatted post-classification stack shown to users or
   logs
 - `patternLocation` comes from the first `pattern` frame after classification
 - `userMessage` is preformatted so callers do not need to rebuild a concise
   display string
 
-The convenience entrypoint remains synchronous:
+The synchronous helper must operate on the shared mapper rather than allocate a
+fresh mapper per error:
 
 ```typescript
 function mapError(
+  mapper: StackMapper,
   error: Error,
   options: ErrorMappingOptions = {},
 ): MappedError {
-  return new ErrorMapper(options.debug).mapError(error, options);
+  if (options.filename && options.sourceMap) {
+    mapper.loadSourceMap(options.filename, options.sourceMap);
+  }
+
+  return classifyAndFormatMappedError(mapper, error, options);
 }
 ```
+
+`mapError()` is therefore a pure formatter/classifier over runtime-owned mapper
+state. It must not instantiate a new `SourceMapParser`, `ErrorMapper`, or other
+per-call cache container.
 
 #### 8.4.3 Execution Wrappers
 
@@ -1288,6 +1305,7 @@ interface ExecutionWrapperOptions {
   readonly functionName?: string;
   readonly includeStack?: boolean;
   readonly debug?: boolean;
+  readonly mapper: StackMapper;
 }
 
 class PatternExecutionError extends Error {
@@ -1623,8 +1641,8 @@ current tree.
 |------|----------|-------|
 | Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
 | Source map chaining in js-compiler | High | `js-compiler/typescript/compiler.ts` |
-| ErrorMapper source-map lifecycle | High | `runner/src/sandbox/error-mapping.ts` |
-| Error mapping utility | High | `runner/src/sandbox/error-mapping.ts` |
+| Reuse shared `SourceMapParser` lifecycle in SES runtime | High | `runner/src/harness/*`, `runner/src/sandbox/error-mapping.ts` |
+| Error mapping utility over shared mapper state | High | `runner/src/sandbox/error-mapping.ts` |
 | Execution wrapper with mapping | High | `runner/src/sandbox/execution-wrapper.ts` |
 | Frame classification and filtering | High | `runner/src/sandbox/frame-classifier.ts` |
 | Enhanced error display | Medium | `runner/src/sandbox/error-display.ts` |
@@ -1986,13 +2004,17 @@ export const MyPattern = pattern(() => {
 
 ```typescript
 // Before
+const resultCell = runtime.getCell(space, "pattern-result");
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+await runner.setup(undefined, pattern, inputs, resultCell);
+await runner.start(resultCell);
 
 // After (if explicit lockdown control needed)
 SESRuntime.applyLockdown({ enabled: true, debug: false });
+const resultCell = runtime.getCell(space, "pattern-result");
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+await runner.setup(undefined, pattern, inputs, resultCell);
+await runner.start(resultCell);
 ```
 
 ---
