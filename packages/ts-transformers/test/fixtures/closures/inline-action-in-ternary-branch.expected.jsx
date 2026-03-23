@@ -97,7 +97,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
+            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.key("isEditing").set(true))({
                 state: {
                     isEditing: state.isEditing
                 }

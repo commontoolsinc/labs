@@ -118,7 +118,25 @@ function registerCapabilitySummary(
     interprocedural,
   });
 
-  if (!defaultsByParamName || defaultsByParamName.size === 0) {
+  const mergedDefaultsByParamName = new Map<
+    string,
+    readonly CapabilityParamDefault[]
+  >();
+  const existingSummary = registry.get(callback);
+  if (existingSummary) {
+    for (const param of existingSummary.params) {
+      if (param.defaults && param.defaults.length > 0) {
+        mergedDefaultsByParamName.set(param.name, param.defaults);
+      }
+    }
+  }
+  if (defaultsByParamName) {
+    for (const [paramName, defaults] of defaultsByParamName) {
+      mergedDefaultsByParamName.set(paramName, defaults);
+    }
+  }
+
+  if (mergedDefaultsByParamName.size === 0) {
     registry.set(callback, summary);
     return;
   }
@@ -126,7 +144,7 @@ function registerCapabilitySummary(
   registry.set(callback, {
     ...summary,
     params: summary.params.map((param) => {
-      const defaults = defaultsByParamName.get(param.name);
+      const defaults = mergedDefaultsByParamName.get(param.name);
       if (!defaults || defaults.length === 0) {
         return param;
       }
@@ -436,6 +454,71 @@ function createMaterializedOpaqueRead(
   return expression;
 }
 
+function materializeOpaqueAccessExpression(
+  expression: ts.Expression,
+  rootName: string,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  const visit = (current: ts.Expression): ts.Expression => {
+    if (ts.isIdentifier(current) && current.text === rootName) {
+      return factory.createCallExpression(
+        factory.createPropertyAccessExpression(
+          factory.createIdentifier(rootName),
+          factory.createIdentifier("get"),
+        ),
+        undefined,
+        [],
+      );
+    }
+
+    if (ts.isParenthesizedExpression(current)) {
+      return factory.createParenthesizedExpression(visit(current.expression));
+    }
+    if (ts.isAsExpression(current)) {
+      return factory.createAsExpression(
+        visit(current.expression),
+        current.type,
+      );
+    }
+    if (ts.isTypeAssertionExpression(current)) {
+      return factory.createTypeAssertion(
+        current.type,
+        visit(current.expression),
+      );
+    }
+    if (ts.isSatisfiesExpression(current)) {
+      return factory.createSatisfiesExpression(
+        visit(current.expression),
+        current.type,
+      );
+    }
+    if (ts.isNonNullExpression(current)) {
+      return factory.createNonNullExpression(visit(current.expression));
+    }
+    if (ts.isPartiallyEmittedExpression(current)) {
+      return factory.createPartiallyEmittedExpression(
+        visit(current.expression),
+      );
+    }
+    if (ts.isPropertyAccessExpression(current)) {
+      return factory.createPropertyAccessExpression(
+        visit(current.expression),
+        current.name,
+      );
+    }
+    if (ts.isElementAccessExpression(current)) {
+      return factory.createElementAccessExpression(
+        visit(current.expression),
+        current.argumentExpression,
+      );
+    }
+
+    return current;
+  };
+
+  return visit(expression);
+}
+
 function hasMaterializedOpaqueArrayRead(
   node: ts.Node,
   context: TransformationContext,
@@ -452,6 +535,18 @@ function hasMaterializedOpaqueArrayRead(
       return;
     }
 
+    if (
+      ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text === "map" &&
+      ts.isCallExpression(current.expression.expression) &&
+      ts.isPropertyAccessExpression(current.expression.expression.expression) &&
+      current.expression.expression.expression.name.text === "get"
+    ) {
+      found = true;
+      return;
+    }
+
     if (current !== node && ts.isCallExpression(current)) {
       const callKind = detectCallKind(current, context.checker);
       if (
@@ -464,18 +559,6 @@ function hasMaterializedOpaqueArrayRead(
       ) {
         return;
       }
-    }
-
-    if (
-      ts.isCallExpression(current) &&
-      ts.isPropertyAccessExpression(current.expression) &&
-      current.expression.name.text === "map" &&
-      ts.isCallExpression(current.expression.expression) &&
-      ts.isPropertyAccessExpression(current.expression.expression.expression) &&
-      current.expression.expression.expression.name.text === "get"
-    ) {
-      found = true;
-      return;
     }
 
     ts.forEachChild(current, visit);
@@ -671,48 +754,69 @@ function wrapMaterializedArrayReadsInJsxExpressions(
   };
 
   const wrapHelperBranches = (node: ts.Node): ts.Node => {
-    const visitedNode = visitEachChildWithJsx(
-      node,
-      wrapHelperBranches,
-      context.tsContext,
-    );
-
-    if (!ts.isCallExpression(visitedNode)) {
-      return visitedNode;
+    if (!ts.isCallExpression(node)) {
+      return visitEachChildWithJsx(
+        node,
+        wrapHelperBranches,
+        context.tsContext,
+      );
     }
 
-    const branchIndexes = getHelperBranchIndexes(visitedNode);
-    if (branchIndexes.length === 0) {
-      return visitedNode;
+    const branchIndexes = new Set(getHelperBranchIndexes(node));
+    if (branchIndexes.size === 0) {
+      return visitEachChildWithJsx(
+        node,
+        wrapHelperBranches,
+        context.tsContext,
+      );
     }
 
     let changed = false;
-    const args = [...visitedNode.arguments];
-    for (const index of branchIndexes) {
-      const branch = args[index];
-      if (!branch || !ts.isExpression(branch)) {
-        continue;
+    const expression = visitEachChildWithJsx(
+      node.expression,
+      wrapHelperBranches,
+      context.tsContext,
+    ) as ts.LeftHandSideExpression;
+    changed ||= expression !== node.expression;
+
+    const args = node.arguments.map((argument, index) => {
+      if (!branchIndexes.has(index)) {
+        const visitedArgument = visitEachChildWithJsx(
+          argument,
+          wrapHelperBranches,
+          context.tsContext,
+        ) as ts.Expression;
+        changed ||= visitedArgument !== argument;
+        return visitedArgument;
       }
 
-      const rewrittenBranch = deriveMaterializedExpression(branch, {
+      const rewrittenBranch = deriveMaterializedExpression(argument, {
         nullSafeArrayRoots: true,
       });
-      if (!rewrittenBranch) {
-        continue;
+      if (rewrittenBranch) {
+        changed = true;
+        return rewrittenBranch;
       }
 
-      args[index] = rewrittenBranch;
-      changed = true;
+      const visitedBranch = visitEachChildWithJsx(
+        argument,
+        wrapHelperBranches,
+        context.tsContext,
+      ) as ts.Expression;
+      changed ||= visitedBranch !== argument;
+      return visitedBranch;
+    });
+
+    if (!changed) {
+      return node;
     }
 
-    return changed
-      ? context.factory.updateCallExpression(
-        visitedNode,
-        visitedNode.expression,
-        visitedNode.typeArguments,
-        args,
-      )
-      : visitedNode;
+    return context.factory.updateCallExpression(
+      node,
+      expression,
+      node.typeArguments,
+      args,
+    );
   };
 
   const branchWrappedBody = visitEachChildWithJsx(
@@ -1187,6 +1291,19 @@ function rewritePatternBody(
         }
 
         if (info.dynamic) {
+          if (
+            options.safeNativeMethodReads &&
+            options.materializeSafePropertyReadRoots?.has(info.root)
+          ) {
+            const materializedRead = materializeOpaqueAccessExpression(
+              visited,
+              info.root,
+              context.factory,
+            );
+            registerReplacementType(materializedRead, visited, context);
+            return materializedRead;
+          }
+
           reportOnce(
             visited,
             "computation",

@@ -297,14 +297,6 @@ export function classifyReactiveContext(
           }
 
           if (callKind?.kind === "array-method") {
-            // Nested plain callbacks inside JSX (for example, a string-mapping
-            // callback inside a render expression) should run in compute
-            // context so early JSX rewrites do not derive-wrap plain element
-            // parameters before later structural lowering runs.
-            //
-            // Callbacks that themselves render JSX still inherit the parent
-            // pattern context; those are the ones that the later mapWithPattern
-            // lowering is expected to own.
             if (
               (inJsxExpression || isWithinJsxExpression(current)) &&
               !callbackContainsJsx(current)
@@ -316,7 +308,7 @@ export function classifyReactiveContext(
               };
             }
 
-            // Outside JSX, non-transformed array callbacks inherit the parent
+            // Non-transformed map callbacks otherwise inherit the parent
             // context until a later pass decides whether to lower the method.
             current = current.parent;
             continue;

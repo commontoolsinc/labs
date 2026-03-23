@@ -39,7 +39,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
-            const scaled = state.items.map((item) => item.value * state.multiplier);
+            const scaled = state.key("items").map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
             state: {

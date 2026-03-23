@@ -71,7 +71,7 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "index"]
-                } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
+                } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.key("selectedIndex").set(index))({
                     state: {
                         selectedIndex: state.key("selectedIndex")
                     },

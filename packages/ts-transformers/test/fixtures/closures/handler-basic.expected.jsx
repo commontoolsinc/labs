@@ -23,7 +23,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.key("counter").set(state.key("counter").get() + 1))({
             state: {
                 counter: state.key("counter")
             }

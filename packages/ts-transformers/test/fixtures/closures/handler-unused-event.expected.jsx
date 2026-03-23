@@ -26,7 +26,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1))({
+        } as const satisfies __ctHelpers.JSONSchema, (_, { state }) => state.key("counter").set(state.key("counter").get() + 1))({
             state: {
                 counter: state.key("counter")
             }

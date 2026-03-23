@@ -58,8 +58,8 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
-            state.selectedValue.set(value);
-            state.lastItems.set(items.map(i => i.label).join(", "));
+            state.key("selectedValue").set(value);
+            state.key("lastItems").set(items.map(i => i.label).join(", "));
         })({
             state: {
                 selectedValue: state.key("selectedValue"),

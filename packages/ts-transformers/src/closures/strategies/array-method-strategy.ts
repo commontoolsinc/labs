@@ -31,7 +31,6 @@ import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
-import { isDeclaredWithinFunction } from "../../ast/scope-analysis.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
@@ -135,55 +134,6 @@ function getEnclosingFunctionLike(
   return undefined;
 }
 
-function getCaptureRootIdentifier(
-  expression: ts.Expression,
-): ts.Identifier | undefined {
-  let current = unwrapExpression(expression);
-
-  while (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current)
-  ) {
-    current = unwrapExpression(current.expression);
-  }
-
-  return ts.isIdentifier(current) ? current : undefined;
-}
-
-function isNestedLocalCapture(
-  expression: ts.Expression,
-  callback: ts.FunctionLikeDeclaration,
-  originalCallback: ts.FunctionLikeDeclaration | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  const root = getCaptureRootIdentifier(expression);
-  if (!root) {
-    return false;
-  }
-
-  const symbol = checker.getSymbolAtLocation(root);
-  if (!symbol) {
-    return false;
-  }
-
-  for (const declaration of symbol.declarations ?? []) {
-    if (!isDeclaredWithinFunction(declaration, callback)) {
-      continue;
-    }
-
-    const owner = getEnclosingFunctionLike(declaration);
-    if (!owner) {
-      continue;
-    }
-
-    if (owner !== callback && owner !== originalCallback) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 function createsReactiveCollectionInPlace(
   expression: ts.Expression,
   context: TransformationContext,
@@ -247,7 +197,7 @@ function isLocalReactiveRewrapAlias(
       continue;
     }
 
-    if (!isDeclaredWithinFunction(declaration, scope)) {
+    if (getEnclosingFunctionLike(declaration) !== scope) {
       continue;
     }
 
@@ -259,51 +209,6 @@ function isLocalReactiveRewrapAlias(
         seenSymbols,
       )
     ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isLocalComputedAlias(
-  expression: ts.Expression,
-  scope: ts.FunctionLikeDeclaration,
-  context: TransformationContext,
-  seenSymbols: Set<ts.Symbol> = new Set(),
-): boolean {
-  const current = unwrapExpression(expression);
-  if (!ts.isIdentifier(current)) {
-    return false;
-  }
-
-  const symbol = context.checker.getSymbolAtLocation(current);
-  if (!symbol || seenSymbols.has(symbol)) {
-    return false;
-  }
-  seenSymbols.add(symbol);
-
-  for (const declaration of symbol.declarations ?? []) {
-    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
-      continue;
-    }
-
-    if (!isDeclaredWithinFunction(declaration, scope)) {
-      continue;
-    }
-
-    const initializer = unwrapExpression(declaration.initializer);
-    if (ts.isCallExpression(initializer)) {
-      const callKind = detectCallKind(initializer, context.checker);
-      if (
-        callKind?.kind === "derive" ||
-        (callKind?.kind === "builder" && callKind.builderName === "computed")
-      ) {
-        return true;
-      }
-    }
-
-    if (isLocalComputedAlias(initializer, scope, context, seenSymbols)) {
       return true;
     }
   }
@@ -415,7 +320,14 @@ function shouldTransformArrayMethod(
   );
 
   const callback = methodCall.arguments[0];
+  const parentExpression = methodCall.parent;
+  const isJoinedImmediately = !!parentExpression &&
+    ts.isPropertyAccessExpression(parentExpression) &&
+    parentExpression.expression === methodCall &&
+    parentExpression.name.text === "join";
   if (
+    methodName === "map" &&
+    isJoinedImmediately &&
     contextInfo.kind === "pattern" &&
     contextInfo.inJsxExpression &&
     callback &&
@@ -426,16 +338,6 @@ function shouldTransformArrayMethod(
   }
 
   const enclosingFunction = getEnclosingFunctionLike(methodCall);
-  if (
-    contextInfo.kind === "pattern" &&
-    enclosingFunction &&
-    (
-      isLocalReactiveRewrapAlias(mapTarget, enclosingFunction, context) ||
-      isLocalComputedAlias(mapTarget, enclosingFunction, context)
-    )
-  ) {
-    return false;
-  }
 
   if (
     contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
@@ -664,6 +566,19 @@ function isReactiveMapOrigin(
   seenSymbols: Set<ts.Symbol> = new Set(),
 ): boolean {
   const current = unwrapExpression(expression);
+  const isDirectWishResultAccess = (node: ts.Expression): boolean => {
+    const source = ts.isPropertyAccessExpression(node) &&
+        node.name.text === "result"
+      ? unwrapExpression(node.expression)
+      : undefined;
+    return !!source &&
+      ts.isCallExpression(source) &&
+      detectCallKind(source, context.checker)?.kind === "wish";
+  };
+
+  if (isDirectWishResultAccess(current)) {
+    return false;
+  }
 
   if (isDeriveCall(current)) {
     return true;
@@ -772,6 +687,9 @@ function isReactiveMapOrigin(
         parent = parent.parent;
       }
       if (ts.isVariableDeclaration(parent) && parent.initializer) {
+        if (isDirectWishResultAccess(unwrapExpression(parent.initializer))) {
+          return true;
+        }
         if (
           isReactiveMapOrigin(parent.initializer, context, seenSymbols)
         ) {
@@ -1039,37 +957,7 @@ export function transformArrayMethodCallback(
 
   // Collect captured variables from the callback
   const collector = new CaptureCollector(checker);
-  const { captures, captureTree } = collector.analyzeCurrentAndOriginal(
-    callback,
-  );
-  const originalCallback = ts.getOriginalNode(callback);
-  const originalFunction = ts.isArrowFunction(originalCallback) ||
-      ts.isFunctionExpression(originalCallback)
-    ? originalCallback
-    : undefined;
-  const nestedLocalCaptureNames = new Set<string>();
-  for (const capture of captures) {
-    if (
-      isNestedLocalCapture(
-        capture,
-        callback,
-        originalFunction,
-        checker,
-      )
-    ) {
-      const root = getCaptureRootIdentifier(capture);
-      if (root) {
-        nestedLocalCaptureNames.add(root.text);
-      }
-    }
-  }
-  const filteredCaptureTree = nestedLocalCaptureNames.size === 0
-    ? captureTree
-    : new Map(
-      Array.from(captureTree.entries()).filter(([key]) =>
-        !nestedLocalCaptureNames.has(key)
-      ),
-    );
+  const { captureTree } = collector.analyzeCurrentAndOriginal(callback);
 
   // Get callback parameters
   const originalParams = callback.parameters;
@@ -1093,7 +981,7 @@ export function transformArrayMethodCallback(
     elemParam,
     indexParam,
     arrayParam,
-    filteredCaptureTree,
+    captureTree,
     context,
     visitor,
   );
