@@ -194,6 +194,108 @@ describe("Engine.evaluate()", () => {
     expect(typeof utilExports["double"]).toBe("function");
     expect(typeof utilExports["triple"]).toBe("function");
   });
+
+  it("allows top-level schema() without CTS because it is a runtime helper", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { schema } from "commontools";',
+            "const model = schema({",
+            '  type: "object",',
+            "  properties: { count: { type: \"number\" } },",
+            "  required: [\"count\"],",
+            "});",
+            "export default model;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main).toBeDefined();
+    expect(main!["default"]).toEqual({
+      type: "object",
+      properties: {
+        count: { type: "number" },
+      },
+      required: ["count"],
+    });
+  });
+
+  it("throws when toSchema() reaches runtime without CTS", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { toSchema } from "commontools";',
+            "export default toSchema<{ count: number }>({",
+            "  default: { count: 0 },",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
+      "toSchema() must be transformed at compile time",
+    );
+  });
+
+  it("throws when handler() relies on CTS inference without CTS", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { handler } from "commontools";',
+            "export default handler((_event: { count: number }, state: { count: number }) => {",
+            "  state.count = state.count + 1;",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
+      "Handler requires schemas or CTS transformer",
+    );
+  });
+
+  it("characterizes shared top-level mutable state in untransformed modules", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "let counter = 0;",
+            "export default function next(): number {",
+            "  counter += 1;",
+            "  return counter;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const next = main!["default"] as () => number;
+
+    // Current harness behavior: module-scope state lives across export calls.
+    expect(next()).toBe(1);
+    expect(next()).toBe(2);
+  });
 });
 
 describe("Engine compile + evaluate", () => {
