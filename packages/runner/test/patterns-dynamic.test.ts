@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { OpaqueCell } from "@commontools/api";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -296,7 +297,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: (values as any).mapWithPattern(doublePattern as any, {}),
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -364,7 +368,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: (values as any).mapWithPattern(doublePattern as any, {}),
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -431,7 +438,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: (values as any).mapWithPattern(doublePattern as any, {}),
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -469,7 +479,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        doubled: (values as any).mapWithPattern(doublePattern as any, {}),
+        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+          doublePattern as any,
+          {},
+        ),
       };
     });
 
@@ -523,7 +536,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
+        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
       };
     });
 
@@ -553,7 +569,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as any).filterWithPattern(
+        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
           isPositivePattern as any,
           {},
         ),
@@ -625,7 +641,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as any).filterWithPattern(
+        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
           isPositivePattern as any,
           {},
         ),
@@ -723,7 +739,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as any).filterWithPattern(
+        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
           isPositivePattern as any,
           {},
         ),
@@ -761,7 +777,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
+        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
+          isEvenPattern as any,
+          {},
+        ),
       };
     });
 
@@ -795,7 +814,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as any).filterWithPattern(
+        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
           isPositivePattern as any,
           {},
         ),
@@ -854,7 +873,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        positives: (values as any).filterWithPattern(
+        positives: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
           isPositivePattern as any,
           {},
         ),
@@ -896,7 +915,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -929,7 +951,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(expandPattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          expandPattern as any,
+          {},
+        ),
       };
     });
 
@@ -988,7 +1013,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1079,7 +1107,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(maybeExpandPattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          maybeExpandPattern as any,
+          {},
+        ),
       };
     });
 
@@ -1114,7 +1145,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
           expandOrPassthroughPattern as any,
           {},
         ),
@@ -1151,7 +1182,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
@@ -1190,7 +1224,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       return {
         values,
         // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+          duplicatePattern as any,
+          {},
+        ),
       };
     });
 
