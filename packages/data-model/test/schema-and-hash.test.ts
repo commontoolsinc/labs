@@ -6,17 +6,16 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
-import { deepFreeze } from "../deep-freeze.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
-import { FabricHash } from "../fabric-hash.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
+import { toDeepFrozenSchema } from "../schema-utils.ts";
 
 describe("SchemaAndHash", () => {
   describe("from()", () => {
     it("creates an instance with schema and hash", () => {
       const sah = SchemaAndHash.from({ type: "number" });
       assertEquals(sah.schema, { type: "number" });
-      assert(sah.hash instanceof FabricHash);
+      assertStrictEquals(typeof sah.hash, "string");
     });
 
     it("deep-freezes the stored schema", () => {
@@ -38,9 +37,9 @@ describe("SchemaAndHash", () => {
     });
 
     it("uses an already-deep-frozen schema by reference", () => {
-      const schema = deepFreeze({
+      const schema = toDeepFrozenSchema({
         type: "object",
-        properties: { name: deepFreeze({ type: "string" }) },
+        properties: { name: { type: "string" } },
       }) as JSONSchemaObj;
       assert(isDeepFrozen(schema));
       const sah = SchemaAndHash.from(schema);
@@ -50,19 +49,19 @@ describe("SchemaAndHash", () => {
     it("handles boolean schema true", () => {
       const sah = SchemaAndHash.from(true);
       assertEquals(sah.schema, true);
-      assert(sah.hash instanceof FabricHash);
+      assertStrictEquals(typeof sah.hash, "string");
     });
 
     it("handles boolean schema false", () => {
       const sah = SchemaAndHash.from(false);
       assertEquals(sah.schema, false);
-      assert(sah.hash instanceof FabricHash);
+      assertStrictEquals(typeof sah.hash, "string");
     });
 
     it("handles empty object schema", () => {
       const sah = SchemaAndHash.from({});
       assertEquals(sah.schema, {});
-      assert(sah.hash instanceof FabricHash);
+      assertStrictEquals(typeof sah.hash, "string");
     });
   });
 
@@ -100,19 +99,19 @@ describe("SchemaAndHash", () => {
     it("same schema produces the same hash", () => {
       const sah1 = SchemaAndHash.from({ type: "number" });
       const sah2 = SchemaAndHash.from({ type: "number" });
-      assertEquals(sah1.hash.toString(), sah2.hash.toString());
+      assertEquals(sah1.hash, sah2.hash);
     });
 
     it("different schemas produce different hashes", () => {
       const sah1 = SchemaAndHash.from({ type: "number" });
       const sah2 = SchemaAndHash.from({ type: "string" });
-      assertNotStrictEquals(sah1.hash.toString(), sah2.hash.toString());
+      assertNotStrictEquals(sah1.hash, sah2.hash);
     });
 
     it("property order does not affect hash", () => {
       const sah1 = SchemaAndHash.from({ type: "object", title: "foo" });
       const sah2 = SchemaAndHash.from({ title: "foo", type: "object" });
-      assertEquals(sah1.hash.toString(), sah2.hash.toString());
+      assertEquals(sah1.hash, sah2.hash);
     });
   });
 });
