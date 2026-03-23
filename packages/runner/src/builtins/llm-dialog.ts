@@ -14,7 +14,10 @@ import type {
   JSONSchema,
 } from "commontools";
 import type { Schema } from "@commontools/api/schema";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
@@ -198,18 +201,13 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
  * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */
-function isNonEmptySchema(schema: unknown): schema is JSONSchema {
-  return typeof schema === "object" && schema !== null &&
-    Object.keys(schema as Record<string, unknown>).length > 0;
-}
-
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
-  if (isNonEmptySchema(schema)) {
+  if (isNontrivialSchema(schema)) {
     return schema;
   }
 
@@ -223,7 +221,7 @@ function getCellSchema(
   try {
     const resolvedSchema = cell.resolveAsCell().asSchema(undefined)
       .asSchemaFromLinks()?.getAsNormalizedFullLink()?.schema;
-    if (isNonEmptySchema(resolvedSchema)) {
+    if (isNontrivialSchema(resolvedSchema)) {
       return resolvedSchema;
     }
   } catch (e) {
