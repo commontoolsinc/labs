@@ -30,6 +30,12 @@ import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
+import {
+  evaluateFunctionSourceInSES,
+  SESIsolate,
+  SESRuntime,
+  verifyProgramModuleScope,
+} from "../sandbox/mod.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -83,8 +89,8 @@ export class EngineProgramResolver extends InMemoryProgram {
 
 interface Internals {
   compiler: TypeScriptCompiler;
-  runtime: UnsafeEvalRuntime;
-  isolate: UnsafeEvalIsolate;
+  runtime: UnsafeEvalRuntime | SESRuntime;
+  isolate: UnsafeEvalIsolate | SESIsolate;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
@@ -109,7 +115,16 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    const runtime = new UnsafeEvalRuntime();
+    const runtime = this.ctRuntime.sandbox.mode === "ses"
+      ? new SESRuntime({
+        globals: {
+          [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
+            RUNTIME_ENGINE_CONSOLE_HOOK
+          ],
+        },
+        lockdown: this.ctRuntime.sandbox.lockdown,
+      })
+      : new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
     const { runtimeExports, exportsCallback } = await RuntimeModules
       .getExports();
@@ -129,6 +144,13 @@ export class Engine extends EventTarget implements Harness {
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<CompileResult> {
+    if (
+      this.ctRuntime.sandbox.mode === "ses" &&
+      this.ctRuntime.sandbox.verifyModules
+    ) {
+      verifyProgramModuleScope(program);
+    }
+
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
@@ -224,6 +246,17 @@ export class Engine extends EventTarget implements Harness {
   }
 
   getInvocation(source: string): HarnessedFunction {
+    if (this.ctRuntime.sandbox.mode === "ses") {
+      return evaluateFunctionSourceInSES(source, {
+        globals: {
+          [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
+            RUNTIME_ENGINE_CONSOLE_HOOK
+          ],
+        },
+        lockdown: this.ctRuntime.sandbox.lockdown,
+      }) as HarnessedFunction;
+    }
+
     if (this.internals) {
       // Extract inline source map and sourceURL from the source string
       // so the isolate's SourceMapParser can map stack traces back to

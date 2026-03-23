@@ -205,8 +205,8 @@ describe("Engine.evaluate()", () => {
             'import { schema } from "commontools";',
             "const model = schema({",
             '  type: "object",',
-            "  properties: { count: { type: \"number\" } },",
-            "  required: [\"count\"],",
+            '  properties: { count: { type: "number" } },',
+            '  required: ["count"],',
             "});",
             "export default model;",
           ].join("\n"),
@@ -295,6 +295,143 @@ describe("Engine.evaluate()", () => {
     // Current harness behavior: module-scope state lives across export calls.
     expect(next()).toBe(1);
     expect(next()).toBe(2);
+  });
+});
+
+describe("Engine in SES mode", () => {
+  let runtime: Runtime;
+  let engine: Engine;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      sandbox: {
+        mode: "ses",
+        verifyModules: true,
+      },
+    });
+    engine = runtime.harness as Engine;
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("evaluates safe programs inside SES compartments", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: "export default 42;",
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default).toBe(42);
+  });
+
+  it("allows direct top-level builder definitions with schema constants", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { pattern, schema } from "commontools";',
+            "const model = schema({",
+            '  type: "object",',
+            '  properties: { count: { type: "number" } },',
+            '  required: ["count"],',
+            "});",
+            "export default pattern<{ count: number }>(({ count }) => ({ count }), model, model);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main).toBeDefined();
+    expect(main?.default).toBeDefined();
+    expect(main?.default.nodes).toBeDefined();
+  });
+
+  it("rejects top-level mutable bindings", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "let counter = 0;",
+            "export default function next() {",
+            "  counter += 1;",
+            "  return counter;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Top-level mutable bindings are not allowed in SES mode",
+    );
+  });
+
+  it("rejects top-level IIFEs that try to hide mutable state", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "const state = (() => ({ count: 0 }))();",
+            "export default 42;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Only trusted builder calls and schema() are allowed at module scope in SES mode",
+    );
+  });
+
+  it("rejects trusted-builder callbacks that capture top-level data", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "const state = { count: 0 };",
+            "export default lift(() => state.count + 1);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Callback captures top-level data binding 'state'",
+    );
+  });
+
+  it("reconstructs stringified functions without raw eval", () => {
+    const next = engine.getInvocation("function next(x) { return x + 1; }") as (
+      input: number,
+    ) => number;
+
+    expect(next(1)).toBe(2);
   });
 });
 

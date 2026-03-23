@@ -158,6 +158,15 @@ export interface ExperimentalOptions {
   canonicalHashing?: boolean | undefined;
 }
 
+export interface SandboxOptions {
+  /** Select the execution harness for authored modules. */
+  mode?: "unsafe-eval" | "ses";
+  /** Run conservative module-scope verification before compilation. */
+  verifyModules?: boolean;
+  /** Apply SES lockdown before creating compartments. */
+  lockdown?: boolean;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -174,6 +183,8 @@ export interface RuntimeOptions {
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
+  /** Optional authored-code sandbox configuration. */
+  sandbox?: SandboxOptions;
 }
 
 /**
@@ -257,6 +268,7 @@ export class Runtime {
   readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
+  readonly sandbox: Required<SandboxOptions>;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
@@ -290,6 +302,12 @@ export class Runtime {
       modernSchemaHash: undefined,
       canonicalHashing: undefined,
       ...options.experimental,
+    };
+    this.sandbox = {
+      mode: "unsafe-eval",
+      verifyModules: options.sandbox?.mode === "ses",
+      lockdown: options.sandbox?.mode === "ses",
+      ...options.sandbox,
     };
 
     if (
