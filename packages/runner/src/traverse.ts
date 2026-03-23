@@ -2,6 +2,7 @@ import { hashOf } from "@commontools/data-model/value-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
+  JSONValue,
   MemorySpace,
   Result,
   SchemaPathSelector,
@@ -490,7 +491,7 @@ export interface IObjectCreator<T> {
   // This should also handle annotation of the default value if needed.
   applyDefault(
     link: NormalizedFullLink,
-    defaultValue: T | undefined,
+    defaultValue: Immutable<JSONValue> | undefined,
   ): T | undefined;
 
   // In the SchemaObjectTraverser system, we don't need to annotate the object
@@ -649,7 +650,7 @@ export abstract class BaseObjectTraverser {
    */
   protected traverseDAG(
     doc: IMemorySpaceValueAttestation,
-    defaultValue?: FabricDatum,
+    defaultValue?: Immutable<JSONValue>,
     itemLink?: NormalizedFullLink,
   ): Immutable<FabricValue> {
     this.traverseDAGCalls++;
@@ -806,11 +807,12 @@ export abstract class BaseObjectTraverser {
             },
             value: v,
           };
+          const defaultValueObj = isObject(defaultValue)
+            ? defaultValue as Immutable<Record<string, JSONValue>>
+            : undefined;
           const val = this.traverseDAG(
             itemDoc,
-            isRecord(defaultValue) && !Array.isArray(defaultValue)
-              ? (defaultValue as JSONObject)[k]
-              : undefined,
+            defaultValueObj !== undefined ? defaultValueObj[k] : undefined,
           )!;
           return [k, val];
         });

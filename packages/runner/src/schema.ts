@@ -106,13 +106,15 @@ export function processDefaultValue(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
-  defaultValue: any,
+  defaultValue: Immutable<JSONValue> | undefined,
   synced = false,
 ): any {
   const schema = link.schema;
   if (!schema) return defaultValue;
 
-  let resolvedSchema = resolveSchema(schema);
+  let resolvedSchema = isRecord(schema)
+    ? ContextualFlowControl.resolveSchemaRefsOrThrow(schema)
+    : schema;
   let asCell = false;
   let asStream = false;
   if (isRecord(resolvedSchema)) {
@@ -145,12 +147,12 @@ export function processDefaultValue(
         tx,
       );
     } else {
+      const mergedSchema = defaultValue === undefined
+        ? resolvedSchema
+        : mergeSchemaDefaults(resolvedSchema, defaultValue);
       return createCell(
         runtime,
-        {
-          ...link,
-          schema: mergeDefaults(resolvedSchema, defaultValue),
-        },
+        { ...link, schema: mergedSchema },
         getTransactionForChildCells(tx),
         synced,
       );
@@ -178,21 +180,23 @@ export function processDefaultValue(
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
+    const defaultValueObj = defaultValue as Immutable<
+      Record<string, JSONValue>
+    >;
 
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
       for (const key of Object.keys(resolvedSchema.properties)) {
         const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
-        const propSchema =
-          (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(rawPropSchema)
-            : rawPropSchema;
-        if (key in defaultValue) {
+        const propSchema = isRecord(rawPropSchema)
+          ? ContextualFlowControl.resolveSchemaRefsOrThrow(rawPropSchema)
+          : rawPropSchema;
+        if (key in defaultValueObj) {
           result[key] = processDefaultValue(
             runtime,
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
-            defaultValue[key as keyof typeof defaultValue],
+            defaultValueObj[key],
             synced,
           );
           processedKeys.add(key);
@@ -237,7 +241,7 @@ export function processDefaultValue(
           ? resolvedSchema.additionalProperties
           : undefined;
 
-      for (const key in defaultValue) {
+      for (const key in defaultValueObj) {
         if (!processedKeys.has(key)) {
           processedKeys.add(key);
           result[key] = processDefaultValue(
@@ -248,7 +252,7 @@ export function processDefaultValue(
               schema: additionalPropertiesSchema,
               path: [...link.path, key],
             },
-            defaultValue[key as keyof typeof defaultValue],
+            defaultValueObj[key],
             synced,
           );
         }
@@ -261,32 +265,15 @@ export function processDefaultValue(
   // Handle array type defaults
   if (
     isRecord(resolvedSchema) && resolvedSchema.type === "array" &&
-    Array.isArray(defaultValue) && resolvedSchema.items
+    Array.isArray(defaultValue)
   ) {
-    // Handle boolean items values
-    let itemSchema: JSONSchema;
-    if (resolvedSchema.items === true) {
-      // items: true means allow any item type
-      itemSchema = {};
-    } else if ((resolvedSchema.items as any) === false) {
-      // items: false means no additional items allowed (empty arrays only)
-      // For default value processing, we'll treat this as an error
-      throw new Error(
-        "Array schema error: items: false conflicts with non-empty default\n" +
-          "help: either allow items with valid schema, or use empty array default",
-      );
-    } else {
-      // items is a JSONSchema object
-      itemSchema = resolvedSchema.items as JSONSchema;
-    }
-
     const result = defaultValue.map((item, i) =>
       processDefaultValue(
         runtime,
         tx,
         {
           ...link,
-          schema: itemSchema,
+          schema: runtime.cfc.schemaAtPath(resolvedSchema, [String(i)]),
           path: [...link.path, String(i)],
         },
         item,
@@ -296,11 +283,26 @@ export function processDefaultValue(
     return annotateWithBackToCellSymbols(result, runtime, link, tx, synced);
   }
 
+  // For objects or arrays, we need to clone, since we can't alter the default
+  if (isRecord(defaultValue)) {
+    console.log(
+      "Cloning defaultValue",
+      defaultValue,
+      structuredClone(defaultValue),
+    );
+    return annotateWithBackToCellSymbols(
+      structuredClone(defaultValue),
+      runtime,
+      link,
+      tx,
+      synced,
+    );
+  }
   // For primitive types, return as is
-  return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx, synced);
+  return defaultValue;
 }
 
-/** @internal Exported for testing only. */
+/** @internal Exported for testing only.  */
 export function mergeDefaults(
   schema: JSONSchema | undefined,
   defaultValue: Readonly<FabricDatum>,
@@ -317,6 +319,22 @@ export function mergeDefaults(
 
   result.default = mergedDefault;
   return result;
+}
+
+function mergeSchemaDefaults(
+  schema: JSONSchema | undefined,
+  defaultValue: Immutable<JSONValue>,
+): JSONSchema {
+  const schemaObj = isRecord(schema) ? schema : {};
+
+  // TODO(seefeld): What's the right thing to do for arrays?
+  const mergedDefault =
+    schemaObj.type === "object" && isRecord(schemaObj.default) &&
+      isRecord(defaultValue)
+      ? { ...schemaObj.default, ...defaultValue } as JSONValue
+      : defaultValue;
+
+  return { ...schemaObj, default: mergedDefault };
 }
 
 /**
@@ -524,7 +542,7 @@ class TransformObjectCreator
   }
   applyDefault<T>(
     link: NormalizedFullLink,
-    value: T | undefined,
+    value: Immutable<JSONValue> | undefined,
   ): T | undefined {
     return processDefaultValue(this.runtime, this.tx, link, value, this.synced);
   }
