@@ -1,5 +1,8 @@
 import { hashOf } from "@commontools/data-model/value-hash";
-import { hashSchema } from "@commontools/data-model/schema-hash";
+import {
+  hashSchema,
+  hashSchemaPathSelector,
+} from "@commontools/data-model/schema-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -95,17 +98,6 @@ export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
 };
 
 /**
- * A data structure that maps keys to sets of values, allowing multiple values
- * to be associated with a single key without duplication.
- *
- * While the default behavior is to use object equality, you can provide an
- * `equalFn` parameter to the constructor, which will be used for the value
- * comparisons.
- *
- * @template K The type of keys in the map
- * @template V The type of values stored in the sets
- */
-/**
  * Produces a canonical string representation for use as a hash key.
  * Object keys are sorted for deterministic output so structurally-equal
  * objects always hash identically. Results are cached per object identity
@@ -115,7 +107,7 @@ const _hashCache = new WeakMap<object, string>();
 
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
-// This ensures downstream stableStringify hits the _hashCache WeakMap
+// This ensures downstream hashSchema hits the WeakMap cache
 // (O(1) identity lookup) instead of re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
@@ -169,29 +161,30 @@ export function stableStringify(value: unknown): string {
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
- * When `useStableStringify` is true, values are deduped using a canonical hash
- * (stableStringify with WeakMap identity cache) for O(1) add/hasValue.
- * The hash path uses sorted object keys, so structurally-equal values always
- * produce the same hash.
+ * When a `hashFunction` is provided, values are deduped using hash-based
+ * lookup for O(1) add/hasValue. Structurally-equal values (per the hash
+ * function) are treated as duplicates.
  *
- * When `useStableStringify` is false, values are stored in a plain Set using
+ * When no `hashFunction` is provided, values are stored in a plain Set using
  * reference equality.
  *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
-  // When useStableStringify is true, use hash-based dedup: key → (hash → value)
-  // When false, use plain Set: key → Set<value>
+  // When hashFunction is set, use hash-based dedup: key → (hash → value)
+  // When unset, use plain Set: key → Set<value>
   private hashMap?: Map<K, Map<string, V>>;
   private setMap?: Map<K, Set<V>>;
+  private hashFunction?: (value: V) => string;
 
   // Instrumentation counters (kept for diagnostics)
   deepEqualCalls = 0;
   deepEqualMs = 0;
 
-  constructor(useStableStringify = false) {
-    if (useStableStringify) {
+  constructor(hashFunction?: (value: V) => string) {
+    if (hashFunction) {
+      this.hashFunction = hashFunction;
       this.hashMap = new Map();
     } else {
       this.setMap = new Map();
@@ -230,7 +223,7 @@ export class MapSet<K, V> {
         m = new Map<string, V>();
         this.hashMap.set(key, m);
       }
-      const hash = stableStringify(value);
+      const hash = this.hashFunction!(value);
       if (!m.has(hash)) {
         m.set(hash, value);
       }
@@ -254,7 +247,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      return m.has(stableStringify(value));
+      return m.has(this.hashFunction!(value));
     }
     const values = this.setMap!.get(key);
     return values !== undefined && values.has(value);
@@ -264,7 +257,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      const hash = stableStringify(value);
+      const hash = this.hashFunction!(value);
       const rv = m.delete(hash);
       if (m.size === 0) this.hashMap.delete(key);
       return rv;
@@ -620,7 +613,7 @@ export abstract class BaseObjectTraverser {
     protected schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(true),
+    >(hashSchemaPathSelector),
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
     public objectCreator: IObjectCreator<FabricDatum> =
       new StandardObjectCreator(),
@@ -1753,7 +1746,7 @@ export class SchemaObjectTraverser<V extends FabricDatum>
     schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(true),
+    >(hashSchemaPathSelector),
     cfc: ContextualFlowControl = new ContextualFlowControl(),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,

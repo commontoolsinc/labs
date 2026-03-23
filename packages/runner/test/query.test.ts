@@ -14,6 +14,7 @@ import {
 } from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import { hashSchemaPathSelector } from "@commontools/data-model/schema-hash";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -449,7 +450,9 @@ for (const modernHash of [false, true]) {
           },
         } as const satisfies JSONSchema;
 
-        const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
+        const schemaTracker = new MapSet<string, SchemaPathSelector>(
+          hashSchemaPathSelector,
+        );
         const traverser = new SchemaObjectTraverser(
           emulatedStorageTx,
           { path: ["value"], schema },

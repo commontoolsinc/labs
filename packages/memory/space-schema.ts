@@ -23,6 +23,7 @@ import { type Immutable, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
+import { hashSchemaPathSelector } from "@commontools/data-model/schema-hash";
 import { TheAuthorizationError } from "./error.ts";
 import type {
   CauseString,
@@ -217,7 +218,7 @@ export const selectSchema = <Space extends MemorySpace>(
   const cfc = new ContextualFlowControl();
   // Use existing tracker if provided, otherwise create new one
   const schemaTracker = existingSchemaTracker ??
-    new MapSet<string, SchemaPathSelector>(true);
+    new MapSet<string, SchemaPathSelector>(hashSchemaPathSelector);
   // Shared memo cache across all loadFactsForDoc calls in this query.
   // Since the traversal only discovers linked docs (populating schemaTracker),
   // memoizing across docs is safe — same doc+path+schema always produces
