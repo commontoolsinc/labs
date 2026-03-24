@@ -1033,17 +1033,19 @@ export class XDebuggerView extends LitElement {
   }
 
   private recreateSpaceRootPattern() {
+    if (this._isRecreatingSpaceRootPattern) return;
     this._isRecreatingSpaceRootPattern = true;
-    try {
-      this.dispatchEvent(
-        new CustomEvent("recreate-space-root-pattern", {
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    } finally {
-      this._isRecreatingSpaceRootPattern = false;
-    }
+    this.dispatchEvent(
+      new CustomEvent("recreate-space-root-pattern", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          done: () => {
+            this._isRecreatingSpaceRootPattern = false;
+          },
+        },
+      }),
+    );
   }
 
   private clearEvents() {
