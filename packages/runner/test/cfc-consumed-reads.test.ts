@@ -15,6 +15,7 @@ describe("partitionConsumedBoundaryReads", () => {
           type: "application/json",
           path: ["value", "public"],
           meta: {},
+          cfc: { op: "value" },
         },
       },
       {
@@ -38,7 +39,41 @@ describe("partitionConsumedBoundaryReads", () => {
     expect(partitioned.internalVerifierReads[0].path).toBe("/cfc/schemaHash");
   });
 
-  it("retains non-internal reads in consumed set", () => {
+  it("retains non-internal reads with explicit observation ops", () => {
+    const activity: Activity[] = [
+      {
+        read: {
+          space: "did:key:test",
+          id: "of:doc-a",
+          type: "application/json",
+          path: ["value", "a"],
+          meta: {},
+          cfc: { op: "value" },
+        },
+      },
+      {
+        read: {
+          space: "did:key:test",
+          id: "of:doc-b",
+          type: "application/json",
+          path: ["value", "b"],
+          meta: {},
+          cfc: { op: "shape" },
+        },
+      },
+    ];
+
+    const partitioned = partitionConsumedBoundaryReads(
+      canonicalizeBoundaryActivity(activity),
+    );
+    expect(partitioned.consumedReads.map((read) => read.path)).toEqual([
+      "/a",
+      "/b",
+    ]);
+    expect(partitioned.internalVerifierReads).toEqual([]);
+  });
+
+  it("drops non-internal reads that do not declare an observation op", () => {
     const activity: Activity[] = [
       {
         read: {
@@ -56,6 +91,7 @@ describe("partitionConsumedBoundaryReads", () => {
           type: "application/json",
           path: ["value", "b"],
           meta: {},
+          cfc: { op: "value" },
         },
       },
     ];
@@ -64,9 +100,7 @@ describe("partitionConsumedBoundaryReads", () => {
       canonicalizeBoundaryActivity(activity),
     );
     expect(partitioned.consumedReads.map((read) => read.path)).toEqual([
-      "/a",
       "/b",
     ]);
-    expect(partitioned.internalVerifierReads).toEqual([]);
   });
 });

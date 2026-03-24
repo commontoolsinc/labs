@@ -19,6 +19,9 @@ export function partitionConsumedBoundaryReads(
       internalVerifierReads.push(read);
       continue;
     }
+    if (!read.cfc?.op) {
+      continue;
+    }
     consumedReads.push(read);
   }
 

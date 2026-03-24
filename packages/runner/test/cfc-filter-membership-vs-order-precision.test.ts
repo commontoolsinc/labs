@@ -127,12 +127,16 @@ describe("CFC filter membership vs order precision", () => {
       id: sourceId,
       type: "application/json",
       path: ["0"],
+    }, {
+      cfc: { op: "value" },
     });
     const kept = tx.readValueOrThrow({
       space,
       id: sourceId,
       type: "application/json",
       path: ["1"],
+    }, {
+      cfc: { op: "value" },
     });
     tx.writeOrThrow({
       space,

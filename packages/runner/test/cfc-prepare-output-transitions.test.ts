@@ -329,12 +329,16 @@ describe("CFC prepare output transitions", () => {
       id: unrelatedId,
       type: "application/json",
       path: [],
+    }, {
+      cfc: { op: "value" },
     });
     tx.readValueOrThrow({
       space,
       id: targetId,
       type: "application/json",
       path: [],
+    }, {
+      cfc: { op: "value" },
     });
     tx.writeOrThrow({
       space,

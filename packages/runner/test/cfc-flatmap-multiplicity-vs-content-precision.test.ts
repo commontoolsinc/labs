@@ -127,12 +127,16 @@ describe("CFC flatMap multiplicity vs content precision", () => {
       id: sourceId,
       type: "application/json",
       path: ["0"],
+    }, {
+      cfc: { op: "value" },
     });
     const expanded = Number(tx.readValueOrThrow({
       space,
       id: sourceId,
       type: "application/json",
       path: ["1"],
+    }, {
+      cfc: { op: "value" },
     }));
     tx.writeOrThrow({
       space,

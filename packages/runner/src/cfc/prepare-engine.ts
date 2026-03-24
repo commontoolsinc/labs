@@ -3255,10 +3255,18 @@ export async function prepareBoundaryCommit(
           prepared.actualSchemaHash,
         );
       }
+      const existingLabels = normalizePersistedLabels(
+        tx.readOrThrow(cfcLabelsAddress(prepared.entity), {
+          cfc: internalVerifierReadAnnotations,
+        }),
+      );
       tx.writeOrThrow(
         cfcLabelsAddress(prepared.entity),
         mergePreparedLabels(
-          prepared.labels,
+          mergePreparedLabels(
+            prepared.labels,
+            existingLabels,
+          ),
           dynamicOutputLabels.get(cfcEntityKey(prepared.entity)),
         ) as unknown as never,
       );

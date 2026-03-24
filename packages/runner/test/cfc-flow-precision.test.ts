@@ -156,12 +156,16 @@ describe("CFC flow precision", () => {
       id: options.sourceId,
       type: "application/json",
       path: ["0"],
+    }, {
+      cfc: { op: "value" },
     });
     const sourceValue = tx.readValueOrThrow({
       space,
       id: options.sourceId,
       type: "application/json",
       path: ["1"],
+    }, {
+      cfc: { op: "value" },
     });
     tx.writeOrThrow({
       space,

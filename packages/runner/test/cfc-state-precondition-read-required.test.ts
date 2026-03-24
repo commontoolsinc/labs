@@ -97,6 +97,8 @@ describe("CFC state precondition read requirement", () => {
       id: link.id,
       type: link.type,
       path: ["guard"],
+    }, {
+      cfc: { op: "value" },
     });
     guardedCell.withTx(tx).asSchema(readRequiredSchema).set({
       guard: true,
