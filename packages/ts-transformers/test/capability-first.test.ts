@@ -765,6 +765,87 @@ export default pattern<{ label?: string | null }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: top-level JSX filter-length wrappers lower post-closure",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ items: number[]; threshold: number }>((state) => ({
+  [UI]: <div>{state.items.filter((x) => x > state.threshold).length}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assertStringIncludes(
+      output,
+      "state.items.filter((x) => x > state.threshold).length",
+    );
+    assert(
+      !output.includes("filterWithPattern"),
+      "expected filter-length wrapper to lower as a scalar derive rather than a structural array-method transform",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level JSX filter-length comparisons lower post-closure without leaking callback locals",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ items: number[]; threshold: number }>((state) => ({
+  [UI]: <div>{state.items.filter((x) => x > state.threshold).length > 0}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assertStringIncludes(
+      output,
+      "state.items.filter((x) => x > state.threshold).length > 0",
+    );
+    assert(
+      !output.includes("x: x"),
+      "expected shared post-closure wrapper lowering to avoid capturing filter callback locals",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: JSX control-flow over filter-length comparisons avoids leaking callback locals",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ items: number[]; threshold: number }>((state) => ({
+  [UI]: <div>{state.items.filter((x) => x > state.threshold).length > 0 ? "Yes" : "No"}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "__ctHelpers.ifElse(");
+    assertStringIncludes(
+      output,
+      "state.items.filter((x) => x > state.threshold).length > 0",
+    );
+    assert(
+      !output.includes("x: x"),
+      "expected shared control-flow lowering to avoid capturing filter callback locals",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: top-level call-argument optional property access lowers outside JSX",
   async () => {
     const source = `/// <cts-enable />

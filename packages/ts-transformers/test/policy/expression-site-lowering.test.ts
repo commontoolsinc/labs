@@ -456,7 +456,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: JSX wrapper roots with reactive array-method subexpressions stay on the legacy JSX seam",
+  "Expression site policy: JSX wrapper roots over reactive array-method results use the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -483,9 +483,80 @@ Deno.test(
 
     assertEquals(
       classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
+      { route: "shared-post-closure" },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX comparison wrappers over reactive array-method results use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items.filter((item: any) => item.active).length > 0}</div>
+      ));
+    `);
+
+    const binary = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.GreaterThanToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(classifyJsxExpressionSiteRoute(binary, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: array-method-owned JSX wrapper roots with reactive array-method subexpressions stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.people.map((person: any) => (
+            <span>{person.tags.filter((tag: any) => tag.active).length}</span>
+          ))}
+        </div>
+      ));
+    `);
+
+    const propertyAccess = findFirstNode(
+      sourceFile,
+      (node): node is ts.PropertyAccessExpression =>
+        ts.isPropertyAccessExpression(node) &&
+        node.name.text === "length" &&
+        ts.isCallExpression(node.expression) &&
+        ts.isPropertyAccessExpression(node.expression.expression) &&
+        node.expression.expression.name.text === "filter",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
       {
-        route: "legacy-jsx",
-        reason: "contains-reactive-array-method-subexpression",
+        route: "skip",
+        reason: "array-method-owned",
       },
     );
   },

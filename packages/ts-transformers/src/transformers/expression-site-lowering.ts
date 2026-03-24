@@ -597,10 +597,15 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (containsReactiveArrayMethodSubexpression(expression, context, analyze)) {
-    return {
-      route: "legacy-jsx",
-      reason: "contains-reactive-array-method-subexpression",
-    };
+    return (
+        siteInfo.reactiveContext.owner === "pattern" ||
+        siteInfo.reactiveContext.owner === "render"
+      )
+      ? { route: "shared-post-closure" }
+      : {
+        route: "legacy-jsx",
+        reason: "contains-reactive-array-method-subexpression",
+      };
   }
 
   return { route: "shared-post-closure" };

@@ -254,6 +254,54 @@ export function filterRelevantDataFlows(
   });
 }
 
+function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isCallExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isNestedFunctionLocalCapture(
+  expression: ts.Expression,
+  wrappedExpression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const root = getCaptureRootExpression(expression);
+  if (!ts.isIdentifier(root)) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(root);
+  if (!symbol) {
+    return false;
+  }
+
+  const declarations = symbol.getDeclarations() ?? [];
+  return declarations.some((declaration) => {
+    if (
+      declaration.pos < wrappedExpression.pos ||
+      declaration.end > wrappedExpression.end
+    ) {
+      return false;
+    }
+
+    let current: ts.Node | undefined = declaration.parent;
+    while (current && current !== wrappedExpression) {
+      if (ts.isFunctionLike(current)) {
+        return true;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  });
+}
+
 export function createReactiveWrapperForExpression(
   expression: ts.Expression,
   relevantDataFlows: readonly NormalizedDataFlow[],
@@ -263,7 +311,17 @@ export function createReactiveWrapperForExpression(
     preferDeriveWrapper?: boolean;
   } = {},
 ): ts.Expression | undefined {
-  if (relevantDataFlows.length === 0) return undefined;
+  const wrapperDataFlows = ts.isCallExpression(expression)
+    ? [...relevantDataFlows]
+    : relevantDataFlows.filter((dataFlow) =>
+      !isNestedFunctionLocalCapture(
+        dataFlow.expression,
+        expression,
+        context.checker,
+      )
+    );
+
+  if (wrapperDataFlows.length === 0) return undefined;
 
   // Don't wrap expressions that are already derive, computed, when, or unless calls
   // These are already reactive and wrapping them would create unnecessary nesting
@@ -281,16 +339,16 @@ export function createReactiveWrapperForExpression(
 
   if (
     !options.allowDirectExpressionWrap &&
-    relevantDataFlows.length === 1
+    wrapperDataFlows.length === 1
   ) {
-    const [dataFlow] = relevantDataFlows;
+    const [dataFlow] = wrapperDataFlows;
     if (dataFlow && dataFlow.expression === expression) {
       return undefined;
     }
   }
 
   if (options.preferDeriveWrapper) {
-    const refs = relevantDataFlows.map((dataFlow) => dataFlow.expression);
+    const refs = wrapperDataFlows.map((dataFlow) => dataFlow.expression);
     return createDeriveCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
