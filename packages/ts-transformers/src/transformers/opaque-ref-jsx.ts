@@ -92,7 +92,8 @@ function transform(context: TransformationContext): ts.SourceFile {
         route.route === "owned-pre-closure" &&
         (
           route.owner === "deferred-jsx-array-method-root" ||
-          route.owner === "dynamic-element-access-root"
+          route.owner === "dynamic-element-access-root" ||
+          route.owner === "helper-call-root"
         )
       ) {
         const rewritten = rewriteFallbackJsxExpressionSite({

@@ -47,7 +47,8 @@ export type JsxExpressionSiteRoute =
     owner:
       | "opaque-path-terminal-root"
       | "deferred-jsx-array-method-root"
-      | "dynamic-element-access-root";
+      | "dynamic-element-access-root"
+      | "helper-call-root";
   }
   | {
     route: "legacy-jsx";
@@ -824,6 +825,13 @@ export function classifyJsxExpressionSiteRoute(
     return {
       route: "owned-pre-closure",
       owner: "dynamic-element-access-root",
+    };
+  }
+
+  if (siteInfo.callRootKind === "conditional-helper") {
+    return {
+      route: "owned-pre-closure",
+      owner: "helper-call-root",
     };
   }
 

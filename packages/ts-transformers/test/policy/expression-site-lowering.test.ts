@@ -426,6 +426,52 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: direct JSX helper-call roots use the explicit helper-call owner",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+      declare function ifElse<T>(condition: any, whenTrue: T, whenFalse: T): T;
+
+      const view = pattern((state: any) => (
+        <div>{ifElse(state.ready, <span>Ready</span>, <span>Waiting</span>)}</div>
+      ));
+    `);
+
+    const helperCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "ifElse",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      helperCall,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "conditional-helper");
+    assertEquals(
+      classifyJsxExpressionSiteRoute(helperCall, context, analyze),
+      {
+        route: "owned-pre-closure",
+        owner: "helper-call-root",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: synthetic compute-owned authored subtrees are visible in site metadata",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
