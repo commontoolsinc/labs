@@ -95,8 +95,9 @@ export default pattern<
   const userConfirmedIndex = Writable.of<number | null>(null);
 
   const confirmedIndex = computed(() => {
+    if (initialResults.length === 0) return null;
     if (initialResults.length === 1) return 0;
-    return userConfirmedIndex.get();
+    return userConfirmedIndex.get() ?? 0;
   });
 
   const pickerResult = computed(() => {

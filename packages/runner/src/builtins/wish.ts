@@ -711,7 +711,17 @@ export function wish(
             }
 
             if (pickerReady) {
-              sendResult(tx, suggestionPatternResultCell);
+              const pickerCell = suggestionPatternResultCell!;
+              const pickerState = pickerCell.get();
+              // Direct path wishes need a stable default selection even when a
+              // multi-result picker UI is present. Preserve the live picker UI
+              // and candidates, but default the published result to the first
+              // resolved match until the picker produces an explicit choice.
+              sendResult(tx, {
+                result: pickerState?.result ?? uniqueResultCells[0],
+                candidates: pickerState?.candidates ?? candidatesCell,
+                [UI]: pickerState?.[UI] ?? cellLinkUI(uniqueResultCells[0]),
+              });
             } else {
               // Pattern unavailable or failed — fall back to first result
               const fallbackUI = uniqueResultCells[0].key(UI).get() ??
