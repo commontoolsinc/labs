@@ -3,7 +3,6 @@ import {
   action,
   computed,
   type Default,
-  equals,
   generateText,
   handler,
   NAME,
@@ -286,22 +285,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       },
     );
 
-    // LAZY: Only compute which notebooks contain this note when menu is open
-    const containingNotebooks = computed(() => {
-      if (!menuOpen.get()) return [];
-
-      const result: NotebookPiece[] = [];
-      for (const nb of notebooks) {
-        for (const n of nb?.notes ?? []) {
-          if (equals(n, self)) {
-            result.push(nb);
-            break;
-          }
-        }
-      }
-      return result;
-    });
-
     // Link pattern for wiki-links
     const patternJson = computed(() => {
       const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
@@ -499,12 +482,6 @@ const Note = pattern<NoteInput, NoteOutput>(
                   >
                     {"  "}
                     {notebook?.[NAME] ?? "Untitled"}
-                    {computed(() => {
-                      return containingNotebooks
-                          .find((nb) => equals(nb, notebook))
-                        ? " ✓"
-                        : "";
-                    })}
                   </ct-button>
                 ))}
 
