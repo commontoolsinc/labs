@@ -11,6 +11,7 @@ import {
   SchemaObjectTraverser,
   type SchemaPathSelector,
 } from "@commontools/runner/traverse";
+import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commontools/utils/types";
@@ -203,7 +204,7 @@ export const trackGraph = (
   }
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
-    unknown
+    JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
   const cfc = new ContextualFlowControl();
@@ -415,7 +416,10 @@ const loadFactsForDoc = (
   manager: EngineObjectManager,
   fact: IAttestation,
   selector: SchemaPathSelector,
-  tracker: CompoundCycleTracker<Immutable<StorableDatum>, unknown>,
+  tracker: CompoundCycleTracker<
+    Immutable<StorableDatum>,
+    JSONSchema | undefined
+  >,
   cfc: ContextualFlowControl,
   space: string,
   schemaTracker: MapSetStringToPathSelectors,
@@ -500,7 +504,7 @@ const evaluateTrackedDocument = (
   }
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
-    unknown
+    JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
   loadFactsForDoc(

@@ -1,13 +1,13 @@
 export type {
-  ContentId,
-  DefinedReferent,
+  HashObject,
+  HashObject as ContentId,
 } from "@commontools/data-model/value-hash";
 
 export {
-  contentIdFromJSON,
-  fromString,
+  hashObjectFromJson as contentIdFromJSON,
+  hashObjectFromString as fromString,
   hashOf as refer,
-  isContentId,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  isHashObject as isContentId,
+  resetModernHashConfig as resetCanonicalHashConfig,
+  setModernHashConfig as setCanonicalHashConfig,
 } from "@commontools/data-model/value-hash";

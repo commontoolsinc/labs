@@ -28,15 +28,12 @@ export interface ExperimentalStorableConfig {
 export function setStorableValueConfig(
   config: Partial<ExperimentalStorableConfig>,
 ): void {
-  setDataModelConfig({
-    modernDataModel: config.richStorableValues ??
-      getDataModelConfig().modernDataModel,
-  });
+  setDataModelConfig(config.richStorableValues ?? getDataModelConfig());
 }
 
 export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
   return {
-    richStorableValues: getDataModelConfig().modernDataModel,
+    richStorableValues: getDataModelConfig(),
   };
 }
 

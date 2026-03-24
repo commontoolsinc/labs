@@ -459,19 +459,19 @@ export class SpaceSession {
     }
     this.#ackScheduled = true;
     this.queueBackground(
-      new Promise<void>((resolve) => {
-        setTimeout(() => {
-          this.#ackScheduled = false;
-          this.#ackFlushing = true;
-          void this.flushScheduledAcks().finally(() => {
-            this.#ackFlushing = false;
-            resolve();
-            if (this.#pendingAckSeq > this.#ackedSeq) {
-              this.scheduleAck(this.#pendingAckSeq);
-            }
-          });
-        }, 0);
-      }),
+      (async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        this.#ackScheduled = false;
+        this.#ackFlushing = true;
+        try {
+          await this.flushScheduledAcks();
+        } finally {
+          this.#ackFlushing = false;
+          if (this.#pendingAckSeq > this.#ackedSeq) {
+            this.scheduleAck(this.#pendingAckSeq);
+          }
+        }
+      })(),
     );
   }
 

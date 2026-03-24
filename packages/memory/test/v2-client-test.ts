@@ -277,6 +277,40 @@ Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   }
 });
 
+Deno.test("memory v2 client close settles a pending ack flush", async () => {
+  const time = new FakeTime();
+  const transport = new HangingAckTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-memory-v2-client-close-ack");
+
+  try {
+    await session.watchAdd([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+
+    await time.tickAsync(0);
+    await time.runMicrotasks();
+
+    const closePromise = client.close();
+    await time.runMicrotasks();
+    await closePromise;
+
+    assertEquals(transport.ackCount, 1);
+  } finally {
+    time.restore();
+  }
+});
+
 class ReconnectableLoopbackTransport implements Transport {
   connectionCount = 0;
   watchSetCount = 0;
@@ -489,6 +523,78 @@ class AckCountingTransport implements Transport {
             serverSeq: this.#watchSeq,
           },
         });
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled message ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    this.#closeReceiver();
+    return Promise.resolve();
+  }
+
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
+  }
+}
+
+class HangingAckTransport implements Transport {
+  ackCount = 0;
+  #watchSeq = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond({
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+        });
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:hanging-ack",
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "session.watch.add":
+        this.#watchSeq += 1;
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: this.#watchSeq,
+            sync: {
+              type: "sync",
+              fromSeq: this.#watchSeq - 1,
+              toSeq: this.#watchSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.ackCount += 1;
         return Promise.resolve();
       default:
         throw new Error(`Unhandled message ${message.type}`);
