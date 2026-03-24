@@ -81,7 +81,7 @@ export function verifyProgramModuleScope(program: Program): void {
     const pendingCaptureChecks: PendingCaptureCheck[] = [];
 
     verifyStaticImportPolicy(sourceFile);
-    rejectDynamicImportExpressions(sourceFile);
+    rejectDynamicImportExpressions(sourceFile, sourceFile);
     predeclareImports(sourceFile, env);
     predeclareFunctions(sourceFile, env);
     predeclareVariables(sourceFile, env);
@@ -103,6 +103,38 @@ export function verifyProgramModuleScope(program: Program): void {
         env,
       );
     }
+  }
+}
+
+export function verifyCompiledBundleModuleFactories(
+  source: string,
+  filename = "<bundle>",
+): void {
+  const sourceFile = ts.createSourceFile(
+    filename,
+    source,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.JS,
+  );
+
+  if (sourceFile.statements.length !== 1) {
+    throw new ModuleVerificationError(
+      filename,
+      1,
+      1,
+      "Compiled bundle must contain a single top-level wrapper",
+    );
+  }
+
+  const wrapper = unwrapBundleExpressionStatement(sourceFile.statements[0]);
+  const body = getBundleWrapperBody(wrapper, filename);
+
+  for (const statement of body.statements) {
+    if (!isDefineCallStatement(statement)) {
+      continue;
+    }
+    verifyCompiledDefineCall(statement.expression, sourceFile);
   }
 }
 
@@ -145,7 +177,10 @@ function verifyStaticImportPolicy(sourceFile: ts.SourceFile): void {
   }
 }
 
-function rejectDynamicImportExpressions(sourceFile: ts.SourceFile): void {
+function rejectDynamicImportExpressions(
+  root: ts.Node,
+  sourceFile: ts.SourceFile,
+): void {
   const visit = (node: ts.Node): void => {
     if (ts.isTypeNode(node)) {
       return;
@@ -165,7 +200,7 @@ function rejectDynamicImportExpressions(sourceFile: ts.SourceFile): void {
     ts.forEachChild(node, visit);
   };
 
-  ts.forEachChild(sourceFile, visit);
+  ts.forEachChild(root, visit);
 }
 
 function predeclareImports(
@@ -1292,12 +1327,424 @@ function verifyCtDataPropertyName(
   verifyCtDataExpression(name.expression, sourceFile, env, locals);
 }
 
+function verifyCompiledDefineCall(
+  expression: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): void {
+  if (expression.arguments.length !== 3) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "AMD define() calls must include id, dependencies, and factory",
+    );
+  }
+
+  const [moduleIdExpr, depsExpr, factoryExpr] = expression.arguments;
+  if (!ts.isStringLiteral(moduleIdExpr)) {
+    throw verificationError(
+      sourceFile,
+      moduleIdExpr,
+      "AMD define() module ids must be string literals",
+    );
+  }
+  if (!ts.isArrayLiteralExpression(depsExpr)) {
+    throw verificationError(
+      sourceFile,
+      depsExpr,
+      "AMD define() dependencies must be an array literal",
+    );
+  }
+
+  const dependencySpecifiers = depsExpr.elements.map((element) => {
+    if (!ts.isStringLiteral(element)) {
+      throw verificationError(
+        sourceFile,
+        element,
+        "AMD define() dependencies must be string literals",
+      );
+    }
+    return element.text;
+  });
+
+  const factory = unwrapExpression(factoryExpr);
+  if (!ts.isFunctionExpression(factory) && !ts.isArrowFunction(factory)) {
+    throw verificationError(
+      sourceFile,
+      factoryExpr,
+      "AMD define() factories must be direct functions",
+    );
+  }
+  if (!ts.isBlock(factory.body)) {
+    throw verificationError(
+      sourceFile,
+      factory.body,
+      "AMD define() factories must use block bodies",
+    );
+  }
+
+  if (moduleIdExpr.text === "index") {
+    verifyCompiledIndexFactory(factory.body.statements, sourceFile);
+    return;
+  }
+
+  verifyCompiledAuthoredFactory(
+    factory,
+    dependencySpecifiers,
+    sourceFile,
+  );
+}
+
+function verifyCompiledAuthoredFactory(
+  factory:
+    | ts.FunctionExpression
+    | ts.ArrowFunction,
+  dependencySpecifiers: string[],
+  sourceFile: ts.SourceFile,
+): void {
+  if (!ts.isBlock(factory.body)) {
+    throw verificationError(
+      sourceFile,
+      factory.body,
+      "AMD define() factories must use block bodies",
+    );
+  }
+
+  const body = factory.body;
+  const env = new Map<string, BindingInfo>();
+  const pendingCaptureChecks: PendingCaptureCheck[] = [];
+
+  rejectDynamicImportExpressions(body, sourceFile);
+  predeclareCompiledFactoryDependencies(factory, dependencySpecifiers, env);
+  predeclareFunctionsFromStatements(body.statements, env);
+  predeclareVariablesFromStatements(body.statements, env);
+
+  for (const statement of body.statements) {
+    if (
+      ts.isExpressionStatement(statement) &&
+      ts.isStringLiteral(statement.expression)
+    ) {
+      continue;
+    }
+
+    if (isCompiledEsModuleMarker(statement)) {
+      continue;
+    }
+
+    if (isCompiledImportStarRebinding(statement, env)) {
+      continue;
+    }
+
+    if (isCompiledExportAssignment(statement)) {
+      verifyCompiledExportAssignment(
+        statement.expression,
+        sourceFile,
+        env,
+        pendingCaptureChecks,
+      );
+      continue;
+    }
+
+    if (ts.isFunctionDeclaration(statement)) {
+      verifyTopLevelFunction(statement, env, pendingCaptureChecks);
+      continue;
+    }
+
+    if (ts.isVariableStatement(statement)) {
+      verifyVariableStatement(
+        statement,
+        sourceFile,
+        env,
+        pendingCaptureChecks,
+      );
+      continue;
+    }
+
+    if (
+      ts.isExpressionStatement(statement) &&
+      isAllowedHelperMutationStatement(statement.expression, sourceFile, env)
+    ) {
+      continue;
+    }
+
+    throw verificationError(
+      sourceFile,
+      statement,
+      "Compiled AMD module contains unsupported top-level executable code",
+    );
+  }
+
+  for (const pending of pendingCaptureChecks) {
+    rejectUnsafeCaptures(
+      pending.fn,
+      pending.nodeForError,
+      sourceFile,
+      env,
+    );
+  }
+}
+
+function verifyCompiledIndexFactory(
+  statements: readonly ts.Statement[],
+  sourceFile: ts.SourceFile,
+): void {
+  for (const statement of statements) {
+    if (
+      ts.isExpressionStatement(statement) &&
+      ts.isStringLiteral(statement.expression)
+    ) {
+      continue;
+    }
+
+    if (
+      isCompiledEsModuleMarker(statement) ||
+      isCompiledExportAssignment(statement) ||
+      isCompiledExportStarStatement(statement) ||
+      isCompiledDefaultReexportStatement(statement)
+    ) {
+      continue;
+    }
+
+    throw verificationError(
+      sourceFile,
+      statement,
+      "Compiled index module contains unsupported top-level executable code",
+    );
+  }
+}
+
+function predeclareCompiledFactoryDependencies(
+  factory:
+    | ts.FunctionExpression
+    | ts.ArrowFunction,
+  dependencySpecifiers: string[],
+  env: Map<string, BindingInfo>,
+): void {
+  for (
+    let i = 0;
+    i < Math.min(factory.parameters.length, dependencySpecifiers.length);
+    i++
+  ) {
+    const parameter = factory.parameters[i];
+    if (!ts.isIdentifier(parameter.name)) {
+      continue;
+    }
+    const specifier = dependencySpecifiers[i];
+    env.set(parameter.name.text, {
+      kind: "import",
+      namespaceImport: true,
+      trustedRuntimeName: TRUSTED_RUNTIME_MODULES.has(specifier)
+        ? specifier
+        : undefined,
+      captureSafe: true,
+    });
+  }
+}
+
+function predeclareFunctionsFromStatements(
+  statements: readonly ts.Statement[],
+  env: Map<string, BindingInfo>,
+): void {
+  for (const statement of statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      env.set(statement.name.text, {
+        kind: "function",
+        functionNode: statement,
+      });
+    }
+  }
+}
+
+function predeclareVariablesFromStatements(
+  statements: readonly ts.Statement[],
+  env: Map<string, BindingInfo>,
+): void {
+  for (const statement of statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) && !env.has(declaration.name.text)
+      ) {
+        env.set(declaration.name.text, { kind: "unknown" });
+      }
+    }
+  }
+}
+
+function verifyCompiledExportAssignment(
+  expression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  pendingCaptureChecks: PendingCaptureCheck[],
+): void {
+  if (
+    !ts.isBinaryExpression(expression) ||
+    expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken
+  ) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "Compiled exports must use direct assignment",
+    );
+  }
+
+  if (
+    ts.isBinaryExpression(expression.right) &&
+    expression.right.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    isExportsReference(expression.right.left)
+  ) {
+    verifyCompiledExportAssignment(
+      expression.right,
+      sourceFile,
+      env,
+      pendingCaptureChecks,
+    );
+    return;
+  }
+
+  if (isVoidZeroExpression(expression.right)) {
+    return;
+  }
+
+  classifyTopLevelExpression(
+    expression.right,
+    sourceFile,
+    env,
+    pendingCaptureChecks,
+  );
+}
+
+function isCompiledEsModuleMarker(statement: ts.Statement): boolean {
+  if (!ts.isExpressionStatement(statement)) return false;
+  const expr = statement.expression;
+  if (!ts.isCallExpression(expr)) return false;
+  if (
+    !ts.isPropertyAccessExpression(expr.expression) ||
+    !ts.isIdentifier(expr.expression.expression) ||
+    expr.expression.expression.text !== "Object" ||
+    expr.expression.name.text !== "defineProperty"
+  ) {
+    return false;
+  }
+  return expr.arguments.length >= 2 &&
+    ts.isIdentifier(expr.arguments[0]) &&
+    expr.arguments[0].text === "exports" &&
+    ts.isStringLiteral(expr.arguments[1]) &&
+    expr.arguments[1].text === "__esModule";
+}
+
+function isCompiledImportStarRebinding(
+  statement: ts.Statement,
+  env: Map<string, BindingInfo>,
+): boolean {
+  if (!ts.isExpressionStatement(statement)) return false;
+  const expr = statement.expression;
+  if (
+    !ts.isBinaryExpression(expr) ||
+    expr.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !ts.isIdentifier(expr.left)
+  ) {
+    return false;
+  }
+  if (env.get(expr.left.text)?.kind !== "import") {
+    return false;
+  }
+  const right = unwrapExpression(expr.right);
+  return ts.isCallExpression(right) &&
+    ts.isIdentifier(right.expression) &&
+    right.expression.text === "__importStar" &&
+    right.arguments.length === 1 &&
+    ts.isIdentifier(right.arguments[0]) &&
+    right.arguments[0].text === expr.left.text;
+}
+
+function isCompiledExportAssignment(
+  statement: ts.Statement,
+): statement is ts.ExpressionStatement & {
+  expression: ts.BinaryExpression;
+} {
+  if (!ts.isExpressionStatement(statement)) return false;
+  const expr = statement.expression;
+  if (
+    !ts.isBinaryExpression(expr) ||
+    expr.operatorToken.kind !== ts.SyntaxKind.EqualsToken
+  ) {
+    return false;
+  }
+  return isExportsReference(expr.left);
+}
+
+function isCompiledExportStarStatement(statement: ts.Statement): boolean {
+  if (!ts.isExpressionStatement(statement)) return false;
+  const expr = statement.expression;
+  return ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === "__exportStar" &&
+    expr.arguments.length === 2 &&
+    ts.isIdentifier(expr.arguments[1]) &&
+    expr.arguments[1].text === "exports";
+}
+
+function isCompiledDefaultReexportStatement(statement: ts.Statement): boolean {
+  if (!ts.isExpressionStatement(statement)) return false;
+  const expr = statement.expression;
+  if (!ts.isCallExpression(expr)) return false;
+  if (
+    !ts.isPropertyAccessExpression(expr.expression) ||
+    !ts.isIdentifier(expr.expression.expression) ||
+    expr.expression.expression.text !== "Object" ||
+    expr.expression.name.text !== "defineProperty"
+  ) {
+    return false;
+  }
+  if (
+    expr.arguments.length !== 3 ||
+    !ts.isIdentifier(expr.arguments[0]) ||
+    expr.arguments[0].text !== "exports" ||
+    !ts.isStringLiteral(expr.arguments[1]) ||
+    expr.arguments[1].text !== "default"
+  ) {
+    return false;
+  }
+  const descriptor = unwrapExpression(expr.arguments[2]);
+  if (!ts.isObjectLiteralExpression(descriptor)) return false;
+  return descriptor.properties.some((property) =>
+    ts.isGetAccessorDeclaration(property) ||
+    ts.isPropertyAssignment(property) &&
+      ts.isIdentifier(property.name) &&
+      property.name.text === "get" &&
+      isFunctionLikeExpression(unwrapExpression(property.initializer))
+  );
+}
+
+function isExportsReference(
+  expression: ts.Expression,
+): boolean {
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "exports"
+  ) || (
+    ts.isElementAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "exports"
+  );
+}
+
+function isVoidZeroExpression(expression: ts.Expression): boolean {
+  const target = ts.isVoidExpression(expression)
+    ? unwrapExpression(expression.expression)
+    : undefined;
+  return !!target && ts.isNumericLiteral(target) && target.text === "0";
+}
+
 function resolveTrustedCallName(
   expression: ts.LeftHandSideExpression,
   env: Map<string, BindingInfo>,
 ): string | undefined {
-  if (ts.isIdentifier(expression)) {
-    const trustedImportName = env.get(expression.text)?.trustedRuntimeName;
+  const callee = normalizeCallTarget(expression);
+
+  if (ts.isIdentifier(callee)) {
+    const trustedImportName = env.get(callee.text)?.trustedRuntimeName;
     if (
       trustedImportName &&
       (TRUSTED_BUILDERS.has(trustedImportName) ||
@@ -1309,19 +1756,19 @@ function resolveTrustedCallName(
   }
 
   if (
-    ts.isPropertyAccessExpression(expression) &&
-    ts.isIdentifier(expression.name)
+    ts.isPropertyAccessExpression(callee) &&
+    ts.isIdentifier(callee.name)
   ) {
-    const base = expression.expression;
+    const base = normalizeCallTarget(callee.expression);
     if (ts.isIdentifier(base)) {
       const binding = env.get(base.text);
       if (
         binding?.namespaceImport &&
         binding.trustedRuntimeName &&
-        (TRUSTED_BUILDERS.has(expression.name.text) ||
-          TRUSTED_DATA_HELPERS.has(expression.name.text))
+        (TRUSTED_BUILDERS.has(callee.name.text) ||
+          TRUSTED_DATA_HELPERS.has(callee.name.text))
       ) {
-        return expression.name.text;
+        return callee.name.text;
       }
     }
   }
@@ -1422,8 +1869,10 @@ function isLocalCallableExpression(
   expression: ts.LeftHandSideExpression,
   env: Map<string, BindingInfo>,
 ): boolean {
-  if (ts.isIdentifier(expression)) {
-    const binding = env.get(expression.text);
+  const callee = normalizeCallTarget(expression);
+
+  if (ts.isIdentifier(callee)) {
+    const binding = env.get(callee.text);
     return !!binding &&
       (
         binding.kind === "function" ||
@@ -1431,8 +1880,8 @@ function isLocalCallableExpression(
       );
   }
 
-  if (ts.isPropertyAccessExpression(expression)) {
-    const root = getAccessRootIdentifier(expression);
+  if (ts.isPropertyAccessExpression(callee)) {
+    const root = getAccessRootIdentifier(callee);
     if (!root) return false;
     const binding = env.get(root.text);
     return !!binding && binding.kind === "import" &&
@@ -1496,10 +1945,64 @@ function cloneBindingInfo(binding: BindingInfo): BindingInfo {
   return { ...binding };
 }
 
+function normalizeCallTarget(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = unwrapExpression(expression);
+  while (
+    ts.isBinaryExpression(current) &&
+    current.operatorToken.kind === ts.SyntaxKind.CommaToken
+  ) {
+    current = unwrapExpression(current.right);
+  }
+  return current;
+}
+
 function getImportSpecifier(statement: ts.ImportDeclaration): string {
   return ts.isStringLiteral(statement.moduleSpecifier)
     ? statement.moduleSpecifier.text
     : "";
+}
+
+function isDefineCallStatement(
+  statement: ts.Statement,
+): statement is ts.ExpressionStatement & { expression: ts.CallExpression } {
+  return ts.isExpressionStatement(statement) &&
+    ts.isCallExpression(statement.expression) &&
+    ts.isIdentifier(statement.expression.expression) &&
+    statement.expression.expression.text === "define";
+}
+
+function unwrapBundleExpressionStatement(
+  statement: ts.Statement,
+): ts.Expression {
+  if (!ts.isExpressionStatement(statement)) {
+    throw new ModuleVerificationError(
+      "<bundle>",
+      1,
+      1,
+      "Compiled bundle must be wrapped in a single expression",
+    );
+  }
+  return unwrapExpression(statement.expression);
+}
+
+function getBundleWrapperBody(
+  expression: ts.Expression,
+  filename: string,
+): ts.Block {
+  if (ts.isArrowFunction(expression) && ts.isBlock(expression.body)) {
+    return expression.body;
+  }
+  if (ts.isFunctionExpression(expression) && expression.body) {
+    return expression.body;
+  }
+  throw new ModuleVerificationError(
+    filename,
+    1,
+    1,
+    "Compiled bundle wrapper must be a block-bodied function",
+  );
 }
 
 function scriptKindForFile(name: string): ts.ScriptKind {

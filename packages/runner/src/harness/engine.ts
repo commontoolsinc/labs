@@ -36,6 +36,7 @@ import {
   RuntimeModuleIdentifiers,
   SESIsolate,
   SESRuntime,
+  verifyCompiledBundleModuleFactories,
   verifyProgramModuleScope,
 } from "../sandbox/mod.ts";
 
@@ -181,6 +182,10 @@ export class Engine extends EventTarget implements Harness {
 
     verifyProgramModuleScope(transformedProgram ?? resolvedProgram);
     preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
+    verifyCompiledBundleModuleFactories(
+      jsScript.js,
+      jsScript.filename ?? filename,
+    );
 
     return { id, jsScript };
   }
