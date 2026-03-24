@@ -329,6 +329,17 @@ function requiresLegacyJsxControlFlowHandling(
       return false;
     }
 
+    if (isControlFlowRewriteExpression(branch)) {
+      const branchRoute = classifyJsxExpressionSiteRoute(
+        branch,
+        context,
+        analyze,
+      );
+      if (branchRoute.route !== "skip") {
+        return branchRoute.route === "legacy-jsx";
+      }
+    }
+
     return !!findPendingComputeWrapCandidate(branch, analyze, context) ||
       containsReactiveArrayMethodSubexpression(branch, context, analyze);
   };

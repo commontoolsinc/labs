@@ -682,6 +682,37 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: logical roots with reactive get guards and direct map values use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.recentEvents.get() && state.recentEvents.map((event: any) => <span>{event.label}</span>)}</div>
+      ));
+    `);
+
+    const logical = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(classifyJsxExpressionSiteRoute(logical, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
   "Expression site policy: JSX-local ternary branch containers with nested scalar lowerables use the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
@@ -725,7 +756,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: non-JSX ternary branches with structural map subtrees stay on the legacy JSX seam",
+  "Expression site policy: nested logical branches with structural map subtrees use the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -759,8 +790,7 @@ Deno.test(
     assertEquals(
       classifyJsxExpressionSiteRoute(conditional, context, analyze),
       {
-        route: "legacy-jsx",
-        reason: "legacy-control-flow-branch-local",
+        route: "shared-post-closure",
       },
     );
   },

@@ -18,6 +18,17 @@ import {
   isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
 
+function isControlFlowBranchExpression(expr: ts.Expression): boolean {
+  return ts.isConditionalExpression(expr) ||
+    (
+      ts.isBinaryExpression(expr) &&
+      (
+        expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        expr.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      )
+    );
+}
+
 function processBranch(
   expr: ts.Expression,
   context: Parameters<Emitter>[0]["context"],
@@ -26,6 +37,10 @@ function processBranch(
   preferDeriveWrappers: boolean,
 ): ts.Expression {
   if (isJsxLocalRewriteContainer(expr)) {
+    return rewriteChildren(expr) || expr;
+  }
+
+  if (isControlFlowBranchExpression(expr)) {
     return rewriteChildren(expr) || expr;
   }
 
