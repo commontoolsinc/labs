@@ -83,6 +83,15 @@ type InitialObservationMode = "auto" | "skip";
 type ShapeOnlyPropertyCheck = "hasOwnProperty" | "propertyIsEnumerable";
 type ObservedArrayIteratorKind = "keys" | "values" | "entries";
 
+function parseArrayIndex(prop: PropertyKey): number | undefined {
+  if (typeof prop !== "string" || !/^(0|[1-9]\d*)$/.test(prop)) {
+    return undefined;
+  }
+
+  const index = Number(prop);
+  return Number.isSafeInteger(index) ? index : undefined;
+}
+
 function observeLink(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
@@ -249,6 +258,54 @@ function createObservedArrayIterator(
       };
     },
   };
+}
+
+function createObservedArrayMethodReceiver(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  current: any[],
+  depth: number,
+  writable: boolean,
+): any[] {
+  const target = new Array(current.length);
+
+  return new Proxy(target, {
+    get(target, prop, receiver) {
+      if (prop === "length") {
+        return current.length;
+      }
+
+      const index = parseArrayIndex(prop);
+      if (index !== undefined && index < current.length) {
+        if (!Object.hasOwn(current, index)) {
+          return undefined;
+        }
+        return readObservedChildValue(
+          runtime,
+          tx,
+          { ...link, path: [...link.path, String(index)] },
+          depth,
+          writable,
+        );
+      }
+
+      return Reflect.get(target, prop, receiver);
+    },
+    has(target, prop) {
+      const index = parseArrayIndex(prop);
+      if (index !== undefined && index < current.length) {
+        observeLink(
+          tx,
+          { ...link, path: [...link.path, String(index)] },
+          "shape",
+        );
+        return Object.hasOwn(current, index);
+      }
+
+      return Reflect.has(target, prop);
+    },
+  });
 }
 
 export function createQueryResultProxy<T>(
@@ -489,26 +546,19 @@ export function createQueryResultProxy<T>(
             observeLink(tx, link, "shape");
             observeLink(tx, link, "enumerate");
             observeLink(tx, link, "count");
-            const length = (readValueInternally(readTx, link) as any[]).length;
+            const current = readValueInternally(readTx, link) as any[];
 
-            if (typeof length !== "number") {
-              throw new Error(
-                `Array length is not a number for ${prop} operation`,
-              );
-            }
-
-            const copy = new Array(length);
-            for (let i = 0; i < length; i++) {
-              copy[i] = createQueryResultProxy(
+            return method.apply(
+              createObservedArrayMethodReceiver(
                 runtime,
                 tx,
-                { ...link, path: [...link.path, String(i)] },
-                depth + 1,
+                link,
+                current,
+                depth,
                 writable,
-              );
-            }
-
-            return method.apply(copy, args);
+              ),
+              args,
+            );
           }
           : (...args: any[]) => {
             if (!writable) {

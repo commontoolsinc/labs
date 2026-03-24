@@ -478,4 +478,88 @@ describe("CFC convenience read decomposition", () => {
       reads.some((read) => read.path === "/items/2" && read.op !== undefined),
     ).toBe(false);
   });
+
+  it("decomposes some into structural observations plus visited child values", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-convenience-array-some",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [10, 20, 30] });
+
+    const proxy = createQueryResultProxy<{ items: number[] }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.items.some((value) => value >= 20)).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "enumerate"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/0" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/2" && read.op !== undefined),
+    ).toBe(false);
+  });
+
+  it("decomposes includes into structural observations plus visited child values", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-convenience-array-includes",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [10, 20, 30] });
+
+    const proxy = createQueryResultProxy<{ items: number[] }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.items.includes(20)).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "enumerate"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/0" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/2" && read.op !== undefined),
+    ).toBe(false);
+  });
 });
