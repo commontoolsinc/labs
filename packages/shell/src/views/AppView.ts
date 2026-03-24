@@ -178,7 +178,7 @@ export class XAppView extends BaseView {
     this.pieceTitle = event.detail ?? "";
   };
 
-  #handleRecreatePattern = async () => {
+  #handleRecreateSpaceRootPattern = async () => {
     if (!this.rt) return;
     try {
       await this.rt.recreateSpaceRootPattern();
@@ -190,12 +190,12 @@ export class XAppView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("recreate-pattern", this.#handleRecreatePattern);
+    this.addEventListener("recreate-space-root-pattern", this.#handleRecreateSpaceRootPattern);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("recreate-pattern", this.#handleRecreatePattern);
+    this.removeEventListener("recreate-space-root-pattern", this.#handleRecreateSpaceRootPattern);
   }
 
   override updated(changedProperties: Map<string, unknown>) {
