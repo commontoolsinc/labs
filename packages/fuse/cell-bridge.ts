@@ -912,6 +912,105 @@ export class CellBridge {
     await subscribeProp("input");
     await subscribeProp("result");
 
+    // Subscribe to the root cell to detect [NAME] changes and rename the
+    // piece directory in the FUSE tree accordingly.
+    try {
+      const rootCell = piece.getCell();
+      const cancelRootSub = rootCell.sink((_newValue: unknown) => {
+        setTimeout(() => {
+          try {
+            const state = this.spaces.get(spaceName);
+            if (!state) return;
+
+            // Find the piece's current FUSE name by searching pieceMap.
+            let currentName: string | undefined;
+            for (const [name, id] of state.pieceMap) {
+              if (id === piece.id) {
+                currentName = name;
+                break;
+              }
+            }
+            if (currentName === undefined) return;
+
+            const newRawName = piece.name() ?? piece.id;
+
+            // Skip if the raw name hasn't changed.
+            if (newRawName === currentName) return;
+
+            // Collision-resolve the new name using the same logic as addPieceToSpace.
+            // Temporarily remove the current name so we don't collide with ourselves.
+            state.usedNames.delete(currentName);
+            let newName = newRawName;
+            if (state.usedNames.has(newName)) {
+              let suffix = 2;
+              while (state.usedNames.has(`${newName}-${suffix}`)) suffix++;
+              newName = `${newName}-${suffix}`;
+            }
+
+            // Skip if the resolved name is unchanged.
+            if (newName === currentName) {
+              state.usedNames.add(currentName);
+              return;
+            }
+
+            // Look up the controller and subs before mutating maps.
+            const controller = state.pieceControllers.get(currentName);
+            const subs = state.pieceSubs.get(currentName);
+
+            // Rename the directory in the tree.
+            this.tree.rename(
+              state.piecesIno,
+              currentName,
+              state.piecesIno,
+              newName,
+            );
+
+            // Update all four state maps.
+            state.pieceMap.delete(currentName);
+            state.pieceMap.set(newName, piece.id);
+            state.pieceControllers.delete(currentName);
+            if (controller !== undefined) {
+              state.pieceControllers.set(newName, controller);
+            }
+            state.pieceSubs.delete(currentName);
+            if (subs !== undefined) {
+              state.pieceSubs.set(newName, subs);
+            }
+            state.usedNames.add(newName);
+
+            // Rebuild .index.json.
+            this.updateIndexJson(state);
+
+            // Invalidate kernel cache.
+            if (this.onInvalidate) {
+              this.onInvalidate(state.piecesIno, [
+                currentName,
+                newName,
+                ".index.json",
+              ]);
+              this.onInvalidate(state.spaceIno, ["pieces"]);
+            }
+            if (this.onInvalidateInode) {
+              this.onInvalidateInode(state.piecesIno);
+            }
+
+            console.log(
+              `[${spaceName}] Renamed piece: ${currentName} → ${newName}`,
+            );
+          } catch (e) {
+            console.error(
+              `[${spaceName}] Error renaming piece in FUSE tree: ${e}`,
+            );
+          }
+        }, 0);
+      });
+      cancels.push(cancelRootSub);
+    } catch (e) {
+      console.error(
+        `[${spaceName}] Could not subscribe to root cell for ${pieceName}: ${e}`,
+      );
+    }
+
     return cancels;
   }
 
