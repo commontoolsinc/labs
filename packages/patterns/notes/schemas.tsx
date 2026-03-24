@@ -62,7 +62,7 @@ export interface NotebookPiece {
 
   createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
-  setTitle: Stream<{ newTitle: string }>;
+  setTitle: Stream<string>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;

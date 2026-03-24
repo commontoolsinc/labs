@@ -74,7 +74,7 @@ interface NotebookOutput extends NotebookPiece {
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
-  setTitle: Stream<{ newTitle: string }>;
+  setTitle: Stream<string>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;
@@ -672,7 +672,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     );
 
     // LLM-callable: Rename the notebook
-    const setTitleAction = action(({ newTitle }: { newTitle: string }) => {
+    const setTitleAction = action((newTitle: string) => {
       title.set(newTitle);
       return newTitle;
     });
