@@ -82,14 +82,26 @@ export function hashSchemaItem(item: FabricValue): FabricHash {
  *
  * - `schemaToHash`: object schema → hash string (WeakMap so schemas can be
  *   GC'd when no longer referenced elsewhere).
- * - `hashToSchema`: hash string → WeakRef to interned schema (cleaned up on
- *   lookup if the ref is dead).
+ * - `hashToSchema`: hash string → WeakRef to interned schema (dead entries
+ *   cleaned up by `schemaFinalizer` and on lookup).
+ * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSchema`
+ *   entries when interned schemas are garbage-collected.
  * - `booleanInterns`: cached SchemaAndHash for `true` and `false` (boolean
  *   schemas are primitives and can't be WeakMap/WeakRef targets).
  */
 const schemaToHash = new WeakMap<JSONSchemaObj, string>();
 const hashToSchema = new Map<string, WeakRef<JSONSchemaObj>>();
 const booleanInterns: { true?: SchemaAndHash; false?: SchemaAndHash } = {};
+
+/** Removes dead `hashToSchema` entries when interned schemas are GC'd. */
+const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
+  const ref = hashToSchema.get(hashStr);
+  // Only delete if the entry still points to a dead ref — a new schema with
+  // the same hash may have replaced it.
+  if (ref && ref.deref() === undefined) {
+    hashToSchema.delete(hashStr);
+  }
+});
 
 /**
  * Intern a schema: freeze it, compute its hash, and cache the
@@ -134,6 +146,7 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
 
   schemaToHash.set(frozen, hashStr);
   hashToSchema.set(hashStr, new WeakRef(frozen));
+  schemaFinalizer.register(frozen, hashStr);
 
   return new SchemaAndHash(frozen, hash);
 }
