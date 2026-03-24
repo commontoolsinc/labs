@@ -192,8 +192,8 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
       // We only do this when the input was already deep-frozen
       // (frozen === schema), because mutable objects could be changed
       // after caching, producing stale hits.
-      const inputWasFrozen = frozen === schema;
-      if (inputWasFrozen) {
+      const inputIsFrozen = frozen === schema;
+      if (inputIsFrozen) {
         schemaToSah.set(frozen, existingSah);
       }
 
