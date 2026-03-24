@@ -81,6 +81,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 
 type InitialObservationMode = "auto" | "skip";
 type ShapeOnlyPropertyCheck = "hasOwnProperty" | "propertyIsEnumerable";
+type ObservedArrayIteratorKind = "keys" | "values" | "entries";
 
 function observeLink(
   tx: IExtendedStorageTransaction | undefined,
@@ -151,6 +152,69 @@ function isShapeOnlyPropertyCheck(
   prop: PropertyKey,
 ): prop is ShapeOnlyPropertyCheck {
   return prop === "hasOwnProperty" || prop === "propertyIsEnumerable";
+}
+
+function createObservedArrayIterator(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  depth: number,
+  writable: boolean,
+  kind: ObservedArrayIteratorKind,
+): IterableIterator<unknown> {
+  let initialized = false;
+  let index = 0;
+  let length = 0;
+
+  return {
+    [Symbol.iterator]() {
+      return this;
+    },
+    next() {
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      if (!initialized) {
+        observeLink(tx, link, "shape");
+        observeLink(tx, link, "enumerate");
+        observeLink(tx, link, "count");
+        length = (readValueInternally(readTx, link) as any[]).length;
+        initialized = true;
+      }
+
+      if (index >= length) {
+        return { value: undefined, done: true };
+      }
+
+      const childLink = {
+        ...link,
+        path: [...link.path, String(index)],
+      };
+      const currentIndex = index;
+      index++;
+
+      if (kind === "keys") {
+        observeLink(tx, childLink, "shape");
+        return {
+          value: currentIndex,
+          done: false,
+        };
+      }
+
+      const observedValue = readObservedChildValue(
+        runtime,
+        tx,
+        childLink,
+        depth,
+        writable,
+      );
+
+      return {
+        value: kind === "entries"
+          ? [currentIndex, observedValue]
+          : observedValue,
+        done: false,
+      };
+    },
+  };
 }
 
 export function createQueryResultProxy<T>(
@@ -265,43 +329,14 @@ export function createQueryResultProxy<T>(
           return () => createCell(runtime, link, tx);
         } else if (prop === Symbol.iterator && Array.isArray(value)) {
           return function () {
-            let index = 0;
-            return {
-              next() {
-                const readTx = (tx?.status().status === "ready")
-                  ? tx
-                  : runtime.edit();
-                observeLink(tx, link, "count");
-                const current = readValueInternally(readTx, link) as any[];
-                const length = current.length;
-                if (index < length) {
-                  const childLink = {
-                    ...link,
-                    path: [...link.path, String(index)],
-                  };
-                  const childValue = readValueInternally(readTx, childLink);
-                  const result = {
-                    value: !isRecord(childValue)
-                      ? (observeLink(tx, childLink, "shape"),
-                        observeLink(tx, childLink, "value"),
-                        childValue)
-                      : (observeLink(tx, childLink, "shape"),
-                        createQueryResultProxy(
-                          runtime,
-                          tx,
-                          childLink,
-                          depth + 1,
-                          writable,
-                          "skip",
-                        )),
-                    done: false,
-                  };
-                  index++;
-                  return result;
-                }
-                return { done: true };
-              },
-            };
+            return createObservedArrayIterator(
+              runtime,
+              tx,
+              link,
+              depth,
+              writable,
+              "values",
+            );
           };
         }
 
@@ -324,6 +359,22 @@ export function createQueryResultProxy<T>(
             observeLink(tx, { ...link, path: [...link.path, key] }, "shape");
           }
           return method.call(current, key);
+        };
+      }
+
+      if (
+        Array.isArray(value) &&
+        (prop === "keys" || prop === "values" || prop === "entries")
+      ) {
+        return function () {
+          return createObservedArrayIterator(
+            runtime,
+            tx,
+            link,
+            depth,
+            writable,
+            prop,
+          );
         };
       }
 
