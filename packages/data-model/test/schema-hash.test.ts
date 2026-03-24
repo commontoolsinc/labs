@@ -176,16 +176,16 @@ describe("schema-hash dispatch", () => {
   // Reset behavior
   // -------------------------------------------------------------------------
 
-  describe("reset restores legacy path", () => {
-    it("hashSchema returns legacy result after reset", () => {
-      setSchemaHashConfig(false);
-      const legacy = hashSchema({ type: "boolean" }).toString();
-
+  describe("reset restores default (modern) path", () => {
+    it("hashSchema returns modern result after reset", () => {
       setSchemaHashConfig(true);
+      const modern = hashSchema({ type: "boolean" }).toString();
+
+      setSchemaHashConfig(false);
       resetSchemaHashConfig();
       const afterReset = hashSchema({ type: "boolean" }).toString();
 
-      assert(legacy === afterReset);
+      assert(modern === afterReset);
     });
   });
 
