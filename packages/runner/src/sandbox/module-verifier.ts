@@ -80,6 +80,8 @@ export function verifyProgramModuleScope(program: Program): void {
     const env = new Map<string, BindingInfo>();
     const pendingCaptureChecks: PendingCaptureCheck[] = [];
 
+    verifyStaticImportPolicy(sourceFile);
+    rejectDynamicImportExpressions(sourceFile);
     predeclareImports(sourceFile, env);
     predeclareFunctions(sourceFile, env);
     predeclareVariables(sourceFile, env);
@@ -102,6 +104,68 @@ export function verifyProgramModuleScope(program: Program): void {
       );
     }
   }
+}
+
+function verifyStaticImportPolicy(sourceFile: ts.SourceFile): void {
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportEqualsDeclaration(statement)) {
+      throw verificationError(
+        sourceFile,
+        statement,
+        "Import-equals declarations are not allowed in SES mode",
+      );
+    }
+
+    if (ts.isImportDeclaration(statement)) {
+      const specifier = getImportSpecifier(statement);
+      if (!isAllowedStaticImportSpecifier(specifier)) {
+        throw verificationError(
+          sourceFile,
+          statement.moduleSpecifier,
+          `Static import '${specifier}' is not allowed in SES mode`,
+        );
+      }
+      continue;
+    }
+
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      const specifier = statement.moduleSpecifier.text;
+      if (!isAllowedStaticImportSpecifier(specifier)) {
+        throw verificationError(
+          sourceFile,
+          statement.moduleSpecifier,
+          `Static re-export '${specifier}' is not allowed in SES mode`,
+        );
+      }
+    }
+  }
+}
+
+function rejectDynamicImportExpressions(sourceFile: ts.SourceFile): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeNode(node)) {
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      throw verificationError(
+        sourceFile,
+        node,
+        "Dynamic import() is not allowed in SES mode",
+      );
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
 }
 
 function predeclareImports(
@@ -1414,6 +1478,13 @@ function isAllowedCtDataProxy(expression: ts.NewExpression): boolean {
 function isAllowedCtDataEphemeralCall(expression: ts.CallExpression): boolean {
   return ts.isIdentifier(expression.expression) &&
     expression.expression.text === "Symbol";
+}
+
+function isAllowedStaticImportSpecifier(specifier: string): boolean {
+  return TRUSTED_RUNTIME_MODULES.has(specifier) ||
+    specifier.startsWith("./") ||
+    specifier.startsWith("../") ||
+    specifier.startsWith("/");
 }
 
 function isDirectIifeCall(expression: ts.CallExpression): boolean {
