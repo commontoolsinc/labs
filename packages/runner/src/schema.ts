@@ -12,10 +12,7 @@ import type {
 import { cloneIfNecessary } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import {
-  type ICfcReadAnnotations,
-  type IExtendedStorageTransaction,
-} from "./storage/interface.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -28,6 +25,8 @@ import {
   markCfcRelevantForEffectiveLabels,
   markCfcRelevantForSchema,
 } from "./cfc/relevance.ts";
+import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
+import { readIfcInputAnnotations } from "./cfc/schema-read-annotations.ts";
 import {
   combineSchema,
   IMemorySpaceValueAddress,
@@ -37,7 +36,6 @@ import {
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { normalizeIntegrityLabel } from "./cfc/label-algebra.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -361,37 +359,6 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-function readIfcInputAnnotations(
-  schema: JSONSchema | undefined,
-): ICfcReadAnnotations | undefined {
-  const resolvedSchema = resolveSchema(schema);
-  const schemaWithIfc = isObject(resolvedSchema) && isObject(resolvedSchema.ifc)
-    ? resolvedSchema
-    : isObject(schema) && isObject(schema.ifc)
-    ? schema
-    : undefined;
-  if (!schemaWithIfc) {
-    return undefined;
-  }
-  const rawMaxConfidentiality = (schemaWithIfc.ifc as Record<string, unknown>)
-    .maxConfidentiality;
-  const maxConfidentiality = Array.isArray(rawMaxConfidentiality)
-    ? rawMaxConfidentiality.filter(
-      (entry): entry is string => typeof entry === "string" && entry.length > 0,
-    )
-    : [];
-  const rawRequiredIntegrity = (schemaWithIfc.ifc as Record<string, unknown>)
-    .requiredIntegrity;
-  const requiredIntegrity = normalizeIntegrityLabel(rawRequiredIntegrity) ?? [];
-  if (maxConfidentiality.length === 0 && requiredIntegrity.length === 0) {
-    return undefined;
-  }
-  return {
-    ...(maxConfidentiality.length > 0 ? { maxConfidentiality } : {}),
-    ...(requiredIntegrity.length > 0 ? { requiredIntegrity } : {}),
-  };
-}
-
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -511,10 +478,10 @@ export function validateAndTransform(
     // read annotations derived from the schema.
     value: tx!.readOrThrow(
       address,
-      {
+      withInternalVerifierRead({
         meta: ignoreReadForScheduling,
         ...(readCfc ? { cfc: readCfc } : {}),
-      },
+      }),
     ),
   };
   // If we have a ref with a schema, use that; otherwise, use the link's schema

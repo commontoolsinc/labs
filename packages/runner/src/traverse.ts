@@ -53,22 +53,59 @@ import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { cfcSchemaBlobAddress } from "./cfc/schema-blob.ts";
+import {
+  recordCfcReadObservation,
+  withInternalVerifierRead,
+} from "./cfc/read-observation-logging.ts";
+import {
+  readIfcInputAnnotations,
+  withReadObservationOp,
+} from "./cfc/schema-read-annotations.ts";
+import type { ReadObservationOp } from "./cfc/read-observation.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
-const READ_NON_RECURSIVE: IReadOptions = {
+const READ_NON_RECURSIVE: IReadOptions = withInternalVerifierRead({
   nonRecursive: true,
-};
-const READ_FOR_SCHEDULING: IReadOptions = {
+});
+const READ_FOR_SCHEDULING: IReadOptions = withInternalVerifierRead({
   trackReadWithoutLoad: true,
-};
-const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions = {
-  nonRecursive: true,
-  trackReadWithoutLoad: true,
-};
+});
+const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions =
+  withInternalVerifierRead(
+    {
+      nonRecursive: true,
+      trackReadWithoutLoad: true,
+    },
+  );
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
+
+function defaultReadObservationOp(
+  value: StorableDatum | undefined,
+): ReadObservationOp {
+  if (Array.isArray(value)) {
+    return "shape";
+  }
+  if (isObject(value) && !isPrimitiveCellLink(value)) {
+    return "shape";
+  }
+  return "value";
+}
+
+function recordSchemaReadObservation(
+  tx: IExtendedStorageTransaction,
+  address: IMemorySpaceAddress,
+  schema: JSONSchema | undefined,
+  op: ReadObservationOp,
+): void {
+  recordCfcReadObservation(
+    tx,
+    address,
+    withReadObservationOp(readIfcInputAnnotations(schema), op),
+  );
+}
 
 // An IAttestation where the address is an IMemorySpaceAddress
 interface IMemorySpaceAttestation {
@@ -1204,7 +1241,10 @@ function followPointer(
       }
       const remaining = target.path.slice(lastExisting.length);
       const partialTarget = { ...target, path: lastExisting };
-      const lastValue = tx.readOrThrow(partialTarget)!;
+      const lastValue = tx.readOrThrow(
+        partialTarget,
+        withInternalVerifierRead(),
+      )!;
       // We can continue with the target, but provide the top level target doc
       // to getAtPath.
       // An assertion fact.is will be an object with a value property, and
@@ -1268,7 +1308,10 @@ function trackVisitedDoc(
   if (includeSource) {
     // Loading source requires the full doc. This could be narrowed, but it
     // happens in a non-reactive context.
-    const { ok: fullDoc } = tx.read({ ...target, path: [] });
+    const { ok: fullDoc } = tx.read(
+      { ...target, path: [] },
+      withInternalVerifierRead(),
+    );
     if (fullDoc) {
       loadSource(
         tx,
@@ -1324,7 +1367,7 @@ export function loadSource(
     path: [],
   };
   // This only happens in the query path, so don't worry about scheduler
-  const { ok: entry, error } = tx.read(address);
+  const { ok: entry, error } = tx.read(address, withInternalVerifierRead());
   if (error) {
     return;
   }
@@ -1358,7 +1401,7 @@ function loadSchemaBlobForEntry(
   }
 
   const address = cfcSchemaBlobAddress(valueEntry.address.space, schemaHash);
-  const { ok: entry, error } = tx.read(address);
+  const { ok: entry, error } = tx.read(address, withInternalVerifierRead());
   if (error || entry === null || entry.value === undefined) {
     return;
   }
@@ -1663,7 +1706,7 @@ function loadLinkedPattern(
     return;
   }
   // This only happens in the query path, so don't worry about scheduler
-  const result = tx.read(address);
+  const result = tx.read(address, withInternalVerifierRead());
   if (result.error) {
     return;
   }
@@ -1685,7 +1728,7 @@ function loadLinkedPattern(
       path: [],
     };
     // This only happens in the query path, so don't worry about scheduler
-    const legacyResult = tx.read(legacyAddress);
+    const legacyResult = tx.read(legacyAddress, withInternalVerifierRead());
     if (!legacyResult.error) {
       entry = legacyResult.ok;
       address = legacyAddress;
@@ -1863,6 +1906,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+    recordSchemaReadObservation(
+      this.tx,
+      doc.address,
+      this.selector.schema,
+      defaultReadObservationOp(doc.value),
+    );
     const rv = this.traverseWithSelector(doc, this.selector, link);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
@@ -2472,6 +2521,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
     this.traverseArrayCalls++;
+    recordSchemaReadObservation(this.tx, doc.address, schema, "count");
+    recordSchemaReadObservation(this.tx, doc.address, schema, "enumerate");
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
 
@@ -2486,6 +2537,21 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         value: item,
       };
       this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      if (isPrimitiveCellLink(item)) {
+        recordSchemaReadObservation(
+          this.tx,
+          curDoc.address,
+          itemSchema,
+          "followRef",
+        );
+      } else {
+        recordSchemaReadObservation(
+          this.tx,
+          curDoc.address,
+          itemSchema,
+          defaultReadObservationOp(item),
+        );
+      }
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
@@ -2685,6 +2751,21 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ...doc.address,
         path: appendToPath(doc.address.path, propKey),
       };
+      if (isPrimitiveCellLink(propValue)) {
+        recordSchemaReadObservation(
+          this.tx,
+          propAddress,
+          propSchema,
+          "followRef",
+        );
+      } else {
+        recordSchemaReadObservation(
+          this.tx,
+          propAddress,
+          propSchema,
+          defaultReadObservationOp(propValue),
+        );
+      }
       // If we have a link, the traverseWithSchema will handle that for us.
       // If we have a value, we instead need to handle it ourselves
       if (
