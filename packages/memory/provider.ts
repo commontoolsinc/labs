@@ -37,8 +37,8 @@ import { FabricDatum } from "@commontools/data-model/fabric-value";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
-  fromString as causeFromString,
   type HashObject,
+  hashObjectFromString as causeFromString,
   hashOf,
 } from "@commontools/data-model/value-hash";
 import {

@@ -10,7 +10,7 @@ import type {
 } from "./interface.ts";
 import type { HashObject } from "@commontools/data-model/value-hash";
 import { assert } from "./fact.ts";
-import { fromString } from "@commontools/data-model/value-hash";
+import { hashObjectFromString } from "@commontools/data-model/value-hash";
 
 export const COMMIT_LOG_TYPE = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
@@ -45,7 +45,7 @@ export const toRevision = (
       the: COMMIT_LOG_TYPE,
       of: space as MemorySpace,
       is,
-      cause: fromString(cause) as HashObject<Fact>,
+      cause: hashObjectFromString(cause) as HashObject<Fact>,
     }),
     since: is.since,
   };
@@ -66,8 +66,8 @@ export const toChanges = function* (
         if (state !== true) {
           const { is } = state;
           const change = is == null
-            ? { the, of, cause: fromString(cause), since }
-            : { the, of, is, cause: fromString(cause), since };
+            ? { the, of, cause: hashObjectFromString(cause), since }
+            : { the, of, is, cause: hashObjectFromString(cause), since };
           yield change as Revision<Fact>;
         }
       }

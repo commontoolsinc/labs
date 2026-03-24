@@ -130,7 +130,7 @@ export const hashOfLegacyCached = <T extends DefinedReferent>(
 /** Legacy `hashObjectFromJson` using merkle-reference. */
 export const hashObjectFromJsonLegacy = Reference.fromJSON;
 
-/** Legacy `fromString` using merkle-reference. */
+/** Legacy `hashObjectFromString` using merkle-reference. */
 export const hashObjectFromStringLegacy = Reference.fromString as (
   source: string,
 ) => HashObject;

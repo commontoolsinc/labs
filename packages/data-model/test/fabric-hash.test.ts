@@ -7,8 +7,8 @@ import {
 import * as Reference from "merkle-reference";
 import { FabricHash } from "../fabric-hash.ts";
 import {
-  fromString,
   hashObjectFromJson,
+  hashObjectFromString,
   hashOf,
   isHashObject,
   resetModernHashConfig,
@@ -106,14 +106,14 @@ Deno.test("FabricHash", async (t) => {
   );
 
   await t.step(
-    "fromString round-trips through FabricHash when canonical hashing is on",
+    "hashObjectFromString round-trips through FabricHash when modern hashing is on",
     () => {
       setModernHashConfig(true);
       try {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
         const original = new FabricHash(SAMPLE_HASH, "sha3");
         const str = original.toString();
-        const reconstructed = fromString(str);
+        const reconstructed = hashObjectFromString(str);
 
         assertInstanceOf(reconstructed, FabricHash);
         const cid = reconstructed as unknown as FabricHash;
@@ -127,12 +127,12 @@ Deno.test("FabricHash", async (t) => {
   );
 
   await t.step(
-    "fromString throws on invalid format (no colon) when canonical hashing is on",
+    "hashObjectFromString throws on invalid format (no colon) when modern hashing is on",
     () => {
       setModernHashConfig(true);
       try {
         assertThrows(
-          () => fromString("nocolonhere"),
+          () => hashObjectFromString("nocolonhere"),
           ReferenceError,
           "Invalid content hash string",
         );

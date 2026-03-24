@@ -1,4 +1,7 @@
-import { fromString, hashOf } from "@commontools/data-model/value-hash";
+import {
+  hashObjectFromString,
+  hashOf,
+} from "@commontools/data-model/value-hash";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type {
   CauseString,
@@ -301,8 +304,10 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: fromString(cause) } as Revision<Fact>
-      : { the, of, is, since, cause: fromString(cause) } as Revision<Fact>;
+      ? { the, of, since, cause: hashObjectFromString(cause) } as Revision<Fact>
+      : { the, of, is, since, cause: hashObjectFromString(cause) } as Revision<
+        Fact
+      >;
   }
 
   static encode(

@@ -12,9 +12,9 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import {
-  fromString,
   HashObject,
   hashObjectFromJson,
+  hashObjectFromString,
   hashOf,
   isHashObject,
 } from "@commontools/data-model/value-hash";
@@ -114,7 +114,7 @@ export const iterate = function* (
         yield {
           the: the as MIME,
           of: of as URI,
-          cause: fromString(cause),
+          cause: hashObjectFromString(cause),
           since,
           ...(is ? { is } : undefined),
         };

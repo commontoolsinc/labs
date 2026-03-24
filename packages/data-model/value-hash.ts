@@ -2,7 +2,7 @@
  * Content hash dispatch layer.
  *
  * Provides the public API for content hashing: `hashOf`,
- * `isHashObject`, `hashObjectFromJson`, `fromString`. Dispatches between
+ * `isHashObject`, `hashObjectFromJson`, `hashObjectFromString`. Dispatches between
  * modern hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
  *
@@ -103,13 +103,6 @@ export function hashObjectFromJson(source: { "/": string }): HashObject {
   return modernHashEnabled
     ? FabricHash.fromString(source["/"])
     : hashObjectFromJsonLegacy(source);
-}
-
-/** Reconstruct a hash object from its string representation. */
-export function fromString(source: string): HashObject {
-  return modernHashEnabled
-    ? FabricHash.fromString(source)
-    : hashObjectFromStringLegacy(source);
 }
 
 /** Compute a content hash for the given source value. */

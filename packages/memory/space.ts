@@ -9,8 +9,8 @@ import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
 import {
-  fromString,
   type HashObject,
+  hashObjectFromString,
   hashOf,
 } from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
@@ -564,7 +564,7 @@ const recall = <Space extends MemorySpace>(
       the,
       of,
       cause: (row.cause
-        ? fromString(row.cause)
+        ? hashObjectFromString(row.cause)
         : unclaimedRef({ the, of })) as HashObject<Assertion>,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
@@ -653,7 +653,7 @@ const getFact = <Space extends MemorySpace>(
     of: row.of as URI,
     cause:
       (row.cause
-        ? fromString(row.cause)
+        ? hashObjectFromString(row.cause)
         : unclaimedRef(row as FactAddress)) as HashObject<Assertion>,
     since: row.since,
   };
@@ -809,12 +809,21 @@ const iterateTransaction = function* (
     for (const [the, revisions] of Object.entries(attributes)) {
       for (const [cause, change] of Object.entries(revisions)) {
         if (change == true) {
-          yield { claim: { the, of, fact: fromString(cause) } } as Claim;
+          yield {
+            claim: { the, of, fact: hashObjectFromString(cause) },
+          } as Claim;
         } else if (change.is === undefined) {
-          yield { retract: { the, of, cause: fromString(cause) } } as Retract;
+          yield {
+            retract: { the, of, cause: hashObjectFromString(cause) },
+          } as Retract;
         } else {
           yield {
-            assert: { the, of, is: change.is, cause: fromString(cause) },
+            assert: {
+              the,
+              of,
+              is: change.is,
+              cause: hashObjectFromString(cause),
+            },
           } as Assert;
         }
       }
@@ -963,7 +972,7 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
-      fromString(row.fact) as HashObject<Assertion>,
+      hashObjectFromString(row.fact) as HashObject<Assertion>,
     ]
     : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
 
