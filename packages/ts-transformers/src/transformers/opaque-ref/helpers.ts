@@ -271,6 +271,9 @@ function isNestedFunctionLocalCapture(
   wrappedExpression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
+  const wrappedSourceNode = wrappedExpression.pos >= 0
+    ? wrappedExpression
+    : ts.getOriginalNode(wrappedExpression);
   const root = getCaptureRootExpression(expression);
   if (!ts.isIdentifier(root)) {
     return false;
@@ -284,14 +287,14 @@ function isNestedFunctionLocalCapture(
   const declarations = symbol.getDeclarations() ?? [];
   return declarations.some((declaration) => {
     if (
-      declaration.pos < wrappedExpression.pos ||
-      declaration.end > wrappedExpression.end
+      declaration.pos < wrappedSourceNode.pos ||
+      declaration.end > wrappedSourceNode.end
     ) {
       return false;
     }
 
     let current: ts.Node | undefined = declaration.parent;
-    while (current && current !== wrappedExpression) {
+    while (current && current !== wrappedSourceNode) {
       if (ts.isFunctionLike(current)) {
         return true;
       }

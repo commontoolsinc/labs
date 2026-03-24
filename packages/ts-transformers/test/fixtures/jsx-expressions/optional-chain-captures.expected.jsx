@@ -30,8 +30,6 @@ export default pattern((state) => {
                             properties: {
                                 maybe: {
                                     anyOf: [{
-                                            type: "undefined"
-                                        }, {
                                             type: "object",
                                             properties: {
                                                 value: {
@@ -39,6 +37,8 @@ export default pattern((state) => {
                                                 }
                                             },
                                             required: ["value"]
+                                        }, {
+                                            type: "undefined"
                                         }]
                                 }
                             }

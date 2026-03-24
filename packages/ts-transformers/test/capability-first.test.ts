@@ -2028,7 +2028,7 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
     assertStringIncludes(output, ".filterWithPattern(");
     assertStringIncludes(output, ".flatMapWithPattern(");
     assertStringIncludes(output, ".mapWithPattern(");
-    assertStringIncludes(output, "items }) => items ?? []");
+    assertStringIncludes(output, "({ item }) => item.tags ?? []");
   },
 );
 

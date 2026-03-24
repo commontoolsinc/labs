@@ -229,21 +229,35 @@ function rewritePatternBody(
   };
 
   const diagnosticsSeen = new Set<number>();
+  const syntheticDiagnosticsSeen = new WeakSet<ts.Node>();
   const analyze = createDataFlowAnalyzer(context.checker);
+  const resolveDiagnosticNode = (node: ts.Node): ts.Node => {
+    const original = ts.getOriginalNode(node);
+    if (original.pos >= 0) {
+      return original;
+    }
+    return node;
+  };
   const reportOnce = (
     node: ts.Node,
     type: "computation" | "optional" | "receiver-method",
     message: string,
   ): void => {
-    const key = node.getStart(context.sourceFile);
-    if (diagnosticsSeen.has(key)) return;
-    diagnosticsSeen.add(key);
-    if (type === "computation") {
-      reportComputationError(context, node, message);
-    } else if (type === "optional") {
-      reportOptionalError(context, node, message);
+    const diagnosticNode = resolveDiagnosticNode(node);
+    if (diagnosticNode.pos >= 0) {
+      const key = diagnosticNode.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(key)) return;
+      diagnosticsSeen.add(key);
     } else {
-      reportReceiverMethodError(context, node, message);
+      if (syntheticDiagnosticsSeen.has(diagnosticNode)) return;
+      syntheticDiagnosticsSeen.add(diagnosticNode);
+    }
+    if (type === "computation") {
+      reportComputationError(context, diagnosticNode, message);
+    } else if (type === "optional") {
+      reportOptionalError(context, diagnosticNode, message);
+    } else {
+      reportReceiverMethodError(context, diagnosticNode, message);
     }
   };
 
@@ -323,6 +337,40 @@ function rewritePatternBody(
       initializer,
       relevantDataFlows,
       context,
+    );
+  };
+
+  const maybeWrapDynamicJsxAccess = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    const reactiveContext = classifyReactiveContext(
+      expression,
+      context.checker,
+      context,
+    );
+    if (
+      reactiveContext.kind !== "pattern" || !reactiveContext.inJsxExpression
+    ) {
+      return undefined;
+    }
+
+    const analysis = analyze(expression);
+    const relevantDataFlows = filterRelevantDataFlows(
+      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
+      analysis,
+      context,
+    );
+    if (relevantDataFlows.length === 0) {
+      return undefined;
+    }
+
+    return createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+      {
+        preferDeriveWrapper: true,
+      },
     );
   };
 
@@ -540,6 +588,12 @@ function rewritePatternBody(
       }
 
       if (info.dynamic) {
+        const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
+        if (wrappedDynamicAccess) {
+          registerReplacementType(wrappedDynamicAccess, visited, context);
+          return wrappedDynamicAccess;
+        }
+
         reportOnce(
           visited,
           "computation",

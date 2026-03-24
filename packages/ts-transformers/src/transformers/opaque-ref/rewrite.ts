@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   isInsideSafeCallbackWrapper,
   normalizeDataFlows,
   visitEachChildWithJsx,
@@ -45,6 +46,42 @@ function rewriteChildExpressions(
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
+      if (ts.isCallExpression(child)) {
+        const arrayMethodCall = classifyArrayMethodCall(child);
+        if (arrayMethodCall) {
+          if (arrayMethodCall.lowered) {
+            return child;
+          }
+
+          const rewrittenArguments = child.arguments.map((argument) =>
+            rewriteChildExpressions(
+              argument,
+              context,
+              analyze,
+              reactiveContextKind,
+              containerKind,
+              inSafeContext,
+              preferDeriveWrappers,
+            )
+          );
+
+          if (
+            rewrittenArguments.some((argument, index) =>
+              argument !== child.arguments[index]
+            )
+          ) {
+            return context.factory.updateCallExpression(
+              child,
+              child.expression,
+              child.typeArguments,
+              rewrittenArguments,
+            );
+          }
+
+          return child;
+        }
+      }
+
       const analysis = analyze(child);
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
         // Skip wrapping if inside a safe callback wrapper (computed/derive/action/etc.)

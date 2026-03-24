@@ -22,26 +22,12 @@ export default pattern((state) => {
                     properties: {
                         item: {
                             type: "number"
-                        },
-                        settings: {
-                            type: "object",
-                            properties: {
-                                multiplier: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["multiplier"]
                         }
                     },
-                    required: ["item", "settings"]
+                    required: ["item"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    item: item,
-                    settings: {
-                        multiplier: settings.key("multiplier")
-                    }
-                }, ({ item, settings }) => item * settings.multiplier)}</span>);
+                } as const satisfies __ctHelpers.JSONSchema, { item: item }, ({ item }) => item * settings.multiplier)}</span>);
             }, {
                 type: "object",
                 properties: {

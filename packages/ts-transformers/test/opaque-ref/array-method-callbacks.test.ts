@@ -160,6 +160,52 @@ export default pattern<State>((state) => {
 });
 `;
 
+const NESTED_REACTIVE_ROOT_MAP_SOURCE = `/// <cts-enable />
+import { pattern, UI, Writable } from "commontools";
+
+interface Task {
+  label: string;
+  done: boolean;
+  tags: string[];
+}
+
+interface Section {
+  title: string;
+  tasks: Task[];
+}
+
+interface State {
+  sections: Writable<Section[]>;
+  showCompleted: boolean;
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <div>
+        {state.sections.map((section) => (
+          <section>
+            {section.tasks.map((task, taskIndex) => (
+              <div>
+                {task.tags.map((tag, tagIndex) => (
+                  <span>
+                    {tagIndex === taskIndex
+                      ? section.title + ":" + tag
+                      : state.showCompleted || !task.done
+                      ? tag
+                      : ""}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -224,6 +270,24 @@ describe("OpaqueRef map callbacks", () => {
     assert(
       !normalized.includes("spotPreferences.map((n) => __ctHelpers.derive("),
       "nested plain-array callbacks inside derive-owned joins should stay plain",
+    );
+  });
+
+  it("does not whole-wrap direct reactive map roots inside callback-local JSX", async () => {
+    const output = await transformSource(
+      NESTED_REACTIVE_ROOT_MAP_SOURCE,
+      {
+        types: { "commontools.d.ts": commontools },
+      },
+    );
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertStringIncludes(output, 'section.key("tasks").mapWithPattern(');
+    assert(
+      !normalized.includes(
+        '({ section, task, taskIndex, tag, tagIndex, state }) => section.key("tasks").mapWithPattern(',
+      ),
+      "direct reactive callback-root maps should stay structural mapWithPattern roots, not whole-root derive wrappers",
     );
   });
 

@@ -13,31 +13,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    n: {
-                        type: "number"
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["multiplier"]
-                    }
-                },
-                required: ["n", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                n: n,
-                state: {
-                    multiplier: state.multiplier
-                }
-            }, ({ n, state }) => n * state.multiplier)}</span>))}
+        {plainArray.map((n) => (<span>{n * state.multiplier}</span>))}
       </div>),
     };
 }, {

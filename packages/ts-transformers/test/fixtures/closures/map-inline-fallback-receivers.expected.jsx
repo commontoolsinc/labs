@@ -23,260 +23,148 @@ export default pattern((__ct_pattern_input) => {
         {messages.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const msg = __ct_pattern_input.key("element");
                 return (<section>
-            {(__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        msg: {
-                            type: "object",
-                            properties: {
-                                reactions: {
-                                    anyOf: [{
-                                            type: "undefined"
-                                        }, {
-                                            type: "array",
-                                            items: {
-                                                $ref: "#/$defs/Reaction"
-                                            }
-                                        }]
-                                }
-                            }
-                        }
-                    },
-                    required: ["msg"],
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
-                                    }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Reaction"
-                    },
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
-                                    }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, { msg: {
-                        reactions: msg.key("reactions")
-                    } }, ({ msg }) => msg.reactions ?? [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                    const reaction = __ct_pattern_input.key("element");
-                    const msg = __ct_pattern_input.key("params", "msg");
-                    return (<button type="button" data-msg-id={msg.key("id")}>
+            {(msg.key("reactions") ?? []).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                        const reaction = __ct_pattern_input.key("element");
+                        const msg = __ct_pattern_input.key("params", "msg");
+                        return (<button type="button" data-msg-id={msg.key("id")}>
                 {reaction.key("emoji")}
               </button>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Reaction"
+                    }, {
+                        type: "object",
+                        properties: {
+                            element: {
+                                $ref: "#/$defs/Reaction"
+                            },
+                            params: {
+                                type: "object",
+                                properties: {
+                                    msg: {
+                                        type: "object",
+                                        properties: {
+                                            id: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["id"]
+                                    }
+                                },
+                                required: ["msg"]
+                            }
                         },
-                        params: {
-                            type: "object",
-                            properties: {
-                                msg: {
-                                    type: "object",
-                                    properties: {
-                                        id: {
+                        required: ["element", "params"],
+                        $defs: {
+                            Reaction: {
+                                type: "object",
+                                properties: {
+                                    emoji: {
+                                        type: "string"
+                                    },
+                                    userNames: {
+                                        type: "array",
+                                        items: {
                                             type: "string"
                                         }
-                                    },
-                                    required: ["id"]
-                                }
-                            },
-                            required: ["msg"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
                                     }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema), {
-                    msg: {
-                        id: msg.key("id")
-                    }
-                })}
-            {(__ctHelpers.unless({
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Reaction"
+                                },
+                                required: ["emoji", "userNames"]
                             }
-                        }],
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
-                                    }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "array",
-                    items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Reaction"
-                    },
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        anyOf: [{
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }],
+                        $defs: {
+                            UIRenderable: {
+                                type: "object",
+                                properties: {
+                                    $UI: {
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
                                     }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
+                                },
+                                required: ["$UI"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, msg.key("reactions"), [])).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                    const reaction = __ct_pattern_input.key("element");
-                    const msg = __ct_pattern_input.key("params", "msg");
-                    return (<span>
+                    } as const satisfies __ctHelpers.JSONSchema), {
+                        msg: {
+                            id: msg.key("id")
+                        }
+                    })}
+            {(msg.key("reactions") || []).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                        const reaction = __ct_pattern_input.key("element");
+                        const msg = __ct_pattern_input.key("params", "msg");
+                        return (<span>
                 {msg.key("id")}:{reaction.key("userNames", "length")}
               </span>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Reaction"
+                    }, {
+                        type: "object",
+                        properties: {
+                            element: {
+                                $ref: "#/$defs/Reaction"
+                            },
+                            params: {
+                                type: "object",
+                                properties: {
+                                    msg: {
+                                        type: "object",
+                                        properties: {
+                                            id: {
+                                                type: "string"
+                                            }
+                                        },
+                                        required: ["id"]
+                                    }
+                                },
+                                required: ["msg"]
+                            }
                         },
-                        params: {
-                            type: "object",
-                            properties: {
-                                msg: {
-                                    type: "object",
-                                    properties: {
-                                        id: {
+                        required: ["element", "params"],
+                        $defs: {
+                            Reaction: {
+                                type: "object",
+                                properties: {
+                                    emoji: {
+                                        type: "string"
+                                    },
+                                    userNames: {
+                                        type: "array",
+                                        items: {
                                             type: "string"
                                         }
-                                    },
-                                    required: ["id"]
-                                }
-                            },
-                            required: ["msg"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                },
-                                userNames: {
-                                    type: "array",
-                                    items: {
-                                        type: "string"
                                     }
-                                }
-                            },
-                            required: ["emoji", "userNames"]
+                                },
+                                required: ["emoji", "userNames"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        anyOf: [{
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }],
+                        $defs: {
+                            UIRenderable: {
+                                type: "object",
+                                properties: {
+                                    $UI: {
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }
+                                },
+                                required: ["$UI"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema), {
-                    msg: {
-                        id: msg.key("id")
-                    }
-                })}
+                    } as const satisfies __ctHelpers.JSONSchema), {
+                        msg: {
+                            id: msg.key("id")
+                        }
+                    })}
           </section>);
             }, {
                 type: "object",

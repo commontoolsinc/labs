@@ -444,9 +444,63 @@ export default pattern((state) => {
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<aside>
-              {reboundIndex === outerIndex
-                        ? `${state.key("lane")}:${comment.key("id")}`
-                        : comment.key("text")}
+              {__ctHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        reboundIndex: {
+                            type: "number"
+                        },
+                        outerIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["reboundIndex", "outerIndex"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    reboundIndex: reboundIndex,
+                    outerIndex: outerIndex
+                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                lane: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["lane"]
+                        },
+                        comment: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["id"]
+                        }
+                    },
+                    required: ["state", "comment"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    state: {
+                        lane: state.key("lane")
+                    },
+                    comment: {
+                        id: comment.key("id")
+                    }
+                }, ({ state, comment }) => `${state.lane}:${comment.id}`), comment.key("text"))}
             </aside>);
             }, {
                 type: "object",
@@ -534,7 +588,55 @@ export default pattern((state) => {
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<small>
-              {edgeIndex === outerIndex ? `${state.key("lane")}:${edge}` : edge}
+              {__ctHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        edgeIndex: {
+                            type: "number"
+                        },
+                        outerIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["edgeIndex", "outerIndex"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    edgeIndex: edgeIndex,
+                    outerIndex: outerIndex
+                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                lane: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["lane"]
+                        },
+                        edge: {
+                            type: "string"
+                        }
+                    },
+                    required: ["state", "edge"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    state: {
+                        lane: state.key("lane")
+                    },
+                    edge: edge
+                }, ({ state, edge }) => `${state.lane}:${edge}`), edge)}
             </small>);
             }, {
                 type: "object",

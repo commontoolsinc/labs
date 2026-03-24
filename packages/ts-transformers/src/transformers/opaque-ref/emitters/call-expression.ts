@@ -55,7 +55,7 @@ function shouldFilterNestedLocalsForCallWrapper(
       detectCallKind(callbackContext.call, context.checker)?.kind ===
         "array-method")
   ) {
-    return false;
+    return true;
   }
 
   const sinkCall = classifyArrayMethodResultSinkCall(

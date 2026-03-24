@@ -50,12 +50,9 @@ export default pattern((state) => {
                                 }
                             },
                             required: ["discount", "taxRate"]
-                        },
-                        multiplier: {
-                            type: "number"
                         }
                     },
-                    required: ["item", "state", "multiplier"]
+                    required: ["item", "state"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, {
@@ -66,9 +63,8 @@ export default pattern((state) => {
                     state: {
                         discount: state.key("discount"),
                         taxRate: state.key("taxRate")
-                    },
-                    multiplier: multiplier
-                }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+                    }
+                }, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
           </span>);
             }, {
                 type: "object",

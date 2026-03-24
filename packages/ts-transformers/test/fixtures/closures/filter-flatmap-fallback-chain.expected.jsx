@@ -13,60 +13,7 @@ export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<div>
-        {(__ctHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            }
-                        }]
-                }
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["id"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items ?? [])).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {(items ?? []).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item.key("id");
         }, {
@@ -98,7 +45,34 @@ export default pattern((__ct_pattern_input) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema), {}).flatMapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
-            return item.key("tags") ?? [];
+            return __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                anyOf: [{
+                                        type: "undefined"
+                                    }, {
+                                        type: "array",
+                                        items: {
+                                            type: "string"
+                                        }
+                                    }]
+                            }
+                        }
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
+                    tags: item.key("tags")
+                } }, ({ item }) => item.tags ?? []);
         }, {
             type: "object",
             properties: {
