@@ -44,13 +44,7 @@ export default pattern((state) => {
             type: "object",
             properties: {
                 summary: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "string"
                 }
             },
             required: ["summary"]

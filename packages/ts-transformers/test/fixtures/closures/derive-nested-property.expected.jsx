@@ -20,21 +20,7 @@ export default pattern((state: State) => {
                 type: "number",
                 asCell: true
             },
-            state: {
-                type: "object",
-                properties: {
-                    config: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["multiplier"]
-                    }
-                },
-                required: ["config"]
-            }
+            state: true
         },
         required: ["value", "state"]
     } as const satisfies __ctHelpers.JSONSchema, {

@@ -666,9 +666,15 @@ export default pattern((state) => {
                             properties: {
                                 name: {
                                     type: "string"
+                                },
+                                age: {
+                                    type: "number"
+                                },
+                                active: {
+                                    type: "boolean"
                                 }
                             },
-                            required: ["name"]
+                            required: ["name", "age", "active"]
                         }
                     },
                     required: ["u"]
@@ -684,9 +690,15 @@ export default pattern((state) => {
                             properties: {
                                 name: {
                                     type: "string"
+                                },
+                                age: {
+                                    type: "number"
+                                },
+                                active: {
+                                    type: "boolean"
                                 }
                             },
-                            required: ["name"]
+                            required: ["name", "age", "active"]
                         }
                     },
                     required: ["u"]

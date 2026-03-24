@@ -28,15 +28,7 @@ export default pattern((state) => {
             Item: {__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        }
+                        item: true
                     },
                     required: ["item"]
                 } as const satisfies __ctHelpers.JSONSchema, {

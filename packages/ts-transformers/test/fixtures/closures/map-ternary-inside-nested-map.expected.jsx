@@ -113,21 +113,7 @@ export default pattern((__ct_pattern_input) => {
             } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                 type: "object",
                 properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            tags: {
-                                type: "object",
-                                properties: {
-                                    length: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["length"]
-                            }
-                        },
-                        required: ["tags"]
-                    }
+                    item: true
                 },
                 required: ["item"]
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -157,15 +143,7 @@ export default pattern((__ct_pattern_input) => {
                             showInactive: {
                                 type: "boolean"
                             },
-                            tag: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
+                            tag: true
                         },
                         required: ["showInactive", "tag"]
                     } as const satisfies __ctHelpers.JSONSchema, {

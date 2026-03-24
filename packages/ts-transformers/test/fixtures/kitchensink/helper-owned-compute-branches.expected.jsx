@@ -151,9 +151,7 @@ export default pattern((state) => {
         properties: {
             visibleProjects: {
                 type: "array",
-                items: {
-                    $ref: "#/$defs/Project"
-                }
+                items: true
             },
             state: {
                 type: "object",
@@ -172,48 +170,7 @@ export default pattern((state) => {
                 asCell: true
             }
         },
-        required: ["visibleProjects", "state", "fallbackMembers"],
-        $defs: {
-            Project: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    archived: {
-                        type: "boolean"
-                    },
-                    members: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    badges: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Badge"
-                        }
-                    }
-                },
-                required: ["id", "name", "archived", "members", "badges"]
-            },
-            Badge: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["text", "active"]
-            }
-        }
+        required: ["visibleProjects", "state", "fallbackMembers"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {

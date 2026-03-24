@@ -21,18 +21,10 @@ export default pattern(() => {
                 type: "number",
                 asCell: true
             },
-            numLiteral: {
-                type: "number"
-            },
-            floatLiteral: {
-                type: "number"
-            },
-            boolLiteral: {
-                type: "boolean"
-            },
-            strLiteral: {
-                type: "string"
-            }
+            numLiteral: true,
+            floatLiteral: true,
+            boolLiteral: true,
+            strLiteral: true
         },
         required: ["value", "numLiteral", "floatLiteral", "boolLiteral", "strLiteral"]
     } as const satisfies __ctHelpers.JSONSchema, {

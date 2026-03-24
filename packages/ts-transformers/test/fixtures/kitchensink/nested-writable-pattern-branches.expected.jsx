@@ -192,14 +192,7 @@ export default pattern((state) => {
                             } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                                 type: "object",
                                 properties: {
-                                    task: {
-                                        type: "object",
-                                        properties: {
-                                            note: {
-                                                type: ["string", "undefined"]
-                                            }
-                                        }
-                                    }
+                                    task: true
                                 },
                                 required: ["task"]
                             } as const satisfies __ctHelpers.JSONSchema, {
@@ -209,14 +202,7 @@ export default pattern((state) => {
                                 } }, ({ task }) => task.note !== undefined), __ctHelpers.derive({
                                 type: "object",
                                 properties: {
-                                    task: {
-                                        type: "object",
-                                        properties: {
-                                            note: {
-                                                type: "string"
-                                            }
-                                        }
-                                    }
+                                    task: true
                                 },
                                 required: ["task"]
                             } as const satisfies __ctHelpers.JSONSchema, {
@@ -263,15 +249,7 @@ export default pattern((state) => {
                                     }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), __ctHelpers.derive({
                                         type: "object",
                                         properties: {
-                                            section: {
-                                                type: "object",
-                                                properties: {
-                                                    title: {
-                                                        type: "string"
-                                                    }
-                                                },
-                                                required: ["title"]
-                                            },
+                                            section: true,
                                             tag: {
                                                 type: "string"
                                             }
@@ -296,15 +274,7 @@ export default pattern((state) => {
                                                 },
                                                 required: ["showCompleted"]
                                             },
-                                            task: {
-                                                type: "object",
-                                                properties: {
-                                                    done: {
-                                                        type: "boolean"
-                                                    }
-                                                },
-                                                required: ["done"]
-                                            },
+                                            task: true,
                                             tag: {
                                                 type: "string"
                                             }
@@ -513,24 +483,7 @@ export default pattern((state) => {
                   </div>, __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        section: {
-                            type: "object",
-                            properties: {
-                                tasks: {
-                                    type: "object",
-                                    properties: {
-                                        length: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["length"]
-                                },
-                                title: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["tasks", "title"]
-                        }
+                        section: true
                     },
                     required: ["section"]
                 } as const satisfies __ctHelpers.JSONSchema, {

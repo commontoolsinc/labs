@@ -24,26 +24,10 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             items: {
                 type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                }
+                items: true
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "price"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -71,26 +55,10 @@ export default pattern((__ct_pattern_input) => {
                 properties: {
                     filtered: {
                         type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
+                        items: true
                     }
                 },
-                required: ["filtered"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["name", "price"]
-                    }
-                }
+                required: ["filtered"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "array",
                 items: {

@@ -19,18 +19,7 @@ export default pattern((config: Config) => {
                 type: "number",
                 asCell: true
             },
-            config: {
-                type: "object",
-                properties: {
-                    required: {
-                        type: "number"
-                    },
-                    unionUndefined: {
-                        type: ["number", "undefined"]
-                    }
-                },
-                required: ["required", "unionUndefined"]
-            }
+            config: true
         },
         required: ["value", "config"]
     } as const satisfies __ctHelpers.JSONSchema, {

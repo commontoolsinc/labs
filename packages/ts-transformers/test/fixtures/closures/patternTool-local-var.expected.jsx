@@ -50,18 +50,7 @@ export default pattern(() => {
         return __ctHelpers.derive({
             type: "object",
             properties: {
-                genResult: {
-                    type: "object",
-                    properties: {
-                        pending: {
-                            type: "boolean"
-                        },
-                        result: {
-                            type: ["string", "undefined"]
-                        }
-                    },
-                    required: ["pending"]
-                }
+                genResult: true
             },
             required: ["genResult"]
         } as const satisfies __ctHelpers.JSONSchema, {

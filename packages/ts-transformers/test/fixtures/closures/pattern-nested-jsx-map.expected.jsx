@@ -122,15 +122,7 @@ export default pattern((__ct_pattern_input) => {
                             i: {
                                 type: "number"
                             },
-                            item: {
-                                type: "object",
-                                properties: {
-                                    selectedIndex: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["selectedIndex"]
-                            }
+                            item: true
                         },
                         required: ["i", "item"]
                     } as const satisfies __ctHelpers.JSONSchema, {

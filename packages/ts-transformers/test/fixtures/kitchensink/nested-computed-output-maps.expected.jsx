@@ -224,24 +224,24 @@ export default pattern((state) => {
                 items: {
                     type: "object",
                     properties: {
-                        thread: {
-                            $ref: "#/$defs/Thread"
-                        },
+                        thread: true,
                         outerIndex: {
                             type: "number"
                         },
                         visibleComments: {
                             type: "array",
-                            items: {
-                                $ref: "#/$defs/Comment"
-                            }
+                            items: true
                         }
                     },
                     required: ["thread", "outerIndex", "visibleComments"]
                 }
             },
             selectedCommentId: {
-                type: ["string", "undefined"],
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "undefined"
+                    }],
                 asCell: true
             },
             state: {
@@ -254,51 +254,7 @@ export default pattern((state) => {
                 required: ["lane"]
             }
         },
-        required: ["visibleThreads", "selectedCommentId", "state"],
-        $defs: {
-            Comment: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    flagged: {
-                        type: "boolean"
-                    },
-                    reactions: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["id", "text", "flagged", "reactions"]
-            },
-            Thread: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    title: {
-                        type: "string"
-                    },
-                    muted: {
-                        type: "boolean"
-                    },
-                    comments: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Comment"
-                        }
-                    }
-                },
-                required: ["id", "title", "muted", "comments"]
-            }
-        }
+        required: ["visibleThreads", "selectedCommentId", "state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -343,35 +299,10 @@ export default pattern((state) => {
             properties: {
                 visibleComments: {
                     type: "array",
-                    items: {
-                        $ref: "#/$defs/Comment"
-                    }
+                    items: true
                 }
             },
-            required: ["visibleComments"],
-            $defs: {
-                Comment: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        },
-                        text: {
-                            type: "string"
-                        },
-                        flagged: {
-                            type: "boolean"
-                        },
-                        reactions: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["id", "text", "flagged", "reactions"]
-                }
-            }
+            required: ["visibleComments"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {

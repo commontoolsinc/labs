@@ -24,26 +24,10 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             items: {
                 type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                }
+                items: true
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -86,9 +70,7 @@ export default pattern((__ct_pattern_input) => {
                         properties: {
                             tasks: {
                                 type: "array",
-                                items: {
-                                    $ref: "#/$defs/Item"
-                                }
+                                items: true
                             },
                             view: {
                                 type: "string"
@@ -97,21 +79,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["tasks", "view"]
                     }
                 },
-                required: ["result"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "done"]
-                    }
-                }
+                required: ["result"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "array",
                 items: {

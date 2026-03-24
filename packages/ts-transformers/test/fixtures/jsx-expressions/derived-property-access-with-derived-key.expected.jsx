@@ -89,31 +89,13 @@ export default pattern((__ct_pattern_input) => {
                     properties: {
                         aisle: {
                             type: "string"
-                        },
-                        item: {
-                            $ref: "#/$defs/Item"
                         }
                     },
-                    required: ["aisle", "item"]
+                    required: ["aisle"]
                 }
             }
         },
-        required: ["itemsWithAisles"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["itemsWithAisles"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {},

@@ -12,12 +12,7 @@ export default pattern((items) => {
     const doubled = __ctHelpers.derive({
         type: "object",
         properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                }
-            }
+            items: true
         },
         required: ["items"]
     } as const satisfies __ctHelpers.JSONSchema, {

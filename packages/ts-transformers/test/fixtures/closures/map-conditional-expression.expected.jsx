@@ -33,15 +33,7 @@ export default pattern((state) => {
                 } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
+                        item: true,
                         state: {
                             type: "object",
                             properties: {
@@ -65,15 +57,7 @@ export default pattern((state) => {
                 }, ({ item, state }) => item.price > state.threshold), __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
+                        item: true,
                         state: {
                             type: "object",
                             properties: {

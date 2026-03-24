@@ -56,15 +56,7 @@ export default pattern((state) => {
               Total: {__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
+                        item: true,
                         state: {
                             type: "object",
                             properties: {

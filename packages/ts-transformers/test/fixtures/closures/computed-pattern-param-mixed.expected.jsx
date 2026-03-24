@@ -36,9 +36,7 @@ export default pattern((config: {
                 },
                 required: ["base", "multiplier"]
             },
-            offset: {
-                type: "number"
-            },
+            offset: true,
             threshold: {
                 type: "number",
                 asCell: true

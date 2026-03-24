@@ -28,15 +28,7 @@ export default pattern((state: State) => {
                             },
                             required: ["price"]
                         },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
+                        state: true
                     },
                     required: ["item", "state"]
                 } as const satisfies __ctHelpers.JSONSchema, {

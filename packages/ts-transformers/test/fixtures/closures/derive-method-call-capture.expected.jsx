@@ -21,21 +21,7 @@ export default pattern((state: State) => {
                 type: "number",
                 asCell: true
             },
-            state: {
-                type: "object",
-                properties: {
-                    counter: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    }
-                },
-                required: ["counter"]
-            }
+            state: true
         },
         required: ["value", "state"]
     } as const satisfies __ctHelpers.JSONSchema, {

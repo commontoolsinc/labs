@@ -54,13 +54,8 @@ export default pattern(() => {
             type: "object",
             properties: {
                 allCharms: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "array",
+                    items: true
                 }
             },
             required: ["allCharms"]
@@ -74,13 +69,8 @@ export default pattern(() => {
             type: "object",
             properties: {
                 allCharms: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "array",
+                    items: true
                 }
             },
             required: ["allCharms"]

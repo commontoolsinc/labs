@@ -65,15 +65,7 @@ export default pattern((__ct_pattern_input) => {
             {__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    card: {
-                        type: "object",
-                        properties: {
-                            description: {
-                                type: "string"
-                            }
-                        },
-                        required: ["description"]
-                    },
+                    card: true,
                     startEditing: {
                         asStream: true
                     }

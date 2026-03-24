@@ -18,14 +18,7 @@ export default pattern((config: Config) => {
                 type: "number",
                 asCell: true
             },
-            config: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: ["number", "undefined"]
-                    }
-                }
-            }
+            config: true
         },
         required: ["value", "config"]
     } as const satisfies __ctHelpers.JSONSchema, {

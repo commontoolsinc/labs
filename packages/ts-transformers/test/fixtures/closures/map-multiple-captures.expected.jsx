@@ -27,18 +27,7 @@ export default pattern((state) => {
             Total: {__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                },
-                                quantity: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price", "quantity"]
-                        },
+                        item: true,
                         state: {
                             type: "object",
                             properties: {
@@ -51,9 +40,7 @@ export default pattern((state) => {
                             },
                             required: ["discount", "taxRate"]
                         },
-                        multiplier: {
-                            type: "number"
-                        }
+                        multiplier: true
                     },
                     required: ["item", "state", "multiplier"]
                 } as const satisfies __ctHelpers.JSONSchema, {
