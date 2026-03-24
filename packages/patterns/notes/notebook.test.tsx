@@ -81,11 +81,11 @@ export default pattern(() => {
   // ==========================================================================
 
   const action_rename_notebook = action(() => {
-    notebook.setTitle.send({ newTitle: "Renamed Notebook" });
+    notebook.setTitle.send("Renamed Notebook");
   });
 
   const action_rename_again = action(() => {
-    notebook.setTitle.send({ newTitle: "Final Name" });
+    notebook.setTitle.send("Final Name");
   });
 
   const action_create_note_via_stream = action(() => {
