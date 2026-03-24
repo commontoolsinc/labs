@@ -35,10 +35,12 @@ import type {
   LLMFunction,
   Module,
   NavigateToFunction,
+  NonPrivateRandomFunction,
   Opaque,
   OpaqueRef,
   Pattern,
   PatternToolFunction,
+  SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -286,6 +288,8 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
+  nonPrivateRandom: NonPrivateRandomFunction;
+  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;

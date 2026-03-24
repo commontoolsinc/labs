@@ -163,6 +163,42 @@ describe("Engine.compile()", () => {
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe("Open");
   });
+
+  it("rewrites Date.now() and Math.random() to explicit SES-safe helpers", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "/// <cts-enable />",
+            "const startedAt = Date.now();",
+            "const seed = Math.random();",
+            "export default function probe() {",
+            "  return {",
+            "    startedAt,",
+            "    seed,",
+            "    now: Date.now(),",
+            "    random: Math.random(),",
+            "  };",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("safeDateNow");
+    expect(jsScript.js).toContain("nonPrivateRandom");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const result = main?.default();
+
+    expect(typeof result?.startedAt).toBe("number");
+    expect(typeof result?.now).toBe("number");
+    expect(typeof result?.seed).toBe("number");
+    expect(typeof result?.random).toBe("number");
+  });
 });
 
 describe("Engine.evaluate()", () => {
@@ -270,6 +306,29 @@ describe("Engine.evaluate()", () => {
       },
       required: ["count"],
     });
+  });
+
+  it("allows explicit snapshot helpers without CTS", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { nonPrivateRandom, safeDateNow } from "commontools";',
+            "const startedAt = safeDateNow();",
+            "const seed = nonPrivateRandom();",
+            "export default { startedAt, seed };",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(typeof main?.default?.startedAt).toBe("number");
+    expect(typeof main?.default?.seed).toBe("number");
   });
 
   it("throws when handler() relies on CTS inference without CTS", async () => {

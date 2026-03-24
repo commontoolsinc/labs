@@ -20,7 +20,12 @@ const TRUSTED_BUILDERS = new Set([
   "lift",
   "pattern",
 ]);
-const TRUSTED_DATA_HELPERS = new Set(["schema", "__ct_data"]);
+const TRUSTED_DATA_HELPERS = new Set([
+  "schema",
+  "__ct_data",
+  "nonPrivateRandom",
+  "safeDateNow",
+]);
 const TRUSTED_RUNTIME_MODULES = new Set([
   "commontools",
   "@commontools/builder",
@@ -513,6 +518,14 @@ function classifyCallExpression(
       };
     }
 
+    if (isTrustedSnapshotHelperName(trustedName)) {
+      verifyTrustedSnapshotHelperCall(expression, sourceFile);
+      return {
+        kind: "data",
+        captureSafe: true,
+      };
+    }
+
     verifyTrustedBuilderCall(
       trustedName,
       expression,
@@ -740,6 +753,10 @@ function verifyTrustedValueExpression(
     }
     if (name === "__ct_data") {
       verifyCtDataCall(expr, sourceFile, env);
+      return;
+    }
+    if (isTrustedSnapshotHelperName(name)) {
+      verifyTrustedSnapshotHelperCall(expr, sourceFile);
       return;
     }
   }
@@ -1011,6 +1028,13 @@ function isTopLevelDataExpression(
       isTopLevelDataExpression(expr.arguments[0], env);
   }
 
+  if (
+    ts.isCallExpression(expr) &&
+    isTrustedSnapshotHelperName(resolveTrustedCallName(expr.expression, env))
+  ) {
+    return expr.arguments.length === 0;
+  }
+
   if (ts.isNewExpression(expr)) {
     return isAllowedCtDataCollection(expr) &&
       (expr.arguments ?? []).every((arg) => isTopLevelDataExpression(arg, env));
@@ -1199,6 +1223,10 @@ function verifyCtDataExpression(
     }
     if (trustedName === "__ct_data") {
       verifyCtDataCall(expr, sourceFile, env);
+      return;
+    }
+    if (isTrustedSnapshotHelperName(trustedName)) {
+      verifyTrustedSnapshotHelperCall(expr, sourceFile);
       return;
     }
     if (isDirectIifeCall(expr)) {
@@ -2171,6 +2199,25 @@ function isAllowedCtDataProxy(expression: ts.NewExpression): boolean {
 function isAllowedCtDataEphemeralCall(expression: ts.CallExpression): boolean {
   return ts.isIdentifier(expression.expression) &&
     expression.expression.text === "Symbol";
+}
+
+function isTrustedSnapshotHelperName(
+  name: string | undefined,
+): name is "nonPrivateRandom" | "safeDateNow" {
+  return name === "nonPrivateRandom" || name === "safeDateNow";
+}
+
+function verifyTrustedSnapshotHelperCall(
+  expression: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): void {
+  if (expression.arguments.length !== 0) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "Trusted snapshot helpers must not receive arguments in SES mode",
+    );
+  }
 }
 
 function isAllowedStaticImportSpecifier(specifier: string): boolean {

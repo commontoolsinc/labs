@@ -41,7 +41,9 @@ hardening of module-scope definitions at load time.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
    be a versioned, recursively inert subset of `StorableValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
-   allowed only if the final result passes this verifier.
+   allowed only if the final result passes this verifier. Transitional explicit
+   snapshot helpers such as `safeDateNow()` and `nonPrivateRandom()` are
+   allowed as narrow exceptions and return plain data.
 6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
    code to reduce runtime parsing cost, but compiler output is not trusted and
    the runner must verify the final code boundary.
@@ -360,6 +362,8 @@ pattern construction. A data initializer may use:
 - previously verified module-safe-data bindings
 - approved top-level local helper calls whose captures are themselves limited to
   module-safe data
+- explicit runtime snapshot helpers such as `safeDateNow()` and
+  `nonPrivateRandom()`
 
 A data initializer MUST NOT call:
 
@@ -367,6 +371,12 @@ A data initializer MUST NOT call:
 - graph-construction built-ins such as `fetchData`, `compileAndRun`,
   `navigateTo`, or `wish`
 - arbitrary imported runtime-module functions
+
+Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
+stable SES contract. In the current implementation, CTS may rewrite those calls
+to `safeDateNow()` and `nonPrivateRandom()` as a compatibility assist, and the
+verifier treats those helpers as explicit narrow exceptions that yield plain
+data snapshots.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commontools/memory`'s `StorableValue`:
@@ -2105,8 +2115,10 @@ const startTime = Date.now();  // Side effect at module scope
 
 **After:**
 ```typescript
-// Move to a lift if needed
-const getStartTime = lift(() => Date.now());
+import { safeDateNow } from "commontools";
+
+// Or let CTS rewrite direct Date.now() during migration
+const getStartTime = lift(() => safeDateNow());
 ```
 
 #### Patterns with mutable module-scope state

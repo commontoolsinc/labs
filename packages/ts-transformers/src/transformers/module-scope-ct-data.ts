@@ -11,7 +11,12 @@ const TRUSTED_BUILDER_NAMES = new Set([
   "pattern",
   "patternTool",
 ]);
-const TRUSTED_DATA_HELPER_NAMES = new Set(["schema", "__ct_data"]);
+const TRUSTED_DATA_HELPER_NAMES = new Set([
+  "schema",
+  "__ct_data",
+  "nonPrivateRandom",
+  "safeDateNow",
+]);
 const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set", "Proxy"]);
 
 export class ModuleScopeCtDataTransformer extends Transformer {

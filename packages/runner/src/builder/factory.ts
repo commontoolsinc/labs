@@ -58,6 +58,7 @@ import {
 } from "@commonfabric/data-model/fabric-epoch";
 import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
+import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -136,6 +137,8 @@ export const createBuilder = (): {
 
     // Environment
     getPatternEnvironment,
+    nonPrivateRandom,
+    safeDateNow,
 
     // Entity utilities
     getEntityId,

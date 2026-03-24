@@ -2031,6 +2031,8 @@ export interface PatternEnvironment {
 }
 
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
+export type NonPrivateRandomFunction = () => number;
+export type SafeDateNowFunction = () => number;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -2073,6 +2075,8 @@ export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
+export declare const nonPrivateRandom: NonPrivateRandomFunction;
+export declare const safeDateNow: SafeDateNowFunction;
 
 /**
  * Get the entity ID from a cell or value.

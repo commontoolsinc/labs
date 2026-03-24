@@ -95,6 +95,35 @@ export default function next(value: number) {
     );
     assertStringIncludes(main, "__ctHardenFn(next);");
   });
+
+  it("rewrites Date.now() and Math.random() to explicit helpers", async () => {
+    const source = `/// <cts-enable />
+const startedAt = Date.now();
+const seed = Math.random();
+
+export default function probe() {
+  return [Date.now(), Math.random(), startedAt, seed];
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      "const startedAt = __ctHelpers.__ct_data(__ctHelpers.safeDateNow());",
+    );
+    assertStringIncludes(
+      main,
+      "const seed = __ctHelpers.__ct_data(__ctHelpers.nonPrivateRandom());",
+    );
+    assertStringIncludes(
+      main,
+      "return [__ctHelpers.safeDateNow(), __ctHelpers.nonPrivateRandom(), startedAt, seed];",
+    );
+  });
 });
 
 describe("CFHelpers handling", () => {
