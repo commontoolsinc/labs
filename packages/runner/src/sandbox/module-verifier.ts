@@ -952,6 +952,12 @@ function verifyCtDataExpression(
           continue;
         }
       }
+      if (
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      ) {
+        continue;
+      }
       throw verificationError(
         sourceFile,
         property,
@@ -1003,11 +1009,17 @@ function verifyCtDataExpression(
     return;
   }
 
-  if (ts.isNewExpression(expr) && isAllowedCtDataCollection(expr)) {
-    for (const arg of expr.arguments ?? []) {
-      verifyCtDataExpression(arg, sourceFile, env, locals);
+  if (ts.isNewExpression(expr)) {
+    if (isAllowedCtDataCollection(expr)) {
+      for (const arg of expr.arguments ?? []) {
+        verifyCtDataExpression(arg, sourceFile, env, locals);
+      }
+      return;
     }
-    return;
+    if (isAllowedCtDataProxy(expr)) {
+      verifyCtDataProxyExpression(expr, sourceFile, env, locals);
+      return;
+    }
   }
 
   if (ts.isCallExpression(expr)) {
@@ -1125,6 +1137,72 @@ function verifyCtDataIife(
       sourceFile,
       target,
       "__ct_data() IIFEs must return a data value",
+    );
+  }
+}
+
+function verifyCtDataProxyExpression(
+  expression: ts.NewExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  const args = expression.arguments ?? [];
+  if (args.length !== 2) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "__ct_data() Proxy initializers must receive exactly target and handler",
+    );
+  }
+
+  verifyCtDataExpression(args[0], sourceFile, env, locals);
+  verifyCtDataProxyHandlerExpression(args[1], sourceFile, env, locals);
+}
+
+function verifyCtDataProxyHandlerExpression(
+  expression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  const expr = unwrapExpression(expression);
+  if (!ts.isObjectLiteralExpression(expr)) {
+    throw verificationError(
+      sourceFile,
+      expr,
+      "__ct_data() Proxy handlers must be object literals",
+    );
+  }
+
+  for (const property of expr.properties) {
+    if (
+      ts.isMethodDeclaration(property) ||
+      ts.isGetAccessorDeclaration(property) ||
+      ts.isSetAccessorDeclaration(property)
+    ) {
+      continue;
+    }
+    if (ts.isPropertyAssignment(property)) {
+      if (isFunctionLikeExpression(unwrapExpression(property.initializer))) {
+        continue;
+      }
+      verifyCtDataExpression(property.initializer, sourceFile, env, locals);
+      continue;
+    }
+    if (ts.isShorthandPropertyAssignment(property)) {
+      if (locals.has(property.name.text)) continue;
+      if (
+        env.get(property.name.text)?.kind === "data" &&
+        env.get(property.name.text)?.captureSafe
+      ) {
+        continue;
+      }
+    }
+    throw verificationError(
+      sourceFile,
+      property,
+      "__ct_data() Proxy handlers must be plain object literals",
     );
   }
 }
@@ -1305,6 +1383,11 @@ function isAllowedCtDataCollection(expression: ts.NewExpression): boolean {
   return ts.isIdentifier(expression.expression) &&
     (expression.expression.text === "Map" ||
       expression.expression.text === "Set");
+}
+
+function isAllowedCtDataProxy(expression: ts.NewExpression): boolean {
+  return ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "Proxy";
 }
 
 function isDirectIifeCall(expression: ts.CallExpression): boolean {

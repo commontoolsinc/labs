@@ -12,7 +12,7 @@ const TRUSTED_BUILDER_NAMES = new Set([
   "patternTool",
 ]);
 const TRUSTED_DATA_HELPER_NAMES = new Set(["schema", "__ct_data"]);
-const IMMUTABLE_COLLECTION_NAMES = new Set(["Map", "Set"]);
+const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set", "Proxy"]);
 
 export class ModuleScopeCtDataTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -118,7 +118,7 @@ function shouldWrapTopLevelExpression(
   }
 
   if (ts.isNewExpression(expr)) {
-    return hasNamedTarget(expr.expression, IMMUTABLE_COLLECTION_NAMES);
+    return hasNamedTarget(expr.expression, CT_DATA_CONSTRUCTOR_NAMES);
   }
 
   if (

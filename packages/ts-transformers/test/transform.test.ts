@@ -42,9 +42,10 @@ import { lift, schema } from "commontools";
 const model = schema({ type: "string" } as const);
 const lookup = (() => ({ open: "Open" }))();
 const tags = new Set(["a", "b"]);
+const proxied = new Proxy({ open: "Open" }, {});
 const passthrough = lift((value: string) => value);
 
-export { model, lookup, tags, passthrough };
+export { model, lookup, tags, proxied, passthrough };
 `;
 
     const output = await transformFiles({
@@ -63,6 +64,10 @@ export { model, lookup, tags, passthrough };
     assertStringIncludes(
       main,
       'const tags = __ctHelpers.__ct_data(new Set(["a", "b"]));',
+    );
+    assertStringIncludes(
+      main,
+      'const proxied = __ctHelpers.__ct_data(new Proxy({ open: "Open" }, {}));',
     );
     assert(
       !main.includes("__ctHelpers.__ct_data(lift("),

@@ -359,6 +359,58 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
+  it("allows CTS-wrapped accessor-backed data snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { lift } from "commontools";',
+            "const lookup = {",
+            '  get open() { return "Open"; },',
+            "};",
+            "export default lift(() => lookup.open);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBeDefined();
+  });
+
+  it("allows CTS-wrapped proxy-backed data snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { lift } from "commontools";',
+            'const lookup = new Proxy({ open: "Open" }, {',
+            "  get(target, key) {",
+            '    return key === "open" ? "Open" : Reflect.get(target, key);',
+            "  },",
+            "});",
+            "export default lift(() => lookup.open);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBeDefined();
+  });
+
   it("rejects top-level mutable bindings", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
