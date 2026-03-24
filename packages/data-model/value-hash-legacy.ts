@@ -135,5 +135,10 @@ export const hashObjectFromStringLegacy = Reference.fromString as (
   source: string,
 ) => HashObject;
 
+/** Legacy hash object type — the merkle-reference `Reference.View`. */
+export type LegacyHashObject<
+  T extends DefinedReferent = DefinedReferent,
+> = Reference.View<T>;
+
 /** Legacy `isHashObject` using merkle-reference. */
 export { Reference };
