@@ -22,6 +22,7 @@ const serviceDid: DID = (() => {
 
 const storePath = (Deno.env.get("STORE") ?? "memory").replace(/\/?$/, "/");
 const STORE = new URL(storePath, Path.toFileUrl(`${Deno.cwd()}/`));
+const stitchHub = STITCH ? new Stitch.StitchHub(STORE) : null;
 const { ok: provider, error } = await Provider.open({
   store: STORE,
   serviceDid,
@@ -42,10 +43,11 @@ from ${STORE}`);
     if (request.headers.get("upgrade") === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(request);
       const consumer = Socket.from<string, string>(socket);
-      if (STITCH) {
-        consumer.readable
-          .pipeThrough(Stitch.createSession())
-          .pipeTo(consumer.writable);
+      if (STITCH && stitchHub) {
+        const spaceDid = new URL(request.url).searchParams.get("space") ?? "";
+        const session = stitchHub.createSession(spaceDid);
+        consumer.readable.pipeTo(session.writable);
+        session.readable.pipeTo(consumer.writable);
       } else {
         const session = provider.session();
         consumer
@@ -96,6 +98,8 @@ export const open = async (
     throw error;
   }
 
+  const hub = stitch ? new Stitch.StitchHub(store) : null;
+
   return new Promise((resolve) => {
     const server = Deno.serve({
       port,
@@ -107,10 +111,11 @@ export const open = async (
         if (request.headers.get("upgrade") === "websocket") {
           const { socket, response } = Deno.upgradeWebSocket(request);
           const consumer = Socket.from<string, string>(socket);
-          if (stitch) {
-            consumer.readable
-              .pipeThrough(Stitch.createSession())
-              .pipeTo(consumer.writable);
+          if (stitch && hub) {
+            const spaceDid = new URL(request.url).searchParams.get("space") ?? "";
+            const session = hub.createSession(spaceDid);
+            consumer.readable.pipeTo(session.writable);
+            session.readable.pipeTo(consumer.writable);
           } else {
             const session = provider.session();
             consumer
