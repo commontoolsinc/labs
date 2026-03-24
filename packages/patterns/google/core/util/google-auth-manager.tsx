@@ -27,6 +27,7 @@
  */
 
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import type { Opaque } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -94,7 +95,9 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
 };
 
 export function GoogleAuthManager(
-  input: import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+  input: Opaque<
+    import("../../../auth/create-auth-manager.tsx").AuthManagerInput
+  >,
 ) {
   return createAuthManager(
     GoogleAuthManagerDescriptor,
