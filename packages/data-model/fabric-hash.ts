@@ -10,8 +10,11 @@ import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
  *
- * Instances are frozen at construction time. The string form is cached
- * internally so that repeated `toString()` calls are O(1).
+ * Immutable by convention: instances are `Object.freeze()`-d at construction
+ * time, and the constructor assumes ownership of the `hash` bytes (callers
+ * must not mutate the `Uint8Array` after passing it in, since JS cannot
+ * freeze `ArrayBuffer` contents). The string form is cached internally so
+ * that repeated `toString()` calls are O(1).
  */
 export class FabricHash extends FabricPrimitive {
   readonly #stringForm: string;
