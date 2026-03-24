@@ -20,11 +20,11 @@ export default pattern<Input, Input>(({ items }) => ({
     <div>
       {items.map((item) => (
         <div>
-          <ct-checkbox $checked={item.done}>
+          <cf-checkbox $checked={item.done}>
             <span style={item.done ? { textDecoration: "line-through" } : {}}>
               {item.title}
             </span>
-          </ct-checkbox>
+          </cf-checkbox>
           <cf-button onClick={() => {
             const current = items.get();
             const index = current.findIndex((el) => equals(item, el));

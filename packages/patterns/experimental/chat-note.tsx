@@ -257,7 +257,7 @@ const handleTitleKeydown = handler<
 });
 
 // Handler for Generate button - triggers LLM generation
-// Event type matches both onClick (unknown) and onct-submit ({ value: string })
+// Event type matches both onClick (unknown) and oncf-submit ({ value: string })
 const handleGenerate = handler<
   { value?: string },
   {

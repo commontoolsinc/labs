@@ -161,7 +161,7 @@ describe("shadow DOM component test", () => {
 
 ## Best Practices
 
-1. **Use semantic data attributes**: `data-cf-input`, `data-ct-submit-button`,
+1. **Use semantic data attributes**: `data-cf-input`, `data-cf-submit-button`,
    etc.
 2. **Put attributes on the actual interactive element**: The `<input>`,
    `<button>`, not their wrappers

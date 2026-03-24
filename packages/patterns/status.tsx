@@ -56,7 +56,7 @@ export const StatusModule = pattern<StatusModuleInput, StatusModuleInput>(
       [UI]: (
         <cf-vstack style={{ gap: "8px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Status</label>
-          <ct-select $value={status} items={STATUS_OPTIONS} />
+          <cf-select $value={status} items={STATUS_OPTIONS} />
         </cf-vstack>
       ),
       status,

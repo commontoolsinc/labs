@@ -1,5 +1,5 @@
 /**
- * Styles for ct-form component
+ * Styles for cf-form component
  */
 
 export const formStyles = `

@@ -338,7 +338,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Relationship
                     </label>
-                    <ct-select
+                    <cf-select
                       $value={member.key("relationship")}
                       items={RELATIONSHIP_OPTIONS}
                     />
@@ -462,7 +462,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                     <ct-autocomplete
                       items={sameAsItems}
                       placeholder="Search contacts..."
-                      onct-select={selectSameAs({ member, showPicker })}
+                      oncf-select={selectSameAs({ member, showPicker })}
                     />
                   </cf-vstack>
                 );

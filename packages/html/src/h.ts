@@ -40,7 +40,7 @@ export const h: HFunction = Object.assign(
               "If invoking from within computed(), consider moving the component into a pattern: E.g.\n" +
               "```\n" +
               (key === "$checked"
-                ? "const Item = pattern<{ item: Item }>(({item}) => <div><ct-checkbox $checked={item.checked} />{item.title}</div>);"
+                ? "const Item = pattern<{ item: Item }>(({item}) => <div><cf-checkbox $checked={item.checked} />{item.title}</div>);"
                 : "const Item = pattern<{ item: Item }>(({item}) => <div><cf-input $value={item.value} />{item.title}</div>);") +
               "\n```" +
               "\n" +

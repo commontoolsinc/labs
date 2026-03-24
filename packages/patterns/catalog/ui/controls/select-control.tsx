@@ -54,7 +54,7 @@ export const SelectControl = pattern<SelectControlInput, SelectControlOutput>(
           <div style={styles.colDescription}>{description}</div>
           <div style={styles.colDefault}>{defaultValue}</div>
           <div style={styles.colControl}>
-            <ct-select $value={value} items={items} style="width: 100%;" />
+            <cf-select $value={value} items={items} style="width: 100%;" />
           </div>
         </div>
       ),

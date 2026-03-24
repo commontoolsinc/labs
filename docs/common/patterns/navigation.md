@@ -54,7 +54,7 @@ export default pattern<Input>(({ item }) => ({
   [UI]: (
     <cf-screen>
       <cf-input $value={item.key("name")} placeholder="Name" />
-      <ct-select
+      <cf-select
         $value={item.key("status")}
         items={[
           { label: "Active", value: "active" },

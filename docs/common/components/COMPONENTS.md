@@ -11,9 +11,9 @@ CommonTools UI components with bidirectional binding support.
 Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 ```tsx
-<ct-checkbox $checked={item.done} />    // Auto-syncs checkbox state
+<cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
 <cf-input $value={title} />             // Auto-syncs text input
-<ct-select $value={category} items={[...]} />
+<cf-select $value={category} items={[...]} />
 ```
 
 **Native HTML inputs are one-way only.** Always use `ct-*` components for form inputs.
@@ -68,26 +68,26 @@ const increment = action(() => {
 
 ---
 
-## ct-checkbox
+## cf-checkbox
 
 ```tsx
 // Bidirectional binding
-<ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+<cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
 
 // In array maps
 {items.map((item) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+  <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
 ))}
 ```
 
 ---
 
-## ct-select
+## cf-select
 
 Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` elements.**
 
 ```tsx
-<ct-select
+<cf-select
   $value={category}
   items={[
     { label: "Produce", value: "Produce" },
@@ -97,7 +97,7 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 
 // Values can be any type
-<ct-select
+<cf-select
   $value={selectedId}
   items={[
     { label: "First", value: 1 },
@@ -106,7 +106,7 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 
 // Dynamic items from data
-<ct-select
+<cf-select
   $value={selectedUser}
   items={users.map(u => ({ label: u.name, value: u }))}
 />

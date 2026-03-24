@@ -79,7 +79,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {items.map((item, index) => (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 <span
                   style={computed(
                     () => (item.done ? { textDecoration: "line-through" } : {}),
@@ -87,7 +87,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
                 >
                   [{index}] {item.title} ({item.category})
                 </span>
-              </ct-checkbox>
+              </cf-checkbox>
               <cf-button onClick={removeItemByIndex({ items, index })}>
                 x
               </cf-button>
@@ -149,7 +149,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     marginLeft: "16px",
                   }}
                 >
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     <span
                       style={computed(() => (item.done
                         ? { textDecoration: "line-through" }
@@ -158,7 +158,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     >
                       [{index}] {item.title}
                     </span>
-                  </ct-checkbox>
+                  </cf-checkbox>
                   <cf-button onClick={removeItemByIndex({ items, index })}>
                     x
                   </cf-button>

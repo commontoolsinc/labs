@@ -69,7 +69,7 @@ export default pattern<State>(({ count, showButton }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={showButton}>Show button</ct-checkbox>
+          <cf-checkbox $checked={showButton}>Show button</cf-checkbox>
         </div>
 
         {/* WORKING: ifElse with plain cell (not derived) */}

@@ -5273,7 +5273,7 @@ export default pattern<Input, Output>(
                 gap: 8px;
               }
 
-              .month-year-selectors ct-select {
+              .month-year-selectors cf-select {
                 --ct-theme-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
                 --ct-theme-border-radius: 0;
                 --ct-theme-color-border: transparent;
@@ -5909,7 +5909,7 @@ export default pattern<Input, Output>(
                         <label style="font-size: 0.75rem; color: #86868b; display: block; margin-bottom: 4px;">
                           Start Time
                         </label>
-                        <ct-select
+                        <cf-select
                           $value={startTime}
                           items={timeSelectItems}
                           style="width: 100%;"
@@ -5919,7 +5919,7 @@ export default pattern<Input, Output>(
                         <label style="font-size: 0.75rem; color: #86868b; display: block; margin-bottom: 4px;">
                           End Time
                         </label>
-                        <ct-select
+                        <cf-select
                           $value={endTime}
                           items={timeSelectItems}
                           style="width: 100%;"
@@ -5930,7 +5930,7 @@ export default pattern<Input, Output>(
                       <label style="font-size: 0.75rem; color: #86868b; display: block; margin-bottom: 4px;">
                         Time Interval
                       </label>
-                      <ct-select
+                      <cf-select
                         $value={timeInterval}
                         items={intervalSelectItems}
                         style="width: 100%;"
@@ -5942,7 +5942,7 @@ export default pattern<Input, Output>(
                       Display Options
                     </label>
                     <cf-hstack gap="2" style="align-items: center;">
-                      <ct-checkbox $checked={showMonthView} />
+                      <cf-checkbox $checked={showMonthView} />
                       <span style="font-size: 0.875rem; color: #1d1d1f;">
                         Show month calendar
                       </span>
@@ -6233,7 +6233,7 @@ export default pattern<Input, Output>(
                           $value={scheduleStartDateCell}
                           style="flex: 1.2;"
                         />
-                        <ct-select
+                        <cf-select
                           $value={scheduleHourCell}
                           items={hourItems}
                           style="flex: 0.8;"
@@ -6241,12 +6241,12 @@ export default pattern<Input, Output>(
                         <span style="font-size: 1.25rem; font-weight: 500; color: #86868b;">
                           :
                         </span>
-                        <ct-select
+                        <cf-select
                           $value={scheduleMinuteCell}
                           items={minuteItems}
                           style="flex: 0.8;"
                         />
-                        <ct-select
+                        <cf-select
                           $value={schedulePeriodCell}
                           items={periodItems}
                           style="flex: 0.8;"
@@ -6256,7 +6256,7 @@ export default pattern<Input, Output>(
 
                     <div className="modal-section">
                       <div className="modal-label">Duration</div>
-                      <ct-select
+                      <cf-select
                         $value={scheduleDurationCell}
                         items={durationItems}
                         style="width: 100%;"
@@ -6265,7 +6265,7 @@ export default pattern<Input, Output>(
 
                     <div className="modal-section">
                       <div className="modal-label">Repeats</div>
-                      <ct-select
+                      <cf-select
                         $value={scheduleRepeatCell}
                         onChange={onRepeatTypeChange({
                           scheduleRepeatDaysCell,
@@ -6409,7 +6409,7 @@ export default pattern<Input, Output>(
                         repeatType === "monthly"),
                       <div className="modal-section">
                         <div className="modal-label">Monthly Pattern</div>
-                        <ct-select
+                        <cf-select
                           $value={scheduleMonthlyPatternCell}
                           items={derive(
                             scheduleStartDateCell,
@@ -6467,7 +6467,7 @@ export default pattern<Input, Output>(
                         repeatType !== "none"),
                       <div className="modal-section">
                         <div className="modal-label">Ends</div>
-                        <ct-select
+                        <cf-select
                           $value={scheduleRepeatEndsCell}
                           items={[
                             { value: "never", label: "Never" },
@@ -6494,7 +6494,7 @@ export default pattern<Input, Output>(
 
                     <div className="modal-section">
                       <cf-hstack gap="2" style="align-items: center;">
-                        <ct-checkbox $checked={scheduleNotifEnabledCell} />
+                        <cf-checkbox $checked={scheduleNotifEnabledCell} />
                         <div className="modal-label" style="margin-bottom: 0;">
                           Enable Notification
                         </div>
@@ -6511,7 +6511,7 @@ export default pattern<Input, Output>(
                             $value={scheduleNotifValueCell}
                             style="width: 80px;"
                           />
-                          <ct-select
+                          <cf-select
                             $value={scheduleNotifUnitCell}
                             items={[
                               { value: "minute", label: "minute(s)" },

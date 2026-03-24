@@ -11,13 +11,13 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {boolean} loading - Whether to show loading animation instead of chevron
  * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
  *
- * @fires ct-toggle - Fired when button is clicked
+ * @fires cf-toggle - Fired when button is clicked
  *
  * @example
  * <ct-chevron-button
  *   ?expanded=${showContent}
  *   ?loading=${isPending}
- *   @ct-toggle=${handleToggle}
+ *   @cf-toggle=${handleToggle}
  * ></ct-chevron-button>
  */
 export class CTChevronButton extends BaseElement {
@@ -134,7 +134,7 @@ export class CTChevronButton extends BaseElement {
   }
 
   private _handleClick = () => {
-    this.emit("ct-toggle");
+    this.emit("cf-toggle");
   };
 
   override render() {

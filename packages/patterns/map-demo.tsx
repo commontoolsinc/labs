@@ -347,7 +347,7 @@ export default pattern<Input, Output>(
                     >
                       Reset View
                     </cf-button>
-                    <ct-checkbox $checked={showRoute}>Show Route</ct-checkbox>
+                    <cf-checkbox $checked={showRoute}>Show Route</cf-checkbox>
                   </cf-hstack>
                   <cf-hstack gap="3">
                     <span style="font-size: 0.875rem;">

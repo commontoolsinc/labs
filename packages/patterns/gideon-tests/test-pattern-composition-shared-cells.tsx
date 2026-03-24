@@ -100,7 +100,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {items.map((item) => (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 <span
                   style={computed(
                     () => (item.done ? { textDecoration: "line-through" } : {}),
@@ -108,7 +108,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
                 >
                   {item.title} ({item.category})
                 </span>
-              </ct-checkbox>
+              </cf-checkbox>
               <cf-button onClick={removeItem({ items, item })}>x</cf-button>
             </div>
           ))}
@@ -169,7 +169,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     marginLeft: "16px",
                   }}
                 >
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     <span
                       style={computed(() => (item.done
                         ? { textDecoration: "line-through" }
@@ -178,7 +178,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     >
                       {item.title}
                     </span>
-                  </ct-checkbox>
+                  </cf-checkbox>
                   <cf-button onClick={removeItem({ items, item })}>x</cf-button>
                 </div>,
                 null,

@@ -1087,7 +1087,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           </span>
                         )
                         : (
-                          <ct-select
+                          <cf-select
                             $value={selectedPersonName}
                             items={personSelectItems}
                             style="width: 100%;"
@@ -1238,7 +1238,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   gap="1"
                                   style="background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.375rem;"
                                 >
-                                  <ct-select
+                                  <cf-select
                                     $value={overridePersonName}
                                     items={computed(() =>
                                       people.get().map((p) => ({
@@ -1467,7 +1467,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Commute
                                       </span>
-                                      <ct-select
+                                      <cf-select
                                         $value={editCommuteMode}
                                         items={commuteModeOptions}
                                         style="width: 100%;"
@@ -1490,7 +1490,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Default Spot
                                       </span>
-                                      <ct-select
+                                      <cf-select
                                         $value={editDefaultSpot}
                                         items={editSpotItems}
                                         style="width: 100%;"
@@ -1693,7 +1693,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Commute
                                   </span>
-                                  <ct-select
+                                  <cf-select
                                     $value={newPersonCommuteMode}
                                     items={commuteModeOptions}
                                     style="width: 100%;"
@@ -1714,7 +1714,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Default Spot
                                   </span>
-                                  <ct-select
+                                  <cf-select
                                     $value={newPersonDefaultSpot}
                                     items={computed(() => [
                                       { label: "None", value: "" },
@@ -1834,9 +1834,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     />
                                   </cf-vstack>
                                   <cf-hstack gap="2" align="center">
-                                    <ct-checkbox $checked={editSpotActive}>
+                                    <cf-checkbox $checked={editSpotActive}>
                                       Active
-                                    </ct-checkbox>
+                                    </cf-checkbox>
                                     {spotDeactivateWarning
                                       ? (
                                         <span style="font-size: 0.75rem; color: var(--ct-color-amber-600);">

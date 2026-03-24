@@ -59,7 +59,7 @@ export default pattern<{ items: Item[] }>(
               {groupedByAisle[aisleName]!.map((assignment) => (
                 <div>
                   <span>{assignment.item.name}</span>
-                  <ct-checkbox $checked={assignment.item.done} />
+                  <cf-checkbox $checked={assignment.item.done} />
                 </div>
               ))}
             </div>

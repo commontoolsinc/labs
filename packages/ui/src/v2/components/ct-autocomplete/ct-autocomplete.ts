@@ -46,7 +46,7 @@ export interface AutocompleteItem {
   /** Additional search terms that match this item */
   searchAliases?: string[];
   /**
-   * Arbitrary data to pass through with ct-select event.
+   * Arbitrary data to pass through with cf-select event.
    *
    * NOTE: Cell references passed here will be converted to link representations
    * during event sanitization. The original Cell instance is NOT preserved.
@@ -137,7 +137,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @prop {CellHandle<string>|CellHandle<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
- * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
+ * @fires cf-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
  *                   Note: Cell refs in `data` become link representations; use Cell.equals() to compare
  * @fires ct-open - Fired when dropdown opens
  * @fires ct-close - Fired when dropdown closes
@@ -162,7 +162,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @example Event-only API (no value binding)
  * <ct-autocomplete
  *   items={items}
- *   onct-select={(e) => console.log('Selected:', e.detail)}
+ *   oncf-select={(e) => console.log('Selected:', e.detail)}
  *   placeholder="Search..."
  * />
  */
@@ -978,9 +978,9 @@ export class CTAutocomplete extends BaseElement {
 
     // Selection methods
     private _selectItem(item: AutocompleteItem) {
-      // Always emit ct-select for side effects
+      // Always emit cf-select for side effects
       // Include data field if present (allows passing arbitrary objects through selection)
-      this.emit("ct-select", {
+      this.emit("cf-select", {
         value: item.value,
         label: item.label || item.value,
         group: item.group,
@@ -1011,8 +1011,8 @@ export class CTAutocomplete extends BaseElement {
 
       const customValue = this._query.trim();
 
-      // Always emit ct-select for side effects
-      this.emit("ct-select", {
+      // Always emit cf-select for side effects
+      this.emit("cf-select", {
         value: customValue,
         label: customValue,
         isCustom: true,

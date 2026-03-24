@@ -117,7 +117,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Type
                       </label>
-                      <ct-select
+                      <cf-select
                         $value={type}
                         items={[
                           { label: "📄 Article", value: "article" },
@@ -132,7 +132,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Status
                       </label>
-                      <ct-select
+                      <cf-select
                         $value={status}
                         items={[
                           { label: "Want to read", value: "want" },
@@ -148,7 +148,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Rating
                     </label>
-                    <ct-select
+                    <cf-select
                       $value={rating}
                       items={[
                         { label: "No rating", value: null },

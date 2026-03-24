@@ -447,11 +447,11 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               Birthday
             </label>
             <cf-hstack style={{ gap: "8px", alignItems: "center" }}>
-              <ct-select
+              <cf-select
                 $value={person.key("birthday").key("month")}
                 items={MONTH_OPTIONS}
               />
-              <ct-select
+              <cf-select
                 $value={person.key("birthday").key("day")}
                 items={DAY_OPTIONS}
               />
@@ -545,7 +545,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                             alignItems: "center",
                           }}
                         >
-                          <ct-select
+                          <cf-select
                             $value={person
                               .key("addresses")
                               .key(i)
@@ -622,7 +622,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                 <cf-vstack style={{ gap: "8px" }}>
                   {profiles.map((_profile, i) => (
                     <cf-hstack style={{ gap: "4px", alignItems: "center" }}>
-                      <ct-select
+                      <cf-select
                         $value={person
                           .key("socialProfiles")
                           .key(i)
@@ -720,7 +720,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     <ct-autocomplete
                       items={sameAsItems}
                       placeholder="Search contacts..."
-                      onct-select={selectSameAs({ person, showPicker })}
+                      oncf-select={selectSameAs({ person, showPicker })}
                     />
                   </cf-vstack>
                 );

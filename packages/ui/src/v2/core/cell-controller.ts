@@ -293,7 +293,7 @@ export class CellController<T> implements ReactiveController {
       let previousValue: T | undefined;
       this._cellUnsubscribe = this._currentValue.subscribe((newValue) => {
         // Call onChange when the cell value changes from the backend
-        // This ensures components like ct-select can update their DOM state
+        // This ensures components like cf-select can update their DOM state
         const typedNewValue = newValue as T | undefined;
         if (typedNewValue !== previousValue) {
           const oldValue = previousValue;

@@ -2708,7 +2708,7 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
           <ct-autocomplete
             items={EMOJI_ITEMS}
             placeholder="Search emojis..."
-            onct-select={onSelectEmoji({ selectedEmoji })}
+            oncf-select={onSelectEmoji({ selectedEmoji })}
             style={{ flex: "1" }}
           />
           <cf-button onClick={clearSelection({ selectedEmoji })}>

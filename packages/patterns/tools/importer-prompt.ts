@@ -568,12 +568,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <ct-checkbox
+                  <cf-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </label>
               ))}
             </div>
@@ -2094,9 +2094,9 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 Use \`ct-*\` custom elements:
 
 - \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
-- \`<ct-checkbox $checked={cell}>Label</ct-checkbox>\` — Checkbox with bidirectional binding
+- \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
 - \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
-- \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
+- \`<cf-select $value={cell} items={[{label, value}]} />\` — Select dropdown
 - \`<cf-button onClick={handler}>Label</cf-button>\` — Button
 - \`<cf-card>...</cf-card>\` — Styled card container
 - \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout

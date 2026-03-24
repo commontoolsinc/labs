@@ -14,7 +14,7 @@ import { collapsibleStyles } from "./styles.ts";
  * @slot trigger - Clickable trigger element
  * @slot - Default slot for collapsible content
  *
- * @fires ct-toggle - Fired on open/close with detail: { open }
+ * @fires cf-toggle - Fired on open/close with detail: { open }
  *
  * @example
  * <ct-collapsible>
@@ -226,7 +226,7 @@ export class CTCollapsible extends BaseElement {
     this.open = !this.open;
 
     // Emit toggle event
-    this.emit("ct-toggle", {
+    this.emit("cf-toggle", {
       open: this.open,
     });
   }
@@ -237,7 +237,7 @@ export class CTCollapsible extends BaseElement {
   expand(): void {
     if (!this.open && !this.disabled) {
       this.open = true;
-      this.emit("ct-toggle", {
+      this.emit("cf-toggle", {
         open: true,
       });
     }
@@ -249,7 +249,7 @@ export class CTCollapsible extends BaseElement {
   collapse(): void {
     if (this.open && !this.disabled) {
       this.open = false;
-      this.emit("ct-toggle", {
+      this.emit("cf-toggle", {
         open: false,
       });
     }

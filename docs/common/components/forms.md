@@ -18,10 +18,10 @@ The form system enables modal forms where:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ct-form (provides FormContext)                              │
+│ cf-form (provides FormContext)                              │
 │                                                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ cf-input    │  │ ct-select   │  │ ct-checkbox │         │
+│  │ cf-input    │  │ cf-select   │  │ cf-checkbox │         │
 │  │             │  │             │  │             │         │
 │  │ FormField   │  │ FormField   │  │ FormField   │         │
 │  │ Controller  │  │ Controller  │  │ Controller  │         │
@@ -39,32 +39,32 @@ The form system enables modal forms where:
 
 ## Core Components
 
-### ct-form
+### cf-form
 
 The form wrapper that coordinates field buffering and validation.
 
 ```tsx
-<ct-form onct-submit={handleSubmit}>
+<cf-form oncf-submit={handleSubmit}>
   <cf-input name="email" $value={data.key("email")} required />
   <cf-button type="submit">Save</cf-button>
-</ct-form>
+</cf-form>
 ```
 
 **Key behaviors:**
 
 - Provides `FormContext` to descendant fields via Lit context
-- On submit: validates all fields, flushes buffers to bound cells, emits `ct-submit`
+- On submit: validates all fields, flushes buffers to bound cells, emits `cf-submit`
 - On reset: restores all fields to their initial cell values
 - Handlers close over the bound cell and read from it directly (type-safe)
 
 ### Form Fields
 
-All form-compatible fields (cf-input, ct-select, ct-checkbox, cf-textarea) share
+All form-compatible fields (cf-input, cf-select, cf-checkbox, cf-textarea) share
 the same behavior:
 
-**Outside ct-form:** Writes to bound cell immediately (existing behavior)
+**Outside cf-form:** Writes to bound cell immediately (existing behavior)
 
-**Inside ct-form:** Buffers writes locally until form submits
+**Inside cf-form:** Buffers writes locally until form submits
 
 ## Usage Patterns
 
@@ -75,9 +75,9 @@ Bind fields to a staging cell, then copy to collection on submit:
 ```tsx
 const formData = Writable.of({ name: "", email: "" });
 
-<ct-form
-  onct-submit={handler((_, { formData, collection }) => {
-    // ct-form flushes buffers to cells before emitting ct-submit,
+<cf-form
+  oncf-submit={handler((_, { formData, collection }) => {
+    // cf-form flushes buffers to cells before emitting cf-submit,
     // so we can read the complete, typed object directly.
     // IMPORTANT: Copy the object to avoid sharing references!
     collection.push({ ...formData.get() });
@@ -86,7 +86,7 @@ const formData = Writable.of({ name: "", email: "" });
   <cf-input name="name" $value={formData.key("name")} required />
   <cf-input name="email" $value={formData.key("email")} type="email" />
   <cf-button type="submit">Create</cf-button>
-</ct-form>;
+</cf-form>;
 ```
 
 ### Edit Mode
@@ -98,12 +98,12 @@ values are flushed to the bound cell:
 export const EditPerson = pattern<{ person: Writable<Person> }, { [UI]: VNode }>(
   ({ person }) => ({
     [UI]: (
-      <ct-form onct-submit={closeModal}>
+      <cf-form oncf-submit={closeModal}>
         <cf-input name="name" $value={person.key("name")} required />
         <cf-input name="email" $value={person.key("email")} type="email" />
         <cf-button type="submit">Save</cf-button>
         <cf-button type="reset">Cancel</cf-button>
-      </ct-form>
+      </cf-form>
     ),
   }),
 );
@@ -200,7 +200,7 @@ the same object reference would cause all items to share the same data.
 
 ## Creating Form-Compatible Components
 
-To make a custom component work with ct-form, use `FormFieldController`:
+To make a custom component work with cf-form, use `FormFieldController`:
 
 ```typescript
 import { BaseElement } from "../../core/base-element.ts";
@@ -262,7 +262,7 @@ class FormFieldController<T> {
   // Register with form (call in firstUpdated after cell binding)
   register(name?: string): void;
 
-  // Check if this field is inside a ct-form
+  // Check if this field is inside a cf-form
   inFormContext: boolean;
 }
 ```
@@ -278,7 +278,7 @@ packages/ui/src/v2/
 └── components/
     └── form/
         ├── form-context.ts     # FormContext interface
-        ├── ct-form.ts          # Form element
+        ├── cf-form.ts          # Form element
         └── index.ts            # Exports
 ```
 
@@ -303,10 +303,10 @@ initialization and falling back to cell value, edit mode works correctly.
 
 ## Events
 
-### ct-submit
+### cf-submit
 
 Emitted when form is submitted and all fields are valid. Before emitting this
-event, ct-form flushes all buffered field values to their bound cells.
+event, cf-form flushes all buffered field values to their bound cells.
 
 **Important:** Handlers should read from the bound cell directly, not from event
 detail. This provides type safety and avoids manual object reconstruction.
@@ -320,12 +320,12 @@ const handleSubmit = handler((_, { formData, collection }) => {
 }, { formData, collection });
 ```
 
-### ct-form-invalid
+### cf-form-invalid
 
 Emitted when submit is attempted but validation fails.
 
 ```typescript
-interface CTFormInvalidEvent {
+interface CFFormInvalidEvent {
   detail: {
     errors: Array<{
       element: HTMLElement;

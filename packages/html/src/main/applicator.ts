@@ -377,7 +377,7 @@ export class DomApplicator {
     const cellHandle = new CellHandle(this.runtimeClient, cellRef);
 
     // Set the CellHandle on the element's property
-    // Custom elements like cf-input and ct-checkbox expect this
+    // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
   }
 

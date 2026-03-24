@@ -59,12 +59,12 @@ registerAllComponents();
 
 ### Core UI Components (23)
 
-- **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `ct-checkbox`, `ct-radio`,
-  `ct-switch`, `ct-toggle`, `ct-slider`
+- **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
+  `cf-switch`, `cf-toggle`, `ct-slider`
 - **Layout**: `cf-card`, `ct-separator`, `ct-accordion`, `ct-collapsible`,
   `ct-tabs`, `ct-scroll-area`
 - **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `ct-skeleton`, `ct-label`
-- **Data**: `ct-table`, `ct-form`, `ct-input-otp`
+- **Data**: `ct-table`, `cf-form`, `ct-input-otp`
 - **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`
 
 ### Layout Components (8)
@@ -146,7 +146,7 @@ packages/ui/
 ### Form with Validation
 
 ```html
-<ct-form>
+<cf-form>
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
@@ -163,7 +163,7 @@ packages/ui/
       <cf-button type="submit">Submit</cf-button>
     </cf-hstack>
   </cf-vstack>
-</ct-form>
+</cf-form>
 ```
 
 ### Dashboard Layout
@@ -194,7 +194,7 @@ document.querySelector("cf-button").addEventListener("ct-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 
-document.querySelector("ct-form").addEventListener("ct-submit", (e) => {
+document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
   e.preventDefault();
   console.log("Form data:", e.detail.formData);
 });

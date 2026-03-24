@@ -53,7 +53,7 @@ export const SwitchControl = pattern<SwitchControlInput, SwitchControlOutput>(
           <div style={styles.colDescription}>{description}</div>
           <div style={styles.colDefault}>{defaultValue}</div>
           <div style={styles.colControl}>
-            <ct-switch $checked={checked} />
+            <cf-switch $checked={checked} />
           </div>
         </div>
       ),

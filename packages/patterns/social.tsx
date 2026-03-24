@@ -88,7 +88,7 @@ export const SocialModule = pattern<SocialModuleInput, SocialModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Platform
             </label>
-            <ct-select $value={platform} items={PLATFORM_OPTIONS} />
+            <cf-select $value={platform} items={PLATFORM_OPTIONS} />
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Handle</label>

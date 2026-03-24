@@ -274,7 +274,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                   <ct-chevron-button
                     expanded={showHistory}
                     loading={omnibot.pending}
-                    onct-toggle={toggle({ value: showHistory })}
+                    oncf-toggle={toggle({ value: showHistory })}
                   />
                 </div>
 

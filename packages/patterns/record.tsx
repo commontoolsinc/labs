@@ -1089,11 +1089,11 @@ const Record = pattern<RecordInput, RecordOutput>(
               style={{ flex: "1", fontWeight: "600", fontSize: "16px" }}
             />
             {hasTypesToAdd && (
-              <ct-select
+              <cf-select
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubPiece({
+                oncf-change={addSubPiece({
                   subPieces,
                   trashedSubPieces,
                   title,

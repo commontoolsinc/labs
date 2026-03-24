@@ -135,7 +135,7 @@ export const GiftPrefsModule = pattern<
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Gift Giving Tier
             </label>
-            <ct-select $value={giftTier} items={TIER_OPTIONS} />
+            <cf-select $value={giftTier} items={TIER_OPTIONS} />
           </cf-vstack>
 
           {/* Favorites */}

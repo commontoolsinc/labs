@@ -17,7 +17,7 @@ Only do this AFTER all logic is verified and tests pass.
 ## Available Components
 
 Layout: `cf-screen`, `cf-vstack`, `cf-hstack`, `ct-box` Input: `cf-input`,
-`cf-textarea`, `ct-checkbox`, `ct-select` Action: `cf-button` Display:
+`cf-textarea`, `cf-checkbox`, `cf-select` Action: `cf-button` Display:
 `ct-text`, `ct-status-pill`
 
 ## Key Patterns
@@ -26,7 +26,7 @@ Layout: `cf-screen`, `cf-vstack`, `cf-hstack`, `ct-box` Input: `cf-input`,
 
 ```tsx
 <cf-input $value={field} />
-<ct-checkbox $checked={done} />
+<cf-checkbox $checked={done} />
 ```
 
 **Layout structure:**

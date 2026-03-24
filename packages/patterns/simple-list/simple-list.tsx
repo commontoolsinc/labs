@@ -141,7 +141,7 @@ export const SimpleListModule = pattern<
               }}
             >
               {/* Checkbox */}
-              <ct-checkbox $checked={item.done} style={{ flexShrink: "0" }} />
+              <cf-checkbox $checked={item.done} style={{ flexShrink: "0" }} />
 
               {/* Editable text with Cmd+[ / Cmd+] for indent */}
               <cf-input

@@ -26,7 +26,7 @@
  * Without the aggregator, falls back to local-only mode.
  *
  * NOTE: Due to a runtime bug where CustomEvent details aren't passed through
- * cf-render boundaries, we use $value binding instead of onct-select handlers.
+ * cf-render boundaries, we use $value binding instead of oncf-select handlers.
  */
 import {
   type Default,
@@ -353,7 +353,7 @@ export const FolksonomyTags = pattern<
 
           {
             /* Autocomplete input - use $value binding with multiple mode
-              instead of onct-select (runtime bug: CustomEvent.detail not passed through ct-render)
+              instead of oncf-select (runtime bug: CustomEvent.detail not passed through ct-render)
               onct-change triggers telemetry posting for additions */
           }
           <ct-autocomplete

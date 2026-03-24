@@ -2,11 +2,11 @@
 import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 import ButtonStory from "./cf-button-story.tsx";
-import CheckboxStory from "./ct-checkbox-story.tsx";
+import CheckboxStory from "./cf-checkbox-story.tsx";
 import CodeEditorStory from "./ct-code-editor-story.tsx";
 import InputStory from "./cf-input-story.tsx";
-import SelectStory from "./ct-select-story.tsx";
-import SwitchStory from "./ct-switch-story.tsx";
+import SelectStory from "./cf-select-story.tsx";
+import SwitchStory from "./cf-switch-story.tsx";
 import CardStory from "./cf-card-story.tsx";
 import ModalStory from "./ct-modal-story.tsx";
 import ProgressStory from "./ct-progress-story.tsx";

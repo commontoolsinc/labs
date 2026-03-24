@@ -46,14 +46,14 @@ keywords/features.
 - chatbot-list-view.tsx: Chat application with sidebar list of chat sessions
   - **Data types**: array of objects (CharmEntry with ID and piece), selected
     piece object
-  - **Keywords**: lift, handler, navigateTo, ct-select, ct-render,
+  - **Keywords**: lift, handler, navigateTo, cf-select, ct-render,
     ct-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
     of pieces
   - **Keywords**: llmDialog, handler, derive, wish, ct-chat, ct-prompt-input,
-    ct-select, Stream, generateObject
+    cf-select, Stream, generateObject
 
 - cheeseboard.tsx: Fetch and display pizza schedule from web
   - **Data types**: array of tuples (date/pizza strings), web response object
@@ -69,23 +69,23 @@ keywords/features.
   - **Keywords**: handler, str template, derive (via pure function), cf-button,
     Stream
 
-- examples/ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
+- examples/cf-checkbox-cell.tsx: Checkbox component with bidirectional binding
   - **Data types**: boolean
-  - **Keywords**: ct-checkbox, $checked (bidirectional binding), handler
-    (optional), ifElse, onct-change
+  - **Keywords**: cf-checkbox, $checked (bidirectional binding), handler
+    (optional), ifElse, oncf-change
 
-- ct-checkbox-handler.tsx: Checkbox with explicit handler for state changes
+- cf-checkbox-handler.tsx: Checkbox with explicit handler for state changes
   - **Data types**: boolean
-  - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
+  - **Keywords**: cf-checkbox, handler, checked property, oncf-change, ifElse
 
 - examples/ct-render.tsx: Rendering sub-patterns with ct-render component
   - **Data types**: number (counter value)
   - **Keywords**: ct-render, $cell, nested patterns, pattern composition,
     handler
 
-- ct-select.tsx: Dropdown select component with various value types
+- cf-select.tsx: Dropdown select component with various value types
   - **Data types**: string, number
-  - **Keywords**: ct-select, $value (bidirectional binding), items (label/value
+  - **Keywords**: cf-select, $value (bidirectional binding), items (label/value
     objects)
 
 - examples/ct-tags.tsx: Tags input component

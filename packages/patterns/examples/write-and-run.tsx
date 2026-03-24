@@ -51,7 +51,7 @@ IMPORTANT RULES:
 2. Import from "commonfabric": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Writable<T[]> in the interface
-5. Use $checked, $value for bidirectional binding on ct-checkbox, cf-input
+5. Use $checked, $value for bidirectional binding on cf-checkbox, cf-input
 6. Use inline handlers for simple operations, handler() for complex ones
 7. Always return [NAME] and [UI] from the pattern
 8. Use computed() for derived values and data transformations

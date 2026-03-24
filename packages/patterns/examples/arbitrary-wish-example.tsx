@@ -32,8 +32,8 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: "Wish tester",
     [UI]: (
       <div>
-        <ct-checkbox $checked={searchHome}>Search Home</ct-checkbox>
-        <ct-checkbox $checked={searchSpace}>Search Space</ct-checkbox>
+        <cf-checkbox $checked={searchHome}>Search Home</cf-checkbox>
+        <cf-checkbox $checked={searchSpace}>Search Space</cf-checkbox>
         <cf-input $value={arbitraryDID} placeholder="did:key:..." />
         <hr />
         <cf-textarea $value={wishText} />

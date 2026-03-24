@@ -155,7 +155,7 @@ export const RelationshipModule = pattern<
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Closeness
             </label>
-            <ct-select $value={closeness} items={CLOSENESS_OPTIONS} />
+            <cf-select $value={closeness} items={CLOSENESS_OPTIONS} />
           </cf-vstack>
 
           {/* How we met */}

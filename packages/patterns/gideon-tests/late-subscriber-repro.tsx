@@ -62,8 +62,8 @@ export default pattern<Record<string, never>, Output>(() => {
 
           <cf-card>
             <cf-vstack gap="2">
-              <cf-heading level={4}>ct-checkbox</cf-heading>
-              <ct-checkbox $checked={checkboxValue}>Toggle me</ct-checkbox>
+              <cf-heading level={4}>cf-checkbox</cf-heading>
+              <cf-checkbox $checked={checkboxValue}>Toggle me</cf-checkbox>
               <p>
                 <strong>Interpolated:</strong> [{checkboxValue}]
               </p>

@@ -170,9 +170,9 @@ export default pattern<Input, Output>(
               {todos.map((todo) => (
                 <cf-card>
                   <cf-hstack gap="2" align="center">
-                    <ct-checkbox
+                    <cf-checkbox
                       checked={todo.done}
-                      onct-change={onToggle({ todo, edits })}
+                      oncf-change={onToggle({ todo, edits })}
                     />
                     <cf-input
                       $value={todo.description}

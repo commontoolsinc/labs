@@ -197,17 +197,17 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Checkbox states</p>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <ct-checkbox id="checkbox1"></ct-checkbox>
+              <cf-checkbox id="checkbox1"></cf-checkbox>
               <ct-label for="checkbox1">Unchecked by default</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <ct-checkbox id="checkbox2" checked></ct-checkbox>
+              <cf-checkbox id="checkbox2" checked></cf-checkbox>
               <ct-label for="checkbox2">Checked by default</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <ct-checkbox id="checkbox3" disabled></ct-checkbox>
+              <cf-checkbox id="checkbox3" disabled></cf-checkbox>
               <ct-label for="checkbox3" disabled>Disabled checkbox</ct-label>
             </div>
           </section>
@@ -218,17 +218,17 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Toggle switches</p>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <ct-switch id="switch1"></ct-switch>
+              <cf-switch id="switch1"></cf-switch>
               <ct-label for="switch1">Enable notifications</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <ct-switch id="switch2" checked></ct-switch>
+              <cf-switch id="switch2" checked></cf-switch>
               <ct-label for="switch2">Dark mode (on by default)</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <ct-switch id="switch3" disabled></ct-switch>
+              <cf-switch id="switch3" disabled></cf-switch>
               <ct-label for="switch3" disabled>Disabled switch</ct-label>
             </div>
           </section>
@@ -366,16 +366,16 @@ export default pattern(
             </p>
 
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-              <ct-toggle>Bold</ct-toggle>
-              <ct-toggle pressed>Italic</ct-toggle>
-              <ct-toggle>Underline</ct-toggle>
+              <cf-toggle>Bold</cf-toggle>
+              <cf-toggle pressed>Italic</cf-toggle>
+              <cf-toggle>Underline</cf-toggle>
             </div>
 
-            <ct-toggle-group type="single">
-              <ct-toggle value="left">Left</ct-toggle>
-              <ct-toggle value="center">Center</ct-toggle>
-              <ct-toggle value="right">Right</ct-toggle>
-            </ct-toggle-group>
+            <cf-toggle-group type="single">
+              <cf-toggle value="left">Left</cf-toggle>
+              <cf-toggle value="center">Center</cf-toggle>
+              <cf-toggle value="right">Right</cf-toggle>
+            </cf-toggle-group>
           </section>
 
           {/* Radio Component */}
@@ -385,20 +385,20 @@ export default pattern(
               Radio buttons with grouping
             </p>
 
-            <ct-radio-group name="options" value="option1">
+            <cf-radio-group name="options" value="option1">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <ct-radio id="radio1" value="option1"></ct-radio>
+                <cf-radio id="radio1" value="option1"></cf-radio>
                 <ct-label for="radio1">Option 1</ct-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <ct-radio id="radio2" value="option2"></ct-radio>
+                <cf-radio id="radio2" value="option2"></cf-radio>
                 <ct-label for="radio2">Option 2</ct-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <ct-radio id="radio3" value="option3"></ct-radio>
+                <cf-radio id="radio3" value="option3"></cf-radio>
                 <ct-label for="radio3">Option 3</ct-label>
               </div>
-            </ct-radio-group>
+            </cf-radio-group>
           </section>
 
           {/* Collapsible Component */}
@@ -450,7 +450,7 @@ export default pattern(
               Form wrapper with validation
             </p>
 
-            <ct-form>
+            <cf-form>
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
                 <div>
                   <ct-label for="form-name" required>Name</ct-label>
@@ -489,7 +489,7 @@ export default pattern(
               </div>
 
               <cf-button type="submit">Submit Form</cf-button>
-            </ct-form>
+            </cf-form>
           </section>
 
           {/* Input OTP Component */}

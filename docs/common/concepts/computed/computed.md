@@ -35,7 +35,7 @@ export default pattern<Input, Input>(({ items }) => {
           <div>
             <h3>{cat}</h3>
             {(grouped[cat] ?? []).map((item) => (
-              <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+              <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
             ))}
           </div>
         ))}

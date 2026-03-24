@@ -130,22 +130,22 @@ export class CFButton extends BaseElement {
       return;
     }
 
-    // For submit/reset types, we need to manually find the ancestor ct-form
+    // For submit/reset types, we need to manually find the ancestor cf-form
     // because the native button in our shadow DOM can't find forms across
     // shadow DOM boundaries
     if (this.type === "submit" || this.type === "reset") {
-      const ctForm = this.closest("ct-form") as
+      const cfForm = this.closest("cf-form") as
         | (Element & { submit(): void; reset(): void })
         | null;
-      if (ctForm) {
+      if (cfForm) {
         e.preventDefault(); // Prevent native form lookup (which would fail)
         if (this.type === "submit") {
-          ctForm.submit();
+          cfForm.submit();
         } else {
-          ctForm.reset();
+          cfForm.reset();
         }
       }
-      // If no ct-form found, let native behavior try (might work with light DOM forms)
+      // If no cf-form found, let native behavior try (might work with light DOM forms)
       return;
     }
   }

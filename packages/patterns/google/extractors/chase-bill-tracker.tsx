@@ -537,7 +537,7 @@ export default pattern<PatternInput>(
                   marginTop: "8px",
                 }}
               >
-                <ct-checkbox $checked={demoMode!} />
+                <cf-checkbox $checked={demoMode!} />
                 <span
                   style={{ fontSize: "11px", color: "#9ca3af" }}
                   title="Uses fake numbers for privacy"

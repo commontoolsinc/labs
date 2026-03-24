@@ -48,7 +48,7 @@ const createEmptyPerson = (): Person => ({
 });
 
 // Form submit handler - must be at module scope
-// ct-form flushes buffered values to bound cells before emitting ct-submit,
+// cf-form flushes buffered values to bound cells before emitting cf-submit,
 // so handlers read from the cells directly (type-safe, no reconstruction needed)
 const handleFormSubmit = handler<
   unknown,
@@ -98,8 +98,8 @@ export const EditPerson = pattern<
 
     return {
       [UI]: (
-        <ct-form
-          onct-submit={handleFormSubmit({
+        <cf-form
+          oncf-submit={handleFormSubmit({
             formData,
             people,
             editing,
@@ -139,7 +139,7 @@ export const EditPerson = pattern<
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Role
               </label>
-              <ct-select
+              <cf-select
                 name="role"
                 $value={formData.key("role")}
                 items={[
@@ -168,7 +168,7 @@ export const EditPerson = pattern<
               </cf-button>
             </cf-hstack>
           </cf-vstack>
-        </ct-form>
+        </cf-form>
       ),
     };
   },

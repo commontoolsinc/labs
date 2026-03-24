@@ -2865,10 +2865,10 @@ interface CFTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CFInputLegacyElement extends CTHTMLElement {}
-interface CTCheckboxElement extends CTHTMLElement {}
+interface CFCheckboxElement extends CTHTMLElement {}
 interface CTAutocompleteElement extends CTHTMLElement {}
-interface CTSelectElement extends CTHTMLElement {}
-interface CTRadioGroupElement extends CTHTMLElement {}
+interface CFSelectElement extends CTHTMLElement {}
+interface CFRadioGroupElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
@@ -2950,12 +2950,12 @@ interface CTAccordionElement extends CTHTMLElement {}
 interface CTAccordionItemElement extends CTHTMLElement {}
 
 // Form components
-interface CTFormElement extends CTHTMLElement {}
+interface CFFormElement extends CTHTMLElement {}
 interface CTSliderElement extends CTHTMLElement {}
-interface CTSwitchElement extends CTHTMLElement {}
-interface CTToggleElement extends CTHTMLElement {}
-interface CTToggleGroupElement extends CTHTMLElement {}
-interface CTRadioElement extends CTHTMLElement {}
+interface CFSwitchElement extends CTHTMLElement {}
+interface CFToggleElement extends CTHTMLElement {}
+interface CFToggleGroupElement extends CTHTMLElement {}
+interface CFRadioElement extends CTHTMLElement {}
 interface CTInputOtpElement extends CTHTMLElement {}
 interface CTLabelElement extends CTHTMLElement {}
 
@@ -3657,14 +3657,14 @@ interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "onct-error"?: EventHandler<any>;
 }
 
-interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "$checked"?: CellLike<boolean>;
   "checked"?: boolean;
   "disabled"?: boolean;
   "indeterminate"?: boolean;
   "name"?: string;
   "value"?: string;
-  "onct-change"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<any>;
 }
 
 interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
@@ -3683,14 +3683,14 @@ interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
   "onct-change"?: EventHandler<
     { value: string | string[]; oldValue: string | string[] }
   >;
-  "onct-select"?: EventHandler<
+  "oncf-select"?: EventHandler<
     { value: string; label: string; group?: string; isCustom: boolean }
   >;
   "onct-open"?: EventHandler<any>;
   "onct-close"?: EventHandler<any>;
 }
 
-interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSelectAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<any | any[]>;
   "items": { label: string; value: any }[];
   "multiple"?: boolean;
@@ -3699,19 +3699,21 @@ interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: number;
   "name"?: string;
   "placeholder"?: string;
-  "onct-change"?: EventHandler<
+  "oncf-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any | any[] }
   >;
+  "oncf-focus"?: EventHandler<any>;
+  "oncf-blur"?: EventHandler<any>;
 }
 
-interface CTRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<any>;
   "value"?: any;
   "items"?: { label: string; value: any; disabled?: boolean }[];
   "name"?: string;
   "disabled"?: boolean;
   "orientation"?: "vertical" | "horizontal";
-  "onct-change"?: EventHandler<
+  "oncf-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any; oldValue: any }
   >;
 }
@@ -3755,7 +3757,7 @@ interface CFHeadingAttributes<T> extends CTHTMLAttributes<T> {
 interface CTCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
   "open"?: boolean;
   "disabled"?: boolean;
-  "onct-toggle"?: any;
+  "oncf-toggle"?: any;
 }
 
 interface CTThemeAttributes<T> extends CTHTMLAttributes<T> {
@@ -3862,11 +3864,11 @@ interface CTAccordionItemAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Form component attributes
-interface CTFormAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFormAttributes<T> extends CTHTMLAttributes<T> {
   "method"?: "GET" | "POST" | CellLike<"GET" | "POST">;
   "action"?: string | CellLike<string>;
-  "onct-submit"?: EventHandler<any>;
-  "onct-form-invalid"?: EventHandler<{
+  "oncf-submit"?: EventHandler<any>;
+  "oncf-form-invalid"?: EventHandler<{
     errors: Array<{ element: HTMLElement; message?: string }>;
   }>;
 }
@@ -3885,38 +3887,38 @@ interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {
   "onct-change"?: EventHandler<{ value: number }>;
 }
 
-interface CTSwitchAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSwitchAttributes<T> extends CTHTMLAttributes<T> {
   "checked"?: boolean | CellLike<boolean>;
   "$checked"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "name"?: string | CellLike<string>;
   "value"?: string | CellLike<string>;
-  "onct-change"?: EventHandler<{ checked: boolean }>;
+  "oncf-change"?: EventHandler<{ checked: boolean }>;
 }
 
-interface CTToggleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToggleAttributes<T> extends CTHTMLAttributes<T> {
   "pressed"?: boolean | CellLike<boolean>;
   "$pressed"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "variant"?: "default" | "outline" | CellLike<"default" | "outline">;
   "size"?: "default" | "sm" | "lg" | CellLike<"default" | "sm" | "lg">;
-  "onct-change"?: EventHandler<{ pressed: boolean }>;
+  "oncf-change"?: EventHandler<{ pressed: boolean }>;
 }
 
-interface CTToggleGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToggleGroupAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
   "value"?: string | string[] | CellLike<string | string[]>;
   "$value"?: CellLike<string | string[]>;
   "disabled"?: boolean | CellLike<boolean>;
-  "onct-change"?: EventHandler<{ value: string | string[] }>;
+  "oncf-change"?: EventHandler<{ value: string | string[] }>;
 }
 
-interface CTRadioAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRadioAttributes<T> extends CTHTMLAttributes<T> {
   "checked"?: boolean | CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "value"?: string | CellLike<string>;
   "name"?: string | CellLike<string>;
-  "onct-change"?: EventHandler<{ checked: boolean; value: string }>;
+  "oncf-change"?: EventHandler<{ checked: boolean; value: string }>;
 }
 
 interface CTInputOtpAttributes<T> extends CTHTMLAttributes<T> {
@@ -4625,21 +4627,21 @@ declare global {
         CTImageInputAttributes<CTImageInputElement>,
         CTImageInputElement
       >;
-      "ct-checkbox": CTDOM.DetailedHTMLProps<
-        CTCheckboxAttributes<CTCheckboxElement>,
-        CTCheckboxElement
+      "cf-checkbox": CTDOM.DetailedHTMLProps<
+        CFCheckboxAttributes<CFCheckboxElement>,
+        CFCheckboxElement
       >;
       "ct-autocomplete": CTDOM.DetailedHTMLProps<
         CTAutocompleteAttributes<CTAutocompleteElement>,
         CTAutocompleteElement
       >;
-      "ct-select": CTDOM.DetailedHTMLProps<
-        CTSelectAttributes<CTSelectElement>,
-        CTSelectElement
+      "cf-select": CTDOM.DetailedHTMLProps<
+        CFSelectAttributes<CFSelectElement>,
+        CFSelectElement
       >;
-      "ct-radio-group": CTDOM.DetailedHTMLProps<
-        CTRadioGroupAttributes<CTRadioGroupElement>,
-        CTRadioGroupElement
+      "cf-radio-group": CTDOM.DetailedHTMLProps<
+        CFRadioGroupAttributes<CFRadioGroupElement>,
+        CFRadioGroupElement
       >;
       "ct-picker": CTDOM.DetailedHTMLProps<
         CTPickerAttributes<CTPickerElement>,
@@ -4907,33 +4909,33 @@ declare global {
       >;
 
       // Form components
-      "ct-form": CTDOM.DetailedHTMLProps<
-        CTFormAttributes<CTFormElement>,
-        CTFormElement
+      "cf-form": CTDOM.DetailedHTMLProps<
+        CFFormAttributes<CFFormElement>,
+        CFFormElement
       >;
       "ct-slider": CTDOM.DetailedHTMLProps<
         CTSliderAttributes<CTSliderElement>,
         CTSliderElement
       >;
-      "ct-switch": CTDOM.DetailedHTMLProps<
-        CTSwitchAttributes<CTSwitchElement>,
-        CTSwitchElement
+      "cf-switch": CTDOM.DetailedHTMLProps<
+        CFSwitchAttributes<CFSwitchElement>,
+        CFSwitchElement
       >;
       "ct-svg": CTDOM.DetailedHTMLProps<
         CTSvgAttributes<CTSvgElement>,
         CTSvgElement
       >;
-      "ct-toggle": CTDOM.DetailedHTMLProps<
-        CTToggleAttributes<CTToggleElement>,
-        CTToggleElement
+      "cf-toggle": CTDOM.DetailedHTMLProps<
+        CFToggleAttributes<CFToggleElement>,
+        CFToggleElement
       >;
-      "ct-toggle-group": CTDOM.DetailedHTMLProps<
-        CTToggleGroupAttributes<CTToggleGroupElement>,
-        CTToggleGroupElement
+      "cf-toggle-group": CTDOM.DetailedHTMLProps<
+        CFToggleGroupAttributes<CFToggleGroupElement>,
+        CFToggleGroupElement
       >;
-      "ct-radio": CTDOM.DetailedHTMLProps<
-        CTRadioAttributes<CTRadioElement>,
-        CTRadioElement
+      "cf-radio": CTDOM.DetailedHTMLProps<
+        CFRadioAttributes<CFRadioElement>,
+        CFRadioElement
       >;
       "ct-input-otp": CTDOM.DetailedHTMLProps<
         CTInputOtpAttributes<CTInputOtpElement>,

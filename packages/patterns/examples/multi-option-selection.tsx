@@ -19,18 +19,18 @@ type Result = {
 export default pattern<Input, Result>(
   ({ selected, numericChoice, category, activeTab }) => {
     return {
-      [NAME]: "ct-select demo",
+      [NAME]: "cf-select demo",
       [UI]: (
         <cf-vstack gap="3" style={{ padding: "1rem" }}>
-          <h3>ct-select Component Demo</h3>
+          <h3>cf-select Component Demo</h3>
 
           <cf-card>
             <h4>String Values</h4>
             <p>
-              ct-select uses an `items` attribute with {`{label, value}`}{" "}
+              cf-select uses an `items` attribute with {`{label, value}`}{" "}
               objects
             </p>
-            <ct-select
+            <cf-select
               items={[
                 { label: "Option 1", value: "opt_1" },
                 { label: "Option 2", value: "opt_2" },
@@ -57,9 +57,9 @@ export default pattern<Input, Result>(
 
           <cf-card>
             <h4>
-              <code>ct-radio-group</code>
+              <code>cf-radio-group</code>
             </h4>
-            <ct-radio-group
+            <cf-radio-group
               $value={selected}
               items={[
                 { label: "Option 1", value: "opt_1" },
@@ -73,7 +73,7 @@ export default pattern<Input, Result>(
           <cf-card>
             <h4>Numeric Values</h4>
             <p>Values can be any type, not just strings</p>
-            <ct-select
+            <cf-select
               items={[
                 { label: "First Item", value: 1 },
                 { label: "Second Item", value: 2 },
@@ -86,7 +86,7 @@ export default pattern<Input, Result>(
 
           <cf-card>
             <h4>Common Categories Example</h4>
-            <ct-select
+            <cf-select
               $value={category}
               items={[
                 { label: "Produce", value: "Produce" },

@@ -312,26 +312,26 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Input Components
 
-- input: `cf-button`, `ct-select`, `cf-input`, `cf-textarea`, `ct-checkbox`, `ct-tags`
+- input: `cf-button`, `cf-select`, `cf-input`, `cf-textarea`, `cf-checkbox`, `ct-tags`
 	- gap: `ct-search` which has an autocomplete menu
 	- gap: `ct-file-picker`
 	- redundant: common-send-message, cf-message-input (?)
 	    - this is JUST a button and an input
 		- the "right" way is:
       - ```{code-block} html
-        <ct-form onSubmit={handler({ ... })}>
+        <cf-form oncf-submit={handler({ ... })}>
           <cf-input></cf-input>
           <cf-button type="submit">Submit</cf-button>
-        </ct-form>
+        </cf-form>
         ```
 
       - ```{code-block} typescript
         const EnterToSubmit = pattern(({ myHandler }) => {
           return {
-              [UI]: <ct-form onSubmit={myHandler}>
+              [UI]: <cf-form oncf-submit={myHandler}>
                 <cf-input></cf-input>
                 <cf-button type="submit">Submit</cf-button>
-              </ct-form>
+              </cf-form>
           }
         })
 
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `cf-vgroup`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `cf-radio`, `cf-radio-group`, `ct-slider`, `cf-switch`, `ct-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

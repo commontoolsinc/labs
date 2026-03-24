@@ -201,13 +201,13 @@ export default pattern<ContactBookInput, ContactBookOutput>(
             </cf-hstack>
 
             <cf-hstack gap="2">
-              <ct-select
+              <cf-select
                 $value={newRelationFrom}
                 items={contactSelectItems}
                 placeholder="From..."
                 style="flex: 1;"
               />
-              <ct-select
+              <cf-select
                 $value={newRelationTo}
                 items={contactSelectItems}
                 placeholder="To..."

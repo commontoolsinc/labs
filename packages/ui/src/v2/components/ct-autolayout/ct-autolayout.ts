@@ -453,7 +453,7 @@ export class CTAutoLayout extends BaseElement {
         // Emit change events so hosts can react even on attribute changes.
         if (changed.has("leftOpen")) {
           this.dispatchEvent(
-            new CustomEvent("ct-toggle-left", {
+            new CustomEvent("cf-toggle-left", {
               bubbles: true,
               composed: true,
               detail: { open: this.leftOpen },
@@ -462,7 +462,7 @@ export class CTAutoLayout extends BaseElement {
         }
         if (changed.has("rightOpen")) {
           this.dispatchEvent(
-            new CustomEvent("ct-toggle-right", {
+            new CustomEvent("cf-toggle-right", {
               bubbles: true,
               composed: true,
               detail: { open: this.rightOpen },
@@ -502,7 +502,7 @@ export class CTAutoLayout extends BaseElement {
         this.rightOpen = false;
       }
       this.dispatchEvent(
-        new CustomEvent("ct-toggle-left", {
+        new CustomEvent("cf-toggle-left", {
           bubbles: true,
           composed: true,
           detail: { open: this.leftOpen },
@@ -520,7 +520,7 @@ export class CTAutoLayout extends BaseElement {
         this.leftOpen = false;
       }
       this.dispatchEvent(
-        new CustomEvent("ct-toggle-right", {
+        new CustomEvent("cf-toggle-right", {
           bubbles: true,
           composed: true,
           detail: { open: this.rightOpen },

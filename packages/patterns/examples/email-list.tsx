@@ -35,7 +35,7 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: computed(() => "Email list (" + emails.length + ")"),
     [UI]: (
       <div>
-        <ct-select
+        <cf-select
           items={people.map((p) => ({
             label: p[NAME],
             value: p,

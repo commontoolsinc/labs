@@ -251,7 +251,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
               placeholder="Author..."
               style="width: 150px;"
             />
-            <ct-select
+            <cf-select
               $value={newType}
               items={[
                 { label: "📄 Article", value: "article" },

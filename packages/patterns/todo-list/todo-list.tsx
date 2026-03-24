@@ -51,7 +51,7 @@ export const TodoItemPiece = pattern<
     [UI]: (
       <cf-card>
         <cf-hstack gap="2" align="center">
-          <ct-checkbox $checked={item.done} />
+          <cf-checkbox $checked={item.done} />
           <cf-input
             $value={item.title}
             style="flex: 1;"
@@ -76,7 +76,7 @@ const CompletedTodoItem = pattern<
     [UI]: (
       <cf-card style="opacity: 0.7;">
         <cf-hstack gap="2" align="center">
-          <ct-checkbox $checked={item.done} />
+          <cf-checkbox $checked={item.done} />
           <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
             {item.title}
           </span>

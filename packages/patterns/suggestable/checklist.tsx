@@ -92,7 +92,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
               <div>
                 {items.map((item) => (
                   <cf-hstack gap="2" align="center">
-                    <ct-checkbox $checked={item.done}>{item.label}</ct-checkbox>
+                    <cf-checkbox $checked={item.done}>{item.label}</cf-checkbox>
                   </cf-hstack>
                 ))}
               </div>,

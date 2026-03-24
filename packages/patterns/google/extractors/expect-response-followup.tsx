@@ -900,7 +900,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({dueCount} due / {threadCount} total)
             </span>
-            <ct-checkbox $checked={sortOldestFirst}>Oldest first</ct-checkbox>
+            <cf-checkbox $checked={sortOldestFirst}>Oldest first</cf-checkbox>
           </cf-hstack>
         </div>
 

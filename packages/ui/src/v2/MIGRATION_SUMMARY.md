@@ -15,12 +15,12 @@
 2. **ct-collapsible** - Expandable/collapsible content section
 3. **ct-progress** - Progress bar with determinate/indeterminate states
 4. **ct-input-otp** - One-time password input with individual digits
-5. **ct-radio-group** - Radio button group container
+5. **cf-radio-group** - Radio button group container
 
 ### Interactive Components (3)
 
-1. **ct-toggle** - Toggle button with pressed state
-2. **ct-toggle-group** - Toggle group for single/multiple selection
+1. **cf-toggle** - Toggle button with pressed state
+2. **cf-toggle-group** - Toggle group for single/multiple selection
 3. **ct-scroll-area** - Custom scrollable area with styled scrollbars
 
 ## Migration Pattern Applied

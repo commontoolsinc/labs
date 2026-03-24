@@ -1301,7 +1301,7 @@ describe("bidirectional binding validation", () => {
 
   it("throws when $checked is a primitive boolean", () => {
     assert.throws(
-      () => h("ct-checkbox", { $checked: true }),
+      () => h("cf-checkbox", { $checked: true }),
       "Should throw for primitive boolean $checked",
     );
   });
@@ -1369,7 +1369,7 @@ describe("bidirectional binding validation", () => {
   it("error message mentions $checked property name", () => {
     let errorMessage = "";
     try {
-      h("ct-checkbox", { $checked: false });
+      h("cf-checkbox", { $checked: false });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
@@ -1383,12 +1383,12 @@ describe("bidirectional binding validation", () => {
   it("error message for $checked includes checkbox example", () => {
     let errorMessage = "";
     try {
-      h("ct-checkbox", { $checked: false });
+      h("cf-checkbox", { $checked: false });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
     assert.equal(
-      errorMessage.includes("ct-checkbox"),
+      errorMessage.includes("cf-checkbox"),
       true,
       "Error message for $checked should include checkbox example",
     );

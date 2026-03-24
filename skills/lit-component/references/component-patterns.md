@@ -93,7 +93,7 @@ export class CTSeparator extends BaseElement {
 
 Components that capture user input.
 
-**Examples:** `cf-button`, `cf-input`, `ct-checkbox`, `cf-textarea`
+**Examples:** `cf-button`, `cf-input`, `cf-checkbox`, `cf-textarea`
 
 **Characteristics:**
 
@@ -362,7 +362,7 @@ Document events in JSDoc:
 ```typescript
 /**
  * @fires ct-change - Fired when value changes with detail: { value }
- * @fires ct-submit - Fired when form is submitted with detail: { formData }
+ * @fires cf-submit - Fired when form is submitted with detail: { formData }
  */
 ```
 

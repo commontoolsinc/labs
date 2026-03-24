@@ -519,7 +519,7 @@ const Profile = pattern<ProfileInput, Output>(
                       </cf-vstack>
                       <cf-vstack style={{ gap: "4px", width: "120px" }}>
                         <label style={labelStyle}>Relationship</label>
-                        <ct-select
+                        <cf-select
                           $value={partner.key("relationship")}
                           items={RELATIONSHIP_OPTIONS}
                         />
@@ -684,7 +684,7 @@ const Profile = pattern<ProfileInput, Output>(
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
-                              <ct-select
+                              <cf-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
@@ -767,7 +767,7 @@ const Profile = pattern<ProfileInput, Output>(
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
-                              <ct-select
+                              <cf-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
@@ -844,7 +844,7 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", width: "100px" }}>
                               <label style={labelStyle}>Label</label>
-                              <ct-select
+                              <cf-select
                                 $value={addr.label}
                                 items={ADDRESS_LABELS}
                               />
@@ -1129,12 +1129,12 @@ const Profile = pattern<ProfileInput, Output>(
                             </button>
                           </cf-hstack>
                           <cf-hstack style={{ gap: "16px" }}>
-                            <ct-checkbox $checked={b.hasCheckingAccount}>
+                            <cf-checkbox $checked={b.hasCheckingAccount}>
                               Checking Account
-                            </ct-checkbox>
-                            <ct-checkbox $checked={b.hasCreditCard}>
+                            </cf-checkbox>
+                            <cf-checkbox $checked={b.hasCreditCard}>
                               Credit Card
-                            </ct-checkbox>
+                            </cf-checkbox>
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>

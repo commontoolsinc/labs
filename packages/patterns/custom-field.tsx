@@ -209,7 +209,7 @@ export const CustomFieldModule = pattern<
           </cf-vstack>
           <cf-vstack style={{ width: "110px", gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Type</label>
-            <ct-select $value={valueType} items={VALUE_TYPE_OPTIONS} />
+            <cf-select $value={valueType} items={VALUE_TYPE_OPTIONS} />
           </cf-vstack>
         </cf-hstack>
 

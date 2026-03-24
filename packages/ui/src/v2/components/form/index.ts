@@ -1,11 +1,11 @@
-import { CTForm } from "./ct-form.ts";
+import { CFForm } from "./cf-form.ts";
 
-if (!customElements.get("ct-form")) {
-  customElements.define("ct-form", CTForm);
+if (!customElements.get("cf-form")) {
+  customElements.define("cf-form", CFForm);
 }
 
-export { CTForm };
-export type { CTForm as CTFormElement };
+export { CFForm };
+export type { CFForm as CFFormElement };
 
 // Re-export form context types and utilities
 export {

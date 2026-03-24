@@ -7,13 +7,13 @@ interface State {
 // FIXTURE: handler-event-param
 // Verifies: inline handler with a named event parameter generates event + capture schemas
 //   onct-change={(event) => ...} → handler(event schema with detail.value, capture schema, (event, { state }) => ...)({ state })
-// Context: Typed ct-select event; event param is not destructured, used as event.detail.value
+// Context: Typed cf-select event; event param is not destructured, used as event.detail.value
 export default pattern((state) => {
     return {
-        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
+        [UI]: (<cf-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} onct-change={__ctHelpers.handler({
+            ]} oncf-change={__ctHelpers.handler({
             type: "object",
             properties: {
                 detail: {

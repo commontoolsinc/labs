@@ -1344,7 +1344,7 @@ const _selectSuggestion = handler<
   input.set("");
 });
 
-// Handler for ct-autocomplete's ct-select event
+// Handler for ct-autocomplete's cf-select event
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
@@ -1473,7 +1473,7 @@ export const DietaryRestrictionsModule = pattern<
     return raw.filter((item) => item != null).length > 0;
   });
 
-  // Level options for ct-select
+  // Level options for cf-select
   const levelOptions = [
     { value: "flexible", label: "Flexible" },
     { value: "prefer", label: "Prefer" },
@@ -1491,11 +1491,11 @@ export const DietaryRestrictionsModule = pattern<
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom
-            onct-select={onSelectRestriction({ restrictions, selectedLevel })}
+            oncf-select={onSelectRestriction({ restrictions, selectedLevel })}
             style="flex: 1;"
           />
 
-          <ct-select
+          <cf-select
             $value={selectedLevel}
             items={levelOptions}
             style="width: 120px;"
@@ -1532,7 +1532,7 @@ export const DietaryRestrictionsModule = pattern<
                         whiteSpace: "nowrap",
                       }}
                     >
-                      <ct-select
+                      <cf-select
                         $value={item.level}
                         items={levelOptions}
                         style={{

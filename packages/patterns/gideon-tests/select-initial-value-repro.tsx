@@ -2,16 +2,16 @@
 import { NAME, pattern, UI, Writable } from "commonfabric";
 
 /**
- * Reproduction case for ct-select not displaying initial values from backend.
+ * Reproduction case for cf-select not displaying initial values from backend.
  *
- * Bug: When a ct-select is bound to a cell via $value, the dropdown would show
+ * Bug: When a cf-select is bound to a cell via $value, the dropdown would show
  * the placeholder "-" instead of the actual cell value on initial page load.
  * The value was present in the cell, but the component's onChange callback
  * wasn't being called when the subscription received backend updates.
  *
  * Root cause: CellController._setupCellSubscription() only called
  * host.requestUpdate() when cell values changed, but didn't call the onChange
- * callback. Components like ct-select rely on onChange to sync their DOM state.
+ * callback. Components like cf-select rely on onChange to sync their DOM state.
  *
  * Fix: In cell-controller.ts, the subscription callback now calls onChange
  * when the cell value changes from the backend.
@@ -41,7 +41,7 @@ export default pattern<Record<string, never>, Output>(() => {
           <cf-card>
             <cf-vstack gap="2">
               <cf-heading level={4}>Type Select</cf-heading>
-              <ct-select
+              <cf-select
                 $value={type}
                 items={[
                   { label: "📄 Article", value: "article" },
@@ -59,7 +59,7 @@ export default pattern<Record<string, never>, Output>(() => {
           <cf-card>
             <cf-vstack gap="2">
               <cf-heading level={4}>Status Select</cf-heading>
-              <ct-select
+              <cf-select
                 $value={status}
                 items={[
                   { label: "Want to read", value: "want" },

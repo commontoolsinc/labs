@@ -315,7 +315,7 @@ const addSelectedToNotebook = handler<
     pendingNotebookAction,
   },
 ) => {
-  // Handle both native select (target.value) and ct-select (detail.value)
+  // Handle both native select (target.value) and cf-select (detail.value)
   const value = event.target?.value ?? event.detail?.value ?? "";
   if (!value) return;
 
@@ -874,8 +874,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       };
     });
 
-    // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
-    // ct-select has proper bidirectional DOM sync, unlike native <select>
+    // Computed items for cf-select dropdowns (notebooks + "New Notebook...")
+    // cf-select has proper bidirectional DOM sync, unlike native <select>
     const notebookSelectItems = computed(() => [
       ...notebooks.map((nb, idx: number) => ({
         label: nb?.[NAME] ?? "Untitled",
@@ -1166,7 +1166,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                   lastSelectedNoteIndex,
                                 })}
                               >
-                                <ct-checkbox
+                                <cf-checkbox
                                   checked={computed(() =>
                                     selectedNoteIndices.get().includes(index)
                                   )}
@@ -1235,7 +1235,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     >
                       {/* Checkbox column (32px + 4px padding) */}
                       <div style={{ width: "32px", padding: "0 4px" }}>
-                        <ct-checkbox
+                        <cf-checkbox
                           checked={computed(() => notes.get().length > 0 &&
                             selectedNoteIndices.get().length ===
                               notes.get().length
@@ -1269,7 +1269,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       {selectedCount} selected
                     </span>
                     <span style={{ flex: 1 }} />
-                    <ct-select
+                    <cf-select
                       $value={selectedAddNotebook}
                       items={notebookSelectItems}
                       placeholder="Add to notebook..."
@@ -1283,7 +1283,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                         pendingNotebookAction,
                       })}
                     />
-                    <ct-select
+                    <cf-select
                       $value={selectedMoveNotebook}
                       items={notebookSelectItems}
                       placeholder="Move to..."

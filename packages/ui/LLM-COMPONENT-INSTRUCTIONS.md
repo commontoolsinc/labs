@@ -49,9 +49,9 @@ shadcn/ui design system. All components:
 - `pattern` - string
 - `autocomplete` - string **Events**:
 - `cf-input` - Fired on input with detail: `{ value, name }`
-- `ct-change` - Fired on change with detail: `{ value, name }`
-- `ct-focus` - Fired on focus
-- `ct-blur` - Fired on blur **Example**:
+- `cf-change` - Fired on change with detail: `{ value, name }`
+- `cf-focus` - Fired on focus
+- `cf-blur` - Fired on blur **Example**:
 
 ```html
 <cf-input type="email" placeholder="Enter email" required></cf-input>
@@ -72,15 +72,15 @@ shadcn/ui design system. All components:
 - `maxlength` - number
 - `auto-resize` - boolean **Events**:
 - `cf-input` - Fired on input with detail: `{ value, name }`
-- `ct-change` - Fired on change with detail: `{ value, name }` **Example**:
+- `cf-change` - Fired on change with detail: `{ value, name }` **Example**:
 
 ```html
 <cf-textarea rows="4" placeholder="Enter message" auto-resize></cf-textarea>
 ```
 
-### 4. ct-checkbox
+### 4. cf-checkbox
 
-**Purpose**: Binary selection input **Tag**: `<ct-checkbox>` **Attributes**:
+**Purpose**: Binary selection input **Tag**: `<cf-checkbox>` **Attributes**:
 
 - `checked` - boolean
 - `disabled` - boolean
@@ -88,55 +88,55 @@ shadcn/ui design system. All components:
 - `value` - string
 - `required` - boolean
 - `indeterminate` - boolean **Events**:
-- `ct-change` - Fired on change with detail: `{ checked, indeterminate }`
+- `cf-change` - Fired on change with detail: `{ checked, indeterminate }`
 
 **Example**:
 
 ```html
-<ct-checkbox name="terms" checked>Accept terms</ct-checkbox>
+<cf-checkbox name="terms" checked>Accept terms</cf-checkbox>
 ```
 
-### 5. ct-radio
+### 5. cf-radio
 
-**Purpose**: Single selection from group **Tag**: `<ct-radio>` **Attributes**:
+**Purpose**: Single selection from group **Tag**: `<cf-radio>` **Attributes**:
 
 - `checked` - boolean
 - `disabled` - boolean
 - `name` - string (required for grouping)
 - `value` - string (required)
 - `required` - boolean **Events**:
-- `ct-change` - Fired on change with detail: `{ value, checked }` **Note**: Must
-  be used within `ct-radio-group` for proper functionality **Example**:
+- `cf-change` - Fired on change with detail: `{ value, checked }` **Note**: Must
+  be used within `cf-radio-group` for proper functionality **Example**:
 
 ```html
-<ct-radio-group name="color" value="blue">
-  <ct-radio value="red">Red</ct-radio>
-  <ct-radio value="blue">Blue</ct-radio>
-</ct-radio-group>
+<cf-radio-group name="color" value="blue">
+  <cf-radio value="red">Red</cf-radio>
+  <cf-radio value="blue">Blue</cf-radio>
+</cf-radio-group>
 ```
 
-### 6. ct-radio-group
+### 6. cf-radio-group
 
-**Purpose**: Container for radio buttons **Tag**: `<ct-radio-group>`
+**Purpose**: Container for radio buttons **Tag**: `<cf-radio-group>`
 **Attributes**:
 
 - `name` - string (required)
 - `value` - string (currently selected value)
 - `disabled` - boolean **Events**:
-- `ct-change` - Fired when selection changes with detail: `{ value }` **Slots**:
-  Default slot for ct-radio elements
+- `cf-change` - Fired when selection changes with detail: `{ value }` **Slots**:
+  Default slot for cf-radio elements
 
-### 7. ct-switch
+### 7. cf-switch
 
-**Purpose**: Toggle switch **Tag**: `<ct-switch>` **Attributes**:
+**Purpose**: Toggle switch **Tag**: `<cf-switch>` **Attributes**:
 
 - `checked` - boolean
 - `disabled` - boolean
 - `name` - string **Events**:
-- `ct-change` - Fired on toggle with detail: `{ checked }` **Example**:
+- `cf-change` - Fired on toggle with detail: `{ checked }` **Example**:
 
 ```html
-<ct-switch name="notifications" checked>Enable notifications</ct-switch>
+<cf-switch name="notifications" checked>Enable notifications</cf-switch>
 ```
 
 ### 8. ct-slider
@@ -155,32 +155,32 @@ shadcn/ui design system. All components:
 <ct-slider min="0" max="100" value="50" step="5"></ct-slider>
 ```
 
-### 9. ct-toggle
+### 9. cf-toggle
 
-**Purpose**: Toggle button **Tag**: `<ct-toggle>` **Attributes**:
+**Purpose**: Toggle button **Tag**: `<cf-toggle>` **Attributes**:
 
 - `pressed` - boolean
 - `disabled` - boolean
 - `variant` - "default" | "outline"
 - `size` - "default" | "sm" | "lg"
 - `value` - string (for toggle groups) **Events**:
-- `ct-change` - Fired on toggle with detail: `{ pressed }` **Slots**: Default
+- `cf-change` - Fired on toggle with detail: `{ pressed }` **Slots**: Default
   slot for content **Example**:
 
 ```html
-<ct-toggle pressed>Bold</ct-toggle>
+<cf-toggle pressed>Bold</cf-toggle>
 ```
 
-### 10. ct-toggle-group
+### 10. cf-toggle-group
 
-**Purpose**: Group of toggle buttons **Tag**: `<ct-toggle-group>`
+**Purpose**: Group of toggle buttons **Tag**: `<cf-toggle-group>`
 **Attributes**:
 
 - `type` - "single" | "multiple"
 - `value` - string (for single) | string[] (for multiple)
 - `disabled` - boolean **Events**:
-- `ct-change` - Fired on selection change with detail: `{ value }` **Slots**:
-  Default slot for ct-toggle elements
+- `cf-change` - Fired on selection change with detail: `{ value }` **Slots**:
+  Default slot for cf-toggle elements
 
 ### 11. ct-label
 
@@ -317,7 +317,7 @@ shadcn/ui design system. All components:
 
 - `open` - boolean
 - `disabled` - boolean **Events**:
-- `ct-toggle` - Fired on open/close with detail: `{ open }` **Slots**:
+- `cf-toggle` - Fired on open/close with detail: `{ open }` **Slots**:
 - `trigger` - Clickable trigger element
 - `content` - Collapsible content
 
@@ -388,15 +388,15 @@ Default slot for ct-tab elements
 </ct-aspect-ratio>
 ```
 
-### 27. ct-form
+### 27. cf-form
 
-**Purpose**: Form wrapper with validation **Tag**: `<ct-form>` **Attributes**:
+**Purpose**: Form wrapper with validation **Tag**: `<cf-form>` **Attributes**:
 
 - `action` - string
 - `method` - string
 - `novalidate` - boolean **Events**:
-- `ct-submit` - Fired on valid submission with detail: `{ formData }`
-- `ct-invalid` - Fired on validation failure with detail: `{ errors }`
+- `cf-submit` - Fired on valid submission with detail: `{ formData }`
+- `cf-form-invalid` - Fired on validation failure with detail: `{ errors }`
 
 **Slots**: Default slot for form elements **Methods**:
 
@@ -573,7 +573,7 @@ Same as cf-hstack **Example**:
 ### Form Example
 
 ```html
-<ct-form>
+<cf-form>
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
       <ct-label for="name" required>Full Name</ct-label>
@@ -595,7 +595,7 @@ Same as cf-hstack **Example**:
       <cf-button type="submit">Submit</cf-button>
     </cf-hstack>
   </cf-vstack>
-</ct-form>
+</cf-form>
 ```
 
 ### Dashboard Layout Example
@@ -639,11 +639,11 @@ document.querySelector("cf-button").addEventListener("ct-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 
-document.querySelector("cf-input").addEventListener("ct-change", (e) => {
+document.querySelector("cf-input").addEventListener("cf-change", (e) => {
   console.log("Input value:", e.detail.value);
 });
 
-document.querySelector("ct-form").addEventListener("ct-submit", (e) => {
+document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
   e.preventDefault();
   console.log("Form data:", e.detail.formData);
 });

@@ -489,7 +489,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                 {items.map((item) => (
                   <cf-card>
                     <cf-hstack gap="2" align="center">
-                      <ct-checkbox $checked={item.done} />
+                      <cf-checkbox $checked={item.done} />
                       <cf-input
                         $value={item.title}
                         placeholder="Enter item..."
@@ -546,7 +546,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                 {itemsWithAisles.map((itemWithAisle) => (
                   <cf-card>
                     <cf-hstack gap="2" align="center">
-                      <ct-checkbox $checked={itemWithAisle.item.done} />
+                      <cf-checkbox $checked={itemWithAisle.item.done} />
                       <div
                         style={{
                           flex: 1,

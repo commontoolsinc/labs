@@ -28,7 +28,7 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @csspart content - The markdown content wrapper
  *
- * @fires ct-checkbox-change - Fired when a task list checkbox is toggled. Detail: { index: number, checked: boolean }
+ * @fires cf-checkbox-change - Fired when a task list checkbox is toggled. Detail: { index: number, checked: boolean }
  *
  * @cssprop [--ct-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
  * @cssprop [--ct-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
@@ -575,7 +575,7 @@ export class CTMarkdown extends BaseElement {
     const checked = checkbox.checked;
 
     this.dispatchEvent(
-      new CustomEvent("ct-checkbox-change", {
+      new CustomEvent("cf-checkbox-change", {
         detail: { index, checked },
         bubbles: true,
         composed: true,

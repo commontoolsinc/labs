@@ -131,7 +131,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
           {/* Markdown content with wiki-links converted to clickable links */}
           <ct-markdown
             content={processedContent}
-            onct-checkbox-change={handleCheckboxToggle}
+            oncf-checkbox-change={handleCheckboxToggle}
           />
 
           {/* Backlinks section - ct-chips at bottom */}

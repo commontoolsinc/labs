@@ -67,9 +67,9 @@ export default pattern<Input>(({ items }) => {
           </p>
           {items.map((item) => (
             <div style={{ marginBottom: "0.25rem" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 {item.title} {item.active ? "" : "(inactive)"}
-              </ct-checkbox>
+              </cf-checkbox>
             </div>
           ))}
         </div>
@@ -90,9 +90,9 @@ export default pattern<Input>(({ items }) => {
           </p>
           {activeItems.map((item) => (
             <div style={{ marginBottom: "0.25rem" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 {item.title}
-              </ct-checkbox>
+              </cf-checkbox>
             </div>
           ))}
         </div>

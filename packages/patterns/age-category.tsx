@@ -217,11 +217,11 @@ export const AgeCategoryModule = pattern<
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Age Group
           </label>
-          <ct-radio-group
+          <cf-radio-group
             orientation="horizontal"
             items={ageGroupOptions}
             value={currentGroup}
-            onct-change={handleGroupChange({ ageCategory })}
+            oncf-change={handleGroupChange({ ageCategory })}
           />
         </cf-vstack>
 
@@ -230,7 +230,7 @@ export const AgeCategoryModule = pattern<
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Specific Category
           </label>
-          <ct-select $value={ageCategory} items={categoryOptions} />
+          <cf-select $value={ageCategory} items={categoryOptions} />
         </cf-vstack>
       </cf-vstack>
     ),

@@ -308,7 +308,7 @@ export default pattern((__ct_pattern_input) => {
                         const assignment = __ct_pattern_input.key("element");
                         return (<div>
                   <span>{assignment.key("item", "name")}</span>
-                  <ct-checkbox $checked={assignment.key("item", "done")}/>
+                  <cf-checkbox $checked={assignment.key("item", "done")}/>
                 </div>);
                     }, {
                         type: "object",

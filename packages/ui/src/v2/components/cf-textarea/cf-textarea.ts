@@ -302,7 +302,7 @@ export class CFTextarea extends BaseElement {
           },
         });
 
-        // Form field controller handles buffering when in ct-form context
+        // Form field controller handles buffering when in cf-form context
         private _formField = createFormFieldController<string>(this, {
           cellController: this._cellController,
           validate: () => ({

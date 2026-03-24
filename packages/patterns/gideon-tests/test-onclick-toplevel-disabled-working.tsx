@@ -84,13 +84,13 @@ export default pattern<State>(({ count, pending, isProcessing }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={pending}>Simulate pending state</ct-checkbox>
+          <cf-checkbox $checked={pending}>Simulate pending state</cf-checkbox>
         </div>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={isProcessing}>
+          <cf-checkbox $checked={isProcessing}>
             Simulate processing state
-          </ct-checkbox>
+          </cf-checkbox>
         </div>
 
         {/* WORKING: Button always rendered at top level */}

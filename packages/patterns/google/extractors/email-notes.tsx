@@ -343,7 +343,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({noteCount} notes)
             </span>
-            <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
+            <cf-checkbox $checked={sortNewestFirst}>Newest first</cf-checkbox>
           </cf-hstack>
         </div>
 
