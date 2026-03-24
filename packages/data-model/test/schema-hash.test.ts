@@ -29,13 +29,13 @@ describe("schema-hash dispatch", () => {
   // -------------------------------------------------------------------------
 
   describe("legacy path (modernSchemaHash OFF)", () => {
-    it("hashSchema returns a FabricHash", () => {
+    it("hashSchema returns a string", () => {
       setSchemaHashConfig(false);
       const result = hashSchema({ type: "number" });
-      assert(result instanceof FabricHash);
+      assertStrictEquals(typeof result, "string");
     });
 
-    it("hashSchema is deterministic (same input produces same toString())", () => {
+    it("hashSchema is deterministic (same input produces same result)", () => {
       setSchemaHashConfig(false);
       const schema: JSONSchema = {
         type: "object",
@@ -43,50 +43,41 @@ describe("schema-hash dispatch", () => {
       };
       const a = hashSchema(schema);
       const b = hashSchema(schema);
-      assert(a.toString() === b.toString());
+      assertStrictEquals(a, b);
     });
 
     it("hashSchema produces different results for different schemas", () => {
       setSchemaHashConfig(false);
       const a = hashSchema({ type: "number" });
       const b = hashSchema({ type: "string" });
-      assertNotEquals(a.toString(), b.toString());
+      assertNotEquals(a, b);
     });
 
     it("hashSchema is key-order independent", () => {
       setSchemaHashConfig(false);
       const a = hashSchema({ type: "object", title: "A" } as JSONSchema);
       const b = hashSchema({ title: "A", type: "object" } as JSONSchema);
-      assert(a.toString() === b.toString());
+      assertStrictEquals(a, b);
     });
 
-    it("hashSchemaItem returns a FabricHash", () => {
+    it("hashSchemaItem returns a string", () => {
       setSchemaHashConfig(false);
       const result = hashSchemaItem("hello");
-      assert(result instanceof FabricHash);
+      assertStrictEquals(typeof result, "string");
     });
 
     it("hashSchemaItem is deterministic", () => {
       setSchemaHashConfig(false);
       const a = hashSchemaItem(42);
       const b = hashSchemaItem(42);
-      assert(a.toString() === b.toString());
+      assertStrictEquals(a, b);
     });
 
     it("hashSchemaItem produces different results for different values", () => {
       setSchemaHashConfig(false);
       const a = hashSchemaItem("foo");
       const b = hashSchemaItem("bar");
-      assertNotEquals(a.toString(), b.toString());
-    });
-
-    it("legacy hashSchema uses 'legacy' algorithm tag", () => {
-      setSchemaHashConfig(false);
-      const result = hashSchema({ type: "number" });
-      assert(
-        result.algorithmTag === "legacy",
-        `Expected legacy algorithm tag, got: ${result.algorithmTag}`,
-      );
+      assertNotEquals(a, b);
     });
   });
 
@@ -95,13 +86,13 @@ describe("schema-hash dispatch", () => {
   // -------------------------------------------------------------------------
 
   describe("modern path (modernSchemaHash ON)", () => {
-    it("hashSchema returns a FabricHash", () => {
+    it("hashSchema returns a string", () => {
       setSchemaHashConfig(true);
       const result = hashSchema({ type: "number" });
-      assert(result instanceof FabricHash);
+      assertStrictEquals(typeof result, "string");
     });
 
-    it("hashSchema is deterministic (same input produces same toString())", () => {
+    it("hashSchema is deterministic (same input produces same result)", () => {
       setSchemaHashConfig(true);
       const schema: JSONSchema = {
         type: "object",
@@ -109,42 +100,42 @@ describe("schema-hash dispatch", () => {
       };
       const a = hashSchema(schema);
       const b = hashSchema(schema);
-      assert(a.toString() === b.toString());
+      assertStrictEquals(a, b);
     });
 
     it("hashSchema produces different results for different schemas", () => {
       setSchemaHashConfig(true);
       const a = hashSchema({ type: "number" });
       const b = hashSchema({ type: "string" });
-      assertNotEquals(a.toString(), b.toString());
+      assertNotEquals(a, b);
     });
 
-    it("hashSchemaItem returns a FabricHash", () => {
+    it("hashSchemaItem returns a string", () => {
       setSchemaHashConfig(true);
       const result = hashSchemaItem("hello");
-      assert(result instanceof FabricHash);
+      assertStrictEquals(typeof result, "string");
     });
 
     it("hashSchemaItem is deterministic", () => {
       setSchemaHashConfig(true);
       const a = hashSchemaItem(42);
       const b = hashSchemaItem(42);
-      assert(a.toString() === b.toString());
+      assertStrictEquals(a, b);
     });
 
     it("hashSchemaItem produces different results for different values", () => {
       setSchemaHashConfig(true);
       const a = hashSchemaItem("foo");
       const b = hashSchemaItem("bar");
-      assertNotEquals(a.toString(), b.toString());
+      assertNotEquals(a, b);
     });
 
     it("hashSchema returns fid1: prefixed strings", () => {
       setSchemaHashConfig(true);
       const result = hashSchema({ type: "number" });
       assert(
-        result.toString().startsWith("fid1:"),
-        `Expected fid1: prefix, got: ${result.toString()}`,
+        result.startsWith("fid1:"),
+        `Expected fid1: prefix, got: ${result}`,
       );
     });
   });
@@ -157,17 +148,17 @@ describe("schema-hash dispatch", () => {
     it("hashSchema differs between paths for same input", () => {
       const schema: JSONSchema = { type: "number" };
       setSchemaHashConfig(false);
-      const legacy = hashSchema(schema).toString();
+      const legacy = hashSchema(schema);
       setSchemaHashConfig(true);
-      const modern = hashSchema(schema).toString();
+      const modern = hashSchema(schema);
       assertNotEquals(legacy, modern);
     });
 
     it("hashSchemaItem differs between paths for same input", () => {
       setSchemaHashConfig(false);
-      const legacy = hashSchemaItem("test").toString();
+      const legacy = hashSchemaItem("test");
       setSchemaHashConfig(true);
-      const modern = hashSchemaItem("test").toString();
+      const modern = hashSchemaItem("test");
       assertNotEquals(legacy, modern);
     });
   });
@@ -176,16 +167,16 @@ describe("schema-hash dispatch", () => {
   // Reset behavior
   // -------------------------------------------------------------------------
 
-  describe("reset restores default (modern) path", () => {
-    it("hashSchema returns modern result after reset", () => {
-      setSchemaHashConfig(true);
-      const modern = hashSchema({ type: "boolean" }).toString();
-
+  describe("reset restores legacy path", () => {
+    it("hashSchema returns legacy result after reset", () => {
       setSchemaHashConfig(false);
-      resetSchemaHashConfig();
-      const afterReset = hashSchema({ type: "boolean" }).toString();
+      const legacy = hashSchema({ type: "boolean" });
 
-      assert(modern === afterReset);
+      setSchemaHashConfig(true);
+      resetSchemaHashConfig();
+      const afterReset = hashSchema({ type: "boolean" });
+
+      assertStrictEquals(legacy, afterReset);
     });
   });
 

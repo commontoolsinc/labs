@@ -264,7 +264,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
+    super(hashValues ? (v) => hashSchemaItem(v) : undefined);
   }
 }
 
@@ -341,7 +341,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -365,7 +365,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey).toString();
+    const hash = hashSchemaItem(extraKey);
     return existing.get(hash);
   }
 }
@@ -3018,7 +3018,7 @@ export function mergeAnyOfBranchSchemas(
   if (branches.length < 2) return null;
 
   const key = hashSchema(outerSchema) + "||" +
-    branches.map((b) => "" + hashSchema(b)).join("|");
+    branches.map((b) => hashSchema(b)).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3100,7 +3100,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // Deduplicate schemas using hashSchema
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set("" + hashSchema(s), s);
+      uniqueHashes.set(hashSchema(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
