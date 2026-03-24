@@ -10,7 +10,8 @@
  * replaced by canonical hashing (via `modernHash`) behind a flag.
  */
 
-import type { FabricValue, JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { FabricValue } from "./interface.ts";
 
 const _hashCache = new WeakMap<object, string>();
 

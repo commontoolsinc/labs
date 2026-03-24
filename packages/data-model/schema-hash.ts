@@ -10,7 +10,8 @@
  * `fabric-value.ts`.
  */
 
-import type { FabricValue, JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { FabricValue } from "./interface.ts";
 import {
   hashSchemaItemLegacy,
   hashSchemaLegacy,
