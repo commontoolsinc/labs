@@ -15,8 +15,8 @@ import {
   hashObjectFromJsonLegacy,
   hashObjectFromStringLegacy,
   hashOfLegacyCached,
+  isLegacyHashObject,
   type LegacyHashObject,
-  Reference,
 } from "./value-hash-legacy.ts";
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ export function isHashObject<T extends DefinedReferent>(
   value: unknown | HashObject<T>,
 ): value is HashObject<T> {
   if (value instanceof FabricHash) return true;
-  return Reference.is(value);
+  return isLegacyHashObject(value);
 }
 
 /** Reconstructs a hash object from its JSON representation. */

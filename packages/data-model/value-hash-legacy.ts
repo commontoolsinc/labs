@@ -140,5 +140,7 @@ export type LegacyHashObject<
   T extends DefinedReferent = DefinedReferent,
 > = Reference.View<T>;
 
-/** Re-export for internal use by `value-hash.ts` (`Reference.is()` type guard). */
-export { Reference };
+/** Type guard for legacy hash objects (merkle-reference instances). */
+export function isLegacyHashObject(value: unknown): value is LegacyHashObject {
+  return Reference.is(value);
+}
