@@ -1032,7 +1032,7 @@ export class XDebuggerView extends LitElement {
     }
   }
 
-  private async recreateSpaceRootPattern() {
+  private recreateSpaceRootPattern() {
     this._isRecreatingSpaceRootPattern = true;
     try {
       this.dispatchEvent(
