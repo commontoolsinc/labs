@@ -11,7 +11,6 @@
  */
 import { modernHash } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
-import { fromBase64url } from "./bigint-encoding.ts";
 import {
   contentIdFromJSONLegacy,
   fromStringLegacy,
@@ -79,20 +78,6 @@ export function resetCanonicalHashConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a `FabricHash` from its string representation
- * (`<algorithmTag>:<base64urlHash>`).
- */
-function hashFromString(source: string): FabricHash {
-  const colonIndex = source.indexOf(":");
-  if (colonIndex === -1) {
-    throw new ReferenceError(`Invalid content ID string: ${source}`);
-  }
-  const algorithmTag = source.substring(0, colonIndex);
-  const hashBase64url = source.substring(colonIndex + 1);
-  return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
-}
-
-/**
  * Type guard: returns true if the value is a content identifier
  * (`Reference.View` or `FabricHash`).
  */
@@ -106,14 +91,14 @@ export function isContentId<T extends DefinedReferent>(
 /** Reconstructs a content identifier from its JSON representation. */
 export function contentIdFromJSON(source: { "/": string }): ContentId {
   return canonicalHashingEnabled
-    ? hashFromString(source["/"])
+    ? FabricHash.fromString(source["/"])
     : contentIdFromJSONLegacy(source);
 }
 
 /** Reconstruct a content identifier from its string representation. */
 export function fromString(source: string): ContentId {
   return canonicalHashingEnabled
-    ? hashFromString(source)
+    ? FabricHash.fromString(source)
     : fromStringLegacy(source);
 }
 
