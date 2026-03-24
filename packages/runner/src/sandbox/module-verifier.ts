@@ -939,6 +939,7 @@ function verifyCtDataExpression(
 
   if (ts.isObjectLiteralExpression(expr)) {
     for (const property of expr.properties) {
+      verifyCtDataPropertyName(property.name, sourceFile, env, locals);
       if (ts.isPropertyAssignment(property)) {
         verifyCtDataExpression(property.initializer, sourceFile, env, locals);
         continue;
@@ -975,6 +976,13 @@ function verifyCtDataExpression(
   }
 
   if (ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return;
+  }
+
+  if (ts.isCallExpression(expr) && isAllowedCtDataEphemeralCall(expr)) {
+    for (const arg of expr.arguments) {
+      verifyCtDataExpression(arg, sourceFile, env, locals);
+    }
     return;
   }
 
@@ -1176,6 +1184,7 @@ function verifyCtDataProxyHandlerExpression(
   }
 
   for (const property of expr.properties) {
+    verifyCtDataPropertyName(property.name, sourceFile, env, locals);
     if (
       ts.isMethodDeclaration(property) ||
       ts.isGetAccessorDeclaration(property) ||
@@ -1205,6 +1214,18 @@ function verifyCtDataProxyHandlerExpression(
       "__ct_data() Proxy handlers must be plain object literals",
     );
   }
+}
+
+function verifyCtDataPropertyName(
+  name: ts.PropertyName | undefined,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  if (!name || !ts.isComputedPropertyName(name)) {
+    return;
+  }
+  verifyCtDataExpression(name.expression, sourceFile, env, locals);
 }
 
 function resolveTrustedCallName(
@@ -1388,6 +1409,11 @@ function isAllowedCtDataCollection(expression: ts.NewExpression): boolean {
 function isAllowedCtDataProxy(expression: ts.NewExpression): boolean {
   return ts.isIdentifier(expression.expression) &&
     expression.expression.text === "Proxy";
+}
+
+function isAllowedCtDataEphemeralCall(expression: ts.CallExpression): boolean {
+  return ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "Symbol";
 }
 
 function isDirectIifeCall(expression: ts.CallExpression): boolean {

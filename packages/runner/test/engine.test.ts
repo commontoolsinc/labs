@@ -411,6 +411,32 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
+  it("allows CTS-wrapped symbol-keyed data snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { lift } from "commontools";',
+            "const lookup = (() => {",
+            '  const tag = Symbol("open");',
+            '  return { [tag]: "Open" };',
+            "})();",
+            "export default lift(() => Object.getOwnPropertySymbols(lookup).length);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBeDefined();
+  });
+
   it("rejects top-level mutable bindings", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
