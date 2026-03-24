@@ -14,6 +14,7 @@ import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "./opaque-ref/fallback-rewrite.ts";
+import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { AnalyzeFn } from "./opaque-ref/types.ts";
 import {
   findPendingComputeWrapCandidate,
@@ -590,6 +591,26 @@ export function classifyJsxExpressionSiteRoute(
 
   if (siteInfo.callRootKind === "free-function") {
     return { route: "shared-post-closure" };
+  }
+
+  if (siteInfo.callRootKind === "receiver-method") {
+    if (
+      ts.isCallExpression(expression) &&
+      classifyOpaquePathTerminalCall(expression)
+    ) {
+      return { route: "skip", reason: "not-shared-jsx-root-kind" };
+    }
+
+    return containsReactiveArrayMethodSubexpression(
+        expression,
+        context,
+        analyze,
+      )
+      ? {
+        route: "legacy-jsx",
+        reason: "contains-reactive-array-method-subexpression",
+      }
+      : { route: "shared-post-closure" };
   }
 
   if (!isPostClosureJsxWrapperRewriteExpression(expression, context)) {

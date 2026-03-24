@@ -313,7 +313,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: JSX receiver-method call roots stay on the legacy JSX seam",
+  "Expression site policy: JSX receiver-method call roots defer to the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -333,6 +333,90 @@ Deno.test(
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
         node.expression.name.text === "toUpperCase",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "receiver-method");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX receiver-method roots over reactive array-method receivers stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items.filter((item: number) => item > state.threshold).join(", ")}</div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "join",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "receiver-method");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "legacy-jsx",
+      reason: "contains-reactive-array-method-subexpression",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX opaque path-terminal calls stay out of the shared receiver-method slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      interface Cell<T> {
+        get(): T;
+        key(name: string): Cell<unknown>;
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((input: Cell<{ foo: string }>) => (
+        <div>{input.key("foo").get()}</div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "get",
     );
     const analyze = createDataFlowAnalyzer(checker);
     const siteInfo = getExpressionSitePolicyInfo(
