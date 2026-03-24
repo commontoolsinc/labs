@@ -27,7 +27,7 @@ describe("cloneIfNecessary", () => {
     const label = richMode ? "rich" : "legacy";
     describe(`error cases (${label} path)`, () => {
       if (richMode) {
-        beforeEach(() => setDataModelConfig({ modernDataModel: true }));
+        beforeEach(() => setDataModelConfig(true));
       }
 
       it("throws for frozen=true, force=true", () => {
@@ -281,7 +281,7 @@ describe("cloneIfNecessary", () => {
 
   describe("rich path: default options (frozen=true, deep=true)", () => {
     it("passes through primitives unchanged", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(cloneIfNecessary(42 as FabricValue)).toBe(42);
       expect(cloneIfNecessary("hello" as FabricValue)).toBe("hello");
       expect(cloneIfNecessary(null)).toBe(null);
@@ -290,12 +290,12 @@ describe("cloneIfNecessary", () => {
     });
 
     it("passes through bigint unchanged", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(cloneIfNecessary(42n as FabricValue)).toBe(42n);
     });
 
     it("returns a frozen copy of an unfrozen object", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1, b: "two" } as FabricValue;
       const result = cloneIfNecessary(value);
       expect(result).toEqual({ a: 1, b: "two" });
@@ -304,7 +304,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns a frozen copy of an unfrozen array", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = [1, 2, 3] as FabricValue;
       const result = cloneIfNecessary(value);
       expect(result).toEqual([1, 2, 3]);
@@ -313,7 +313,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("deep-freezes nested structures", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: { b: [1, 2] } } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
@@ -323,7 +323,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns already-deep-frozen value as-is (identity optimization)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const inner = Object.freeze([1, 2]);
       const value = Object.freeze({ a: inner }) as FabricValue;
       const result = cloneIfNecessary(value);
@@ -331,7 +331,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves deep-frozen subtrees as-is within unfrozen parent", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       // `frozenChild` is a deep-frozen subtree.
       const frozenChild = Object.freeze({ x: Object.freeze([1, 2]) });
       // `value` is NOT frozen (unfrozen parent), so it must be cloned.
@@ -352,7 +352,7 @@ describe("cloneIfNecessary", () => {
 
   describe("rich path: frozen=false (deep, force=true default)", () => {
     it("returns a mutable copy of a frozen object", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual({ a: 1, b: "two" });
@@ -361,7 +361,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns a mutable array copy", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.freeze([1, 2, 3]) as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false });
       expect(result).toEqual([1, 2, 3]);
@@ -370,7 +370,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("clones already-mutable values (force=true default)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const inner = { x: 1 };
       const value = { a: inner, b: [2, 3] } as FabricValue;
       const result = cloneIfNecessary(value, { frozen: false }) as Record<
@@ -387,7 +387,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("deep-unfreezes nested structures", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const inner = Object.freeze([1, 2]);
       const value = Object.freeze({
         a: Object.freeze({ b: inner }),
@@ -409,7 +409,7 @@ describe("cloneIfNecessary", () => {
 
   describe("rich path: shallow clone (deep=false)", () => {
     it("shallow-clones an unfrozen object to frozen", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const inner = { x: 1 };
       const value = { a: inner } as FabricValue;
       const result = cloneIfNecessary(value, { deep: false }) as Record<
@@ -423,14 +423,14 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns already-frozen object as-is (shallow, force=false)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.freeze({ a: 1 }) as FabricValue;
       const result = cloneIfNecessary(value, { deep: false });
       expect(result).toBe(value);
     });
 
     it("shallow-clones frozen object to mutable (deep=false, frozen=false)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
@@ -442,7 +442,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("force-copies mutable object (shallow, frozen=false, force=true)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1 } as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
@@ -454,7 +454,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("returns mutable as-is (shallow, frozen=false, force=false)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1 } as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
@@ -465,7 +465,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("thaws frozen value (shallow, frozen=false, force=false)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.freeze({ a: 1 }) as FabricValue;
       const result = cloneIfNecessary(value, {
         deep: false,
@@ -484,7 +484,7 @@ describe("cloneIfNecessary", () => {
 
   describe("FabricInstance", () => {
     it("clones FabricError via shallowClone protocol", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error = new FabricError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(error as unknown as FabricValue);
@@ -493,7 +493,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("produces mutable FabricError clone when frozen=false", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error = new FabricError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(
@@ -506,7 +506,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("handles FabricError nested in an object", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error = new FabricError(new Error("nested"));
       const value = { err: error, x: 42 } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
@@ -522,7 +522,7 @@ describe("cloneIfNecessary", () => {
 
   describe("undefined preservation", () => {
     it("preserves undefined in objects", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1, b: undefined } as FabricValue;
       const result = cloneIfNecessary(value) as Record<string, unknown>;
       expect(result.b).toBe(undefined);
@@ -531,7 +531,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves undefined in arrays", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = [1, undefined, 3] as FabricValue;
       const result = cloneIfNecessary(value) as unknown[];
       expect(result[1]).toBe(undefined);
@@ -546,7 +546,7 @@ describe("cloneIfNecessary", () => {
 
   describe("null prototype preservation", () => {
     it("preserves null prototype on objects", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.create(null) as Record<string, unknown>;
       value.a = 1;
       value.b = "two";
@@ -560,7 +560,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves null prototype when frozen=false", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.create(null) as Record<string, unknown>;
       value.x = 42;
       const result = cloneIfNecessary(
@@ -573,7 +573,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves null prototype on shallow clone", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.create(null) as Record<string, unknown>;
       value.a = 1;
       const result = cloneIfNecessary(
@@ -586,7 +586,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("preserves null prototype on shallow clone when frozen=false", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = Object.create(null) as Record<string, unknown>;
       value.b = 2;
       const result = cloneIfNecessary(
@@ -605,7 +605,7 @@ describe("cloneIfNecessary", () => {
 
   describe("FabricPrimitive", () => {
     it("passes through FabricEpochNsec unchanged", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const epoch = new FabricEpochNsec(1234567890n);
       Object.freeze(epoch);
       const result = cloneIfNecessary(epoch as unknown as FabricValue);
@@ -613,7 +613,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("passes through FabricEpochNsec when frozen=false", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const epoch = new FabricEpochNsec(42n);
       Object.freeze(epoch);
       // frozen parameter is irrelevant for special primitives
@@ -625,7 +625,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("passes through FabricEpochNsec nested in an object", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const epoch = new FabricEpochNsec(999n);
       Object.freeze(epoch);
       const value = { time: epoch, label: "test" } as FabricValue;
@@ -642,7 +642,7 @@ describe("cloneIfNecessary", () => {
 
   describe("circular reference detection", () => {
     it("throws on direct circular object reference", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const obj = {} as Record<string, unknown>;
       obj.self = obj;
       expect(() => cloneIfNecessary(obj as FabricValue)).toThrow(
@@ -651,7 +651,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("throws on circular array reference", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const arr: unknown[] = [1, 2];
       arr.push(arr);
       expect(() => cloneIfNecessary(arr as FabricValue)).toThrow(
@@ -660,7 +660,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("throws on indirect circular reference", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const a = {} as Record<string, unknown>;
       const b = { parent: a } as Record<string, unknown>;
       a.child = b;
@@ -670,7 +670,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("handles shared (diamond) references without throwing", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const shared = { x: 1 };
       const value = { a: shared, b: shared } as FabricValue;
       // Shared (non-circular) references should not throw.
@@ -686,7 +686,7 @@ describe("cloneIfNecessary", () => {
 
   describe("config lifecycle", () => {
     it("switching from rich to legacy restores identity passthrough", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1 } as FabricValue;
       const richResult = cloneIfNecessary(value);
       expect(richResult).not.toBe(value); // rich path clones

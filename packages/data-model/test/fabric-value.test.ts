@@ -16,7 +16,7 @@ describe("fabric-value", () => {
   // default. The rich-path describe blocks override this in their own
   // beforeEach.
   beforeEach(() => {
-    setDataModelConfig({ modernDataModel: false });
+    setDataModelConfig(false);
   });
   afterEach(() => {
     resetDataModelConfig();
@@ -935,7 +935,7 @@ describe("fabric-value", () => {
 
   describe("freeze parameter (rich path)", () => {
     beforeEach(() => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
     });
 
     afterEach(() => {
@@ -1234,7 +1234,7 @@ describe("fabric-value", () => {
 
   describe("Error internals deep conversion (rich path)", () => {
     beforeEach(() => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
     });
     afterEach(() => {
       resetDataModelConfig();

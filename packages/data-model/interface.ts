@@ -276,16 +276,3 @@ export interface SerializationContext<SerializedForm = unknown> {
     runtime: ReconstructionContext,
   ): FabricValue;
 }
-
-/**
- * Configuration for experimental data model features gated behind
- * `RuntimeOptions.experimental`. Uses ambient (module-level) state so that
- * deep call sites can check flags without parameter threading.
- *
- * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
- */
-export interface ExperimentalDataModelConfig {
-  /** When `true`, fabric value functions use the extended type system
-   *  (bigint, Map, Set, Uint8Array, Date, etc.). */
-  modernDataModel: boolean;
-}

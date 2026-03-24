@@ -224,7 +224,7 @@ describe("FabricRegExp", () => {
 
   describe("shallowFabricFromNativeValue (rich path)", () => {
     it("converts RegExp to FabricRegExp", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       try {
         const result = shallowFabricFromNativeValue(/abc/gi);
         expect(result).toBeInstanceOf(FabricRegExp);
@@ -236,7 +236,7 @@ describe("FabricRegExp", () => {
     });
 
     it("rejects RegExp with extra enumerable properties", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       try {
         const re = /abc/;
         (re as unknown as Record<string, unknown>).custom = 1;
@@ -274,7 +274,7 @@ describe("FabricRegExp", () => {
 
   describe("canBeStored", () => {
     beforeEach(() => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
     });
     afterEach(() => {
       resetDataModelConfig();

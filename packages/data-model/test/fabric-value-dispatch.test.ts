@@ -68,7 +68,7 @@ describe("fabric-value-dispatch", () => {
 
   describe("flag ON: rich fabric value conversion", () => {
     it("round-trip preserves primitives", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(roundTrip(42 as FabricValue)).toBe(42);
       expect(roundTrip("hello" as FabricValue)).toBe("hello");
       expect(roundTrip(null)).toBe(null);
@@ -76,36 +76,36 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("round-trip preserves undefined", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(roundTrip(undefined)).toBe(undefined);
     });
 
     it("round-trip preserves bigint", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(roundTrip(42n as FabricValue)).toBe(42n);
     });
 
     it("round-trip preserves plain objects", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1, b: "two" } as FabricValue;
       expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
     it("round-trip preserves arrays", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = [1, "two", null] as FabricValue;
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
     it("fabricFromNativeValue wraps Error into FabricError", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
     it("nativeFromFabricValue unwraps FabricError back to Error", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       const restored = nativeFromFabricValue(stored);
@@ -114,14 +114,14 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("fabricFromNativeValue deep-freezes result", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = { a: 1, b: [2, 3] } as FabricValue;
       const stored = fabricFromNativeValue(value);
       expect(Object.isFrozen(stored)).toBe(true);
     });
 
     it("round-trip preserves nested structure", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const value = {
         name: "test",
         count: 42n,
@@ -139,15 +139,15 @@ describe("fabric-value-dispatch", () => {
   // --------------------------------------------------------------------------
 
   describe("config lifecycle", () => {
-    it("setDataModelConfig({ modernDataModel: true }) enables conversion", () => {
-      setDataModelConfig({ modernDataModel: true });
+    it("setDataModelConfig(true) enables conversion", () => {
+      setDataModelConfig(true);
       const error = new Error("test");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
     it("resetDataModelConfig() restores legacy conversion", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       resetDataModelConfig();
       const error = new Error("reset test");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
@@ -159,7 +159,7 @@ describe("fabric-value-dispatch", () => {
 
     it("multiple set/reset cycles work correctly", () => {
       // Cycle 1: ON — rich conversion
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error1 = new Error("test1");
       expect(fabricFromNativeValue(error1 as unknown as FabricValue))
         .toBeInstanceOf(
@@ -176,7 +176,7 @@ describe("fabric-value-dispatch", () => {
       expect((stored1 as Record<string, unknown>)["@Error"]).toBeDefined();
 
       // Cycle 2: ON — rich conversion
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const error2 = new Error("test2");
       expect(fabricFromNativeValue(error2 as unknown as FabricValue))
         .toBeInstanceOf(
@@ -193,9 +193,9 @@ describe("fabric-value-dispatch", () => {
       expect((stored2 as Record<string, unknown>)["@Error"]).toBeDefined();
     });
 
-    it("setDataModelConfig({ modernDataModel: false }) after true restores legacy conversion", () => {
-      setDataModelConfig({ modernDataModel: true });
-      setDataModelConfig({ modernDataModel: false });
+    it("setDataModelConfig(false) after true restores legacy conversion", () => {
+      setDataModelConfig(true);
+      setDataModelConfig(false);
       const error = new Error("toggle test");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).not.toBeInstanceOf(FabricError);

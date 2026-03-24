@@ -101,7 +101,7 @@ describe("ExperimentalOptions", () => {
 
   describe("shallowFabricFromNativeValue with modernDataModel flag", () => {
     it("works normally when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       expect(shallowFabricFromNativeValue("hello")).toBe("hello");
       expect(shallowFabricFromNativeValue(42)).toBe(42);
       expect(shallowFabricFromNativeValue(null)).toBe(null);
@@ -110,7 +110,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts Error to @Error object when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toEqual({
@@ -124,13 +124,13 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts undefined in arrays to null when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       const result = shallowFabricFromNativeValue([1, undefined, 3]);
       expect(result).toEqual([1, null, 3]);
     });
 
     it("wraps Error in FabricError when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toBeInstanceOf(FabricError);
@@ -138,7 +138,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const arr = [1, undefined, 3];
       const result = shallowFabricFromNativeValue(arr);
       expect(result).toEqual(arr);
@@ -146,7 +146,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       resetDataModelConfig();
       const err = new Error("test");
       const result = shallowFabricFromNativeValue(err);
@@ -156,13 +156,13 @@ describe("ExperimentalOptions", () => {
 
   describe("fabricFromNativeValue with modernDataModel flag", () => {
     it("works normally when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       expect(fabricFromNativeValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
       expect(fabricFromNativeValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
     it("converts nested Error to @Error object when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       const err = new Error("nested");
       const result = fabricFromNativeValue({ data: err });
       expect(result).toEqual({
@@ -178,13 +178,13 @@ describe("ExperimentalOptions", () => {
     });
 
     it("omits undefined-valued object properties when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, c: 3 });
     });
 
     it("wraps nested Error in FabricError when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const err = new Error("nested");
       const result = fabricFromNativeValue({ data: err }) as Record<
         string,
@@ -195,14 +195,14 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const result = fabricFromNativeValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, b: undefined, c: 3 });
       expect(Object.hasOwn(result as object, "b")).toBe(true);
     });
 
     it("wraps Error in array in FabricError when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       const err = new Error("in array");
       const result = fabricFromNativeValue([1, err, 3]) as unknown[];
       expect(result[1]).toBeInstanceOf(FabricError);
@@ -210,7 +210,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("preserves sparse array holes when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       const result = fabricFromNativeValue(sparse) as unknown[];
@@ -221,14 +221,14 @@ describe("ExperimentalOptions", () => {
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       resetDataModelConfig();
       const result = fabricFromNativeValue({ a: 1, b: undefined });
       expect(result).toEqual({ a: 1 });
     });
 
     it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       // An object whose toJSON() returns undefined. In the rich path, undefined
       // is a valid FabricValue, so this gets stored in the converted map as
       // `undefined`. The bug (before the has() fix) would treat a subsequent
@@ -252,41 +252,41 @@ describe("ExperimentalOptions", () => {
 
   describe("isFabricValue with modernDataModel flag", () => {
     it("rejects Error when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("rejects [undefined] when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       expect(isFabricValue([undefined])).toBe(false);
     });
 
     it("rejects Error even when flag is ON (needs conversion to FabricError)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(isFabricValue(new Error("test"))).toBe(false);
     });
 
     it("accepts [undefined] when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       expect(isFabricValue([undefined])).toBe(true);
     });
 
     it("accepts sparse arrays when flag is ON", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("accepts sparse arrays when flag is OFF", () => {
-      setDataModelConfig({ modernDataModel: false });
+      setDataModelConfig(false);
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       expect(isFabricValue(sparse)).toBe(true);
     });
 
     it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       resetDataModelConfig();
       expect(isFabricValue(new Error("test"))).toBe(false);
       expect(isFabricValue([undefined])).toBe(false);
@@ -305,8 +305,7 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      const config = getDataModelConfig();
-      expect(config.modernDataModel).toBe(true);
+      expect(getDataModelConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -320,8 +319,7 @@ describe("ExperimentalOptions", () => {
         experimental: { modernDataModel: false },
       });
 
-      const config = getDataModelConfig();
-      expect(config.modernDataModel).toBe(false);
+      expect(getDataModelConfig()).toBe(false);
 
       await runtime.dispose();
       await sm.close();
@@ -335,8 +333,7 @@ describe("ExperimentalOptions", () => {
         experimental: { modernDataModel: true, modernHash: true },
       });
 
-      const config = getDataModelConfig();
-      expect(config.modernDataModel).toBe(true);
+      expect(getDataModelConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -353,12 +350,12 @@ describe("ExperimentalOptions", () => {
         },
       });
 
-      expect(getDataModelConfig().modernDataModel).toBe(true);
+      expect(getDataModelConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getDataModelConfig().modernDataModel).toBe(false);
+      expect(getDataModelConfig()).toBe(false);
     });
   });
 

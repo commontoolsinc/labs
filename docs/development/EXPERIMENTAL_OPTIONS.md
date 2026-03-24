@@ -92,9 +92,9 @@ Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setDataModelConfig(...)
-              |    +-- currentConfig.modernDataModel = true
-              |         +-- fabricFromNativeValue() checks currentConfig
+              +-- setDataModelConfig(true)
+              |    +-- modernDataModelEnabled = true
+              |         +-- fabricFromNativeValue() checks modernDataModelEnabled
               +-- setModernHashConfig(...)
                    +-- modernHashEnabled = true
                         +-- hashOf() dispatches to hashOfModern()
@@ -167,7 +167,7 @@ with defaults (all `false`) and stores the resolved result as
 `runtime.experimental` (type `Required<ExperimentalOptions>`).
 
 The memory layer uses module-level ambient config variables:
-`currentConfig` in `packages/data-model/fabric-value.ts` (set by
+`modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
 `setDataModelConfig()`) and `modernHashEnabled` in
 `packages/data-model/value-hash.ts` (set by `setModernHashConfig()`). This means:
 

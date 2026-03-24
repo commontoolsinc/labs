@@ -242,7 +242,7 @@ export class Runtime {
     }
 
     // Propagate experimental flags to the memory layer's ambient config.
-    setDataModelConfig(this.experimental);
+    setDataModelConfig(this.experimental.modernDataModel);
     setModernHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     setSchemaHashConfig(this.experimental.modernSchemaHash);

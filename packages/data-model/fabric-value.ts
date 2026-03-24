@@ -3,7 +3,6 @@
 // base class.
 export {
   DECONSTRUCT,
-  type ExperimentalDataModelConfig,
   type FabricArray,
   type FabricClass,
   type FabricDatum,
@@ -20,7 +19,6 @@ export {
 } from "./interface.ts";
 
 import type {
-  ExperimentalDataModelConfig,
   FabricNativeObject,
   FabricValue,
   FabricValueLayer,
@@ -53,35 +51,35 @@ export {
 // Experimental data model configuration
 // ===========================================================================
 
-const defaultConfig: ExperimentalDataModelConfig = {
-  modernDataModel: false,
-};
-
-let currentConfig: ExperimentalDataModelConfig = { ...defaultConfig };
-
 /**
- * Activates experimental data model features. Called by the `Runtime`
- * constructor to propagate `ExperimentalOptions` into the memory layer.
- * Merges the provided partial config with defaults.
+ * Module-level flag for modern data model mode, set by the `Runtime`
+ * constructor via `setDataModelConfig()`. When enabled, fabric value
+ * functions use the extended type system (bigint, Map, Set, Uint8Array,
+ * Date, etc.).
  */
-export function setDataModelConfig(
-  config: Partial<ExperimentalDataModelConfig>,
-): void {
-  currentConfig = { ...defaultConfig, ...config };
+let modernDataModelEnabled = false;
+
+/**
+ * Activates or deactivates modern data model mode. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions.modernDataModel` into the
+ * memory layer.
+ */
+export function setDataModelConfig(enabled?: boolean): void {
+  modernDataModelEnabled = enabled ?? false;
 }
 
-/** Returns the current experimental data model configuration. */
-export function getDataModelConfig(): ExperimentalDataModelConfig {
-  return currentConfig;
+/** Returns whether modern data model mode is currently enabled. */
+export function getDataModelConfig(): boolean {
+  return modernDataModelEnabled;
 }
 
 /**
- * Restores experimental data model configuration to defaults. Called by
+ * Restores modern data model mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
 export function resetDataModelConfig(): void {
-  currentConfig = { ...defaultConfig };
+  modernDataModelEnabled = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +101,7 @@ export function fabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValue {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? fabricFromNativeValueModern(value, freeze)
     : fabricFromNativeValueLegacy(value);
 }
@@ -126,7 +124,7 @@ export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricValue {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? nativeFromFabricValueModern(value, frozen) as FabricValue
     : value;
 }
@@ -179,7 +177,7 @@ export function cloneIfNecessary<T extends FabricValue>(
     );
   }
 
-  return (currentConfig.modernDataModel
+  return (modernDataModelEnabled
     ? cloneIfNecessaryRich(value, frozen, deep, force)
     : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
 }
@@ -203,7 +201,7 @@ export function cloneIfNecessary<T extends FabricValue>(
 export function isFabricValue(
   value: unknown,
 ): value is FabricValueLayer {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? isFabricValueModern(value)
     : isFabricValueLegacy(value);
 }
@@ -223,7 +221,7 @@ export function isFabricValue(
 export function canBeStored(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? canBeStoredRich(value)
     : canBeStoredLegacy(value);
 }
@@ -250,7 +248,7 @@ export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? shallowFabricFromNativeValueModern(value, freeze)
     : shallowFabricFromNativeValueLegacy(value);
 }
@@ -270,7 +268,7 @@ export function shallowFabricFromNativeValue(
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? deepEqual(a, b)
     : JSON.stringify(a) === JSON.stringify(b);
 }

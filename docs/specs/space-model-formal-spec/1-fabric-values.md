@@ -1560,7 +1560,7 @@ The module also re-exports flag-dispatched type-check functions
  * via `fabricFromNativeValueModern`.
  */
 export function fabricFromNativeValue(value: unknown, freeze?: boolean): FabricValue {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? fabricFromNativeValueModern(value, freeze)
     : fabricFromNativeValueLegacy(value);
 }
@@ -1571,13 +1571,13 @@ export function fabricFromNativeValue(value: unknown, freeze?: boolean): FabricV
  * Flag ON (modern): unwraps fabric wrappers via `nativeFromFabricValueModern`.
  */
 export function nativeFromFabricValue(value: FabricValue, frozen?: boolean): FabricValue {
-  return currentConfig.modernDataModel
+  return modernDataModelEnabled
     ? nativeFromFabricValueModern(value, frozen) as FabricValue
     : value;
 }
 ```
 
-The dispatch flag is set by `setDataModelConfig(config)` /
+The dispatch flag is set by `setDataModelConfig(enabled)` /
 `resetDataModelConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 

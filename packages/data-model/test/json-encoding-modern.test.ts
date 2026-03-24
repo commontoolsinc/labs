@@ -537,7 +537,7 @@ describe("json encoding", () => {
 
   describe("Date -> FabricEpochNsec conversion", () => {
     it("converts Date(0) to FabricEpochNsec(0n)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       try {
         const date = new Date(0);
         const result = shallowFabricFromNativeValue(
@@ -551,7 +551,7 @@ describe("json encoding", () => {
     });
 
     it("converts Date to nanoseconds (msec * 1_000_000)", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       try {
         const date = new Date("2024-01-01T00:00:00.000Z");
         const result = shallowFabricFromNativeValue(
@@ -566,7 +566,7 @@ describe("json encoding", () => {
     });
 
     it("converts negative Date to negative nanoseconds", () => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
       try {
         const date = new Date(-86400000); // -1 day
         const result = shallowFabricFromNativeValue(
@@ -1644,7 +1644,7 @@ describe("json encoding", () => {
 
   describe("canBeStored", () => {
     beforeEach(() => {
-      setDataModelConfig({ modernDataModel: true });
+      setDataModelConfig(true);
     });
     afterEach(() => {
       resetDataModelConfig();
