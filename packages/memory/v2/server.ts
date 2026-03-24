@@ -26,14 +26,24 @@ import {
   type SessionSyncUpsert,
   type TransactRequest,
   type V2Error,
+  type WatchAddRequest,
+  type WatchAddResult,
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
-import { queryGraph, type QueryGraphReuseContext } from "./query.ts";
+import {
+  extendTrackedGraph,
+  queryGraph,
+  type QueryGraphReuseContext,
+  refreshTrackedGraph,
+  type TrackedGraphState,
+  trackGraph,
+} from "./query.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
+const INCREMENTAL_RECONCILE_DELAY_MS = 250;
 
 type SessionCacheEntry = SessionSyncUpsert;
 
@@ -43,6 +53,7 @@ type SessionState = {
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
+  graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
   expiresAt: number | null;
 };
@@ -105,15 +116,42 @@ const toCacheEntry = (
 
 const trackedIdsForSession = (session: SessionState): Set<string> => {
   const ids = new Set<string>();
-  for (const watch of session.watches) {
-    for (const root of watch.query.roots) {
-      ids.add(root.id);
+  for (const graph of session.graphs.values()) {
+    for (const entity of graph.entities.values()) {
+      ids.add(entity.id);
     }
   }
-  for (const entity of session.entities.values()) {
-    ids.add(entity.id);
-  }
   return ids;
+};
+
+const groupedQueries = (
+  watches: readonly WatchSpec[],
+): Map<string, GraphQuery> => {
+  const grouped = new Map<string, GraphQuery>();
+  for (const watch of watches) {
+    const branch = watch.query.branch ?? "";
+    const existing = grouped.get(branch);
+    if (existing === undefined) {
+      grouped.set(branch, {
+        branch,
+        roots: [...watch.query.roots],
+      });
+      continue;
+    }
+    existing.roots.push(...watch.query.roots);
+  }
+  return grouped;
+};
+
+const mergeWatchesById = (
+  current: readonly WatchSpec[],
+  added: readonly WatchSpec[],
+): WatchSpec[] => {
+  const merged = new Map(current.map((watch) => [watch.id, watch] as const));
+  for (const watch of added) {
+    merged.set(watch.id, watch);
+  }
+  return [...merged.values()];
 };
 
 const buildFullSync = (
@@ -208,6 +246,7 @@ export class SessionRegistry {
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
+      graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
       expiresAt: null,
     });
@@ -328,6 +367,9 @@ class Connection {
       case "session.watch.set":
         this.send(await this.server.watchSet(parsed));
         return;
+      case "session.watch.add":
+        this.send(await this.server.watchAdd(parsed));
+        return;
       case "session.ack":
         this.send(await this.server.ackSession(parsed));
         return;
@@ -368,7 +410,9 @@ export class Server {
   #engines = new Map<string, Promise<Engine.Engine>>();
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
+  #reconcileSpaces = new Set<string>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #store?: URL;
 
@@ -394,6 +438,7 @@ export class Server {
     this.#connections.delete(connection);
     if (this.#connections.size === 0) {
       this.cancelScheduledRefresh();
+      this.cancelScheduledReconcile();
     }
   }
 
@@ -403,6 +448,7 @@ export class Server {
 
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
+    this.cancelScheduledReconcile();
     await this.#refreshing;
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
@@ -564,7 +610,7 @@ export class Server {
     }
 
     try {
-      const { serverSeq, entities } = await this.evaluateWatchSet(
+      const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
       );
@@ -575,6 +621,7 @@ export class Server {
         serverSeq,
       );
       session.watches = message.watches;
+      session.graphs = graphs;
       session.entities = entities;
       session.lastSyncedSeq = serverSeq;
       return {
@@ -587,6 +634,113 @@ export class Server {
       };
     } catch (error) {
       return respondTypedError<WatchSetResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async watchAdd(
+    message: WatchAddRequest,
+  ): Promise<ResponseMessage<WatchAddResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<WatchAddResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const previousKeys = new Set(session.watches.map((watch) => watch.id));
+      const nextWatches = mergeWatchesById(session.watches, message.watches);
+      const newWatches = nextWatches.filter((watch) =>
+        !previousKeys.has(watch.id)
+      );
+
+      if (newWatches.length === 0) {
+        const serverSeq = Engine.serverSeq(engine);
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            sync: {
+              type: "sync",
+              fromSeq: session.lastSyncedSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        };
+      }
+
+      const updates = new Map<string, SessionCacheEntry>();
+      for (const [branch, query] of groupedQueries(newWatches)) {
+        const existing = session.graphs.get(branch);
+        if (existing === undefined) {
+          const tracked = trackGraph(
+            message.space,
+            engine,
+            query,
+          );
+          session.graphs.set(branch, tracked.state);
+          for (const entity of tracked.state.entities.values()) {
+            const entry = toCacheEntry(entity);
+            updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+          }
+          continue;
+        }
+
+        const extended = extendTrackedGraph(
+          message.space,
+          engine,
+          existing,
+          query,
+        );
+        for (const entity of extended.updates.values()) {
+          const entry = toCacheEntry(entity);
+          updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+        }
+      }
+
+      const upserts: SessionCacheEntry[] = [];
+      for (const [key, entry] of updates) {
+        const previous = session.entities.get(key);
+        session.entities.set(key, entry);
+        if (!sameSnapshot(previous, entry)) {
+          upserts.push(entry);
+        }
+      }
+
+      const serverSeq = Engine.serverSeq(engine);
+      const fromSeq = session.lastSyncedSeq;
+      session.watches = nextWatches;
+      session.lastSyncedSeq = serverSeq;
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq,
+          sync: {
+            type: "sync",
+            fromSeq,
+            toSeq: serverSeq,
+            upserts: upserts.toSorted((left, right) =>
+              left.branch.localeCompare(right.branch) ||
+              left.id.localeCompare(right.id)
+            ),
+            removes: [],
+          },
+        },
+      };
+    } catch (error) {
+      return respondTypedError<WatchAddResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -616,23 +770,27 @@ export class Server {
     engine?: Engine.Engine,
   ): Promise<{
     serverSeq: number;
+    graphs: Map<string, TrackedGraphState>;
     entities: Map<string, SessionCacheEntry>;
   }> {
     const resolvedEngine = engine ?? await this.openEngine(space);
     const reuse: QueryGraphReuseContext = {
       managers: new Map(),
-      sharedMemos: new Map(),
     };
+    const graphs = new Map<string, TrackedGraphState>();
     const entities = new Map<string, SessionCacheEntry>();
+    let serverSeq = Engine.serverSeq(resolvedEngine);
 
-    for (const watch of watches) {
-      const result = await this.evaluateGraphQuery(
+    for (const [branch, query] of groupedQueries(watches)) {
+      const result = trackGraph(
         space,
-        watch.query,
         resolvedEngine,
+        query,
         reuse,
       );
-      for (const entity of result.entities) {
+      serverSeq = result.serverSeq;
+      graphs.set(branch, result.state);
+      for (const entity of result.state.entities.values()) {
         const entry = toCacheEntry(entity);
         const key = cacheKeyForEntity(entry.branch, entry.id);
         const existing = entities.get(key);
@@ -647,7 +805,8 @@ export class Server {
     }
 
     return {
-      serverSeq: Engine.serverSeq(resolvedEngine),
+      serverSeq,
+      graphs,
       entities,
     };
   }
@@ -673,9 +832,63 @@ export class Server {
       if (!touched) {
         return null;
       }
+
+      const engine = await this.openEngine(space);
+      const fromSeq = session.lastSyncedSeq;
+      const updates = new Map<string, SessionCacheEntry>();
+
+      for (const graph of session.graphs.values()) {
+        const refreshed = refreshTrackedGraph(
+          space,
+          engine,
+          graph,
+          dirtyIds,
+        );
+        if (refreshed === null) {
+          continue;
+        }
+        for (const entity of refreshed.updates.values()) {
+          const entry = toCacheEntry(entity);
+          updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+        }
+      }
+
+      if (updates.size === 0) {
+        return null;
+      }
+
+      const upserts: SessionCacheEntry[] = [];
+      for (const [key, entry] of updates) {
+        const previous = session.entities.get(key);
+        session.entities.set(key, entry);
+        if (!sameSnapshot(previous, entry)) {
+          upserts.push(entry);
+        }
+      }
+      const toSeq = Engine.serverSeq(engine);
+      session.lastSyncedSeq = toSeq;
+      if (upserts.length === 0) {
+        return null;
+      }
+      this.scheduleReconcile(space);
+      return {
+        type: "session/effect",
+        space,
+        sessionId,
+        effect: {
+          type: "sync",
+          fromSeq,
+          toSeq,
+          upserts: upserts.toSorted((left, right) =>
+            left.branch.localeCompare(right.branch) ||
+            left.id.localeCompare(right.id)
+          ),
+          removes: [],
+        },
+      };
     }
 
-    const { serverSeq, entities } = await this.evaluateWatchSet(
+    const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
       space,
       session.watches,
     );
@@ -685,6 +898,7 @@ export class Server {
       session.lastSyncedSeq,
       serverSeq,
     );
+    session.graphs = graphs;
     session.entities = entities;
     session.lastSyncedSeq = serverSeq;
     if (isEmptySync(sync)) {
@@ -732,6 +946,19 @@ export class Server {
     }
     this.#dirtySpaces.add(space);
     this.scheduleRefresh();
+  }
+
+  scheduleReconcile(space: string): void {
+    this.#reconcileSpaces.add(space);
+    if (this.#reconcileTimer !== null) {
+      clearTimeout(this.#reconcileTimer);
+    }
+    this.#reconcileTimer = setTimeout(() => {
+      this.#reconcileTimer = null;
+      const spaces = [...this.#reconcileSpaces];
+      this.#reconcileSpaces.clear();
+      void this.flushSessions(spaces);
+    }, INCREMENTAL_RECONCILE_DELAY_MS);
   }
 
   private stageConflictRefreshDirtyIds(
@@ -792,6 +1019,16 @@ export class Server {
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();
       this.#dirtyDocsBySpace.clear();
+    }
+  }
+
+  private cancelScheduledReconcile(): void {
+    if (this.#reconcileTimer !== null) {
+      clearTimeout(this.#reconcileTimer);
+      this.#reconcileTimer = null;
+    }
+    if (this.#connections.size === 0) {
+      this.#reconcileSpaces.clear();
     }
   }
 
@@ -973,6 +1210,22 @@ export const parseClientMessage = (
   ) {
     return {
       type: "session.watch.set",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "session.watch.add" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    Array.isArray(parsed.watches)
+  ) {
+    return {
+      type: "session.watch.add",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,

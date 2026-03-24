@@ -8,6 +8,7 @@ import {
   type ServerMessage,
   type SessionEffectMessage,
   type SessionSync,
+  type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
@@ -260,6 +261,8 @@ export class SpaceSession {
   #sessionId: string;
   #serverSeq: number;
   #ackedSeq = 0;
+  #background = new Set<Promise<void>>();
+  #watchMutation: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly client: Client,
@@ -318,23 +321,51 @@ export class SpaceSession {
   }
 
   async watchSet(watches: WatchSpec[]): Promise<QueryView> {
-    const result = await this.client.request<WatchSetResult>({
-      type: "session.watch.set",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
-      watches,
+    return await this.runWatchMutation(async () => {
+      const result = await this.client.request<WatchSetResult>({
+        type: "session.watch.set",
+        requestId: crypto.randomUUID(),
+        space: this.space,
+        sessionId: this.#sessionId,
+        watches,
+      });
+      this.#watchSpecs = watches;
+      this.applySync(result.sync, false);
+      const snapshot = this.currentWatchResult();
+      if (this.#watchView === null) {
+        this.#watchView = new QueryView(snapshot);
+      } else {
+        this.#watchView.reconnect(snapshot);
+      }
+      this.queueBackground(this.ack(result.serverSeq));
+      return this.#watchView;
     });
-    this.#watchSpecs = watches;
-    this.applySync(result.sync, false);
-    const snapshot = this.currentWatchResult();
-    if (this.#watchView === null) {
-      this.#watchView = new QueryView(snapshot);
-    } else {
-      this.#watchView.reconnect(snapshot);
-    }
-    void this.ack(result.serverSeq).catch(() => undefined);
-    return this.#watchView;
+  }
+
+  async watchAdd(watches: WatchSpec[]): Promise<QueryView> {
+    return await this.runWatchMutation(async () => {
+      const result = await this.client.request<WatchAddResult>({
+        type: "session.watch.add",
+        requestId: crypto.randomUUID(),
+        space: this.space,
+        sessionId: this.#sessionId,
+        watches,
+      });
+      this.#watchSpecs = [
+        ...new Map(
+          [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
+        ).values(),
+      ];
+      this.applySync(result.sync, false);
+      const snapshot = this.currentWatchResult();
+      if (this.#watchView === null) {
+        this.#watchView = new QueryView(snapshot);
+      } else {
+        this.#watchView.reconnect(snapshot);
+      }
+      this.queueBackground(this.ack(result.serverSeq));
+      return this.#watchView;
+    });
   }
 
   async ack(seenSeq: number): Promise<void> {
@@ -354,7 +385,7 @@ export class SpaceSession {
 
   handleEffect(effect: SessionSync): void {
     this.applySync(effect, true);
-    void this.ack(effect.toSeq).catch(() => undefined);
+    this.queueBackground(this.ack(effect.toSeq));
   }
 
   async restore(): Promise<void> {
@@ -373,6 +404,23 @@ export class SpaceSession {
     this.#outstandingCommits.clear();
     this.#watchView?.close();
     this.#watchView = null;
+    const background = [...this.#background];
+    this.#background.clear();
+    await Promise.allSettled(background);
+  }
+
+  private queueBackground(task: Promise<void>): void {
+    const tracked = task
+      .catch(() => undefined)
+      .finally(() => this.#background.delete(tracked));
+    this.#background.add(tracked);
+  }
+
+  private async runWatchMutation<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.#watchMutation;
+    const current = previous.catch(() => undefined).then(work);
+    this.#watchMutation = current.then(() => undefined, () => undefined);
+    return await current;
   }
 
   private noteResult(serverSeq: number): void {

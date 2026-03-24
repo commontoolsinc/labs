@@ -728,6 +728,18 @@ const compactWatchEntries = (
   return compacted;
 };
 
+const watchIdForEntry = (
+  address: { id: URI; type: MIME },
+  selector: SchemaPathSelector,
+): string =>
+  `replica:${
+    stableHash({
+      id: address.id,
+      type: address.type,
+      selector,
+    })
+  }`;
+
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
@@ -751,6 +763,7 @@ class SpaceReplica implements ISpaceReplica {
     Set<(value: StorageValue | undefined) => void>
   >();
   #watchView: MemoryV2Client.QueryView | null = null;
+  #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<URI>();
   #nextLocalSeq = 1;
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
@@ -827,10 +840,9 @@ class SpaceReplica implements ISpaceReplica {
 
   async close(): Promise<void> {
     await this.synced();
-    if (this.#queuedWatchRefreshTimer !== null) {
-      clearTimeout(this.#queuedWatchRefreshTimer);
-      this.#queuedWatchRefreshTimer = null;
-    }
+    this.cancelQueuedWatchRefresh();
+    this.#watchView?.close();
+    this.#watchView = null;
     const sessionHandle = this.#sessionHandle;
     if (sessionHandle) {
       const { client } = await sessionHandle;
@@ -838,6 +850,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
   async load(
@@ -875,14 +888,44 @@ class SpaceReplica implements ISpaceReplica {
       entries: normalizedEntries,
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
+    const cfc = new ContextualFlowControl();
+    const newEntries = normalizedEntries.filter(([address, selector]) => {
+      const [superset] = this.#watchSelectorTracker.getSupersetSelector(
+        { id: address.id, type: address.type },
+        selector,
+        cfc,
+      );
+      return superset === undefined;
+    });
+    if (newEntries.length === 0) {
+      return { ok: {} };
+    }
+    task.entries = newEntries;
     this.#syncTasks.set(key, task);
     const promise = this.enqueueWatchRefresh("pull");
     task.promise = promise;
+    for (const [address, selector] of newEntries) {
+      this.#watchSelectorTracker.add(
+        { id: address.id, type: address.type },
+        selector,
+        promise,
+      );
+    }
     this.#syncPromises.add(promise);
     try {
       return await promise;
     } finally {
+      this.#syncTasks.delete(key);
       this.#syncPromises.delete(promise);
+      const result = await Promise.resolve(task.promise);
+      if (result.error) {
+        for (const [address, selector] of newEntries) {
+          this.#watchSelectorTracker.delete(
+            { id: address.id, type: address.type },
+            selector,
+          );
+        }
+      }
     }
   }
 
@@ -944,6 +987,8 @@ class SpaceReplica implements ISpaceReplica {
   reset(): void {
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.cancelQueuedWatchRefresh();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
     this.#subscription.next({
       type: "reset",
       space: this.#space,
@@ -955,27 +1000,33 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
-      const uniqueEntries = new Map<
+      const pendingEntries = new Map<
         string,
         [{ id: URI; type: MIME }, SchemaPathSelector]
       >();
       for (const task of this.#syncTasks.values()) {
         for (const entry of task.entries) {
-          uniqueEntries.set(JSON.stringify(entry), entry);
+          pendingEntries.set(JSON.stringify(entry), entry);
         }
       }
-      const watchEntries = compactWatchEntries([...uniqueEntries.values()]);
+      const rawEntries = [...pendingEntries.values()];
+      const watchEntries = compactWatchEntries(rawEntries);
+      if (watchEntries.length === 0) {
+        return { ok: {} };
+      }
 
-      const view = await session.watchSet([{
-        id: "replica",
-        kind: "graph",
+      const watches = watchEntries.map(([address, selector]) => ({
+        id: watchIdForEntry(address, selector),
+        kind: "graph" as const,
         query: {
-          roots: watchEntries.map(([address, selector]) => ({
+          roots: [{
             id: address.id,
             selector,
-          })),
+          }],
         },
-      }]);
+      }));
+
+      const view = await session.watchAdd(watches);
 
       this.#watchView = view;
       this.applyQueryResult(view.entities, type);
@@ -1020,6 +1071,19 @@ class SpaceReplica implements ISpaceReplica {
       batch.pending.resolve(await this.refreshWatchSet(batch.type));
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
+    }
+  }
+
+  private cancelQueuedWatchRefresh(): void {
+    if (this.#queuedWatchRefreshTimer !== null) {
+      clearTimeout(this.#queuedWatchRefreshTimer);
+      this.#queuedWatchRefreshTimer = null;
+    }
+    if (this.#queuedWatchRefresh !== null) {
+      this.#queuedWatchRefresh.pending.resolve({
+        error: toConnectionError(new Error("memory/v2 replica closed")),
+      });
+      this.#queuedWatchRefresh = null;
     }
   }
 

@@ -76,6 +76,7 @@ memory route.
   - current relevant entity keys
   - last synced entity cache
 - Add `session.watch.set` to replace the current watch set for a session.
+- Add `session.watch.add` to incrementally extend the current watch set by id.
 - Add `session.ack` to advance server-side `seenSeq`.
 - Emit `session/effect` sync messages instead of `graph.update`.
 - Keep one-shot `graph.query` for non-live reads.
@@ -93,6 +94,7 @@ memory route.
   - reconnect by `seenSeq`
 - Add client APIs for:
   - `watchSet(watches)`
+  - `watchAdd(watches)`
   - `ack(seenSeq)`
   - one-shot `queryGraph(query)`
 - On reconnect:
@@ -106,6 +108,8 @@ memory route.
 
 - Update `packages/runner/src/storage/v2.ts` to use session watch installation
   instead of `queryGraph({ subscribe: true })`.
+- Use `watchAdd(...)` as the normal watch growth path, including the first watch
+  install on a fresh session.
 - Keep the runner/storage public API unchanged.
 - Keep current notification semantics:
   - optimistic `commit`

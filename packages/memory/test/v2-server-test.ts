@@ -366,6 +366,307 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
   }
 });
 
+Deno.test("memory v2 server refreshes watched docs without rerunning full graph queries", async () => {
+  const server = createServer("memory://memory-v2-server-incremental-watch");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-incremental-watch";
+  const originalEvaluateGraphQuery = server.evaluateGraphQuery.bind(server);
+  const evaluatedRoots: string[][] = [];
+  server.evaluateGraphQuery = (async (...args) => {
+    evaluatedRoots.push(args[1].roots.map((root) => root.id));
+    return await originalEvaluateGraphQuery(...args);
+  }) as typeof server.evaluateGraphQuery;
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { one: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "first",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }, {
+        id: "second",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:2",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "watch-1",
+    );
+    evaluatedRoots.length = 0;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "update",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { one: 2 } },
+        }],
+      },
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "update",
+    );
+
+    await tick();
+    const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect.upserts.map((entry) => entry.id), ["of:doc:1"]);
+    assertEquals(effect.effect.removes, []);
+    assertEquals(evaluatedRoots, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server incrementally adds watches without rerunning full graph queries", async () => {
+  const server = createServer("memory://memory-v2-server-watch-add");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-watch-add";
+  const originalEvaluateGraphQuery = server.evaluateGraphQuery.bind(server);
+  const evaluatedRoots: string[][] = [];
+  server.evaluateGraphQuery = (async (...args) => {
+    evaluatedRoots.push(args[1].roots.map((root) => root.id));
+    return await originalEvaluateGraphQuery(...args);
+  }) as typeof server.evaluateGraphQuery;
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { one: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "first",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const first = assertResponse<any>(shiftMessage(messages));
+    assertEquals(
+      first.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
+      [
+        "of:doc:1",
+      ],
+    );
+    evaluatedRoots.length = 0;
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.add",
+      requestId: "watch-2",
+      space,
+      sessionId,
+      watches: [{
+        id: "second",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:2",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const second = assertResponse<any>(shiftMessage(messages));
+    assertEquals(
+      second.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
+      [
+        "of:doc:2",
+      ],
+    );
+    assertEquals(second.ok?.sync.removes, []);
+    assertEquals(evaluatedRoots, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server can bootstrap watches with session.watch.add", async () => {
+  const server = createServer("memory://memory-v2-server-watch-add-bootstrap");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-watch-add-bootstrap";
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { hello: "watch-add" } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.add",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const watch = assertResponse<any>(shiftMessage(messages));
+    assertEquals(
+      watch.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
+      ["of:doc:1"],
+    );
+    assertEquals(watch.ok?.sync.removes, []);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server watch set replacement emits removes for entities that leave scope", async () => {
   const server = createServer("memory://memory-v2-server-watch-replace");
   const messages: ServerMessage[] = [];

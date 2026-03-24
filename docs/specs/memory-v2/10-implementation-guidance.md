@@ -39,6 +39,7 @@ codebase. The target wire messages are:
 - `transact`
 - `graph.query`
 - `session.watch.set`
+- `session.watch.add`
 - `session.ack`
 - `response`
 - `session/effect`
@@ -65,6 +66,12 @@ Reconnect behavior:
 
 The client should treat `seenSeq` as “highest canonical seq fully integrated
 into confirmed state,” not merely “latest seq observed on the wire.”
+
+The normal growth path for live interests should use `session.watch.add`,
+including the first watch install on a fresh session. Use `session.watch.set`
+only when replacing the full interest set. Watch mutations must be serialized
+per session so overlapping add/set requests cannot race to construct competing
+local watch views.
 
 ## 5. Transaction Contract
 

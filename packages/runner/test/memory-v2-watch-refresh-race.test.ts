@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import type { URI } from "@commontools/memory/interface";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
@@ -49,128 +49,11 @@ class TestStorageManager extends V2StorageManager {
   }
 }
 
-class OutOfOrderWatchSetTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #firstWatchPending: { requestId: string } | null = null;
-  #firstWatchSeen = Promise.withResolvers<void>();
-
-  constructor(
-    private readonly docA: URI,
-    private readonly docB: URI,
-  ) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
-  }
-
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
-  }
-
-  async waitForFirstWatch(): Promise<void> {
-    await this.#firstWatchSeen.promise;
-  }
-
-  async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
-      type: string;
-      requestId?: string;
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
-    switch (message.type) {
-      case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: "memory/v2",
-        });
-        return Promise.resolve();
-      case "session.open":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:watch-refresh-race",
-            serverSeq: 0,
-          },
-        });
-        return;
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 2,
-          },
-        });
-        return;
-      case "session.watch.set": {
-        const roots =
-          message.watches?.flatMap((watch) =>
-            watch.query?.roots?.map((root) => root.id) ?? []
-          ) ?? [];
-
-        if (roots.length === 1) {
-          this.#firstWatchPending = { requestId: message.requestId! };
-          this.#firstWatchSeen.resolve();
-          return;
-        }
-
-        if (roots.length !== 2 || this.#firstWatchPending === null) {
-          throw new Error(
-            `Unexpected watch roots: ${JSON.stringify(roots)}`,
-          );
-        }
-
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 2,
-            sync: fullSync(2, [
-              doc(this.docA, 1, { value: { label: "A" } }),
-              doc(this.docB, 2, { value: { label: "B" } }),
-            ]),
-          },
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 5));
-
-        this.#respond({
-          type: "response",
-          requestId: this.#firstWatchPending.requestId,
-          ok: {
-            serverSeq: 1,
-            sync: fullSync(1, [
-              doc(this.docA, 1, { value: { label: "A" } }),
-            ]),
-          },
-        });
-        this.#firstWatchPending = null;
-        return;
-      }
-      default:
-        throw new Error(`Unhandled scripted message: ${message.type}`);
-    }
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
-  }
-}
-
 class CountingWatchSetTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   watchSetCount = 0;
+  watchAddCount = 0;
   rootCounts: number[] = [];
 
   setReceiver(receiver: (payload: string) => void): void {
@@ -216,13 +99,18 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
           },
         });
         return Promise.resolve();
-      case "session.watch.set": {
+      case "session.watch.set":
+      case "session.watch.add": {
         const roots =
           message.watches?.flatMap((watch) =>
             watch.query?.roots?.map((root) => root.id) ?? []
           ) ?? [];
 
-        this.watchSetCount += 1;
+        if (message.type === "session.watch.set") {
+          this.watchSetCount += 1;
+        } else {
+          this.watchAddCount += 1;
+        }
         this.rootCounts.push(roots.length);
 
         this.#respond({
@@ -287,40 +175,6 @@ const getObjectValue = (
     : undefined;
 };
 
-Deno.test("memory v2 runner ignores stale overlapping watch refresh results", async () => {
-  const docA = `of:watch-race-a-${crypto.randomUUID()}` as URI;
-  const docB = `of:watch-race-b-${crypto.randomUUID()}` as URI;
-  const transport = new OutOfOrderWatchSetTransport(docA, docB);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    address: new URL("memory://runner-v2-watch-refresh-race"),
-    memoryVersion: "v2",
-  }, sessionFactory);
-  const provider = storageManager.open(space) as TestProvider;
-
-  try {
-    const firstSync = provider.sync(docA, {
-      path: [],
-      schema: false,
-    });
-    await transport.waitForFirstWatch();
-
-    const secondSync = provider.sync(docB, {
-      path: [],
-      schema: false,
-    });
-
-    await Promise.all([firstSync, secondSync]);
-
-    assertEquals(getObjectValue(provider, docA), { label: "A" });
-    assertExists(getObjectValue(provider, docB));
-    assertEquals(getObjectValue(provider, docB), { label: "B" });
-  } finally {
-    await storageManager.close();
-  }
-});
-
 Deno.test("memory v2 runner batches concurrent watch refreshes", async () => {
   const docA = `of:watch-batch-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-batch-b-${crypto.randomUUID()}` as URI;
@@ -341,7 +195,8 @@ Deno.test("memory v2 runner batches concurrent watch refreshes", async () => {
       provider.sync(docC, { path: [], schema: false }),
     ]);
 
-    assertEquals(transport.watchSetCount, 1);
+    assertEquals(transport.watchSetCount, 0);
+    assertEquals(transport.watchAddCount, 1);
     assertEquals(transport.rootCounts, [3]);
     assertEquals(getObjectValue(provider, docA), { label: docA });
     assertEquals(getObjectValue(provider, docB), { label: docB });
@@ -384,9 +239,36 @@ Deno.test("memory v2 runner compacts redundant selectors for the same doc", asyn
       }),
     ]);
 
-    assertEquals(transport.watchSetCount, 1);
+    assertEquals(transport.watchSetCount, 0);
+    assertEquals(transport.watchAddCount, 1);
     assertEquals(transport.rootCounts, [1]);
     assertEquals(getObjectValue(provider, docA), { label: docA });
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("memory v2 runner incrementally adds later watches after the initial set", async () => {
+  const docA = `of:watch-add-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-add-b-${crypto.randomUUID()}` as URI;
+  const transport = new CountingWatchSetTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-watch-add"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    await provider.sync(docA, { path: [], schema: false });
+    await provider.sync(docB, { path: [], schema: false });
+
+    assertEquals(transport.watchSetCount, 0);
+    assertEquals(transport.watchAddCount, 2);
+    assertEquals(transport.rootCounts, [1, 1]);
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+    assertEquals(getObjectValue(provider, docB), { label: docB });
   } finally {
     await storageManager.close();
   }

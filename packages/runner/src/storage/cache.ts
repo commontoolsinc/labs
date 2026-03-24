@@ -514,6 +514,17 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     return this.selectorPromises.get(promiseKey);
   }
 
+  delete(address: BaseMemoryAddress, selector: SchemaPathSelector): void {
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    this.refTracker.deleteValue(toKey(address), selectorRef);
+    const promiseKey = `${toKey(address)}?${selectorRef}`;
+    this.selectorPromises.delete(promiseKey);
+    if (![...this.refTracker].some(([, refs]) => refs.has(selectorRef))) {
+      this.selectors.delete(selectorRef);
+      this.standardizedSelector.delete(selectorRef);
+    }
+  }
+
   getAllPromises(): Iterable<Promise<T>> {
     return this.selectorPromises.values();
   }

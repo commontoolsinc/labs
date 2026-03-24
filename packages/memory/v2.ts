@@ -217,6 +217,11 @@ export interface WatchSetResult {
   sync: SessionSync;
 }
 
+export interface WatchAddResult {
+  serverSeq: number;
+  sync: SessionSync;
+}
+
 export interface SessionAckResult {
   serverSeq: number;
 }
@@ -241,6 +246,14 @@ export interface GraphQueryRequest {
 
 export interface WatchSetRequest {
   type: "session.watch.set";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  watches: WatchSpec[];
+}
+
+export interface WatchAddRequest {
+  type: "session.watch.add";
   requestId: string;
   space: string;
   sessionId: SessionId;
@@ -291,6 +304,7 @@ export type ClientMessage =
   | TransactRequest
   | GraphQueryRequest
   | WatchSetRequest
+  | WatchAddRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage

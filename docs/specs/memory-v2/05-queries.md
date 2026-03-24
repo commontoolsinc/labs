@@ -410,6 +410,12 @@ Client                                Server
   |<--- ok(serverSeq) -----------------|
   |<--- session/effect(sync) ----------|
   |                                     |
+  |--- watchAdd([queryC]) ------------->|
+  |                                     |-- evaluate only new roots
+  |                                     |-- stop at tracked doc+selector hits
+  |<--- ok(serverSeq) -----------------|
+  |<--- session/effect(sync upserts) --|
+  |                                     |
   |     (data changes on server)        |
   |<--- session/effect(sync) ----------|
   |                                     |
@@ -438,12 +444,15 @@ union:
 
 1. **Watch install**: evaluate the schema query, recording every visited entity
    and the schema context used.
-2. **On commit**: for each changed entity, determine whether it can affect the
+2. **Watch add**: for new roots, start traversal only from those roots. If the
+   traversal reaches an entity-plus-selector pair that is already tracked, stop
+   immediately and reuse the existing downstream result.
+3. **On commit**: for each changed entity, determine whether it can affect the
    current tracked graph.
-3. **Re-evaluate affected topology**: if links or source chains changed, re-run
-   the shared traversal logic to discover newly reachable or no-longer-
-   reachable entities.
-4. **Emit sync**: send entity upserts for newly relevant/current entities and
+4. **Re-evaluate affected topology**: if links or source chains changed, re-run
+   the shared traversal logic only from the affected tracked entities to
+   discover newly reachable or no-longer-reachable entities.
+5. **Emit sync**: send entity upserts for newly relevant/current entities and
    removes for entities that fell out of the watch union.
 
 ### 5.4.4 Deduplication

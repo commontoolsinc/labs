@@ -282,7 +282,40 @@ Semantics:
 - after the watch set is installed, the server emits `session/effect` sync to
   bring the session cache in line with the new interest set
 
-### 4.3.5 Branch Lifecycle Commands
+### 4.3.5 `session.watch.add` — Extend the Session Watch Set
+
+`session.watch.add` incrementally merges new watch specs into the existing
+session watch set by `id`.
+
+```typescript
+interface WatchAddCommand {
+  cmd: "/memory/session/watch/add";
+  sub: SpaceId;
+  args: {
+    watches: WatchSpec[];
+  };
+}
+
+interface WatchAddResult {
+  ok: {
+    watches: string[];
+    serverSeq: number;
+  };
+}
+```
+
+Semantics:
+
+- each provided watch is merged into the existing watch set by `id`
+- new graph watches are evaluated from their new roots only
+- traversal stops immediately when it reaches an already tracked
+  entity-plus-selector pair
+- the server returns only the additional `upserts` needed for the new watches;
+  pure adds do not emit `removes`
+- watch mutations are applied in order per session; clients must serialize
+  `session.watch.set` and `session.watch.add`
+
+### 4.3.6 Branch Lifecycle Commands
 
 Branch create, merge preparation, delete, and list remain protocol commands.
 They continue to use `localSeq` for replay safety when they mutate storage.

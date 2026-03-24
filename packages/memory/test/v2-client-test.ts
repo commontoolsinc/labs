@@ -82,6 +82,75 @@ Deno.test("memory v2 client watch sets expand to previously hidden graph nodes",
   }
 });
 
+Deno.test("memory v2 client can bootstrap watches with watchAdd", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-watch-add-bootstrap"),
+  });
+  const writerClient = await connect({
+    transport: loopback(server),
+  });
+  const observerClient = await connect({
+    transport: loopback(server),
+  });
+  const writer = await writerClient.mount(
+    "did:key:z6Mk-memory-v2-client-watch-add-bootstrap",
+  );
+  const observer = await observerClient.mount(
+    "did:key:z6Mk-memory-v2-client-watch-add-bootstrap",
+  );
+
+  try {
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            hello: "watch-add",
+          },
+        },
+      }],
+    });
+
+    const view = await observer.watchAdd([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+
+    assertEquals(
+      view.entities.map((entity) => ({
+        id: entity.id,
+        seq: entity.seq,
+        document: entity.document,
+      })),
+      [{
+        id: "of:doc:1",
+        seq: 1,
+        document: {
+          value: {
+            hello: "watch-add",
+          },
+        },
+      }],
+    );
+  } finally {
+    await writerClient.close();
+    await observerClient.close();
+    await server.close();
+  }
+});
+
 class ReconnectableLoopbackTransport implements Transport {
   connectionCount = 0;
   watchSetCount = 0;
