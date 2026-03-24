@@ -342,15 +342,6 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
 // ---------------------------------------------------------------------------
 
 /**
- * Like `hashOfModern()`, but returns the hash as a raw string
- * (`tag:base64url`). Delegates to `hashOfModern()` so cached
- * `FabricHash` instances are preserved.
- */
-export function hashOfAsRawStringModern(value: unknown): string {
-  return hashOfModern(value).toString();
-}
-
-/**
  * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
  * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
  * The caller (`hashOf()`) extracts the raw digest via `.hash` for
