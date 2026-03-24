@@ -75,6 +75,13 @@ const CELL_FOR_NAMES = new Set(["for"]);
 const COMMONTOOLS_CALL_NAMES = COMMONTOOLS_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 
+export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
+
+export interface ArrayMethodAccessKind {
+  readonly family: ArrayMethodFamilyName;
+  readonly lowered: boolean;
+}
+
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "when"; symbol?: ts.Symbol }
@@ -186,6 +193,49 @@ export function isWildcardTraversalCall(
   checker?: ts.TypeChecker,
 ): boolean {
   return !!classifyWildcardTraversalCall(call, checker);
+}
+
+export function classifyArrayMethodAccess(
+  expression: ts.Expression,
+): ArrayMethodAccessKind | undefined {
+  const target = stripWrappers(expression);
+
+  let methodName: string | undefined;
+  if (ts.isPropertyAccessExpression(target)) {
+    methodName = target.name.text;
+  } else if (ts.isElementAccessExpression(target)) {
+    const argument = target.argumentExpression;
+    if (
+      argument &&
+      (ts.isStringLiteralLike(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument))
+    ) {
+      methodName = argument.text;
+    }
+  }
+
+  switch (methodName) {
+    case "map":
+      return { family: "map", lowered: false };
+    case "mapWithPattern":
+      return { family: "map", lowered: true };
+    case "filter":
+      return { family: "filter", lowered: false };
+    case "filterWithPattern":
+      return { family: "filter", lowered: true };
+    case "flatMap":
+      return { family: "flatMap", lowered: false };
+    case "flatMapWithPattern":
+      return { family: "flatMap", lowered: true };
+    default:
+      return undefined;
+  }
+}
+
+export function classifyArrayMethodCall(
+  call: ts.CallExpression,
+): ArrayMethodAccessKind | undefined {
+  return classifyArrayMethodAccess(call.expression);
 }
 
 function isReactiveOriginKind(callKind: CallKind): boolean {

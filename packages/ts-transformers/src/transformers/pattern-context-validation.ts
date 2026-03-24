@@ -36,6 +36,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyArrayMethodCall,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -788,12 +789,16 @@ export class PatternContextValidationTransformer extends Transformer {
     _checker: ts.TypeChecker,
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
-    if (!ts.isPropertyAccessExpression(node.expression)) return;
-    const methodName = node.expression.name.text;
+    const arrayMethodInfo = classifyArrayMethodCall(node);
+    if (!arrayMethodInfo || arrayMethodInfo.lowered) return;
+    const methodName = arrayMethodInfo.family;
+
     if (
-      methodName !== "map" && methodName !== "filter" &&
-      methodName !== "flatMap"
-    ) return;
+      !ts.isPropertyAccessExpression(node.expression) &&
+      !ts.isElementAccessExpression(node.expression)
+    ) {
+      return;
+    }
 
     let target: ts.Expression = node.expression.expression;
 

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  classifyArrayMethodCall,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -495,16 +496,17 @@ function isDeferredJsxArrayMethodExpression(
     return false;
   }
 
-  if (
-    ts.isPropertyAccessExpression(current.expression) &&
-    (
-      current.expression.name.text === "map" ||
-      current.expression.name.text === "filter" ||
-      current.expression.name.text === "flatMap"
-    )
-  ) {
+  const arrayMethodInfo = classifyArrayMethodCall(current);
+  if (arrayMethodInfo && !arrayMethodInfo.lowered) {
     if (current.arguments.some(isFunctionLikeExpression)) {
       return true;
+    }
+
+    if (
+      !ts.isPropertyAccessExpression(current.expression) &&
+      !ts.isElementAccessExpression(current.expression)
+    ) {
+      return false;
     }
 
     const receiverAnalysis = analyze(current.expression.expression);

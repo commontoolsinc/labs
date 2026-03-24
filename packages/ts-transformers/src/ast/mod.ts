@@ -1,5 +1,9 @@
 export {
+  type ArrayMethodAccessKind,
+  type ArrayMethodFamilyName,
   type CallKind,
+  classifyArrayMethodAccess,
+  classifyArrayMethodCall,
   classifyWildcardTraversalCall,
   detectCallKind,
   detectDirectBuilderCall,

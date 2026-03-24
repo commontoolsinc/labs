@@ -1796,6 +1796,64 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   );
 
   await t.step(
+    "errors on .filter() after ?? [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).filter((item) => item.name.length > 0)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+    },
+  );
+
+  await t.step(
+    "errors on .flatMap() after ?? [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).flatMap((item) => [item.name])}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+    },
+  );
+
+  await t.step(
     "allows .map() on direct property access (correct usage)",
     async () => {
       const source = `/// <cts-enable />

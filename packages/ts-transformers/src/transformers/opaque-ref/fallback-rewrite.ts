@@ -1,5 +1,6 @@
 import ts from "typescript";
 
+import { classifyArrayMethodAccess } from "../../ast/mod.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import { isFallbackOperator } from "../../utils/reactive-keys.ts";
 import { isSimpleOpaqueRefAccess } from "./opaque-ref.ts";
@@ -17,9 +18,14 @@ export function isFallbackMapReceiverExpression(
   }
 
   const parent = current.parent;
-  return ts.isPropertyAccessExpression(parent) &&
-    parent.expression === current &&
-    parent.name.text === "map";
+  if (!ts.isPropertyAccessExpression(parent) || parent.expression !== current) {
+    return false;
+  }
+
+  const arrayMethodInfo = classifyArrayMethodAccess(parent);
+  return !!arrayMethodInfo &&
+    !arrayMethodInfo.lowered &&
+    arrayMethodInfo.family === "map";
 }
 
 export function shouldDeferFallbackMapReceiverRewrite(
