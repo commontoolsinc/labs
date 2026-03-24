@@ -9,6 +9,7 @@
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type { Immutable } from "@commontools/utils/types";
 import type { SchemaPathSelector, URI } from "./interface.ts";
+export type { SchemaPathSelector };
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -52,12 +53,14 @@ export type ClientCommit = {
 
 export type ClientSubscribe = {
   type: "subscribe";
-  selector: SubscriptionSelector;
+  /** Plain-object form of SubscriptionSelector — safe to JSON round-trip. */
+  selector: Record<string, SchemaPathSelector>;
 };
 
 export type ClientUnsubscribe = {
   type: "unsubscribe";
-  selector: SubscriptionSelector;
+  /** Plain-object form of SubscriptionSelector — safe to JSON round-trip. */
+  selector: Record<string, SchemaPathSelector>;
 };
 
 export type ClientMessage = ClientCommit | ClientSubscribe | ClientUnsubscribe;
@@ -80,7 +83,7 @@ export type ServerRejected = {
 };
 
 /**
- * Sent in response to a subscribe request; carries current snapshots for one
+ * Sent in response to a subscribe request; carries current revisions for one
  * or more docs. The serverSeq here becomes this client's floor for snapshot
  * retention.
  */
@@ -112,24 +115,79 @@ export type ServerMessage =
 
 import { StitchDb } from "./stitch-db.ts";
 
+// ---------------------------------------------------------------------------
+// Per-document revision window
+// ---------------------------------------------------------------------------
+
 /**
- * Per-space state: one StitchDb and the set of sessions currently connected
- * to that space. Created lazily the first time a client connects to a space.
+ * In-memory sliding window for one document.
+ *
+ * `revisions` is a sparse map — it only contains entries for serverSeqs at
+ * which the document was actually written. The most recent entry at or before
+ * a given serverSeq is the document's value as of that point.
+ *
+ * `floor` is the minimum serverSeq any currently-subscribed client has
+ * acknowledged. Revisions strictly below this value can be discarded.
+ */
+type DocWindow = {
+  revisions: Map<number, unknown>;
+  floor: number;
+};
+
+// ---------------------------------------------------------------------------
+// SpaceHub
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-space state: one StitchDb, the active session set, and the per-document
+ * revision windows needed to serve the spec's staleness rules without DB scans.
+ *
+ * Created lazily the first time a client connects to a space.
  */
 class SpaceHub {
   readonly db: StitchDb;
   readonly #sessions = new Set<StitchSession>();
 
+  /** In-memory revision window per document. */
+  readonly #docWindows = new Map<string, DocWindow>();
+
+  /**
+   * docId → set of sessions subscribed to that document.
+   * Used to compute the per-doc floor as min(session.echoedServerSeq).
+   */
+  readonly #docSubscribers = new Map<string, Set<StitchSession>>();
+
+  /**
+   * session → set of docIds it is subscribed to.
+   * Reverse index of #docSubscribers for efficient cleanup on disconnect.
+   */
+  readonly #sessionDocs = new Map<StitchSession, Set<string>>();
+
   constructor(db: StitchDb) {
     this.db = db;
   }
+
+  // -------------------------------------------------------------------------
+  // Session lifecycle
+  // -------------------------------------------------------------------------
 
   addSession(session: StitchSession): void {
     this.#sessions.add(session);
   }
 
-  removeSession(session: StitchSession): void {
+  /**
+   * Remove a session and release its floor contribution from every document it
+   * was subscribed to. Call this when the WebSocket connection closes.
+   */
+  disconnect(session: StitchSession): void {
     this.#sessions.delete(session);
+    const docs = this.#sessionDocs.get(session);
+    if (docs) {
+      for (const docId of docs) {
+        this.#removeSubscriber(session, docId);
+      }
+      this.#sessionDocs.delete(session);
+    }
   }
 
   /** Broadcast an update to all sessions in this space except the originator. */
@@ -138,6 +196,91 @@ class SpaceHub {
     for (const session of this.#sessions) {
       if (session !== origin && session.isSubscribedToAny(touchedIds)) {
         session.send(update);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Snapshot window management
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record a revision for `docId` at `serverSeq`. Call this for every `set`
+   * op after a commit is accepted.
+   */
+  recordRevision(docId: string, serverSeq: number, value: unknown): void {
+    const w = this.#getOrCreateWindow(docId);
+    w.revisions.set(serverSeq, value);
+  }
+
+  /**
+   * Register `session` as a subscriber of `docId`.
+   * The floor is derived from session.echoedServerSeq, not stored separately.
+   */
+  trackSubscription(session: StitchSession, docId: string): void {
+    this.#docSubscribers.getOrInsertComputed(docId, () => new Set()).add(session);
+    this.#sessionDocs.getOrInsertComputed(session, () => new Set()).add(docId);
+    this.#gcWindow(docId);
+  }
+
+  /**
+   * Remove `session` from the subscribers of `docId`. Call this when the
+   * client explicitly unsubscribes from a document.
+   */
+  untrackSubscription(session: StitchSession, docId: string): void {
+    this.#removeSubscriber(session, docId);
+    this.#sessionDocs.get(session)?.delete(docId);
+  }
+
+  /**
+   * The client's echoedServerSeq has advanced — recompute the floor for every
+   * document the session is subscribed to and GC revisions below the new floor.
+   */
+  notifyFloorAdvanced(session: StitchSession): void {
+    const docs = this.#sessionDocs.get(session);
+    if (!docs) return;
+    for (const docId of docs) {
+      this.#gcWindow(docId);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Private helpers
+  // -------------------------------------------------------------------------
+
+  #getOrCreateWindow(docId: string): DocWindow {
+    return this.#docWindows.getOrInsertComputed(
+      docId,
+      () => ({ revisions: new Map(), floor: 0 }),
+    );
+  }
+
+  #removeSubscriber(session: StitchSession, docId: string): void {
+    const subscribers = this.#docSubscribers.get(docId);
+    if (!subscribers) return;
+    subscribers.delete(session);
+    if (subscribers.size === 0) {
+      this.#docSubscribers.delete(docId);
+      this.#docWindows.delete(docId);
+    } else {
+      this.#gcWindow(docId);
+    }
+  }
+
+  /**
+   * Recompute the floor for `docId` as min(session.echoedServerSeq) across
+   * all subscribers, then discard revisions below the new floor.
+   */
+  #gcWindow(docId: string): void {
+    const subscribers = this.#docSubscribers.get(docId);
+    const w = this.#docWindows.get(docId);
+    if (!subscribers || !w) return;
+
+    const newFloor = Math.min(...[...subscribers].map((s) => s.echoedServerSeq));
+    if (newFloor > w.floor) {
+      w.floor = newFloor;
+      for (const seq of w.revisions.keys()) {
+        if (seq < newFloor) w.revisions.delete(seq);
       }
     }
   }
@@ -210,6 +353,11 @@ class StitchSession {
   /** Latest serverSeq echoed by this client in an incoming commit message. */
   #echoedServerSeq = 0;
 
+  /** Exposed so SpaceHub can compute per-doc floors as min(session.echoedServerSeq). */
+  get echoedServerSeq(): number {
+    return this.#echoedServerSeq;
+  }
+
   constructor(hub: SpaceHub, send: (msg: ServerMessage) => void) {
     this.#hub = hub;
     this.#send = send;
@@ -251,9 +399,10 @@ class StitchSession {
 
   #handleSubscribe(msg: ClientSubscribe): void {
     const db = this.#hub.db;
+    const serverSeq = db.currentServerSeq();
     const docs: Record<string, unknown> = {};
 
-    for (const [key] of msg.selector) {
+    for (const key of Object.keys(msg.selector)) {
       if (key === "*") {
         this.#wildcardSubscription = true;
       } else {
@@ -261,23 +410,24 @@ class StitchSession {
         const row = db.getDoc(key);
         if (row !== null) {
           docs[key] = row.value;
+          // Seed the window with the current value so the floor has something
+          // to anchor to from the moment this client subscribes.
+          this.#hub.recordRevision(key, row.server_seq, row.value);
         }
+        this.#hub.trackSubscription(this, key);
       }
     }
 
-    this.#send({
-      type: "subscribed",
-      serverSeq: db.currentServerSeq(),
-      docs,
-    });
+    this.#send({ type: "subscribed", serverSeq, docs });
   }
 
   #handleUnsubscribe(msg: ClientUnsubscribe): void {
-    for (const [key] of msg.selector) {
+    for (const key of Object.keys(msg.selector)) {
       if (key === "*") {
         this.#wildcardSubscription = false;
       } else {
         this.#subscriptions.delete(key);
+        this.#hub.untrackSubscription(this, key);
       }
     }
   }
@@ -285,7 +435,6 @@ class StitchSession {
   #handleCommit(msg: ClientCommit): void {
     // GC stale tracking entries using the serverSeq the client has echoed.
     this.#gc(msg.serverSeq);
-    this.#echoedServerSeq = msg.serverSeq;
 
     // Rule 1: Pending chain — reject if any prior rejected commit's writes
     // overlap with this commit's reads.
@@ -323,8 +472,13 @@ class StitchSession {
       }
     }
 
-    // Accept: write to DB atomically and notify.
+    // Accept: write to DB atomically, record revisions, and notify.
     const newServerSeq = db.acceptCommit("", msg.ops, msg.signature);
+    for (const op of msg.ops) {
+      if (op.op === "set") {
+        this.#hub.recordRevision(op.id, newServerSeq, op.value);
+      }
+    }
     this.#integratedSeqs.set(`${msg.clientSeq}:${msg.serverSeq}`, newServerSeq);
 
     this.#send({ type: "accepted", clientSeq: msg.clientSeq, serverSeq: newServerSeq });
@@ -337,6 +491,10 @@ class StitchSession {
 
   /** Discard tracking entries the client has already processed. */
   #gc(clientEchoedServerSeq: number): void {
+    if (clientEchoedServerSeq > this.#echoedServerSeq) {
+      this.#echoedServerSeq = clientEchoedServerSeq;
+      this.#hub.notifyFloorAdvanced(this);
+    }
     for (const [seq, { serverSeq }] of this.#rejectedSeqs) {
       if (serverSeq < clientEchoedServerSeq) this.#rejectedSeqs.delete(seq);
     }
@@ -389,11 +547,11 @@ const createSession = (
       session.handleMessage(chunk);
     },
     close() {
-      space.removeSession(session);
+      space.disconnect(session);
       closeReadable();
     },
     abort() {
-      space.removeSession(session);
+      space.disconnect(session);
       closeReadable();
     },
   });
