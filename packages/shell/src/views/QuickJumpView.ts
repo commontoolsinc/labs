@@ -67,6 +67,7 @@ export class XQuickJumpView extends BaseView {
       display: flex;
       gap: 8px;
       align-items: baseline;
+      user-select: none;
     }
 
     .item[aria-selected="true"] {
