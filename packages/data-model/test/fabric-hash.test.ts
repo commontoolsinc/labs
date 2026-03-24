@@ -10,7 +10,7 @@ import {
   contentIdFromJSON,
   fromString,
   hashOf,
-  isContentId,
+  isHashObject,
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "../value-hash.ts";
@@ -143,20 +143,20 @@ Deno.test("FabricHash", async (t) => {
   );
 
   await t.step(
-    "isContentId returns true for FabricHash instances",
+    "isHashObject returns true for FabricHash instances",
     () => {
       const cid = new FabricHash(SAMPLE_HASH, "fid1");
-      assert(isContentId(cid));
+      assert(isHashObject(cid));
     },
   );
 
   await t.step(
-    "isContentId returns true for Reference.View instances",
+    "isHashObject returns true for Reference.View instances",
     () => {
       const ref = hashOf({ hello: "world" });
       // With canonical hashing off (default), hashOf() returns a Reference.View.
       assert(Reference.is(ref));
-      assert(isContentId(ref));
+      assert(isHashObject(ref));
     },
   );
 

@@ -2,7 +2,7 @@
  * Content identifier dispatch layer.
  *
  * Provides the public API for content identification (hashing): `hashOf`,
- * `isContentId`, `contentIdFromJSON`, `fromString`. Dispatches between
+ * `isHashObject`, `contentIdFromJSON`, `fromString`. Dispatches between
  * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
  *
@@ -81,7 +81,7 @@ export function resetCanonicalHashConfig(): void {
  * Type guard: returns true if the value is a content identifier
  * (`Reference.View` or `FabricHash`).
  */
-export function isContentId<T extends DefinedReferent>(
+export function isHashObject<T extends DefinedReferent>(
   value: unknown | ContentId<T>,
 ): value is ContentId<T> {
   if (value instanceof FabricHash) return true;

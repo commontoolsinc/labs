@@ -16,7 +16,7 @@ import {
   contentIdFromJSON,
   fromString,
   hashOf,
-  isContentId,
+  isHashObject,
 } from "@commontools/data-model/value-hash";
 
 /**
@@ -73,7 +73,7 @@ export const assert = <
     the,
     of,
     is,
-    cause: isContentId(cause)
+    cause: isHashObject(cause)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
@@ -178,7 +178,7 @@ export function normalizeFact<
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isContentId(arg.cause)
+  const newCause = isHashObject(arg.cause)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })

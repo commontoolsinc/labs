@@ -135,5 +135,5 @@ export const fromStringLegacy = Reference.fromString as (
   source: string,
 ) => ContentId;
 
-/** Legacy `isContentId` using merkle-reference. */
+/** Legacy `isHashObject` using merkle-reference. */
 export { Reference };
