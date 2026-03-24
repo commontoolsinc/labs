@@ -48,7 +48,8 @@ export type JsxExpressionSiteRoute =
       | "opaque-path-terminal-root"
       | "deferred-jsx-array-method-root"
       | "dynamic-element-access-root"
-      | "helper-call-root";
+      | "helper-call-root"
+      | "object-literal-root";
   }
   | {
     route: "legacy-jsx";
@@ -738,6 +739,15 @@ function isOwnedDynamicElementAccessRoot(
   return analyze(current).containsOpaqueRef;
 }
 
+function isOwnedObjectLiteralRoot(
+  expression: ts.Expression,
+  analyze: AnalyzeFn,
+): boolean {
+  const current = unwrapExpression(expression);
+  return ts.isObjectLiteralExpression(current) &&
+    analyze(current).containsOpaqueRef;
+}
+
 export function getExpressionSitePolicyInfo(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -832,6 +842,13 @@ export function classifyJsxExpressionSiteRoute(
     return {
       route: "owned-pre-closure",
       owner: "helper-call-root",
+    };
+  }
+
+  if (isOwnedObjectLiteralRoot(expression, analyze)) {
+    return {
+      route: "owned-pre-closure",
+      owner: "object-literal-root",
     };
   }
 

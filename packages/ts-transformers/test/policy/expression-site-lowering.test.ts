@@ -472,6 +472,93 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: reactive direct JSX object-literal roots use the explicit object-literal owner",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{{
+          color: state.theme.primary,
+          fontSize: state.theme.size + "px",
+        }}</div>
+      ));
+    `);
+
+    const objectLiteral = findFirstNode(
+      sourceFile,
+      (node): node is ts.ObjectLiteralExpression =>
+        ts.isObjectLiteralExpression(node) &&
+        node.getText(sourceFile).includes("color: state.theme.primary"),
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      objectLiteral,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.containerKind, "jsx-expression");
+    assertEquals(
+      classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
+      {
+        route: "owned-pre-closure",
+        owner: "object-literal-root",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: non-reactive direct JSX object-literal roots stay in the residual skip bucket",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => (
+        <div>{{ color: "red", fontSize: "12px" }}</div>
+      ));
+    `);
+
+    const objectLiteral = findFirstNode(
+      sourceFile,
+      ts.isObjectLiteralExpression,
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      objectLiteral,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.containerKind, "jsx-expression");
+    assertEquals(
+      classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
+      {
+        route: "skip",
+        reason: "not-shared-jsx-root-kind",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: synthetic compute-owned authored subtrees are visible in site metadata",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`

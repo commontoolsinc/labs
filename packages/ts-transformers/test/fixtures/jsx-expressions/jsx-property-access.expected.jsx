@@ -284,7 +284,7 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema, { state: {
                     config: {
                         theme: {
-                            fontSize: state.key("config").theme.fontSize
+                            fontSize: state.key("config", "theme", "fontSize")
                         }
                     }
                 } }, ({ state }) => state.config.theme.fontSize + "px"),
