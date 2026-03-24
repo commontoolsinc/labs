@@ -11,6 +11,7 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
+import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";
@@ -115,6 +116,14 @@ const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
  * bidirectional mapping. Returns the existing `SchemaAndHash` if the
  * schema (or a structurally-identical one with the same hash) has
  * already been interned.
+ *
+ * **Caching behaviour:** the cache key is the deep-frozen schema
+ * object, not the caller's input. If the input is already deep-frozen,
+ * it is used directly as the cache key and hits the cache on repeated
+ * calls. If the input is *not* deep-frozen, `toDeepFrozenSchema()`
+ * creates a new frozen copy each time — so passing the same mutable
+ * object repeatedly will miss the identity-keyed WeakMap (though the
+ * hash-keyed reverse map will still find a structurally-equal match).
  */
 export function internSchema(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
@@ -126,8 +135,12 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   const cached = schemaToSah.get(schema);
   if (cached) return cached;
 
+  // If already deep-frozen, use as-is; otherwise freeze a copy.
+  const frozen = isDeepFrozen(schema)
+    ? schema
+    : toDeepFrozenSchema(schema) as JSONSchemaObj;
+
   // Check the hash-keyed reverse map (structurally-equal but different object).
-  const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
   const hash = hashSchema(frozen);
   const hashStr = hash.toString();
 
