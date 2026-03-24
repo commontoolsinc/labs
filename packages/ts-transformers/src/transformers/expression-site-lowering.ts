@@ -324,31 +324,22 @@ function requiresLegacyJsxControlFlowHandling(
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
+  const branchRequiresLegacyHandling = (branch: ts.Expression): boolean => {
+    if (isJsxLocalRewriteContainer(branch)) {
+      return false;
+    }
+
+    return !!findPendingComputeWrapCandidate(branch, analyze, context) ||
+      containsReactiveArrayMethodSubexpression(branch, context, analyze);
+  };
+
   if (ts.isConditionalExpression(expression)) {
     const branches = [expression.whenTrue, expression.whenFalse];
-    return branches.some((branch) =>
-      !!findPendingComputeWrapCandidate(branch, analyze, context) ||
-      (
-        !isJsxLocalRewriteContainer(branch) &&
-        containsReactiveArrayMethodSubexpression(branch, context, analyze)
-      )
-    );
+    return branches.some(branchRequiresLegacyHandling);
   }
 
   if (isLogicalBinaryExpression(expression)) {
-    return !!findPendingComputeWrapCandidate(
-      expression.right,
-      analyze,
-      context,
-    ) ||
-      (
-        !isJsxLocalRewriteContainer(expression.right) &&
-        containsReactiveArrayMethodSubexpression(
-          expression.right,
-          context,
-          analyze,
-        )
-      );
+    return branchRequiresLegacyHandling(expression.right);
   }
 
   return false;

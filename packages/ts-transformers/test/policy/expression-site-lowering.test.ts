@@ -604,6 +604,212 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: pure JSX ternary branches over map subtrees use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.recentEvents.length === 0
+            ? <span>No events yet</span>
+            : (
+              <div>
+                {state.recentEvents.map((event: any) => <span>{event.label}</span>)}
+              </div>
+            )}
+        </div>
+      ));
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "shared-post-closure",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: length guards over JSX-local map containers use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => {
+        return (
+          <div>
+            {state.list.get().length > 0 && (
+              <div>
+                {state.list.map((name: string) => <span>{name}</span>)}
+              </div>
+            )}
+          </div>
+        );
+      });
+    `);
+
+    const logical = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(classifyJsxExpressionSiteRoute(logical, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX-local ternary branch containers with nested scalar lowerables use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+          ul: any;
+          li: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.showAdmin
+            ? (
+              <div>
+                <span>{state.count + " people"}</span>
+                <ul>
+                  {state.adminData.map((entry: any) => <li>{entry.name}</li>)}
+                </ul>
+              </div>
+            )
+            : null}
+        </div>
+      ));
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "shared-post-closure",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: non-JSX ternary branches with structural map subtrees stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+          "ct-vstack": any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.showEmpty
+            ? <span>No events yet</span>
+            : state.recentEvents.get() &&
+              state.recentEvents.map((event: any) => (
+              <ct-vstack>
+                <span>{event.label}</span>
+                {event.tags.map((tag: string) => <span>{tag}</span>)}
+              </ct-vstack>
+              ))}
+        </div>
+      ));
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "legacy-jsx",
+        reason: "legacy-control-flow-branch-local",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: whole-branch compute-wrap ternaries stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.showList
+            ? (() => {
+              const itemCount = state.count + " items";
+              return (
+                <div>
+                  <span>{itemCount}</span>
+                  {state.sorted.map((item: any) => <span>{item.name}</span>)}
+                </div>
+              );
+            })()
+            : <span>Hidden</span>}
+        </div>
+      ));
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "legacy-jsx",
+        reason: "legacy-control-flow-branch-local",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: array-method-owned JSX wrapper roots with reactive array-method subexpressions stay on the legacy JSX seam",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
