@@ -8,6 +8,7 @@ PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
 INSPECT=false
+INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
 
 # Parse command line arguments
@@ -40,6 +41,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --inspect)
             INSPECT=true
+            shift
+            ;;
+        --inspect-brk)
+            INSPECT=true
+            INSPECT_BRK=true
             shift
             ;;
         --inspect-port)
@@ -78,7 +84,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--inspect] [--inspect-port PORT] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
+            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--inspect] [--inspect-brk] [--inspect-port PORT] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
             exit 1
             ;;
     esac
@@ -129,7 +135,11 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     START_ARGS="$START_ARGS --bg-updater"
 fi
 if [[ "$INSPECT" == "true" ]]; then
-    START_ARGS="$START_ARGS --inspect"
+    if [[ "$INSPECT_BRK" == "true" ]]; then
+        START_ARGS="$START_ARGS --inspect-brk"
+    else
+        START_ARGS="$START_ARGS --inspect"
+    fi
     if [[ -n "$INSPECT_PORT" ]]; then
         START_ARGS="$START_ARGS --inspect-port $INSPECT_PORT"
     fi

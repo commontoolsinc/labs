@@ -11,6 +11,7 @@ PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
 INSPECT=false
+INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
 
 # Parse command line arguments
@@ -33,6 +34,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --inspect)
             INSPECT=true
+            shift
+            ;;
+        --inspect-brk)
+            INSPECT=true
+            INSPECT_BRK=true
             shift
             ;;
         --inspect-port)
@@ -129,7 +135,11 @@ if [[ "$WATCH" == "true" ]]; then
 fi
 INSPECT_FLAG=""
 if [[ "$INSPECT" == "true" ]]; then
-    INSPECT_FLAG="--inspect=127.0.0.1:$INSPECT_PORT"
+    if [[ "$INSPECT_BRK" == "true" ]]; then
+        INSPECT_FLAG="--inspect-brk=127.0.0.1:$INSPECT_PORT"
+    else
+        INSPECT_FLAG="--inspect=127.0.0.1:$INSPECT_PORT"
+    fi
 fi
 SHELL_URL="http://localhost:$SHELL_PORT" \
     deno run --unstable-otel -A $INSPECT_FLAG $WATCH_FLAG --env-file=.env index.ts --port="$TOOLSHED_PORT" > local-dev-toolshed.log 2>&1 &
