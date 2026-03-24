@@ -6,8 +6,8 @@
  * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
  *
- * Follows the same dispatch + modern/legacy split pattern used by
- * `fabric-value.ts` / `fabric-value-modern.ts` / `fabric-value-legacy.ts`.
+ * Follows the same inline-flag-test dispatch pattern used by
+ * `fabric-value.ts`.
  */
 import { modernHash } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
@@ -45,53 +45,38 @@ export type ContentId<
 > = Reference.View<T> | FabricHash;
 
 // ---------------------------------------------------------------------------
-// Flag-dispatched public API
-//
-// These four symbols are reassigned by `configureDispatch()` whenever
-// canonical hashing mode changes.  The two implementation worlds (canonical
-// vs. legacy/merkle-reference) are kept in fully separate blocks so that
-// NO code changes when the experiment flag is off -- the legacy path is
-// identical to the pre-flag code.
-// ---------------------------------------------------------------------------
-
-/**
- * Type guard: returns true if the value is a content identifier
- * (`Reference.View` or `FabricHash`).
- */
-export let isContentId: <T extends DefinedReferent>(
-  value: unknown | ContentId<T>,
-) => value is ContentId<T>;
-
-/** Reconstructs a content identifier from its JSON representation. */
-export let contentIdFromJSON: (
-  source: { "/": string },
-) => ContentId;
-
-/** Reconstruct a content identifier from its string representation. */
-export let fromString: (source: string) => ContentId;
-
-/**
- * Compute a content identifier for the given source value.
- *
- * In server environments, uses node:crypto SHA-256 (hardware accelerated).
- * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
- * Falls back to @noble/hashes if neither is available.
- */
-export let hashOf: <T extends DefinedReferent>(
-  source: T,
-) => ContentId<T>;
-
-// ---------------------------------------------------------------------------
-// Canonical hashing mode flag and dispatch configuration
+// Canonical hashing mode flag
 // ---------------------------------------------------------------------------
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
  * constructor via `setCanonicalHashConfig()`. When enabled, the public API
- * symbols dispatch to canonical hash implementations instead of
+ * functions dispatch to canonical hash implementations instead of
  * merkle-reference.
  */
 let canonicalHashingEnabled = false;
+
+/**
+ * Activates or deactivates canonical hashing mode. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions.modernHash` into the
+ * memory layer.
+ */
+export function setCanonicalHashConfig(enabled: boolean): void {
+  canonicalHashingEnabled = enabled;
+}
+
+/**
+ * Restores canonical hashing mode to its default (disabled). Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetCanonicalHashConfig(): void {
+  canonicalHashingEnabled = false;
+}
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched public API
+// ---------------------------------------------------------------------------
 
 /**
  * Parse a `FabricHash` from its string representation
@@ -107,67 +92,42 @@ function hashFromString(source: string): FabricHash {
   return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
 }
 
-/** Shared `isContentId` implementation (same for both modes). */
-const isContentIdImpl = (<T extends DefinedReferent>(
+/**
+ * Type guard: returns true if the value is a content identifier
+ * (`Reference.View` or `FabricHash`).
+ */
+export function isContentId<T extends DefinedReferent>(
   value: unknown | ContentId<T>,
-): value is ContentId<T> => {
+): value is ContentId<T> {
   if (value instanceof FabricHash) return true;
   return Reference.is(value);
-}) as typeof isContentId;
+}
 
-/**
- * Reassign the public API symbols based on the current value of
- * `canonicalHashingEnabled`. Called at module load and whenever the flag
- * changes.
- */
-function configureDispatch(): void {
-  isContentId = isContentIdImpl;
+/** Reconstructs a content identifier from its JSON representation. */
+export function contentIdFromJSON(source: { "/": string }): ContentId {
+  return canonicalHashingEnabled
+    ? hashFromString(source["/"])
+    : contentIdFromJSONLegacy(source);
+}
 
-  if (canonicalHashingEnabled) {
-    // ----- Canonical hashing implementations -----
-
-    contentIdFromJSON = (source) => {
-      return hashFromString(source["/"]);
-    };
-
-    fromString = (source) => {
-      return hashFromString(source);
-    };
-
-    hashOf = (source) => {
-      return modernHash(source);
-    };
-  } else {
-    // ----- Legacy merkle-reference implementations -----
-
-    contentIdFromJSON = contentIdFromJSONLegacy;
-    fromString = fromStringLegacy;
-    hashOf = referLegacyCached;
-  }
+/** Reconstruct a content identifier from its string representation. */
+export function fromString(source: string): ContentId {
+  return canonicalHashingEnabled
+    ? hashFromString(source)
+    : fromStringLegacy(source);
 }
 
 /**
- * Activates or deactivates canonical hashing mode. Called by the `Runtime`
- * constructor to propagate `ExperimentalOptions.modernHash` into the
- * memory layer.
+ * Compute a content identifier for the given source value.
+ *
+ * In server environments, uses node:crypto SHA-256 (hardware accelerated).
+ * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
+ * Falls back to @noble/hashes if neither is available.
  */
-export function setCanonicalHashConfig(enabled: boolean): void {
-  canonicalHashingEnabled = enabled;
-  configureDispatch();
+export function hashOf<T extends DefinedReferent>(
+  source: T,
+): ContentId<T> {
+  return canonicalHashingEnabled
+    ? modernHash(source)
+    : referLegacyCached(source);
 }
-
-/**
- * Restores canonical hashing mode to its default (disabled). Called by
- * `Runtime.dispose()` to avoid leaking flags between runtime instances or
- * test runs.
- */
-export function resetCanonicalHashConfig(): void {
-  canonicalHashingEnabled = false;
-  configureDispatch();
-}
-
-// ---------------------------------------------------------------------------
-// Initialize dispatch to legacy mode at module load.
-// ---------------------------------------------------------------------------
-
-configureDispatch();
