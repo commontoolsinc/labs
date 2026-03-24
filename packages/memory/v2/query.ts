@@ -29,6 +29,7 @@ export interface TrackedGraphState {
   tracker: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: ReturnType<typeof createSchemaMemo>;
+  manager: EngineObjectManager;
 }
 
 export class EngineObjectManager implements ObjectStorageManager {
@@ -38,6 +39,7 @@ export class EngineObjectManager implements ObjectStorageManager {
     document: NonNullable<Engine.EntityState["document"]>;
   }>();
   #missing = new Set<string>();
+  #readCount = 0;
 
   constructor(
     private readonly engine: Engine.Engine,
@@ -61,6 +63,7 @@ export class EngineObjectManager implements ObjectStorageManager {
       id: address.id,
       branch: this.branch,
     });
+    this.#readCount++;
     if (state === null || state.document === null) {
       this.#missing.add(key);
       return null;
@@ -86,11 +89,40 @@ export class EngineObjectManager implements ObjectStorageManager {
     return this.#details.get(`${address.id}/${address.type}`);
   }
 
+  get readCount(): number {
+    return this.#readCount;
+  }
+
   loadedAddresses(): Array<{ id: string; type: string }> {
     return [...this.#attestations.values()].map((attestation) => ({
       id: attestation.address.id,
       type: attestation.address.type,
     }));
+  }
+
+  invalidateIds(ids: Iterable<string>): void {
+    for (const id of ids) {
+      const key = `${id}/application/json`;
+      this.#attestations.delete(key);
+      this.#details.delete(key);
+      this.#missing.delete(key);
+    }
+  }
+
+  mergeFrom(other: EngineObjectManager): void {
+    for (const key of other.#missing) {
+      this.#attestations.delete(key);
+      this.#details.delete(key);
+      this.#missing.add(key);
+    }
+    for (const [key, value] of other.#attestations) {
+      this.#attestations.set(key, value);
+      const detail = other.#details.get(key);
+      if (detail !== undefined) {
+        this.#details.set(key, detail);
+      }
+      this.#missing.delete(key);
+    }
   }
 }
 
@@ -212,6 +244,7 @@ export const trackGraph = (
         manager,
       ),
       memo: sharedMemo,
+      manager,
     },
   };
 };
@@ -225,7 +258,10 @@ export const extendTrackedGraph = (
   serverSeq: number;
   updates: Map<QueryDocKey, EntitySnapshot>;
 } => {
-  const manager = new EngineObjectManager(engine, state.branch);
+  const manager = state.manager;
+  const previouslyLoaded = new Set(
+    manager.loadedAddresses().map((address) => `${address.id}/${address.type}`),
+  );
   const touched = new Set<QueryDocKey>();
 
   for (const root of query.roots) {
@@ -246,6 +282,10 @@ export const extendTrackedGraph = (
   }
 
   for (const address of manager.loadedAddresses()) {
+    const key = `${address.id}/${address.type}`;
+    if (previouslyLoaded.has(key)) {
+      continue;
+    }
     if (address.type === "application/json") {
       touched.add(toDocKey(space, address.id, address.type));
     }
@@ -361,6 +401,9 @@ export const refreshTrackedGraph = (
     state.entities.set(key, snapshot);
     updates.set(key, snapshot);
   }
+
+  state.manager.invalidateIds(dirtyIds);
+  state.manager.mergeFrom(manager);
 
   return {
     serverSeq: Engine.serverSeq(engine),

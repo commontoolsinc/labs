@@ -39,7 +39,6 @@ export interface WatchMutationResult {
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_JITTER_RATIO = 0.2;
-
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -265,6 +264,9 @@ export class SpaceSession {
   #sessionId: string;
   #serverSeq: number;
   #ackedSeq = 0;
+  #pendingAckSeq = 0;
+  #ackScheduled = false;
+  #ackFlushing = false;
   #background = new Set<Promise<void>>();
   #watchMutation: Promise<void> = Promise.resolve();
 
@@ -349,7 +351,7 @@ export class SpaceSession {
       } else {
         this.#watchView.applySync(result.sync, false);
       }
-      this.queueBackground(this.ack(result.serverSeq));
+      this.scheduleAck(result.serverSeq);
       return {
         view: this.#watchView,
         sync: result.sync,
@@ -386,7 +388,7 @@ export class SpaceSession {
       } else {
         this.#watchView.applySync(result.sync, false);
       }
-      this.queueBackground(this.ack(result.serverSeq));
+      this.scheduleAck(result.serverSeq);
       return {
         view: this.#watchView,
         sync: result.sync,
@@ -416,7 +418,7 @@ export class SpaceSession {
     } else {
       this.#watchView.applySync(effect, true);
     }
-    this.queueBackground(this.ack(effect.toSeq));
+    this.scheduleAck(effect.toSeq);
   }
 
   async restore(): Promise<void> {
@@ -448,6 +450,50 @@ export class SpaceSession {
       .catch(() => undefined)
       .finally(() => this.#background.delete(tracked));
     this.#background.add(tracked);
+  }
+
+  private scheduleAck(seenSeq: number): void {
+    this.#pendingAckSeq = Math.max(this.#pendingAckSeq, seenSeq);
+    if (this.#ackScheduled || this.#ackFlushing) {
+      return;
+    }
+    this.#ackScheduled = true;
+    this.queueBackground(
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          this.#ackScheduled = false;
+          this.#ackFlushing = true;
+          void this.flushScheduledAcks().finally(() => {
+            this.#ackFlushing = false;
+            resolve();
+            if (this.#pendingAckSeq > this.#ackedSeq) {
+              this.scheduleAck(this.#pendingAckSeq);
+            }
+          });
+        }, 0);
+      }),
+    );
+  }
+
+  private async flushScheduledAcks(): Promise<void> {
+    while (true) {
+      const target = this.#pendingAckSeq;
+      if (target <= this.#ackedSeq || !this.client.isConnected()) {
+        this.#ackedSeq = Math.max(this.#ackedSeq, target);
+        return;
+      }
+      await this.client.request({
+        type: "session.ack",
+        requestId: crypto.randomUUID(),
+        space: this.space,
+        sessionId: this.#sessionId,
+        seenSeq: target,
+      });
+      this.#ackedSeq = Math.max(this.#ackedSeq, target);
+      if (this.#pendingAckSeq <= this.#ackedSeq) {
+        return;
+      }
+    }
   }
 
   private async runWatchMutation<T>(work: () => Promise<T>): Promise<T> {

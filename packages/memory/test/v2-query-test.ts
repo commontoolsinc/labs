@@ -88,6 +88,77 @@ Deno.test("memory v2 query retains a persistent memo for incremental watch growt
   }
 });
 
+Deno.test("memory v2 query reuses a persistent manager cache for shared source growth", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-manager-growth";
+  const pieceA = "of:piece-a";
+  const pieceB = "of:piece-b";
+  const process = "of:process";
+  const base = "of:base";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: base,
+          value: { value: { label: "base" } },
+        }, {
+          op: "set",
+          id: process,
+          value: {
+            source: { "/": "base" },
+          },
+        }, {
+          op: "set",
+          id: pieceA,
+          value: {
+            source: { "/": "process" },
+          },
+        }, {
+          op: "set",
+          id: pieceB,
+          value: {
+            source: { "/": "process" },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: pieceA,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(tracked.state.manager.readCount, 3);
+
+    extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{
+        id: pieceB,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(tracked.state.manager.readCount, 4);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-refresh";
@@ -151,6 +222,107 @@ Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", asy
       [...refreshed.updates.values()].map((entity) => entity.id).sort(),
       fixture.expandedReachableIds,
     );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 query refresh updates the growth manager cache for later watch adds", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-manager-refresh";
+  const pieceA = "of:piece-a";
+  const pieceB = "of:piece-b";
+  const process = "of:process";
+  const base1 = "of:base-1";
+  const base2 = "of:base-2";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: base1,
+          value: { value: { label: "base-1" } },
+        }, {
+          op: "set",
+          id: base2,
+          value: { value: { label: "base-2" } },
+        }, {
+          op: "set",
+          id: process,
+          value: {
+            source: { "/": "base-1" },
+          },
+        }, {
+          op: "set",
+          id: pieceA,
+          value: {
+            source: { "/": "process" },
+          },
+        }, {
+          op: "set",
+          id: pieceB,
+          value: {
+            source: { "/": "process" },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: pieceA,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(tracked.state.manager.readCount, 3);
+
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: process,
+          value: {
+            source: { "/": "base-2" },
+          },
+        }],
+      },
+    });
+
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([process]),
+    );
+    assertExists(refreshed);
+
+    extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{
+        id: pieceB,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(tracked.state.manager.readCount, 4);
   } finally {
     close(engine);
     await Deno.remove(path);

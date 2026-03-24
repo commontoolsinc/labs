@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { Identity } from "@commontools/identity";
 import type { URI } from "@commontools/memory/interface";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
@@ -364,6 +365,30 @@ Deno.test("memory v2 runner incrementally adds later watches after the initial s
     assertEquals(transport.rootCounts, [1, 1]);
     assertEquals(getObjectValue(provider, docA), { label: docA });
     assertEquals(getObjectValue(provider, docB), { label: docB });
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("memory v2 runner resolves synced on a microtask when idle", async () => {
+  const transport = new CountingWatchSetTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-synced-microtask"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  using time = new FakeTime();
+
+  try {
+    let settled = false;
+    const synced = storageManager.synced().then(() => {
+      settled = true;
+    });
+    await time.runMicrotasks();
+
+    assertEquals(settled, true);
+    await synced;
   } finally {
     await storageManager.close();
   }

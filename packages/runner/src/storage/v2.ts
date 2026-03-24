@@ -73,7 +73,6 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 
-const WATCH_REFRESH_BATCH_DELAY_MS = 0;
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
@@ -468,7 +467,7 @@ export class StorageManager implements IStorageManager {
   private resolveCrossSpace(resolve: () => void): Promise<void> {
     const promises = [...this.#crossSpacePromises.values()];
     if (promises.length === 0) {
-      setTimeout(resolve, 0);
+      queueMicrotask(resolve);
       return Promise.resolve();
     }
     return Promise.all(promises)
@@ -766,7 +765,7 @@ class SpaceReplica implements ISpaceReplica {
   #watchedIds = new Set<URI>();
   #nextLocalSeq = 1;
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
-  #queuedWatchRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #queuedWatchRefreshScheduled = false;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -1052,14 +1051,15 @@ class SpaceReplica implements ISpaceReplica {
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
     this.#queuedWatchRefresh = batch;
-    this.#queuedWatchRefreshTimer = setTimeout(() => {
-      this.#queuedWatchRefreshTimer = null;
+    this.#queuedWatchRefreshScheduled = true;
+    queueMicrotask(() => {
+      this.#queuedWatchRefreshScheduled = false;
       if (this.#queuedWatchRefresh !== batch) {
         return;
       }
       this.#queuedWatchRefresh = null;
       void this.flushWatchRefreshBatch(batch);
-    }, WATCH_REFRESH_BATCH_DELAY_MS);
+    });
     return batch.pending.promise;
   }
 
@@ -1074,10 +1074,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private cancelQueuedWatchRefresh(): void {
-    if (this.#queuedWatchRefreshTimer !== null) {
-      clearTimeout(this.#queuedWatchRefreshTimer);
-      this.#queuedWatchRefreshTimer = null;
-    }
+    this.#queuedWatchRefreshScheduled = false;
     if (this.#queuedWatchRefresh !== null) {
       this.#queuedWatchRefresh.pending.resolve({
         error: toConnectionError(new Error("memory/v2 replica closed")),
