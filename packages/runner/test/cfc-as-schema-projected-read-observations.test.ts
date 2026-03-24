@@ -103,4 +103,121 @@ describe("CFC asSchema projected observations", () => {
 
     tx.abort();
   });
+
+  it("records followRef before reading projected descendants through links", async () => {
+    const seedTx = runtime.edit();
+    const targetCell = runtime.getCell<{ code: number; secret: string }>(
+      space,
+      "cfc-as-schema-linked-target",
+      undefined,
+      seedTx,
+    );
+    targetCell.set({ code: 403, secret: "scope-insufficient" });
+    const sourceCell = runtime.getCell<{ error: typeof targetCell }>(
+      space,
+      "cfc-as-schema-linked-source",
+      undefined,
+      seedTx,
+    );
+    sourceCell.set({ error: targetCell });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const projectionSchema = {
+      type: "object",
+      properties: {
+        error: {
+          type: "object",
+          properties: {
+            code: { type: "number" },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const tx = runtime.edit();
+    const source = runtime.getCell<{ error: { code: number } }>(
+      space,
+      "cfc-as-schema-linked-source",
+      undefined,
+      tx,
+    );
+    const value = source.withTx(tx).asSchema(projectionSchema).get();
+    expect(value?.error?.code).toBe(403);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => !read.internalVerifierRead);
+    const followRefIndex = reads.findIndex((read) =>
+      read.id === source.getAsNormalizedFullLink().id &&
+      read.path === "/error" &&
+      read.op === "followRef"
+    );
+    const targetValueIndex = reads.findIndex((read) =>
+      read.id === targetCell.getAsNormalizedFullLink().id &&
+      read.path === "/code" &&
+      read.op === "value"
+    );
+
+    expect(followRefIndex).toBeGreaterThanOrEqual(0);
+    expect(targetValueIndex).toBeGreaterThan(followRefIndex);
+    expect(
+      reads.some((read) =>
+        read.id === targetCell.getAsNormalizedFullLink().id &&
+        read.path === "/secret"
+      ),
+    ).toBe(false);
+
+    tx.abort();
+  });
+
+  it("records array count and enumeration without reading unprojected sibling fields", async () => {
+    const seedTx = runtime.edit();
+    const cell = runtime.getCell<
+      Array<{ code: number; secret: string }>
+    >(
+      space,
+      "cfc-as-schema-array-projected-observations",
+      undefined,
+      seedTx,
+    );
+    cell.set([
+      { code: 1, secret: "a" },
+      { code: 2, secret: "b" },
+    ]);
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const projectionSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          code: { type: "number" },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const tx = runtime.edit();
+    const source = runtime.getCell<Array<{ code: number }>>(
+      space,
+      "cfc-as-schema-array-projected-observations",
+      undefined,
+      tx,
+    );
+    const value = source.withTx(tx).asSchema(projectionSchema).get();
+    expect(value?.map((entry) => entry.code)).toEqual([1, 2]);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => !read.internalVerifierRead);
+
+    expect(
+      reads.some((read) => read.path === "/" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/" && read.op === "enumerate"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/secret"),
+    ).toBe(false);
+
+    tx.abort();
+  });
 });
