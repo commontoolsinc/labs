@@ -12,11 +12,8 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import type { FabricHash } from "./fabric-hash.ts";
 
 export class SchemaAndHash {
-  /** The deep-frozen schema. */
-  readonly schema: JSONSchema;
-
-  /** The content hash of the schema as a `FabricHash`. */
-  readonly hash: FabricHash;
+  readonly #schema: JSONSchema;
+  readonly #hash: FabricHash;
 
   /**
    * Constructs a `SchemaAndHash` from an already-deep-frozen schema and
@@ -28,13 +25,23 @@ export class SchemaAndHash {
     if (!isDeepFrozen(schema)) {
       throw new Error("SchemaAndHash: schema must be deep-frozen");
     }
-    this.schema = schema;
-    this.hash = hash;
+    this.#schema = schema;
+    this.#hash = hash;
     Object.freeze(this);
+  }
+
+  /** The deep-frozen schema. */
+  get schema(): JSONSchema {
+    return this.#schema;
+  }
+
+  /** The content hash of the schema as a `FabricHash`. */
+  get hash(): FabricHash {
+    return this.#hash;
   }
 
   /** The hash as a string (delegates to `FabricHash.toString()`). */
   get hashString(): string {
-    return this.hash.toString();
+    return this.#hash.toString();
   }
 }
