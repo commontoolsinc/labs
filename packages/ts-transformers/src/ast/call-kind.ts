@@ -88,6 +88,11 @@ export interface ArrayMethodResultSinkCallInfo {
   readonly receiverLowered: boolean;
 }
 
+export interface ArrayMethodResultSinkReceiverChainCallInfo {
+  readonly sinkCall: ArrayMethodResultSinkCallInfo;
+  readonly depth: number;
+}
+
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "when"; symbol?: ts.Symbol }
@@ -297,6 +302,42 @@ export function classifyArrayMethodResultSinkCall(
   }
 
   return undefined;
+}
+
+export function classifyArrayMethodResultSinkReceiverChainCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): ArrayMethodResultSinkReceiverChainCallInfo | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  const receiver = stripWrappers(target.expression);
+  if (!ts.isCallExpression(receiver)) {
+    return undefined;
+  }
+
+  const sinkCall = classifyArrayMethodResultSinkCall(receiver, checker);
+  if (!sinkCall) {
+    const receiverChain = classifyArrayMethodResultSinkReceiverChainCall(
+      receiver,
+      checker,
+    );
+    if (!receiverChain) {
+      return undefined;
+    }
+
+    return {
+      sinkCall: receiverChain.sinkCall,
+      depth: receiverChain.depth + 1,
+    };
+  }
+
+  return {
+    sinkCall,
+    depth: 1,
+  };
 }
 
 function isReactiveOriginKind(callKind: CallKind): boolean {

@@ -2,6 +2,7 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodResultSinkCall,
+  classifyArrayMethodResultSinkReceiverChainCall,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -281,6 +282,32 @@ function isSharedJsxArrayMethodResultSinkCallRoot(
     return false;
   }
   return sinkCall.sink === "join" &&
+    containsReactiveArrayMethodSubexpression(expression, context, analyze);
+}
+
+function isSharedJsxArrayMethodResultSinkReceiverChainRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  owner: ExpressionSitePolicyInfo["reactiveContext"]["owner"],
+): boolean {
+  if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  if (owner !== "pattern" && owner !== "render") {
+    return false;
+  }
+
+  const sinkReceiverChain = classifyArrayMethodResultSinkReceiverChainCall(
+    expression,
+    context.checker,
+  );
+  if (!sinkReceiverChain) {
+    return false;
+  }
+
+  return sinkReceiverChain.sinkCall.sink === "join" &&
     containsReactiveArrayMethodSubexpression(expression, context, analyze);
 }
 
@@ -648,6 +675,17 @@ export function classifyJsxExpressionSiteRoute(
 
     if (
       isSharedJsxArrayMethodResultSinkCallRoot(
+        expression,
+        context,
+        analyze,
+        siteInfo.reactiveContext.owner,
+      )
+    ) {
+      return { route: "shared-post-closure" };
+    }
+
+    if (
+      isSharedJsxArrayMethodResultSinkReceiverChainRoot(
         expression,
         context,
         analyze,

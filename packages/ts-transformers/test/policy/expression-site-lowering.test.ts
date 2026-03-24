@@ -389,7 +389,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: chained JSX receiver-method sinks over reactive array-method receivers stay on the legacy JSX seam",
+  "Expression site policy: one-layer chained JSX receiver-method sinks over reactive array-method receivers defer to the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -422,8 +422,91 @@ Deno.test(
 
     assertEquals(siteInfo.callRootKind, "receiver-method");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
-      route: "legacy-jsx",
-      reason: "contains-reactive-array-method-subexpression",
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: multi-layer chained JSX receiver-method sinks over reactive array-method receivers defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items.filter((item: number) => item > state.threshold).join(", ").toUpperCase().trim()}</div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "trim",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "receiver-method");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: array-method-owned nested join chains stay out of the shared sink-chain slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.people.map((person: any) => (
+            <span>{person.spotPreferences.map((n: string) => "#" + n).join(", ").toUpperCase()}</span>
+          ))}
+        </div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.arrayMethodOwned, true);
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "skip",
+      reason: "array-method-owned",
     });
   },
 );

@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import {
   classifyArrayMethodResultSinkCall,
+  classifyArrayMethodResultSinkReceiverChainCall,
   classifyReactiveContext,
   detectCallKind,
   findEnclosingCallbackContext,
@@ -61,7 +62,24 @@ function shouldFilterNestedLocalsForCallWrapper(
     expression,
     context.checker,
   );
-  if (!sinkCall || sinkCall.sink !== "join") {
+  if (sinkCall?.sink === "join") {
+    const callee = expression.expression;
+    if (
+      !ts.isPropertyAccessExpression(callee) &&
+      !ts.isElementAccessExpression(callee)
+    ) {
+      return false;
+    }
+
+    const receiverAnalysis = analyze(callee.expression);
+    return receiverAnalysis.containsOpaqueRef;
+  }
+
+  const sinkReceiverChain = classifyArrayMethodResultSinkReceiverChainCall(
+    expression,
+    context.checker,
+  );
+  if (!sinkReceiverChain || sinkReceiverChain.sinkCall.sink !== "join") {
     return false;
   }
 

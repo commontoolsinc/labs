@@ -9,10 +9,11 @@ interface State {
 
 // FIXTURE: jsx-array-method-sink-calls
 // Verifies: direct JSX sink receiver-methods over structural array-method chains can use the shared post-closure path
-//   state.items.filter(fn).join(", ")           → shared post-closure derive over the final join call
-//   state.items.filter(fn).map(fn).join(", ")   → shared post-closure derive over the final join call
-//   state.items.filter(fn).join(", ").toUpperCase() stays on the older JSX seam for now
-// Context: Isolates the residual array-method-subexpression sink cases from broader method-chain coverage
+//   state.items.filter(fn).join(", ")                        → shared post-closure derive over the sink call
+//   state.items.filter(fn).map(fn).join(", ")                → shared post-closure derive over the sink call
+//   state.items.filter(fn).join(", ").toUpperCase()          → shared post-closure derive over the chained call
+//   state.items.filter(fn).join(", ").toUpperCase().trim()   → shared post-closure derive over the recursive chained call
+// Context: Verifies recursive receiver-method chaining above a shareable array-method sink base
 export default pattern<State>((state) => {
   return {
     [UI]: (
@@ -30,6 +31,11 @@ export default pattern<State>((state) => {
         <p>
           Filter joined upper:{" "}
           {state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()}
+        </p>
+        <p>
+          Filter joined upper trimmed:{" "}
+          {state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
+            .trim()}
         </p>
       </div>
     ),
