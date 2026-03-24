@@ -6,7 +6,7 @@ import {
 } from "../../core/cell-controller.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { numberSchema } from "@commonfabric/runner/schemas";
-import "../ct-render/ct-render.ts";
+import "../cf-render/cf-render.ts";
 
 /**
  * CTPicker - Simple carousel selection component for cells with UI
@@ -78,7 +78,7 @@ export class CTPicker extends BaseElement {
         min-height: var(--ct-picker-min-height, auto);
       }
 
-      .card-wrapper ct-render {
+      .card-wrapper cf-render {
         width: 100%;
         height: 100%;
       }
@@ -330,10 +330,10 @@ export class CTPicker extends BaseElement {
                 aria-selected="true"
                 id="picker-item-${currentIndex}"
               >
-                <ct-render
+                <cf-render
                   .cell="${this._getItemAt(currentIndex)}"
                   variant="preview"
-                ></ct-render>
+                ></cf-render>
               </div>
               ${hasMultipleItems
                 ? html`

@@ -54,7 +54,7 @@ export default pattern<LLMTestInput>(({ title }) => {
           />
         </div>
 
-        <ct-cell-context $cell={question}>
+        <cf-cell-context $cell={question}>
           {derive(question, (q) =>
             q
               ? (
@@ -66,9 +66,9 @@ export default pattern<LLMTestInput>(({ title }) => {
                 </div>
               )
               : null)}
-        </ct-cell-context>
+        </cf-cell-context>
 
-        <ct-cell-context $cell={llmResponse}>
+        <cf-cell-context $cell={llmResponse}>
           {derive(
             [llmResponse.pending, llmResponse.result],
             ([pending, r]) =>
@@ -89,7 +89,7 @@ export default pattern<LLMTestInput>(({ title }) => {
                 )
                 : null,
           )}
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
     question,

@@ -14,7 +14,7 @@
  * USAGE:
  * ```tsx
  * const tags = Writable.of<string[]>([]);
- * <ct-render $cell={FolksonomyTags({
+ * <cf-render $cell={FolksonomyTags({
  *   scope: "https://github.com/example/recipe-tracker",
  *   tags,
  * })} />
@@ -26,7 +26,7 @@
  * Without the aggregator, falls back to local-only mode.
  *
  * NOTE: Due to a runtime bug where CustomEvent details aren't passed through
- * ct-render boundaries, we use $value binding instead of onct-select handlers.
+ * cf-render boundaries, we use $value binding instead of onct-select handlers.
  */
 import {
   type Default,
@@ -348,7 +348,7 @@ export const FolksonomyTags = pattern<
         <ct-vstack gap="3" style={{ padding: "8px 0" }}>
           {/* Hidden render to force aggregator to execute */}
           <div style={{ display: "none" }}>
-            <ct-render $cell={aggregator} />
+            <cf-render $cell={aggregator} />
           </div>
 
           {

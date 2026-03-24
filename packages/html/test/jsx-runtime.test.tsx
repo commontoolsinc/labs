@@ -118,7 +118,7 @@ describe("JSX automatic runtime", () => {
     });
   });
 
-  it("Fragment creates a ct-fragment element", () => {
+  it("Fragment creates a cf-fragment element", () => {
     const fragment = Fragment({
       children: [
         jsx("p", { children: "Paragraph 1" }),
@@ -128,7 +128,7 @@ describe("JSX automatic runtime", () => {
 
     assert.matchObject(fragment, {
       type: "vnode",
-      name: "ct-fragment",
+      name: "cf-fragment",
       children: [
         {
           type: "vnode",

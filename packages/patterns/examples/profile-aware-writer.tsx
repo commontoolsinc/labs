@@ -69,7 +69,7 @@ Write content personalized to the user when appropriate.`;
           />
         </div>
 
-        <ct-cell-context $cell={topic}>
+        <cf-cell-context $cell={topic}>
           {derive(topic, (t) =>
             t
               ? (
@@ -81,9 +81,9 @@ Write content personalized to the user when appropriate.`;
                 </div>
               )
               : null)}
-        </ct-cell-context>
+        </cf-cell-context>
 
-        <ct-cell-context $cell={result}>
+        <cf-cell-context $cell={result}>
           {derive(
             [result.pending, result.result],
             ([pending, r]) =>
@@ -105,7 +105,7 @@ Write content personalized to the user when appropriate.`;
                 )
                 : null,
           )}
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
     topic,

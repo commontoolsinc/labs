@@ -79,9 +79,9 @@ export default pattern<PatternState>((state) => {
         <div>
           Component: <Counter value={state.value} />
         </div>
-        {/* ct-render will NOT usually appear in a pattern, rather, it's used within other ct- component internals */}
+        {/* cf-render will NOT usually appear in a pattern, rather, it's used within other cf- component internals */}
         <div>
-          ct-render: <ct-render $cell={counter} />
+          cf-render: <cf-render $cell={counter} />
         </div>
       </div>
     ),

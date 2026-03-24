@@ -54,9 +54,9 @@ type VariantCellKey =
   | "settingsUI";
 
 /**
- * CTRender - Renders a cell that contains a piece pattern with UI
+ * CFRender - Renders a cell that contains a piece pattern with UI
  *
- * @element ct-render
+ * @element cf-render
  *
  * @property {CellHandle} cell - The cell containing the piece to render
  * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab" | "settings" | "embedded"
@@ -65,17 +65,17 @@ type VariantCellKey =
  *
  * @example
  * // Default rendering
- * <ct-render .cell=${myPieceCell}></ct-render>
+ * <cf-render .cell=${myPieceCell}></cf-render>
  *
  * @example
  * // Render preview variant (uses previewUI if available, falls back to [UI])
- * <ct-render .cell=${myPieceCell} variant="preview"></ct-render>
+ * <cf-render .cell=${myPieceCell} variant="preview"></cf-render>
  *
  * @example
  * // Render embedded variant (uses embeddedUI - minimal UI without chrome)
- * <ct-render .cell=${notePiece} variant="embedded"></ct-render>
+ * <cf-render .cell=${notePiece} variant="embedded"></cf-render>
  */
-export class CTRender extends BaseElement {
+export class CFRender extends BaseElement {
   static override styles = css`
     :host {
       display: block;
@@ -133,12 +133,12 @@ export class CTRender extends BaseElement {
     : "";
   private _log(...args: unknown[]) {
     if (DEBUG_LOGGING) {
-      console.log(`[ct-render ${this._instanceId}]`, ...args);
+      console.log(`[cf-render ${this._instanceId}]`, ...args);
     }
   }
 
   protected override render() {
-    // Note: ct-cell-context is now auto-injected by the renderer when
+    // Note: cf-cell-context is now auto-injected by the renderer when
     // traversing [UI] with a CellHandle, so we don't need to wrap here
     return html`
       ${!this._hasRendered
@@ -242,7 +242,7 @@ export class CTRender extends BaseElement {
   }
 
   private _handleRenderError(error: unknown) {
-    console.error("[ct-render] Error rendering cell:", error);
+    console.error("[cf-render] Error rendering cell:", error);
 
     const container = this._containerRef.value;
     if (container) {
@@ -262,4 +262,4 @@ export class CTRender extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-render", CTRender);
+globalThis.customElements.define("cf-render", CFRender);

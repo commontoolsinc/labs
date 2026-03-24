@@ -233,13 +233,13 @@ Use the user context above to personalize your suggestions when relevant.`;
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />
-      <ct-cell-context $cell={llmResult}>
+      <cf-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
           computed(() => llmResult),
           undefined,
         )}
-      </ct-cell-context>
+      </cf-cell-context>
       <ct-message-beads
         label="suggestion"
         $messages={messages}

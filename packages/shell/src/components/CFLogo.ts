@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 
-export class CTLogo extends LitElement {
+export class CFLogo extends LitElement {
   static override styles = css`
     :host {
       display: inline-block;
@@ -130,4 +130,4 @@ export class CTLogo extends LitElement {
   }
 }
 
-customElements.define("ct-logo", CTLogo);
+customElements.define("cf-logo", CFLogo);

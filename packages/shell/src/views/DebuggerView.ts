@@ -2742,7 +2742,7 @@ export class XDebuggerView extends LitElement {
       return html`
         <div class="watch-empty">
           No cells being watched.<br />
-          Hold Alt and hover over a ct-cell-context to access watch controls.
+          Hold Alt and hover over a cf-cell-context to access watch controls.
         </div>
       `;
     }

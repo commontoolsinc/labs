@@ -166,7 +166,7 @@ export default pattern<Input, Output>(({ prompt }) => {
 
         {ifElse(
           isReady,
-          <ct-cell-context $cell={compiled} label="Compiled Result">
+          <cf-cell-context $cell={compiled} label="Compiled Result">
             <div>
               <h3>Generated Pattern</h3>
               <div
@@ -180,13 +180,13 @@ export default pattern<Input, Output>(({ prompt }) => {
                 {compiled.result}
               </div>
             </div>
-          </ct-cell-context>,
+          </cf-cell-context>,
           <span />,
         )}
 
         {ifElse(
           hasCode,
-          <ct-cell-context $cell={generated} label="Generated Code">
+          <cf-cell-context $cell={generated} label="Generated Code">
             <div>
               <h3>Generated Code</h3>
               <ct-code-editor
@@ -195,7 +195,7 @@ export default pattern<Input, Output>(({ prompt }) => {
                 readonly
               />
             </div>
-          </ct-cell-context>,
+          </cf-cell-context>,
           <span />,
         )}
       </div>

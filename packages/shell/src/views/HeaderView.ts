@@ -94,7 +94,7 @@ export class XHeaderView extends BaseView {
       border-radius: 6px;
     }
 
-    .nav-picker ct-logo {
+    .nav-picker cf-logo {
       width: 1.5rem;
       height: 1.5rem;
     }
@@ -875,11 +875,11 @@ export class XHeaderView extends BaseView {
             aria-label="Open menu"
           >
             <span class="nav-picker-container">
-              <ct-logo
+              <cf-logo
                 .backgroundColor="${connectionColor}"
                 .width="${24}"
                 .height="${24}"
-              ></ct-logo>
+              ></cf-logo>
               <span class="chevron-down">${iconChevronDown()}</span>
             </span>
           </button>

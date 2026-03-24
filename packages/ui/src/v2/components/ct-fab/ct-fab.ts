@@ -646,12 +646,12 @@ export class CTFab extends BaseElement {
               >
                 <!-- Collapsed pill content -->
                 <div class="fab-collapsed" part="collapsed">
-                  <ct-logo
+                  <cf-logo
                     width="28"
                     height="28"
                     background-color="transparent"
                     ?loading="${this.pending}"
-                  ></ct-logo>
+                  ></cf-logo>
                   ${this.pinCount > 0
                     ? html`
                       <span class="pin-dots">${Array.from(

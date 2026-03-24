@@ -69,7 +69,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="3" style="padding: 1rem;">
             {/* Image Upload */}
-            <ct-cell-context $cell={images} label="Uploaded Images">
+            <cf-cell-context $cell={images} label="Uploaded Images">
               <ct-card>
                 <ct-vstack gap="2">
                   <ct-heading level={5}>Upload Images</ct-heading>
@@ -83,10 +83,10 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                   />
                 </ct-vstack>
               </ct-card>
-            </ct-cell-context>
+            </cf-cell-context>
 
             {/* Prompt Input */}
-            <ct-cell-context $cell={prompt} label="Image Prompt">
+            <cf-cell-context $cell={prompt} label="Image Prompt">
               <ct-card>
                 <ct-vstack gap="2">
                   <ct-heading level={5}>Your Question</ct-heading>
@@ -96,7 +96,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                   />
                 </ct-vstack>
               </ct-card>
-            </ct-cell-context>
+            </cf-cell-context>
 
             {/* Response */}
             {ifElse(

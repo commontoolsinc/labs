@@ -196,7 +196,7 @@ export default pattern<
           />
         </div>
 
-        <ct-cell-context $cell={validData}>
+        <cf-cell-context $cell={validData}>
           <div>
             <h3 id="github-title">
               {validData.name}
@@ -228,7 +228,7 @@ export default pattern<
               </div>
             </div>
           </div>
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
     repo: validData,

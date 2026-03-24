@@ -46,8 +46,8 @@ export class XBodyView extends BaseView {
       flex: 1;
     }
 
-    ct-piece,
-    ct-render[slot="main"] {
+    cf-piece,
+    cf-render[slot="main"] {
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -98,12 +98,12 @@ export class XBodyView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("ct-cell-pin", this._handleCellPin);
+    this.addEventListener("cf-cell-pin", this._handleCellPin);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("ct-cell-pin", this._handleCellPin);
+    this.removeEventListener("cf-cell-pin", this._handleCellPin);
   }
 
   private _handleCellPin = async (e: Event) => {
@@ -174,9 +174,9 @@ export class XBodyView extends BaseView {
       `
       : this.activePattern
       ? html`
-        <ct-piece slot="main" .pieceId="${this.activePattern.id()}">
-          <ct-render .cell="${this.activePattern.cell()}"></ct-render>
-        </ct-piece>
+        <cf-piece slot="main" .pieceId="${this.activePattern.id()}">
+          <cf-render .cell="${this.activePattern.cell()}"></cf-render>
+        </cf-piece>
       `
       : null;
 
@@ -188,11 +188,11 @@ export class XBodyView extends BaseView {
         <x-omni-layout .sidebarOpen="${this.showSidebar}">
           ${mainContent} ${sidebar
             ? html`
-              <ct-render slot="sidebar" .cell="${sidebar}"></ct-render>
+              <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
             `
             : null} ${fab
             ? html`
-              <ct-render slot="fab" .cell="${fab}"></ct-render>
+              <cf-render slot="fab" .cell="${fab}"></cf-render>
             `
             : null}
         </x-omni-layout>

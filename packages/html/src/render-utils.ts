@@ -180,9 +180,9 @@ export const sanitizeNode = (node: VNode): VNode | null => {
     return null;
   }
   // Fragments (`<></>`) appear as VNodes with
-  // no name property. Rewrite to `ct-fragment`.
+  // no name property. Rewrite to `cf-fragment`.
   if (!node.name) {
-    node.name = "ct-fragment";
+    node.name = "cf-fragment";
   }
   if (!isCellHandle(node.props) && !isObject(node.props)) {
     node = { ...node, props: {} };

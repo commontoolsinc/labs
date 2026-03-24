@@ -4,12 +4,12 @@ import { BaseElement } from "../../core/base-element.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
 
 /**
- * CTCellHandleContext - Wraps page regions and associates them with a CellHandle
+ * CFCellHandleContext - Wraps page regions and associates them with a CellHandle
  *
  * Provides a debugging toolbar that appears when holding Alt and hovering.
  * The toolbar allows inspecting cell values and addresses.
  *
- * @element ct-cell-context
+ * @element cf-cell-context
  *
  * @property {CellHandle} cell - The CellHandle reference to associate with this context
  * @property {string} label - Optional label for display in the toolbar
@@ -17,11 +17,11 @@ import type { CellHandle } from "@commonfabric/runtime-client";
  * @slot - Default slot for wrapped content
  *
  * @example
- * <ct-cell-context .cell=${myCellHandle} label="User Data">
+ * <cf-cell-context .cell=${myCellHandle} label="User Data">
  *   <div>Content here</div>
- * </ct-cell-context>
+ * </cf-cell-context>
  */
-export class CTCellContext extends BaseElement {
+export class CFCellContext extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -179,7 +179,7 @@ export class CTCellContext extends BaseElement {
 
   private _handleValClick() {
     if (!this.cell) {
-      console.log("[ct-cell-context] No cell available");
+      console.log("[cf-cell-context] No cell available");
       return;
     }
     // Set window.$cell for easy console access (like Chrome's $0 for elements)
@@ -189,18 +189,18 @@ export class CTCellContext extends BaseElement {
 
   private _handleIdClick() {
     if (!this.cell) {
-      console.log("[ct-cell-context] No cell available");
+      console.log("[cf-cell-context] No cell available");
       return;
     }
     console.log(
-      "[ct-cell-context] CellHandle address:",
+      "[cf-cell-context] CellHandle address:",
       this.cell.ref(),
     );
   }
 
   private _handleWatchClick() {
     if (!this.cell) {
-      console.log("[ct-cell-context] No cell available");
+      console.log("[cf-cell-context] No cell available");
       return;
     }
 
@@ -214,23 +214,23 @@ export class CTCellContext extends BaseElement {
       }
       this._isWatching = false;
       this._updateCount = 0;
-      console.log(`[ct-cell-context] Stopped watching: ${identifier}`);
+      console.log(`[cf-cell-context] Stopped watching: ${identifier}`);
       // Emit event for debugger integration
-      this.emit("ct-cell-unwatch", { cell: this.cell, label: this.label });
+      this.emit("cf-cell-unwatch", { cell: this.cell, label: this.label });
     } else {
       // Watch
       this._updateCount = 0;
       this._watchUnsubscribe = this.cell.subscribe((value) => {
         this._updateCount++;
         console.log(
-          `[ct-cell-context] CellHandle update #${this._updateCount}:`,
+          `[cf-cell-context] CellHandle update #${this._updateCount}:`,
           value,
         );
       });
       this._isWatching = true;
-      console.log(`[ct-cell-context] Started watching: ${identifier}`);
+      console.log(`[cf-cell-context] Started watching: ${identifier}`);
       // Emit event for debugger integration
-      this.emit("ct-cell-watch", { cell: this.cell, label: this.label });
+      this.emit("cf-cell-watch", { cell: this.cell, label: this.label });
     }
   }
 
@@ -287,14 +287,14 @@ export class CTCellContext extends BaseElement {
 
   private _handlePinClick(e: MouseEvent) {
     if (!this.cell) {
-      console.log("[ct-cell-context] No cell available for pinning");
+      console.log("[cf-cell-context] No cell available for pinning");
       return;
     }
 
     const accumulate = e.shiftKey; // Shift+click = add to existing pins
 
     // Use the inherited emit() from BaseElement which sets bubbles: true, composed: true
-    this.emit("ct-cell-pin", {
+    this.emit("cf-cell-pin", {
       cell: this.cell,
       label: this.label,
       accumulate,
@@ -302,10 +302,10 @@ export class CTCellContext extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-cell-context", CTCellContext);
+globalThis.customElements.define("cf-cell-context", CFCellContext);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-cell-context": CTCellContext;
+    "cf-cell-context": CFCellContext;
   }
 }

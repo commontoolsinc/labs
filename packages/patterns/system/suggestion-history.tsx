@@ -94,7 +94,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
                     pointerEvents: "none",
                   }}
                 >
-                  <ct-render $cell={entry.result} />
+                  <cf-render $cell={entry.result} />
                 </div>
               </div>
               <div style={{ padding: "8px" }}>

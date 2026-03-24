@@ -8,13 +8,13 @@ import {
   updateDragPointer,
 } from "../../core/drag-state.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import "../ct-cell-context/ct-cell-context.ts";
+import "../cf-cell-context/cf-cell-context.ts";
 
 /**
  * CTDragSource - Wraps draggable content and initiates drag operations
  *
  * This component makes any content draggable and manages the drag lifecycle.
- * It automatically wraps content with ct-cell-context for debugging support.
+ * It automatically wraps content with cf-cell-context for debugging support.
  *
  * @element ct-drag-source
  *
@@ -45,11 +45,11 @@ export class CTDragSource extends BaseElement {
         cursor: not-allowed;
       }
 
-      :host(:not([disabled])) ct-cell-context {
+      :host(:not([disabled])) cf-cell-context {
         cursor: grab;
       }
 
-      :host(:not([disabled])) ct-cell-context.dragging {
+      :host(:not([disabled])) cf-cell-context.dragging {
         cursor: grabbing;
         opacity: 0.5;
       }
@@ -98,7 +98,7 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
-    // Skip if Alt is held - user is interacting with ct-cell-context debug UI
+    // Skip if Alt is held - user is interacting with cf-cell-context debug UI
     if (e.altKey) {
       return;
     }
@@ -187,7 +187,7 @@ export class CTDragSource extends BaseElement {
 
     // Now that we're actually dragging, capture the pointer and add dragging class
     const cellContext = this.shadowRoot?.querySelector(
-      "ct-cell-context",
+      "cf-cell-context",
     ) as HTMLElement;
     if (cellContext) {
       if (this._pointerId !== undefined) {
@@ -225,7 +225,7 @@ export class CTDragSource extends BaseElement {
     }
 
     // Remove dragging class
-    const cellContext = this.shadowRoot?.querySelector("ct-cell-context");
+    const cellContext = this.shadowRoot?.querySelector("cf-cell-context");
     if (cellContext) {
       cellContext.classList.remove("dragging");
     }
@@ -242,12 +242,12 @@ export class CTDragSource extends BaseElement {
 
   override render() {
     return html`
-      <ct-cell-context
+      <cf-cell-context
         .cell="${this.cell}"
         @pointerdown="${this._handlePointerDown}"
       >
         <slot></slot>
-      </ct-cell-context>
+      </cf-cell-context>
     `;
   }
 }

@@ -1192,14 +1192,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                       self,
                                     })}
                                   >
-                                    <ct-cell-context $cell={note}>
+                                    <cf-cell-context $cell={note}>
                                       <ct-chip
                                         label={note?.[NAME] ??
                                           note?.title ??
                                           "Untitled"}
                                         interactive
                                       />
-                                    </ct-cell-context>
+                                    </cf-cell-context>
                                   </div>
                                 </ct-drag-source>
                               </ct-drop-zone>

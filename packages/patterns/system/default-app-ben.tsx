@@ -469,9 +469,9 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       {recentPieces.map((piece: any) => (
                         <tr>
                           <td>
-                            <ct-cell-context $cell={piece}>
+                            <cf-cell-context $cell={piece}>
                               <ct-cell-link $cell={piece} />
-                            </ct-cell-context>
+                            </cf-cell-context>
                           </td>
                         </tr>
                       ))}
@@ -499,9 +499,9 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
                       const link = (
                         <ct-drag-source $cell={piece} type="note">
-                          <ct-cell-context $cell={piece}>
+                          <cf-cell-context $cell={piece}>
                             <ct-cell-link $cell={piece} />
-                          </ct-cell-context>
+                          </cf-cell-context>
                         </ct-drag-source>
                       );
 

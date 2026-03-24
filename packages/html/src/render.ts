@@ -251,7 +251,7 @@ function renderNode(
   }
 
   if (isCellHandle(node)) {
-    const wrapper = doc.createElement("ct-internal-fill-element");
+    const wrapper = doc.createElement("cf-internal-fill-element");
     addCancel(
       effect(node as CellHandle<VNode>, (resolvedNode) => {
         wrapper.innerHTML = "";
@@ -291,7 +291,7 @@ function renderNode(
   }
 
   if (cellForContext && element) {
-    const wrapper = doc.createElement("ct-cell-context") as HTMLElement & {
+    const wrapper = doc.createElement("cf-cell-context") as HTMLElement & {
       cell?: CellHandle<VNode>;
     };
     wrapper.cell = cellForContext;

@@ -2897,8 +2897,8 @@ interface CTMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
 interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
-interface CTRenderElement extends CTHTMLElement {}
-interface CTCellContextElement extends CTHTMLElement {}
+interface CFRenderElement extends CTHTMLElement {}
+interface CFCellContextElement extends CTHTMLElement {}
 interface CTDragSourceElement extends CTHTMLElement {}
 interface CTDropZoneElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
@@ -2914,14 +2914,14 @@ interface CTChatElement extends CTHTMLElement {}
 interface CTMessageBeadsElement extends CTHTMLElement {}
 interface CTAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
-interface CTFragmentElement extends CTHTMLElement {}
+interface CFFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
 interface CTGoogleOAuthElement extends CTHTMLElement {}
 interface CTOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
-interface CTPieceElement extends CTHTMLElement {}
+interface CFPieceElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
@@ -3032,7 +3032,7 @@ interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "$state"?: CellLike<any>;
 }
 
-interface CTPieceAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPieceAttributes<T> extends CTHTMLAttributes<T> {
   "piece-id"?: string;
   "space-name"?: string;
 }
@@ -3416,7 +3416,7 @@ interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
   "$context": CellLike<any>;
 }
 
-interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRenderAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "variant"?:
     | "default"
@@ -3428,7 +3428,7 @@ interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
     | "embedded";
 }
 
-interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCellContextAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
   "inline"?: boolean;
@@ -4747,13 +4747,13 @@ declare global {
         CTKeybindAttributes<CTKeybindElement>,
         CTKeybindElement
       >;
-      "ct-render": CTDOM.DetailedHTMLProps<
-        CTRenderAttributes<CTRenderElement>,
-        CTRenderElement
+      "cf-render": CTDOM.DetailedHTMLProps<
+        CFRenderAttributes<CFRenderElement>,
+        CFRenderElement
       >;
-      "ct-cell-context": CTDOM.DetailedHTMLProps<
-        CTCellContextAttributes<CTCellContextElement>,
-        CTCellContextElement
+      "cf-cell-context": CTDOM.DetailedHTMLProps<
+        CFCellContextAttributes<CFCellContextElement>,
+        CFCellContextElement
       >;
       "ct-drag-source": CTDOM.DetailedHTMLProps<
         CTDragSourceAttributes<CTDragSourceElement>,
@@ -4819,9 +4819,9 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
-      "ct-piece": CTDOM.DetailedHTMLProps<
-        CTPieceAttributes<CTPieceElement>,
-        CTPieceElement
+      "cf-piece": CTDOM.DetailedHTMLProps<
+        CFPieceAttributes<CFPieceElement>,
+        CFPieceElement
       >;
       "ct-voice-input": CTDOM.DetailedHTMLProps<
         CTVoiceInputAttributes<CTVoiceInputElement>,
@@ -4835,9 +4835,9 @@ declare global {
         CTLocationAttributes<CTLocationElement>,
         CTLocationElement
       >;
-      "ct-fragment": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTFragmentElement>,
-        CTFragmentElement
+      "cf-fragment": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CFFragmentElement>,
+        CFFragmentElement
       >;
       "ct-iframe": CTDOM.DetailedHTMLProps<
         CTIframeAttributes<CTIFrameElement>,

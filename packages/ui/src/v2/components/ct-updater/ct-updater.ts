@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { CTPiece } from "../ct-piece/ct-piece.ts";
+import { CFPiece } from "../cf-piece/cf-piece.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
 
 /**
@@ -102,9 +102,9 @@ export class CTUpdater extends BaseElement {
     this.updateState = "pending";
     this.requestUpdate();
 
-    const container = CTPiece.findPieceContainer(this);
+    const container = CFPiece.findPieceContainer(this);
     if (!container) {
-      throw new Error("No <ct-piece> container.");
+      throw new Error("No <cf-piece> container.");
     }
     const { pieceId } = container;
     const space = this.state.space;

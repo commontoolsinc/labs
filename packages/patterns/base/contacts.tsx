@@ -301,7 +301,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                     </ct-button>
                   </ct-hstack>
 
-                  <ct-render $cell={piece} />
+                  <cf-render $cell={piece} />
                 </ct-vstack>
               );
             })}

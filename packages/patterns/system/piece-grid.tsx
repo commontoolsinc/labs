@@ -51,7 +51,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
                   pointerEvents: "none",
                 }}
               >
-                <ct-render $cell={piece} />
+                <cf-render $cell={piece} />
               </div>
             </div>
             <div style={{ padding: "8px" }}>

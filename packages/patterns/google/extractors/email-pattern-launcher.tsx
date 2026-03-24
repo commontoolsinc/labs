@@ -552,7 +552,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         >
                           {/* Render the pattern's previewUI if available */}
                           {
-                            /*<ct-render
+                            /*<cf-render
                             $cell={patternInfo.result}
                             variant="preview"
                           />*/

@@ -151,7 +151,7 @@ const initializeRecord = lift<{
   recordPatternJson,
 }) => {
   if ((currentPieces || []).length === 0) {
-    // Create Note as default module (rendered via ct-render variant="embedded")
+    // Create Note as default module (rendered via cf-render variant="embedded")
     // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
     const notesPiece = Note({ linkPattern: recordPatternJson });
 
@@ -276,7 +276,7 @@ const addSubPiece = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note (rendered via ct-render variant="embedded")
+  // Special case: create Note (rendered via cf-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
   // Special case: create ExtractorModule as controller with parent Cells and title
   const piece = type === "notes"
@@ -1396,9 +1396,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               {computed(() => {
                                 const piece = entry.piece as any;
-                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                                 return piece?.embeddedUI ??
-                                  <ct-render $cell={entry.piece} />;
+                                  <cf-render $cell={entry.piece} />;
                               })}
                             </div>,
                             null,
@@ -1690,9 +1690,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 {computed(() => {
                                   const piece = entry.piece as any;
-                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                  // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                                   return piece?.embeddedUI ??
-                                    <ct-render $cell={entry.piece} />;
+                                    <cf-render $cell={entry.piece} />;
                                 })}
                               </div>,
                               null,
@@ -1977,9 +1977,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                           >
                             {computed(() => {
                               const piece = entry.piece as any;
-                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                              // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
                               return piece?.embeddedUI ??
-                                <ct-render $cell={entry.piece} />;
+                                <cf-render $cell={entry.piece} />;
                             })}
                           </div>,
                           null,

@@ -2100,7 +2100,7 @@ Use \`ct-*\` custom elements:
 - \`<ct-button onClick={handler}>Label</ct-button>\` — Button
 - \`<ct-card>...</ct-card>\` — Styled card container
 - \`<ct-vstack gap={N}>...</ct-vstack>\` — Vertical stack layout
-- \`<ct-render $cell={patternInstance} />\` — Render a sub-pattern
+- \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style
 \`style={{ camelCase: "value" }}\`. Custom \`ct-*\` elements use string-style

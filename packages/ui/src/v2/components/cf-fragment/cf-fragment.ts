@@ -1,21 +1,21 @@
 /**
- * CTFragment - A transparent wrapper element with display:contents
+ * CFFragment - A transparent wrapper element with display:contents
  *
  * This element behaves like a React Fragment - it doesn't introduce
  * any layout boxes in the DOM tree. Children are rendered as if they
  * were direct children of the fragment's parent.
  *
- * @element ct-fragment
+ * @element cf-fragment
  *
  * @slot - Default slot for fragment content
  *
  * @example
- * <ct-fragment>
+ * <cf-fragment>
  *   <ct-button>Button 1</ct-button>
  *   <ct-button>Button 2</ct-button>
- * </ct-fragment>
+ * </cf-fragment>
  */
-export class CTFragment extends HTMLElement {
+export class CFFragment extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" })
@@ -29,4 +29,4 @@ export class CTFragment extends HTMLElement {
   }
 }
 
-globalThis.customElements.define("ct-fragment", CTFragment);
+globalThis.customElements.define("cf-fragment", CFFragment);

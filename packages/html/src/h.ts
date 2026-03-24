@@ -9,7 +9,7 @@ import { isCell, isCellResult } from "@commonfabric/runner";
 /**
  * Fragment element name used for JSX fragments.
  */
-const FRAGMENT_ELEMENT = "ct-fragment";
+const FRAGMENT_ELEMENT = "cf-fragment";
 
 /**
  * JSX factory function for creating virtual DOM nodes.

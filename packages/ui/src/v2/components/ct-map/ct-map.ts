@@ -24,7 +24,7 @@ import type {
   MapPolyline,
   MapValue,
 } from "./types.ts";
-import "../ct-render/ct-render.ts";
+import "../cf-render/cf-render.ts";
 
 // Default map configuration
 const DEFAULT_CENTER: LatLng = { lat: 37.7749, lng: -122.4194 }; // San Francisco
@@ -1118,10 +1118,10 @@ export class CTMap extends BaseElement {
 
     // Check if we have an OpaqueRef popup (advanced mode)
     if (feature.popup) {
-      // Create a ct-render element for the popup content
-      const ctRender = document.createElement("ct-render");
-      (ctRender as any).cell = feature.popup;
-      container.appendChild(ctRender);
+      // Create a cf-render element for the popup content
+      const cfRender = document.createElement("cf-render");
+      (cfRender as any).cell = feature.popup;
+      container.appendChild(cfRender);
     } else {
       // Simple popup content
       container.className = "popup-simple";

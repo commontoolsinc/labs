@@ -742,7 +742,7 @@ export default pattern(() => {
             Load events above, then type here to feel the autocomplete latency.
             Community suggestions from the aggregator appear as you type.
           </p>
-          <ct-render $cell={tagsInstance} />
+          <cf-render $cell={tagsInstance} />
         </ct-vstack>
 
         {/* Explanation */}

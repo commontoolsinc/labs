@@ -186,7 +186,7 @@ export default pattern<Input, Output>(
                 >
                   Item A: Pasta Recipe
                 </span>
-                <ct-render $cell={tagsA} />
+                <cf-render $cell={tagsA} />
               </ct-vstack>
 
               {/* Item B */}
@@ -209,7 +209,7 @@ export default pattern<Input, Output>(
                 >
                   Item B: Pizza Recipe
                 </span>
-                <ct-render $cell={tagsB} />
+                <cf-render $cell={tagsB} />
               </ct-vstack>
             </ct-hstack>
           </ct-vstack>
@@ -266,7 +266,7 @@ export default pattern<Input, Output>(
               >
                 Item C: Task Tracker
               </span>
-              <ct-render $cell={tagsC} />
+              <cf-render $cell={tagsC} />
             </ct-vstack>
           </ct-vstack>
 

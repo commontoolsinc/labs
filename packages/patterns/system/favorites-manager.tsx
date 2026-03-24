@@ -46,7 +46,7 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <ct-vstack gap="3">
         {favorites!.map((item) => (
-          <ct-cell-context $cell={item.cell}>
+          <cf-cell-context $cell={item.cell}>
             <ct-vstack gap="2">
               <ct-hstack gap="2" align="center">
                 <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
@@ -66,7 +66,7 @@ export default pattern<Record<string, never>>((_) => {
                 onct-change={onUpdateUserTags({ userTags: item.userTags })}
               />
             </ct-vstack>
-          </ct-cell-context>
+          </cf-cell-context>
         ))}
         {favorites!.length === 0 && <ct-text>No favorites yet.</ct-text>}
       </ct-vstack>

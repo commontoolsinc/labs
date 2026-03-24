@@ -93,7 +93,7 @@ export default pattern<{
           />
         </div>
 
-        <ct-cell-context $cell={summary.pending}>
+        <cf-cell-context $cell={summary.pending}>
           {derive(
             [summary.pending, summary.result],
             ([pending, result]) =>
@@ -114,9 +114,9 @@ export default pattern<{
                 )
                 : null,
           )}
-        </ct-cell-context>
+        </cf-cell-context>
 
-        <ct-cell-context $cell={commits}>
+        <cf-cell-context $cell={commits}>
           {derive(commits, (commitList) => {
             if (!commitList || commitList.length === 0) {
               return (
@@ -157,7 +157,7 @@ export default pattern<{
               </div>
             );
           })}
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
   };

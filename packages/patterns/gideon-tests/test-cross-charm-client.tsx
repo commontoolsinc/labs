@@ -12,7 +12,7 @@
  *
  * 2. ct.render Forces Piece Execution - VERIFIED
  *    - Just wishing for a piece doesn't make it run
- *    - Use <ct-render $cell={...} /> to force execution
+ *    - Use <cf-render $cell={...} /> to force execution
  *
  * PREREQUISITES DISCOVERED:
  *    - Wish tags must be in JSDoc on Output type (not file-level comments)
@@ -183,7 +183,7 @@ export default pattern<Input, Output>(
                       marginTop: "8px",
                     }}
                   >
-                    <ct-render $cell={wishResult.result} />
+                    <cf-render $cell={wishResult.result} />
                   </div>
                 </div>
               )

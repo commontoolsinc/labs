@@ -673,12 +673,12 @@ export class XLoginView extends BaseView {
     return html`
       <div class="login-container">
         <div class="logo-container">
-          <ct-logo
+          <cf-logo
             background-color="black"
             shape-color="white"
             width="100"
             height="100"
-          ></ct-logo>
+          ></cf-logo>
         </div>
 
         <div class="auth-action-container">

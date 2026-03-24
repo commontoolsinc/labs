@@ -13,14 +13,14 @@ export class XPieceView extends BaseView {
       min-height: 0; /* Important for flex children */
     }
 
-    ct-piece {
+    cf-piece {
       flex: 1;
       display: flex;
       flex-direction: column;
       min-height: 0;
     }
 
-    ct-render {
+    cf-render {
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -42,9 +42,9 @@ export class XPieceView extends BaseView {
     const cell = this.piece.getCell();
 
     return html`
-      <ct-piece .pieceId="${this.piece.id}">
-        <ct-render .cell="${cell}"></ct-render>
-      </ct-piece>
+      <cf-piece .pieceId="${this.piece.id}">
+        <cf-render .cell="${cell}"></cf-render>
+      </cf-piece>
     `;
   }
 }
