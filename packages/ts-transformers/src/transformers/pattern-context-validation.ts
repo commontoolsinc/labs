@@ -48,6 +48,7 @@ import {
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import {
+  addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
@@ -539,9 +540,7 @@ export class PatternContextValidationTransformer extends Transformer {
       return false;
     }
 
-    if (
-      isReactiveArrayMethodCall(parent, checker, context.options.typeRegistry)
-    ) {
+    if (this.isPatternOwnedArrayMethodCallback(func, context, checker)) {
       return true;
     }
 
@@ -551,6 +550,81 @@ export class PatternContextValidationTransformer extends Transformer {
     return callKind.kind === "builder" &&
       (callKind.builderName === "pattern" ||
         callKind.builderName === "render");
+  }
+
+  private isPatternOwnedArrayMethodCallback(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): boolean {
+    const parent = func.parent;
+    if (
+      !parent || !ts.isCallExpression(parent) ||
+      !parent.arguments.includes(func)
+    ) {
+      return false;
+    }
+
+    const callKind = detectCallKind(parent, checker);
+    if (callKind?.kind !== "array-method") {
+      return isReactiveArrayMethodCall(
+        parent,
+        checker,
+        context.options.typeRegistry,
+      );
+    }
+
+    const callee = parent.expression;
+    const receiver = ts.isPropertyAccessExpression(callee)
+      ? callee.expression
+      : ts.isElementAccessExpression(callee)
+      ? callee.expression
+      : undefined;
+    if (!receiver) {
+      return false;
+    }
+
+    const owner = this.findEnclosingPatternOwnerCallback(func, checker, context);
+    if (!owner) {
+      return false;
+    }
+
+    const opaqueRootSymbols = new Set<ts.Symbol>();
+    for (const parameter of owner.parameters) {
+      addBindingTargetSymbols(parameter.name, opaqueRootSymbols, checker);
+    }
+    for (const symbol of collectLocalOpaqueRootSymbols(owner.body, context)) {
+      opaqueRootSymbols.add(symbol);
+    }
+
+    return isOpaqueSourceExpression(
+      receiver,
+      EMPTY_OPAQUE_ROOTS,
+      opaqueRootSymbols,
+      context,
+    );
+  }
+
+  private findEnclosingPatternOwnerCallback(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    checker: ts.TypeChecker,
+    context: TransformationContext,
+  ): ts.ArrowFunction | ts.FunctionExpression | undefined {
+    let current: ts.Node | undefined = func.parent;
+    while (current) {
+      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+        const reactiveContext = classifyReactiveContext(
+          current.body,
+          checker,
+          context,
+        );
+        if (reactiveContext.kind === "pattern") {
+          return current;
+        }
+      }
+      current = current.parent;
+    }
+    return undefined;
   }
 
   /**

@@ -7,15 +7,11 @@ import { pattern } from "commontools";
 //   → return { label: unless(state.label, "Pending") }
 export default pattern((state) => ({
     label: __ctHelpers.unless({
-        anyOf: [{
-                type: "undefined"
-            }, {
-                type: ["string", "undefined"]
-            }]
+        type: ["string", "undefined"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: ["string", "undefined"]
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema, state.key("label"), "Pending"),
 }), {
     type: "object",
@@ -28,7 +24,7 @@ export default pattern((state) => ({
     type: "object",
     properties: {
         label: {
-            type: ["string", "undefined"]
+            type: "string"
         }
     },
     required: ["label"]
