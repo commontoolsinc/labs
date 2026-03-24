@@ -912,11 +912,14 @@ export class CellBridge {
     await subscribeProp("input");
     await subscribeProp("result");
 
-    // Subscribe to the root cell to detect [NAME] changes and rename the
+    // Subscribe to the result cell to detect [NAME] changes and rename the
     // piece directory in the FUSE tree accordingly.
+    // We use the result cell (not the root entity cell) because [NAME] is part
+    // of the pattern's result output, and the scheduler tracks result cell
+    // reads when setting up reactive subscriptions.
     try {
-      const rootCell = piece.getCell();
-      const cancelRootSub = rootCell.sink((_newValue: unknown) => {
+      const nameTrackingCell = await piece.result.getCell();
+      const cancelRootSub = nameTrackingCell.sink((_newValue: unknown) => {
         setTimeout(() => {
           try {
             const state = this.spaces.get(spaceName);
