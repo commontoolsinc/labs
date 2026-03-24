@@ -251,7 +251,7 @@ export class Runtime {
     const enabledFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v)
       .map(([k]) => k);
-    if (enabledFlags.length > 0) {
+    if (options.debug && enabledFlags.length > 0) {
       console.log(
         `Experimental flags enabled: ${enabledFlags.join(", ")}`,
       );
