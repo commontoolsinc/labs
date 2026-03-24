@@ -185,8 +185,19 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   if (ref) {
     const existing = ref.deref();
     if (existing !== undefined) {
-      // Still alive — return its SchemaAndHash.
-      return schemaToSah.get(existing)!;
+      const existingSah = schemaToSah.get(existing)!;
+
+      // Cache the caller's schema so future calls with the same object
+      // hit the WeakMap at line 174 instead of re-hashing every time.
+      // We only do this when the input was already deep-frozen
+      // (frozen === schema), because mutable objects could be changed
+      // after caching, producing stale hits.
+      const inputWasFrozen = frozen === schema;
+      if (inputWasFrozen) {
+        schemaToSah.set(frozen, existingSah);
+      }
+
+      return existingSah;
     }
     // WeakRef is dead — clean up.
     hashToRef.delete(hashStr);
