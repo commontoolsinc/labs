@@ -157,12 +157,12 @@ seedBooleanInterns();
  * schema (or a structurally-identical one with the same hash) has
  * already been interned.
  *
- * **Caching behaviour:** the cache key is the deep-frozen schema
- * object, not the caller's input. `toDeepFrozenSchema()` returns the
- * same reference if the input is already deep-frozen, so such schemas
- * hit the cache on repeated calls. For mutable inputs, a new frozen
- * copy is created each time — the identity-keyed WeakMap will miss,
- * but the hash-keyed reverse map will still find a structural match.
+ * **Caching behaviour:** only deep-frozen schema objects are used as
+ * cache keys — mutable inputs are never cached by identity.
+ * `toDeepFrozenSchema()` returns the same reference if the input is
+ * already deep-frozen, so such schemas hit the WeakMap on repeated
+ * calls. For mutable inputs, a new frozen copy is created each time
+ * and the hash-keyed reverse map finds a structural match.
  */
 export function internSchema(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
@@ -185,10 +185,8 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   if (ref) {
     const existing = ref.deref();
     if (existing !== undefined) {
-      // Still alive — look up its SchemaAndHash and cache for the caller's key.
-      const existingSah = schemaToSah.get(existing)!;
-      schemaToSah.set(schema, existingSah);
-      return existingSah;
+      // Still alive — return its SchemaAndHash.
+      return schemaToSah.get(existing)!;
     }
     // WeakRef is dead — clean up.
     hashToRef.delete(hashStr);
@@ -197,7 +195,6 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   // Not interned yet — create, cache, and return.
   const sah = new SchemaAndHash(frozen, hash);
   schemaToSah.set(frozen, sah);
-  schemaToSah.set(schema, sah);
   hashToRef.set(hashStr, new WeakRef(frozen));
   schemaFinalizer.register(frozen, hashStr);
 
