@@ -11,10 +11,9 @@
  */
 import { modernHash } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
-import { fromBase64url } from "./bigint-encoding.ts";
 import {
-  hashObjectFromJsonLegacy,
   fromStringLegacy,
+  hashObjectFromJsonLegacy,
   Reference,
   referLegacyCached,
 } from "./value-hash-legacy.ts";
@@ -79,17 +78,13 @@ export function resetCanonicalHashConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a `FabricHash` from its string representation
- * (`<algorithmTag>:<base64urlHash>`).
+ * Parse a hash object from its string representation.
+ * Modern path delegates to `FabricHash.fromString()`.
  */
-export function hashObjectFromString(source: string): FabricHash {
-  const colonIndex = source.indexOf(":");
-  if (colonIndex === -1) {
-    throw new ReferenceError(`Invalid content ID string: ${source}`);
-  }
-  const algorithmTag = source.substring(0, colonIndex);
-  const hashBase64url = source.substring(colonIndex + 1);
-  return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
+export function hashObjectFromString(source: string): HashObject {
+  return canonicalHashingEnabled
+    ? FabricHash.fromString(source)
+    : fromStringLegacy(source);
 }
 
 /**
@@ -106,14 +101,14 @@ export function isHashObject<T extends DefinedReferent>(
 /** Reconstructs a hash object from its JSON representation. */
 export function hashObjectFromJson(source: { "/": string }): HashObject {
   return canonicalHashingEnabled
-    ? hashObjectFromString(source["/"])
+    ? FabricHash.fromString(source["/"])
     : hashObjectFromJsonLegacy(source);
 }
 
 /** Reconstruct a hash object from its string representation. */
 export function fromString(source: string): HashObject {
   return canonicalHashingEnabled
-    ? hashObjectFromString(source)
+    ? FabricHash.fromString(source)
     : fromStringLegacy(source);
 }
 
