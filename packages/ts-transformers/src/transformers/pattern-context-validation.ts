@@ -29,14 +29,12 @@
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
- * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
  * - Local computed()/derive() aliases used as plain values in the same
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
-  classifyArrayMethodCall,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -123,20 +121,6 @@ export class PatternContextValidationTransformer extends Transformer {
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
-
-        // Check for .map() on fallback expressions (x ?? [] or x || [])
-        // Only in restricted context (pattern body) where this pattern causes runtime failures.
-        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
-        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
-        // other validations but still need this check).
-        if (isInsideRestrictedContext(node, checker, context)) {
-          this.validateArrayMethodOnFallbackExpression(
-            node,
-            context,
-            checker,
-            analyze,
-          );
-        }
 
         // Check for .get() calls
         if (
@@ -771,64 +755,6 @@ export class PatternContextValidationTransformer extends Transformer {
           `${builderName}() should be defined at module scope, not inside a pattern. ` +
           `Move this ${builderName}() call outside the pattern and add explicit type parameters. ` +
           `Note: computed(), action(), and .map() callbacks are allowed inside patterns.`,
-        node,
-      });
-    }
-  }
-
-  /**
-   * Validates that .map() is not called on a fallback expression like (x ?? []) or (x || [])
-   * where one side is reactive (OpaqueRef) and the other is not.
-   *
-   * This pattern fails at runtime because the transformer can't properly detect that
-   * the result needs mapWithPattern transformation.
-   */
-  private validateArrayMethodOnFallbackExpression(
-    node: ts.CallExpression,
-    context: TransformationContext,
-    _checker: ts.TypeChecker,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
-  ): void {
-    const arrayMethodInfo = classifyArrayMethodCall(node);
-    if (!arrayMethodInfo || arrayMethodInfo.lowered) return;
-    const methodName = arrayMethodInfo.family;
-
-    if (
-      !ts.isPropertyAccessExpression(node.expression) &&
-      !ts.isElementAccessExpression(node.expression)
-    ) {
-      return;
-    }
-
-    let target: ts.Expression = node.expression.expression;
-
-    // Unwrap parentheses
-    while (ts.isParenthesizedExpression(target)) {
-      target = target.expression;
-    }
-
-    // Check if target is (x ?? y) or (x || y)
-    if (!ts.isBinaryExpression(target)) return;
-
-    const op = target.operatorToken.kind;
-    if (
-      op !== ts.SyntaxKind.QuestionQuestionToken &&
-      op !== ts.SyntaxKind.BarBarToken
-    ) {
-      return;
-    }
-
-    // Check if left side traces to a reactive pattern parameter and right side does not
-    const leftIsOpaque = analyze(target.left).containsOpaqueRef;
-    const rightIsOpaque = analyze(target.right).containsOpaqueRef;
-
-    if (leftIsOpaque && !rightIsOpaque) {
-      context.reportDiagnostic({
-        severity: "error",
-        type: "pattern-context:map-on-fallback",
-        message:
-          `'.${methodName}()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
-          `Use direct property access: 'x.${methodName}(...)' rather than '(x ?? fallback).${methodName}(...)'`,
         node,
       });
     }

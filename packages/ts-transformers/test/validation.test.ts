@@ -1819,9 +1819,9 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 });
 
-Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
+Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
-    "errors on .map() after ?? [] fallback with reactive left side",
+    "allows .map() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1842,13 +1842,12 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(errors.length, 0);
     },
   );
 
   await t.step(
-    "errors on .map() after || [] fallback with reactive left side",
+    "allows .map() after || [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1869,13 +1868,12 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(errors.length, 0);
     },
   );
 
   await t.step(
-    "errors on .map() after ?? [] fallback regardless of legacy flag",
+    "allows .map() after ?? [] fallback without fallback-specific diagnostics",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1895,16 +1893,15 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter((error) =>
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(fallbackErrors.length, 0);
     },
   );
 
   await t.step(
-    "errors on .filter() after ?? [] fallback with reactive left side",
+    "allows .filter() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1924,16 +1921,16 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter((error) =>
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(fallbackErrors.length, 0);
+      assertEquals(getErrors(diagnostics).length, 0);
     },
   );
 
   await t.step(
-    "errors on .flatMap() after ?? [] fallback with reactive left side",
+    "allows .flatMap() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1953,11 +1950,11 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter((error) =>
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(fallbackErrors.length, 0);
+      assertEquals(getErrors(diagnostics).length, 0);
     },
   );
 

@@ -1821,7 +1821,7 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
       diagnostic.type === "pattern-context:map-on-fallback"
     );
 
-    assertGreater(fallbackDiagnostics.length, 0);
+    assertEquals(fallbackDiagnostics.length, 0);
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(output, 'data-id={item.key("id")}');
   },
@@ -1861,7 +1861,7 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
       diagnostic.type === "pattern-context:map-on-fallback"
     );
 
-    assertGreater(fallbackDiagnostics.length, 0);
+    assertEquals(fallbackDiagnostics.length, 0);
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(output, 'data-id={item.key("id")}');
   },
@@ -1901,9 +1901,53 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
       diagnostic.type === "pattern-context:map-on-fallback"
     );
 
-    assertGreater(fallbackDiagnostics.length, 0);
+    assertEquals(fallbackDiagnostics.length, 0);
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites fallback filter and flatMap chains",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+  tags?: string[];
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {(items ?? [])
+          .filter((item) => item.id)
+          .flatMap((item) => item.tags ?? [])
+          .map((tag) => <span>{tag}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".filterWithPattern(");
+    assertStringIncludes(output, ".flatMapWithPattern(");
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "items }) => items ?? []");
   },
 );
 
