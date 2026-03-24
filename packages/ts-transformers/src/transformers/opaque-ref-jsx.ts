@@ -6,7 +6,10 @@ import {
   isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
-import { classifyJsxExpressionSiteRoute } from "./expression-site-lowering.ts";
+import {
+  classifyJsxExpressionSiteRoute,
+  rewriteExpressionSite,
+} from "./expression-site-lowering.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 
 export class OpaqueRefJSXTransformer extends Transformer {
@@ -68,15 +71,33 @@ function transform(context: TransformationContext): ts.SourceFile {
       );
       const inSafeContext = contextInfo.kind === "compute";
 
-      if (
-        classifyJsxExpressionSiteRoute(
-          node.expression,
-          context,
-          analyze,
-        ).route === "shared-post-closure"
-      ) {
+      const route = classifyJsxExpressionSiteRoute(
+        node.expression,
+        context,
+        analyze,
+      );
+
+      if (route.route === "shared-post-closure") {
         // Pattern-owned JSX roots handled by the shared post-closure
         // expression-site lowering pass.
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      if (route.route === "shared-pre-closure") {
+        const rewritten = rewriteExpressionSite({
+          expression: node.expression,
+          containerKind: "jsx-expression",
+          context,
+          analyze,
+          visit,
+        });
+        if (rewritten) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          );
+        }
+
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 

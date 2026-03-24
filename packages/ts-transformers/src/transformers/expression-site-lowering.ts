@@ -40,6 +40,7 @@ interface RewriteExpressionSiteParams {
 }
 
 export type JsxExpressionSiteRoute =
+  | { route: "shared-pre-closure" }
   | { route: "shared-post-closure" }
   | {
     route: "legacy-jsx";
@@ -384,6 +385,59 @@ function containsReactiveArrayMethodSubexpression(
   return found;
 }
 
+function isAtomicWholeBranchIife(
+  branch: ts.Expression,
+): boolean {
+  const current = unwrapExpression(branch);
+  if (!ts.isCallExpression(current) || current.questionDotToken) {
+    return false;
+  }
+
+  const callee = unwrapExpression(current.expression);
+  if (!ts.isArrowFunction(callee) && !ts.isFunctionExpression(callee)) {
+    return false;
+  }
+
+  if (!ts.isBlock(callee.body)) {
+    return false;
+  }
+
+  const statements = callee.body.statements;
+  if (statements.length === 0) {
+    return false;
+  }
+
+  const lastStatement = statements[statements.length - 1];
+  if (
+    !lastStatement ||
+    !ts.isReturnStatement(lastStatement) ||
+    !lastStatement.expression ||
+    !isJsxLocalRewriteContainer(lastStatement.expression)
+  ) {
+    return false;
+  }
+
+  return statements.slice(0, -1).every((statement) =>
+    ts.isVariableStatement(statement)
+  );
+}
+
+function isSharedPreClosureAtomicControlFlowExpression(
+  expression: ts.Expression,
+): boolean {
+  const current = getControlFlowRewriteExpression(expression);
+  if (!current) {
+    return false;
+  }
+
+  if (ts.isConditionalExpression(current)) {
+    return isAtomicWholeBranchIife(current.whenTrue) ||
+      isAtomicWholeBranchIife(current.whenFalse);
+  }
+
+  return false;
+}
+
 function requiresLegacyJsxControlFlowHandling(
   expression: ts.Expression,
   context: TransformationContext,
@@ -684,6 +738,10 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (siteInfo.controlFlowRewriteRoot) {
+    if (isSharedPreClosureAtomicControlFlowExpression(expression)) {
+      return { route: "shared-pre-closure" };
+    }
+
     return requiresLegacyJsxControlFlowHandling(expression, context, analyze)
       ? { route: "legacy-jsx", reason: "legacy-control-flow-branch-local" }
       : { route: "shared-post-closure" };
@@ -788,10 +846,13 @@ function canRewriteExpressionSite(
 
   if (
     containerKind === "jsx-expression" &&
-    siteInfo.controlFlowRewriteRoot &&
-    requiresLegacyJsxControlFlowHandling(expression, context, analyze)
+    siteInfo.controlFlowRewriteRoot
   ) {
-    return false;
+    const route = classifyJsxExpressionSiteRoute(expression, context, analyze)
+      .route;
+    if (route !== "shared-post-closure" && route !== "shared-pre-closure") {
+      return false;
+    }
   }
 
   if (

@@ -1163,7 +1163,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: whole-branch compute-wrap ternaries stay on the legacy JSX seam",
+  "Expression site policy: whole-branch compute-wrap ternaries use the shared pre-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -1198,8 +1198,7 @@ Deno.test(
     assertEquals(
       classifyJsxExpressionSiteRoute(conditional, context, analyze),
       {
-        route: "legacy-jsx",
-        reason: "legacy-control-flow-branch-local",
+        route: "shared-pre-closure",
       },
     );
   },
