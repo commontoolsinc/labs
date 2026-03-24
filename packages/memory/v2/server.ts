@@ -43,8 +43,6 @@ import {
 } from "./query.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
-const INCREMENTAL_RECONCILE_DELAY_MS = 250;
-
 type SessionCacheEntry = SessionSyncUpsert;
 
 type SessionState = {
@@ -410,9 +408,7 @@ export class Server {
   #engines = new Map<string, Promise<Engine.Engine>>();
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
-  #reconcileSpaces = new Set<string>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
-  #reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #store?: URL;
 
@@ -438,7 +434,6 @@ export class Server {
     this.#connections.delete(connection);
     if (this.#connections.size === 0) {
       this.cancelScheduledRefresh();
-      this.cancelScheduledReconcile();
     }
   }
 
@@ -448,7 +443,6 @@ export class Server {
 
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
-    this.cancelScheduledReconcile();
     await this.#refreshing;
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
@@ -870,7 +864,6 @@ export class Server {
       if (upserts.length === 0) {
         return null;
       }
-      this.scheduleReconcile(space);
       return {
         type: "session/effect",
         space,
@@ -948,19 +941,6 @@ export class Server {
     this.scheduleRefresh();
   }
 
-  scheduleReconcile(space: string): void {
-    this.#reconcileSpaces.add(space);
-    if (this.#reconcileTimer !== null) {
-      clearTimeout(this.#reconcileTimer);
-    }
-    this.#reconcileTimer = setTimeout(() => {
-      this.#reconcileTimer = null;
-      const spaces = [...this.#reconcileSpaces];
-      this.#reconcileSpaces.clear();
-      void this.flushSessions(spaces);
-    }, INCREMENTAL_RECONCILE_DELAY_MS);
-  }
-
   private stageConflictRefreshDirtyIds(
     space: string,
     commit: ClientCommit,
@@ -1019,16 +999,6 @@ export class Server {
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();
       this.#dirtyDocsBySpace.clear();
-    }
-  }
-
-  private cancelScheduledReconcile(): void {
-    if (this.#reconcileTimer !== null) {
-      clearTimeout(this.#reconcileTimer);
-      this.#reconcileTimer = null;
-    }
-    if (this.#connections.size === 0) {
-      this.#reconcileSpaces.clear();
     }
   }
 

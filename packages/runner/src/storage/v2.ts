@@ -14,9 +14,8 @@ import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import {
   type DocumentPath,
-  type EntitySnapshot,
-  type GraphQueryResult,
   type PatchOp,
+  type SessionSync,
   toDocumentPath,
   type WireEntityDocument,
 } from "@commontools/memory/v2";
@@ -762,7 +761,7 @@ class SpaceReplica implements ISpaceReplica {
     URI,
     Set<(value: StorageValue | undefined) => void>
   >();
-  #watchView: MemoryV2Client.QueryView | null = null;
+  #watchView: MemoryV2Client.WatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<URI>();
   #nextLocalSeq = 1;
@@ -1026,12 +1025,12 @@ class SpaceReplica implements ISpaceReplica {
         },
       }));
 
-      const view = await session.watchAdd(watches);
+      const { view, sync } = await session.watchAddSync(watches);
 
       this.#watchView = view;
-      this.applyQueryResult(view.entities, type);
+      this.applySessionSync(sync, type);
       if (this.#updatePromises.size === 0) {
-        const updates = this.consumeUpdates(view.subscribe())
+        const updates = this.consumeUpdates(view.subscribeSync())
           .finally(() => this.#updatePromises.delete(updates));
         this.#updatePromises.add(updates);
       }
@@ -1088,14 +1087,14 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async consumeUpdates(
-    iterator: AsyncIterator<GraphQueryResult>,
+    iterator: AsyncIterator<SessionSync>,
   ): Promise<void> {
     while (true) {
       const next = await iterator.next();
       if (next.done) {
         return;
       }
-      this.applyQueryResult(next.value.entities, "integrate");
+      this.applySessionSync(next.value, "integrate");
     }
   }
 
@@ -1255,18 +1254,17 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
-  private applyQueryResult(
-    entities: EntitySnapshot[],
+  private applySessionSync(
+    sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
-    if (this.isDuplicateConfirmedResult(entities)) {
+    if (sync.upserts.length === 0 && sync.removes.length === 0) {
       return;
     }
 
-    const incomingIds = new Set(entities.map((entity) => entity.id as URI));
     const touchedIds = new Set<URI>([
-      ...incomingIds,
-      ...this.#watchedIds,
+      ...sync.upserts.map((upsert) => upsert.id as URI),
+      ...sync.removes.map((remove) => remove.id as URI),
     ]);
 
     const before = Differential.checkout(
@@ -1274,21 +1272,20 @@ class SpaceReplica implements ISpaceReplica {
       [...touchedIds].map((id) => snapshotState(this, id)),
     );
 
-    for (const entity of entities) {
-      const record = this.record(entity.id as URI);
+    for (const upsert of sync.upserts) {
+      const record = this.record(upsert.id as URI);
       record.confirmed = confirmedVersion(
-        entity.seq,
-        entity.document ?? undefined,
+        upsert.seq,
+        upsert.deleted === true ? undefined : upsert.doc,
       );
+      this.#watchedIds.add(upsert.id as URI);
     }
-    for (const id of this.#watchedIds) {
-      if (incomingIds.has(id)) {
-        continue;
-      }
+    for (const remove of sync.removes) {
+      const id = remove.id as URI;
       const record = this.record(id);
       record.confirmed = confirmedVersion(0, undefined);
+      this.#watchedIds.delete(id);
     }
-    this.#watchedIds = incomingIds;
 
     const changes = before.compare(this);
     if (type === "pull" || [...changes].length > 0) {
@@ -1412,21 +1409,6 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
-  }
-
-  private isDuplicateConfirmedResult(
-    entities: readonly EntitySnapshot[],
-  ): boolean {
-    if (entities.length !== this.#watchedIds.size) {
-      return false;
-    }
-    return entities.every((entity) => {
-      const confirmed = this.#docs.get(entity.id as URI)?.confirmed;
-      return confirmed !== undefined &&
-        confirmed.seq === entity.seq &&
-        JSON.stringify(confirmed.value ?? null) ===
-          JSON.stringify(entity.document ?? null);
-    });
   }
 
   private sessionHandle(): Promise<{

@@ -154,6 +154,15 @@ const visibleGraphState = (
       .map((id) => [id, normalizeValue(provider.get(id))]),
   );
 
+const containsExpectedGraphState = (
+  provider: TestProvider,
+  expected: Record<string, unknown>,
+): boolean =>
+  Object.entries(expected).every(([id, value]) =>
+    JSON.stringify(normalizeValue(provider.get(id as URI))) ===
+      JSON.stringify(value)
+  );
+
 const normalizeValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map((entry) => normalizeValue(entry));
@@ -560,16 +569,19 @@ Deno.test(
           await applyMutation(id);
         }
 
-        await waitForAsync(async () => {
-          const expected = await active!.queryGraph!();
-          return JSON.stringify(
-            visibleGraphState(active!.observer, fixture.expandedReachableIds),
-          ) === JSON.stringify(expected);
-        });
+        await waitForAsync(async () =>
+          containsExpectedGraphState(
+            active!.observer,
+            await active!.queryGraph!(),
+          )
+        );
 
         assertEquals(
-          visibleGraphState(active.observer, fixture.expandedReachableIds),
-          await active.queryGraph(),
+          containsExpectedGraphState(
+            active.observer,
+            await active.queryGraph(),
+          ),
+          true,
         );
         active.notifications.clear();
       }

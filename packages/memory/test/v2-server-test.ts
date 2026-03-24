@@ -1,4 +1,5 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   type GraphQueryResult,
@@ -363,6 +364,119 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
     assertEquals(effect.effect.removes, []);
   } finally {
     await server.close();
+  }
+});
+
+Deno.test("memory v2 server does not emit delayed exact-reconcile removes after shrink retargets", async () => {
+  const time = new FakeTime();
+  const server = createServer(
+    "memory://memory-v2-server-watch-shrink-no-reconcile",
+    0,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-watch-shrink-no-reconcile";
+  const fixture = createGraphFixture(space);
+  const expandedDocs = fixture.docs.map((doc) => ({
+    ...doc,
+    value: doc.id === fixture.rootId ? fixture.expandedRootValue : doc.value,
+  }));
+  const initialRoot = fixture.docs.find((doc) => doc.id === fixture.rootId)
+    ?.value;
+  assertExists(initialRoot);
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: expandedDocs.map((doc) => ({
+          op: "set" as const,
+          id: doc.id,
+          value: { value: doc.value },
+        })),
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: fixture.rootId,
+            selector: {
+              path: [],
+              schema: fixture.schema,
+            },
+          }],
+        },
+      }],
+    }));
+    const watch = assertResponse<any>(shiftMessage(messages));
+    assertEquals(
+      watch.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
+      fixture.expandedReachableIds,
+    );
+    assertEquals(watch.ok?.sync.removes, []);
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "shrink",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: fixture.rootId,
+          value: { value: initialRoot },
+        }],
+      },
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "shrink",
+    );
+
+    await time.tickAsync(0);
+    await time.runMicrotasks();
+    const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect.removes, []);
+
+    await time.tickAsync(300);
+    await time.runMicrotasks();
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+    time.restore();
   }
 });
 

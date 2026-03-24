@@ -4,6 +4,7 @@ import { Server } from "../v2/server.ts";
 import {
   type EntitySnapshot,
   MEMORY_V2_PROTOCOL,
+  type SessionSync,
   toDocumentPath,
 } from "../v2.ts";
 import { connect, loopback, type Transport } from "../v2/client.ts";
@@ -144,6 +145,91 @@ Deno.test("memory v2 client can bootstrap watches with watchAdd", async () => {
         },
       }],
     );
+  } finally {
+    await writerClient.close();
+    await observerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 client watch views expose incremental sync effects", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-watch-sync-effects"),
+  });
+  const writerClient = await connect({
+    transport: loopback(server),
+  });
+  const observerClient = await connect({
+    transport: loopback(server),
+  });
+  const writer = await writerClient.mount(
+    "did:key:z6Mk-memory-v2-client-watch-sync-effects",
+  );
+  const observer = await observerClient.mount(
+    "did:key:z6Mk-memory-v2-client-watch-sync-effects",
+  );
+
+  try {
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            version: 1,
+          },
+        },
+      }],
+    });
+
+    const view = await observer.watchAdd([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+    const updates = view.subscribeSync();
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            version: 2,
+          },
+        },
+      }],
+    });
+
+    const next = await updates.next();
+    assertEquals(next.done, false);
+    assertEquals(next.value as SessionSync, {
+      type: "sync",
+      fromSeq: 1,
+      toSeq: 2,
+      upserts: [{
+        branch: "",
+        id: "of:doc:1",
+        seq: 2,
+        doc: {
+          value: {
+            version: 2,
+          },
+        },
+      }],
+      removes: [],
+    });
   } finally {
     await writerClient.close();
     await observerClient.close();

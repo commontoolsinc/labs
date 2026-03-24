@@ -31,6 +31,11 @@ export interface MountOptions {
   seenSeq?: number;
 }
 
+export interface WatchMutationResult {
+  view: WatchView;
+  sync: SessionSync;
+}
+
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_JITTER_RATIO = 0.2;
@@ -256,8 +261,7 @@ export class SpaceSession {
   }>();
   #flushing: Promise<void> | null = null;
   #watchSpecs: WatchSpec[] = [];
-  #watchCache = new Map<string, EntitySnapshot>();
-  #watchView: QueryView | null = null;
+  #watchView: WatchView | null = null;
   #sessionId: string;
   #serverSeq: number;
   #ackedSeq = 0;
@@ -307,7 +311,7 @@ export class SpaceSession {
     return applied;
   }
 
-  async queryGraph(query: GraphQuery): Promise<QueryView> {
+  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
@@ -317,10 +321,19 @@ export class SpaceSession {
     });
 
     this.noteResult(result.serverSeq);
-    return new QueryView(result);
+    return result;
   }
 
-  async watchSet(watches: WatchSpec[]): Promise<QueryView> {
+  async watchSet(watches: WatchSpec[]): Promise<WatchView> {
+    const hadView = this.#watchView !== null;
+    const result = await this.watchSetSync(watches);
+    if (hadView && !isEmptySync(result.sync)) {
+      result.view.emit(result.sync);
+    }
+    return result.view;
+  }
+
+  async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchSetResult>({
         type: "session.watch.set",
@@ -329,20 +342,31 @@ export class SpaceSession {
         sessionId: this.#sessionId,
         watches,
       });
+      this.noteResult(result.serverSeq);
       this.#watchSpecs = watches;
-      this.applySync(result.sync, false);
-      const snapshot = this.currentWatchResult();
       if (this.#watchView === null) {
-        this.#watchView = new QueryView(snapshot);
+        this.#watchView = WatchView.fromSync(result.sync);
       } else {
-        this.#watchView.reconnect(snapshot);
+        this.#watchView.applySync(result.sync, false);
       }
       this.queueBackground(this.ack(result.serverSeq));
-      return this.#watchView;
+      return {
+        view: this.#watchView,
+        sync: result.sync,
+      };
     });
   }
 
-  async watchAdd(watches: WatchSpec[]): Promise<QueryView> {
+  async watchAdd(watches: WatchSpec[]): Promise<WatchView> {
+    const hadView = this.#watchView !== null;
+    const result = await this.watchAddSync(watches);
+    if (hadView && !isEmptySync(result.sync)) {
+      result.view.emit(result.sync);
+    }
+    return result.view;
+  }
+
+  async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchAddResult>({
         type: "session.watch.add",
@@ -351,20 +375,22 @@ export class SpaceSession {
         sessionId: this.#sessionId,
         watches,
       });
+      this.noteResult(result.serverSeq);
       this.#watchSpecs = [
         ...new Map(
           [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
         ).values(),
       ];
-      this.applySync(result.sync, false);
-      const snapshot = this.currentWatchResult();
       if (this.#watchView === null) {
-        this.#watchView = new QueryView(snapshot);
+        this.#watchView = WatchView.fromSync(result.sync);
       } else {
-        this.#watchView.reconnect(snapshot);
+        this.#watchView.applySync(result.sync, false);
       }
       this.queueBackground(this.ack(result.serverSeq));
-      return this.#watchView;
+      return {
+        view: this.#watchView,
+        sync: result.sync,
+      };
     });
   }
 
@@ -384,7 +410,12 @@ export class SpaceSession {
   }
 
   handleEffect(effect: SessionSync): void {
-    this.applySync(effect, true);
+    this.noteResult(effect.toSeq);
+    if (this.#watchView === null) {
+      this.#watchView = WatchView.fromSync(effect);
+    } else {
+      this.#watchView.applySync(effect, true);
+    }
     this.queueBackground(this.ack(effect.toSeq));
   }
 
@@ -392,7 +423,10 @@ export class SpaceSession {
     await this.reopen();
     await this.replayOutstandingCommits();
     if (this.#watchSpecs.length > 0) {
-      await this.watchSet(this.#watchSpecs);
+      const { view, sync } = await this.watchSetSync(this.#watchSpecs);
+      if (!isEmptySync(sync)) {
+        view.pushSync(sync);
+      }
     }
   }
 
@@ -425,34 +459,6 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
-  }
-
-  private applySync(sync: SessionSync, emit: boolean): void {
-    for (const upsert of sync.upserts) {
-      this.#watchCache.set(watchKey(upsert.branch, upsert.id), {
-        branch: upsert.branch,
-        id: upsert.id,
-        seq: upsert.seq,
-        document: upsert.doc ?? null,
-      });
-    }
-    for (const remove of sync.removes) {
-      this.#watchCache.delete(watchKey(remove.branch, remove.id));
-    }
-    this.noteResult(sync.toSeq);
-    if (emit && this.#watchView !== null) {
-      this.#watchView.push(this.currentWatchResult());
-    }
-  }
-
-  private currentWatchResult(): GraphQueryResult {
-    return {
-      serverSeq: this.#serverSeq,
-      entities: [...this.#watchCache.values()].sort((left, right) =>
-        left.branch.localeCompare(right.branch) ||
-        left.id.localeCompare(right.id)
-      ),
-    };
   }
 
   private async reopen(): Promise<void> {
@@ -534,16 +540,30 @@ export class SpaceSession {
   }
 }
 
-export class QueryView {
+export class WatchView {
   #queue: GraphQueryResult[] = [];
   #pending = new Set<PromiseWithResolvers<IteratorResult<GraphQueryResult>>>();
+  #syncQueue: SessionSync[] = [];
+  #syncPending = new Set<PromiseWithResolvers<IteratorResult<SessionSync>>>();
+  #entities = new Map<string, EntitySnapshot>();
   #closed = false;
-  entities: EntitySnapshot[];
-  serverSeq: number;
+  #serverSeq = 0;
 
-  constructor(initial: GraphQueryResult) {
-    this.entities = initial.entities;
-    this.serverSeq = initial.serverSeq;
+  static fromSync(sync: SessionSync): WatchView {
+    const view = new WatchView();
+    view.applySync(sync, false);
+    return view;
+  }
+
+  get entities(): EntitySnapshot[] {
+    return [...this.#entities.values()].sort((left, right) =>
+      left.branch.localeCompare(right.branch) ||
+      left.id.localeCompare(right.id)
+    );
+  }
+
+  get serverSeq(): number {
+    return this.#serverSeq;
   }
 
   subscribe(): AsyncIterator<GraphQueryResult> {
@@ -568,17 +588,60 @@ export class QueryView {
     };
   }
 
+  applySync(sync: SessionSync, emit: boolean): void {
+    for (const upsert of sync.upserts) {
+      this.#entities.set(watchKey(upsert.branch, upsert.id), {
+        branch: upsert.branch,
+        id: upsert.id,
+        seq: upsert.seq,
+        document: upsert.doc ?? null,
+      });
+    }
+    for (const remove of sync.removes) {
+      this.#entities.delete(watchKey(remove.branch, remove.id));
+    }
+    this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
+    if (emit) {
+      this.emit(sync);
+    }
+  }
+
+  emit(sync: SessionSync): void {
+    this.pushSync(sync);
+    this.push(this.snapshot());
+  }
+
+  snapshot(): GraphQueryResult {
+    return {
+      serverSeq: this.#serverSeq,
+      entities: this.entities,
+    };
+  }
+
+  subscribeSync(): AsyncIterator<SessionSync> {
+    return {
+      next: async () => {
+        if (this.#closed) {
+          return {
+            done: true,
+            value: undefined as never,
+          };
+        }
+        const queued = this.#syncQueue.shift();
+        if (queued) {
+          return { done: false, value: queued };
+        }
+        const pending = Promise.withResolvers<IteratorResult<SessionSync>>();
+        this.#syncPending.add(pending);
+        return await pending.promise;
+      },
+    };
+  }
+
   push(result: GraphQueryResult): void {
     if (this.#closed) {
       return;
     }
-    if (sameQueryResult(this, result)) {
-      this.entities = result.entities;
-      this.serverSeq = result.serverSeq;
-      return;
-    }
-    this.entities = result.entities;
-    this.serverSeq = result.serverSeq;
     const pending = this.#pending.values().next().value;
     if (pending) {
       this.#pending.delete(pending);
@@ -588,16 +651,17 @@ export class QueryView {
     this.#queue.push(result);
   }
 
-  reconnect(result: GraphQueryResult): void {
+  pushSync(sync: SessionSync): void {
     if (this.#closed) {
       return;
     }
-    if (sameQueryResult(this, result)) {
-      this.entities = result.entities;
-      this.serverSeq = result.serverSeq;
+    const pending = this.#syncPending.values().next().value;
+    if (pending) {
+      this.#syncPending.delete(pending);
+      pending.resolve({ done: false, value: sync });
       return;
     }
-    this.push(result);
+    this.#syncQueue.push(sync);
   }
 
   close(): void {
@@ -612,7 +676,15 @@ export class QueryView {
       });
     }
     this.#pending.clear();
+    for (const pending of this.#syncPending) {
+      pending.resolve({
+        done: true,
+        value: undefined as never,
+      });
+    }
+    this.#syncPending.clear();
     this.#queue = [];
+    this.#syncQueue = [];
   }
 }
 
@@ -673,22 +745,5 @@ const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
     typeof (message as { requestId?: string }).requestId === "string";
 };
 
-const sameQueryResult = (
-  current: QueryView,
-  next: GraphQueryResult,
-): boolean => {
-  if (current.serverSeq !== next.serverSeq) {
-    return false;
-  }
-  if (current.entities.length !== next.entities.length) {
-    return false;
-  }
-  return current.entities.every((entity, index) => {
-    const other = next.entities[index];
-    return other !== undefined &&
-      entity.branch === other.branch &&
-      entity.id === other.id &&
-      entity.seq === other.seq &&
-      JSON.stringify(entity.document) === JSON.stringify(other.document);
-  });
-};
+const isEmptySync = (sync: SessionSync): boolean =>
+  sync.upserts.length === 0 && sync.removes.length === 0;
