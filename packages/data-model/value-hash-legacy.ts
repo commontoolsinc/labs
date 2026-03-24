@@ -7,7 +7,8 @@
 import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { sha256 } from "./sha256-impl.ts";
-import type { DefinedReferent, HashObject } from "./value-hash.ts";
+import type { HashObject } from "./value-hash.ts";
+import type { FabricValue } from "./interface.ts";
 
 // ---------------------------------------------------------------------------
 // Merkle-reference tree builder
@@ -77,7 +78,7 @@ const treeBuilder = Reference.Tree.createBuilder(
   wrappedNodeBuilder,
 );
 
-export const hashOfLegacy = <T extends DefinedReferent>(
+export const hashOfLegacy = <T extends FabricValue>(
   source: T,
 ): HashObject<T> => {
   return treeBuilder.refer(source) as unknown as HashObject<T>;
@@ -112,7 +113,7 @@ const isUnclaimed = (
  * Legacy `hashOf` implementation using merkle-reference, with caching for
  * unclaimed {the, of} patterns.
  */
-export const hashOfLegacyCached = <T extends DefinedReferent>(
+export const hashOfLegacyCached = <T extends FabricValue>(
   source: T,
 ): HashObject<T> => {
   // Cache {the, of} patterns (unclaimed facts)
@@ -137,7 +138,7 @@ export const hashObjectFromStringLegacy = Reference.fromString as (
 
 /** Legacy hash object type — the merkle-reference `Reference.View`. */
 export type LegacyHashObject<
-  T extends DefinedReferent = DefinedReferent,
+  T extends FabricValue = FabricValue,
 > = Reference.View<T>;
 
 /** Type guard for legacy hash objects (merkle-reference instances). */

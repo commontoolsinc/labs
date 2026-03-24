@@ -18,17 +18,11 @@ import {
   isLegacyHashObject,
   type LegacyHashObject,
 } from "./value-hash-legacy.ts";
+import type { FabricValue } from "./interface.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-/**
- * Type constraint for content hash referents — i.e., any value
- * including `null` but _not_ `undefined`.
- * Used by `HashObject<T>` and related generic types.
- */
-export type DefinedReferent = NonNullable<unknown> | null;
 
 /**
  * Content hash -- a hash-based reference to a value.
@@ -41,7 +35,7 @@ export type DefinedReferent = NonNullable<unknown> | null;
  * sites; `FabricHash` ignores it (no phantom member).
  */
 export type HashObject<
-  T extends DefinedReferent = DefinedReferent,
+  T extends FabricValue = FabricValue,
 > = LegacyHashObject<T> | FabricHash;
 
 // ---------------------------------------------------------------------------
@@ -93,7 +87,7 @@ export function hashObjectFromString(source: string): HashObject {
  * Modern path checks for `FabricHash`; legacy path checks for
  * `LegacyHashObject` (merkle-reference `Reference.View`).
  */
-export function isHashObject<T extends DefinedReferent>(
+export function isHashObject<T extends FabricValue>(
   value: unknown | HashObject<T>,
 ): value is HashObject<T> {
   return modernHashEnabled
@@ -109,7 +103,7 @@ export function hashObjectFromJson(source: { "/": string }): HashObject {
 }
 
 /** Compute a content hash for the given source value. */
-export function hashOf<T extends DefinedReferent>(
+export function hashOf<T extends FabricValue>(
   source: T,
 ): HashObject<T> {
   return modernHashEnabled ? hashOfModern(source) : hashOfLegacyCached(source);

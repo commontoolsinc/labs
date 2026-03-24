@@ -1,10 +1,10 @@
-import type {
-  DefinedReferent,
-  HashObject,
-} from "@commontools/data-model/value-hash";
+import type { HashObject } from "@commontools/data-model/value-hash";
 import type { JSONValue } from "@commontools/api";
 
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type {
+  FabricDatum,
+  FabricValue,
+} from "@commontools/data-model/fabric-value";
 import type { SchemaPathSelector } from "@commontools/api";
 export type { SchemaPathSelector };
 
@@ -30,7 +30,7 @@ export interface Principal<ID extends DID = DID> {
  * Principal capable of issuing an {@link Authorization}.
  */
 export interface Authority extends Principal {
-  authorize<T extends DefinedReferent>(
+  authorize<T extends FabricValue>(
     access: Iterable<HashObject<T> | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
@@ -68,7 +68,7 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends DefinedReferent = DefinedReferent> {
+export interface Proof<Access extends FabricValue = FabricValue> {
   [link: AsString<HashObject<Access>>]: Unit;
 }
 
@@ -76,7 +76,7 @@ export interface Proof<Access extends DefinedReferent = DefinedReferent> {
  * Represents a verifiable authorization issued by specific {@link Authority}.
  * It is slightly more abstract notion than signed payload.
  */
-export type Authorization<T extends DefinedReferent = DefinedReferent> = {
+export type Authorization<T extends FabricValue = FabricValue> = {
   signature: Signature<Proof<T>>;
   access: Proof<T>;
 };
@@ -377,7 +377,7 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Job<
   Command extends NonNullable<unknown> = NonNullable<unknown>,
-  Return extends DefinedReferent = DefinedReferent,
+  Return extends FabricValue = FabricValue,
   Effect = unknown,
 > = {
   invoke: Command;
@@ -403,7 +403,7 @@ export type SessionTask<Space extends MemorySpace> =
 
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends DefinedReferent,
+  Result extends FabricValue,
   Effect,
 > =
   | {
@@ -426,7 +426,7 @@ export type Effect<Of extends NonNullable<unknown>, Command> = {
 
 export type Return<
   Of extends NonNullable<unknown>,
-  Result extends DefinedReferent,
+  Result extends FabricValue,
 > = {
   of: HashObject<Of>;
   is: Result;
