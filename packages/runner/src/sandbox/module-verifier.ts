@@ -52,6 +52,10 @@ const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "Uint8Array",
   "console",
   "globalThis",
+  "isFinite",
+  "isNaN",
+  "parseFloat",
+  "parseInt",
   "undefined",
 ]);
 

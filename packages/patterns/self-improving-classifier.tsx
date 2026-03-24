@@ -196,27 +196,14 @@ interface AutoClassifiedItem {
 }
 
 // =============================================================================
-// REGEX CACHE
+// REGEX SAFETY
 // =============================================================================
-
-/**
- * Maximum number of cached regex patterns to prevent memory leaks.
- * Uses simple LRU-like eviction (removes oldest entries when full).
- */
-const REGEX_CACHE_MAX_SIZE = 100;
 
 /**
  * Maximum length for regex patterns to prevent ReDoS attacks.
  * Patterns longer than this are rejected.
  */
 const REGEX_MAX_PATTERN_LENGTH = 500;
-
-/**
- * Module-scoped cache for compiled RegExp objects.
- * Key format: `${pattern}|${caseInsensitive ? 'i' : ''}`
- * This avoids recompiling the same regex thousands of times when matching rules.
- */
-const regexCache = new Map<string, RegExp | null>();
 
 /**
  * Check if a regex pattern is potentially dangerous (ReDoS).
@@ -247,41 +234,24 @@ function isRegexSafe(pattern: string): boolean {
 }
 
 /**
- * Get a cached compiled regex, or compile and cache it.
+ * Compile a regex after validation.
  * Returns null for invalid or potentially dangerous regex patterns.
  */
 function getCachedRegex(
   pattern: string,
   caseInsensitive: boolean,
 ): RegExp | null {
-  const cacheKey = `${pattern}|${caseInsensitive ? "i" : ""}`;
-
-  if (regexCache.has(cacheKey)) {
-    return regexCache.get(cacheKey)!;
-  }
-
   // Check for potentially dangerous patterns (ReDoS prevention)
   if (!isRegexSafe(pattern)) {
     console.warn(
       `[Classifier] Rejecting potentially dangerous regex pattern: "${pattern}"`,
     );
-    regexCache.set(cacheKey, null);
     return null;
-  }
-
-  // Evict oldest entries if cache is full (simple LRU-like behavior)
-  if (regexCache.size >= REGEX_CACHE_MAX_SIZE) {
-    const firstKey = regexCache.keys().next().value;
-    if (firstKey) {
-      regexCache.delete(firstKey);
-    }
   }
 
   try {
     const flags = caseInsensitive ? "i" : "";
-    const regex = new RegExp(pattern, flags);
-    regexCache.set(cacheKey, regex);
-    return regex;
+    return new RegExp(pattern, flags);
   } catch (e) {
     // Log invalid regex pattern for debugging
     console.warn(
@@ -289,8 +259,6 @@ function getCachedRegex(
         e instanceof Error ? e.message : "Unknown error"
       }`,
     );
-    // Cache null to avoid re-trying
-    regexCache.set(cacheKey, null);
     return null;
   }
 }

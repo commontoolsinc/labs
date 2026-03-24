@@ -84,4 +84,23 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
+
+  it("accepts pure ambient global helper captures in compiled callbacks", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.lift)(() => ({
+      parsed: parseInt("42", 10),
+      float: parseFloat("3.14"),
+      nan: isNaN(Number("x")),
+      finite: isFinite(12),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
 });
