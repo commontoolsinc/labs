@@ -9,8 +9,10 @@ import type {
   ICfcSchemaHashMismatchError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageError,
   Labels,
 } from "../storage/interface.ts";
+import { toThrowable } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import {
   type CanonicalBoundaryActivity,
@@ -76,6 +78,10 @@ import { matchesCfcAtomPattern } from "./atom-patterns.ts";
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 const INTERNAL_STATE_SCHEMA_COMMENT = "ct:internal-state";
 
+function makeStorageError<T extends IStorageError>(error: T): T {
+  return toThrowable(error) as T;
+}
+
 export interface PrepareBoundaryCommitOptions {
   readonly allowSchemaHashMigration?: (
     entity: EntityAddress,
@@ -92,14 +98,14 @@ export interface PrepareBoundaryCommitOptions {
 function CfcPrepareSchemaUnavailableError(
   entity: EntityAddress,
 ): ICfcPrepareSchemaUnavailableError {
-  return {
+  return makeStorageError({
     name: "CfcPrepareSchemaUnavailableError",
     message:
       "CFC prepare could not resolve schema for commit-bearing relevant write",
     space: entity.space,
     id: entity.id,
     type: entity.type,
-  };
+  });
 }
 
 function CfcSchemaHashMismatchError(
@@ -107,7 +113,7 @@ function CfcSchemaHashMismatchError(
   expectedSchemaHash: string,
   actualSchemaHash: string,
 ): ICfcSchemaHashMismatchError {
-  return {
+  return makeStorageError({
     name: "CfcSchemaHashMismatchError",
     message: "CFC prepare found existing schema hash that does not match",
     expectedSchemaHash,
@@ -115,7 +121,7 @@ function CfcSchemaHashMismatchError(
     space: entity.space,
     id: entity.id,
     type: entity.type,
-  };
+  });
 }
 
 function CfcMaxConfidentialityViolationError(
@@ -123,7 +129,7 @@ function CfcMaxConfidentialityViolationError(
   maxConfidentiality: readonly string[],
   actualClassification: CfcConfidentialityLabel | undefined,
 ): ICfcInputRequirementViolationError {
-  return {
+  return makeStorageError({
     name: "CfcInputRequirementViolationError",
     message:
       "CFC prepare input requirement failed: consumed input exceeds maxConfidentiality",
@@ -134,7 +140,7 @@ function CfcMaxConfidentialityViolationError(
     path: read.path,
     maxConfidentiality: [...maxConfidentiality],
     actualClassification,
-  };
+  });
 }
 
 function CfcRequiredIntegrityViolationError(
@@ -143,7 +149,7 @@ function CfcRequiredIntegrityViolationError(
   actualIntegrity: CfcIntegrityLabel | undefined,
   path = read.path,
 ): ICfcInputRequirementViolationError {
-  return {
+  return makeStorageError({
     name: "CfcInputRequirementViolationError",
     message:
       "CFC prepare input requirement failed: consumed input misses requiredIntegrity",
@@ -154,7 +160,7 @@ function CfcRequiredIntegrityViolationError(
     path,
     requiredIntegrity: [...requiredIntegrity],
     actualIntegrity,
-  };
+  });
 }
 
 function CfcStatePreconditionReadViolationError(
@@ -162,7 +168,7 @@ function CfcStatePreconditionReadViolationError(
   path: string,
   requiredReadPath: string,
 ): ICfcInputRequirementViolationError {
-  return {
+  return makeStorageError({
     name: "CfcInputRequirementViolationError",
     message:
       "CFC prepare input requirement failed: state precondition required read was not observed in this attempt",
@@ -172,7 +178,7 @@ function CfcStatePreconditionReadViolationError(
     type: entity.type,
     path,
     requiredReadPath,
-  };
+  });
 }
 
 function CfcStatePreconditionPredicateViolationError(
@@ -182,7 +188,7 @@ function CfcStatePreconditionPredicateViolationError(
   expectedValue: unknown,
   actualValue: unknown,
 ): ICfcInputRequirementViolationError {
-  return {
+  return makeStorageError({
     name: "CfcInputRequirementViolationError",
     message:
       "CFC prepare input requirement failed: state precondition predicate did not hold",
@@ -194,7 +200,7 @@ function CfcStatePreconditionPredicateViolationError(
     predicatePath,
     expectedValue,
     actualValue,
-  };
+  });
 }
 
 function CfcOutputTransitionViolationError(
@@ -203,7 +209,7 @@ function CfcOutputTransitionViolationError(
   minClassification: CfcConfidentialityLabel | undefined,
   actualClassification: CfcConfidentialityLabel | undefined,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: write classification is not monotone with consumed input",
@@ -214,7 +220,7 @@ function CfcOutputTransitionViolationError(
     path,
     minClassification,
     actualClassification,
-  };
+  });
 }
 
 function CfcRuntimeConfinementViolationError(
@@ -222,7 +228,7 @@ function CfcRuntimeConfinementViolationError(
   path: string,
   actualClassification: CfcConfidentialityLabel | undefined,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: runtime/device destination does not satisfy confinement clauses",
@@ -232,14 +238,14 @@ function CfcRuntimeConfinementViolationError(
     type: entity.type,
     path,
     actualClassification,
-  };
+  });
 }
 
 function CfcWriteAuthorizedByViolationError(
   entity: EntityAddress,
   path: string,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: write implementation identity is not in writeAuthorizedBy",
@@ -248,7 +254,7 @@ function CfcWriteAuthorizedByViolationError(
     id: entity.id,
     type: entity.type,
     path,
-  };
+  });
 }
 
 function CfcOutputExactCopyViolationError(
@@ -256,7 +262,7 @@ function CfcOutputExactCopyViolationError(
   path: string,
   sourcePath: string,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: exactCopyOf assertion was not satisfied",
@@ -266,7 +272,7 @@ function CfcOutputExactCopyViolationError(
     type: entity.type,
     path,
     sourcePath,
-  };
+  });
 }
 
 function CfcOutputProjectionViolationError(
@@ -275,7 +281,7 @@ function CfcOutputProjectionViolationError(
   sourcePath: string,
   projectionPath: string,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: projection assertion was not satisfied",
@@ -286,7 +292,7 @@ function CfcOutputProjectionViolationError(
     path,
     sourcePath,
     projectionPath,
-  };
+  });
 }
 
 type CollectionTransitionRequirement =
@@ -304,7 +310,7 @@ function CfcOutputCollectionViolationError(
   const detail = requirement === "lengthPreserved"
     ? "lengthPreserved assertion was not satisfied"
     : `${requirement} collection assertion was not satisfied`;
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message: `CFC prepare output transition failed: ${detail}`,
     requirement,
@@ -313,7 +319,7 @@ function CfcOutputCollectionViolationError(
     type: entity.type,
     path,
     ...(sourcePath ? { sourcePath } : {}),
-  };
+  });
 }
 
 function CfcOutputRecomposeProjectionsViolationError(
@@ -321,7 +327,7 @@ function CfcOutputRecomposeProjectionsViolationError(
   path: string,
   sourcePath: string,
 ): ICfcOutputTransitionViolationError {
-  return {
+  return makeStorageError({
     name: "CfcOutputTransitionViolationError",
     message:
       "CFC prepare output transition failed: recomposeProjections assertion was not satisfied",
@@ -331,7 +337,7 @@ function CfcOutputRecomposeProjectionsViolationError(
     type: entity.type,
     path,
     sourcePath,
-  };
+  });
 }
 
 function CfcPolicyNonConvergenceError(
@@ -339,7 +345,7 @@ function CfcPolicyNonConvergenceError(
   path: string,
   fuel: number,
 ): ICfcPolicyNonConvergenceError {
-  return {
+  return makeStorageError({
     name: "CfcPolicyNonConvergenceError",
     message:
       "CFC prepare policy evaluation did not converge before fuel exhaustion",
@@ -348,7 +354,7 @@ function CfcPolicyNonConvergenceError(
     type: entity.type,
     path,
     fuel,
-  };
+  });
 }
 
 function collectWrittenEntities(
@@ -1004,7 +1010,10 @@ function effectiveInputRequirementLabel(
       consumedReadEntityKey(candidate.read) ===
         consumedReadEntityKey(consumed.read) &&
       candidate.read.path !== consumed.read.path &&
-      isSameOrDescendantCanonicalPath(consumed.read.path, candidate.read.path) &&
+      isSameOrDescendantCanonicalPath(
+        consumed.read.path,
+        candidate.read.path,
+      ) &&
       !isInternalMetadataCanonicalPath(candidate.read.path)
     )
     .map((candidate) => candidate.effectiveLabel);

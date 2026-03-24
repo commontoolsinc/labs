@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
+import { cfcLabelsAddress } from "../src/cfc/shared.ts";
 import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -162,6 +165,15 @@ const gmailOperatorViewSchema = {
   },
   ifc: {
     classification: [[cloneJson(userAliceAtom)], [cloneJson(secretQueryAtom)]],
+  },
+} as const satisfies JSONSchema;
+
+const gmailSanitizedOperatorViewSchema = {
+  type: "object",
+  properties: {
+    code: gmailErrorCodeSchema,
+    status: gmailErrorStatusSchema,
+    message: gmailErrorMessageSchema,
   },
 } as const satisfies JSONSchema;
 
@@ -508,5 +520,138 @@ describe("CFC worked example: Gmail error declassification", () => {
         [secretQueryAtom],
       ]),
     );
+  });
+
+  it("rejects republishing sanitized fields after whole-object materialization of the mixed-label error view", async () => {
+    const requestCell = await harness.writeCellValue({
+      id: "gmail-error-request-materialization",
+      schema: gmailErrorRequestSchema,
+      value: {
+        url:
+          "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=project-x",
+        mode: "json",
+        options: {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer token",
+          },
+        },
+      },
+      prepare: "boundary",
+    });
+
+    const fetchData = harness.byRef("fetchData") as (
+      params: unknown,
+    ) => unknown;
+    const fetchPattern = harness.pattern<{ request: unknown }>(
+      ({ request }: { request: unknown }) => fetchData(request),
+    );
+    const wrapperRun = await harness.runPattern({
+      id: "gmail-error-fetch-wrapper-materialization",
+      pattern: fetchPattern,
+      inputs: { request: requestCell },
+    });
+
+    const projectOperatorView = harness.lift(
+      gmailFetchErrorEnvelopeSchema,
+      gmailOperatorViewSchema,
+      (error: any) => {
+        const gmailError = error["@Error"]?.error;
+        return {
+          code: gmailError?.code ?? 0,
+          status: gmailError?.status ?? "",
+          message: gmailError?.message ?? "",
+          details: gmailError?.details ?? [],
+          headers: error["@Error"]?.headers ?? {},
+        };
+      },
+    );
+    const operatorPattern = harness.pattern<{ error: any }>(
+      ({ error }: { error: any }) => projectOperatorView(error),
+      gmailOperatorViewInputSchema,
+      gmailOperatorViewSchema,
+    );
+
+    const operatorRun = await harness.runPattern({
+      id: "gmail-error-operator-view-materialization",
+      pattern: operatorPattern,
+      inputs: { error: wrapperRun.result.key("error").resolveAsCell() },
+      outputSchema: gmailOperatorViewSchema,
+      initialOutput: {
+        code: 0,
+        status: "",
+        message: "",
+        details: [],
+        headers: {},
+      },
+    });
+
+    const operatorLabels = await harness.readLabels(operatorRun.outputLink);
+    const seedTx = harness.runtime.edit();
+    const sourceCell = harness.getCell(
+      "gmail-error-materialization-source",
+      gmailOperatorViewSchema,
+      seedTx,
+    );
+    sourceCell.set({
+      code: 403,
+      status: "PERMISSION_DENIED",
+      message: "Insufficient authentication scopes.",
+      details: [
+        {
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        },
+      ],
+      headers: {
+        "Content-Type": "application/json",
+        "X-Trace": "gmail-secret-trace",
+      },
+    } as never);
+    seedTx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: sourceCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+      }),
+      operatorLabels as never,
+    );
+    await prepareCfcCommitIfNeeded(seedTx, { enforceBoundary: false });
+    const seeded = await seedTx.commit();
+    expect(seeded.error).toBeUndefined();
+    const materializationSource = sourceCell.getAsNormalizedFullLink();
+
+    const tx = harness.runtime.edit();
+    try {
+      const operatorCell = harness.getCellFromLink(
+        materializationSource,
+        gmailOperatorViewSchema,
+        tx,
+      );
+      const materialized = operatorCell.withTx(tx).get() as {
+        code?: number;
+        status?: string;
+        message?: string;
+      };
+
+      harness.getCell(
+        "gmail-error-materialized-sanitized-view",
+        gmailSanitizedOperatorViewSchema,
+        tx,
+      ).set({
+        code: materialized.code ?? 0,
+        status: materialized.status ?? "",
+        message: materialized.message ?? "",
+      });
+
+      const error = await assertRejects(() => prepareCfcCommitIfNeeded(tx));
+      expect(error).toMatchObject({
+        name: "CfcOutputTransitionViolationError",
+        requirement: "confidentialityMonotonicity",
+      });
+    } finally {
+      const abortResult = tx.abort("gmail-error-materialization-complete");
+      expect(abortResult.error).toBeUndefined();
+    }
   });
 });

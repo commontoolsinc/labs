@@ -16,6 +16,7 @@ import type {
   InactiveTransactionError,
   INotFoundError,
   IReadOptions,
+  IStorageError,
   IStorageTransaction,
   ITransactionJournal,
   ITransactionReader,
@@ -55,21 +56,27 @@ const logger = getLogger("extended-storage-transaction", {
   level: "error",
 });
 
-const CfcPrepareRequiredError = (): ICfcPrepareRequiredError => ({
-  name: "CfcPrepareRequiredError",
-  message: "CFC-relevant transaction must be prepared before commit",
-});
+function makeStorageError<T extends IStorageError>(error: T): T {
+  return toThrowable(error) as T;
+}
+
+const CfcPrepareRequiredError = (): ICfcPrepareRequiredError =>
+  makeStorageError({
+    name: "CfcPrepareRequiredError",
+    message: "CFC-relevant transaction must be prepared before commit",
+  });
 
 const CfcPreparedDigestMismatchError = (
   expectedDigest: string,
   actualDigest: string,
-): ICfcPreparedDigestMismatchError => ({
-  name: "CfcPreparedDigestMismatchError",
-  message:
-    "CFC prepared digest did not match transaction activity at commit time",
-  expectedDigest,
-  actualDigest,
-});
+): ICfcPreparedDigestMismatchError =>
+  makeStorageError({
+    name: "CfcPreparedDigestMismatchError",
+    message:
+      "CFC prepared digest did not match transaction activity at commit time",
+    expectedDigest,
+    actualDigest,
+  });
 
 type CfcTxState = {
   relevant: boolean;
