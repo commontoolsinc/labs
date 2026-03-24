@@ -98,10 +98,13 @@ export function resolveLink(
     let nextLink: NormalizedFullLink | undefined;
 
     // Sigil probe at full path
-    const sigilProbe = tx.read({
-      ...link,
-      path: ["value", ...link.path, "/", LINK_V1_TAG],
-    });
+    const sigilProbe = tx.read(
+      {
+        ...link,
+        path: ["value", ...link.path, "/", LINK_V1_TAG],
+      },
+      withInternalVerifierRead(),
+    );
     if (
       sigilProbe.ok &&
       isRecord(sigilProbe.ok.value) &&
@@ -141,10 +144,13 @@ export function resolveLink(
           }
         } else {
           // Check sigil at this parent, then legacy
-          const parentSigil = tx.read({
-            ...link,
-            path: ["value", ...lastValid, "/", LINK_V1_TAG],
-          });
+          const parentSigil = tx.read(
+            {
+              ...link,
+              path: ["value", ...lastValid, "/", LINK_V1_TAG],
+            },
+            withInternalVerifierRead(),
+          );
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
             // Read the full value at the parent to ensure proper reactivity
             const whole = tx.readValueOrThrow(
@@ -221,10 +227,13 @@ function checkLegacyAt(
   atPath: readonly string[],
   onlyRedirects: boolean,
 ): NormalizedFullLink | undefined {
-  const aliasPath = tx.read({
-    ...link,
-    path: ["value", ...atPath, "$alias", "path"],
-  });
+  const aliasPath = tx.read(
+    {
+      ...link,
+      path: ["value", ...atPath, "$alias", "path"],
+    },
+    withInternalVerifierRead(),
+  );
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
       tx.readValueOrThrow(
@@ -235,10 +244,13 @@ function checkLegacyAt(
     );
   }
   if (onlyRedirects) return undefined;
-  const legacyCell = tx.read({
-    ...link,
-    path: ["value", ...atPath, "cell", "/"],
-  });
+  const legacyCell = tx.read(
+    {
+      ...link,
+      path: ["value", ...atPath, "cell", "/"],
+    },
+    withInternalVerifierRead(),
+  );
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
       tx.readValueOrThrow(

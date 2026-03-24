@@ -91,6 +91,15 @@ describe("CFC asSchema projected observations", () => {
     expect(
       reads.some((read) => read.path === "/error/details/reason"),
     ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/~1/link@1"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/$alias/path"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/cell/~1"),
+    ).toBe(false);
 
     tx.abort();
   });
