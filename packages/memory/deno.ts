@@ -1,9 +1,12 @@
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
+import * as Stitch from "./stitch.ts";
 import * as Path from "@std/path";
 import * as UCAN from "./ucan.ts";
 import * as Receipt from "./receipt.ts";
 import { type DID, Identity, isDID } from "@commontools/identity";
+
+const STITCH = Deno.env.get("STITCH") === "1";
 
 const serviceDid: DID = (() => {
   // Derived from passphrase "implicit trust"
@@ -39,13 +42,19 @@ from ${STORE}`);
     if (request.headers.get("upgrade") === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(request);
       const consumer = Socket.from<string, string>(socket);
-      const session = provider.session();
-      consumer
-        .readable
-        .pipeThrough(UCAN.fromStringStream())
-        .pipeThrough(session)
-        .pipeThrough(Receipt.toStringStream())
-        .pipeTo(consumer.writable);
+      if (STITCH) {
+        consumer.readable
+          .pipeThrough(Stitch.createSession())
+          .pipeTo(consumer.writable);
+      } else {
+        const session = provider.session();
+        consumer
+          .readable
+          .pipeThrough(UCAN.fromStringStream())
+          .pipeThrough(session)
+          .pipeThrough(Receipt.toStringStream())
+          .pipeTo(consumer.writable);
+      }
       return response;
     } else {
       return provider.fetch(request);
@@ -61,6 +70,8 @@ export type Options = {
   };
   port?: number;
   host?: string;
+  /** Enable the stitch sync protocol instead of the legacy UCAN-based protocol. */
+  stitch?: boolean;
 };
 
 export const open = async (
@@ -69,6 +80,7 @@ export const open = async (
     port = -1,
     host = "0.0.0.0",
     credentials = { passphrase: "implicit trust" },
+    stitch = false,
   }: Options,
 ): Promise<Server> => {
   const identity = credentials.pkc8
@@ -95,13 +107,19 @@ export const open = async (
         if (request.headers.get("upgrade") === "websocket") {
           const { socket, response } = Deno.upgradeWebSocket(request);
           const consumer = Socket.from<string, string>(socket);
-          const session = provider.session();
-          consumer
-            .readable
-            .pipeThrough(UCAN.fromStringStream())
-            .pipeThrough(session)
-            .pipeThrough(Receipt.toStringStream())
-            .pipeTo(consumer.writable);
+          if (stitch) {
+            consumer.readable
+              .pipeThrough(Stitch.createSession())
+              .pipeTo(consumer.writable);
+          } else {
+            const session = provider.session();
+            consumer
+              .readable
+              .pipeThrough(UCAN.fromStringStream())
+              .pipeThrough(session)
+              .pipeThrough(Receipt.toStringStream())
+              .pipeTo(consumer.writable);
+          }
           return response;
         } else {
           return provider.fetch(request);

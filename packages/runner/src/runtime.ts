@@ -30,6 +30,7 @@ import {
   resetSchemaHashConfig,
   setSchemaHashConfig,
 } from "@commontools/data-model/schema-hash";
+import { resetStitchConfig, setStitchConfig } from "./storage/stitch-client.ts";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -106,6 +107,8 @@ export interface ExperimentalOptions {
   modernHash?: boolean;
   /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
   modernSchemaHash?: boolean;
+  /** Enable the stitch sync protocol, replacing the legacy UCAN-based protocol. */
+  stitch?: boolean;
 }
 
 export interface RuntimeOptions {
@@ -218,6 +221,7 @@ export class Runtime {
       unifiedJsonEncoding: false,
       modernHash: false,
       modernSchemaHash: false,
+      stitch: false,
       ...options.experimental,
     };
 
@@ -246,6 +250,7 @@ export class Runtime {
     setCanonicalHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     setSchemaHashConfig(this.experimental.modernSchemaHash);
+    setStitchConfig(this.experimental.stitch);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -411,6 +416,7 @@ export class Runtime {
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();
     resetSchemaHashConfig();
+    resetStitchConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

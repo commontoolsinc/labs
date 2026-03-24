@@ -1,4 +1,5 @@
 import { fromString, hashOf } from "@commontools/data-model/value-hash";
+import { getStitchConfig } from "./stitch-client.ts";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import type {
   CauseString,
@@ -2002,6 +2003,12 @@ export class StorageManager implements IStorageManager {
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
+    if (getStitchConfig()) {
+      throw new Error(
+        "stitch client: not yet implemented — StorageManager.connect()",
+      );
+    }
+
     const { id, address, as, settings } = this;
 
     // Determine the correct spaceIdentity for this space
