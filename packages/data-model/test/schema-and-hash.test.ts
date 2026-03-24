@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -6,16 +6,29 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
+import { FabricHash } from "../fabric-hash.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
+import { resetSchemaHashConfig, setSchemaHashConfig } from "../schema-hash.ts";
+import { resetModernHashConfig, setModernHashConfig } from "../value-hash.ts";
 
 describe("SchemaAndHash", () => {
+  beforeEach(() => {
+    setSchemaHashConfig(true);
+    setModernHashConfig(true);
+  });
+
+  afterEach(() => {
+    resetSchemaHashConfig();
+    resetModernHashConfig();
+  });
+
   describe("from()", () => {
     it("creates an instance with schema and hash", () => {
       const sah = SchemaAndHash.from({ type: "number" });
       assertEquals(sah.schema, { type: "number" });
-      assertStrictEquals(typeof sah.hash, "string");
+      assert(sah.hash instanceof FabricHash);
     });
 
     it("deep-freezes the stored schema", () => {
@@ -49,19 +62,31 @@ describe("SchemaAndHash", () => {
     it("handles boolean schema true", () => {
       const sah = SchemaAndHash.from(true);
       assertEquals(sah.schema, true);
-      assertStrictEquals(typeof sah.hash, "string");
+      assert(sah.hash instanceof FabricHash);
     });
 
     it("handles boolean schema false", () => {
       const sah = SchemaAndHash.from(false);
       assertEquals(sah.schema, false);
-      assertStrictEquals(typeof sah.hash, "string");
+      assert(sah.hash instanceof FabricHash);
     });
 
     it("handles empty object schema", () => {
       const sah = SchemaAndHash.from({});
       assertEquals(sah.schema, {});
-      assertStrictEquals(typeof sah.hash, "string");
+      assert(sah.hash instanceof FabricHash);
+    });
+  });
+
+  describe("hashString getter", () => {
+    it("returns a string", () => {
+      const sah = SchemaAndHash.from({ type: "number" });
+      assertStrictEquals(typeof sah.hashString, "string");
+    });
+
+    it("matches hash.toString()", () => {
+      const sah = SchemaAndHash.from({ type: "number" });
+      assertStrictEquals(sah.hashString, sah.hash.toString());
     });
   });
 
@@ -73,7 +98,6 @@ describe("SchemaAndHash", () => {
 
     it("schema property is not writable", () => {
       const sah = SchemaAndHash.from({ type: "string" });
-      // Frozen objects throw in strict mode on property assignment.
       let threw = false;
       try {
         (sah as unknown as Record<string, unknown>).schema = true;
@@ -96,22 +120,22 @@ describe("SchemaAndHash", () => {
   });
 
   describe("hash determinism", () => {
-    it("same schema produces the same hash", () => {
+    it("same schema produces the same hashString", () => {
       const sah1 = SchemaAndHash.from({ type: "number" });
       const sah2 = SchemaAndHash.from({ type: "number" });
-      assertEquals(sah1.hash, sah2.hash);
+      assertEquals(sah1.hashString, sah2.hashString);
     });
 
-    it("different schemas produce different hashes", () => {
+    it("different schemas produce different hashStrings", () => {
       const sah1 = SchemaAndHash.from({ type: "number" });
       const sah2 = SchemaAndHash.from({ type: "string" });
-      assertNotStrictEquals(sah1.hash, sah2.hash);
+      assertNotStrictEquals(sah1.hashString, sah2.hashString);
     });
 
     it("property order does not affect hash", () => {
       const sah1 = SchemaAndHash.from({ type: "object", title: "foo" });
       const sah2 = SchemaAndHash.from({ title: "foo", type: "object" });
-      assertEquals(sah1.hash, sah2.hash);
+      assertEquals(sah1.hashString, sah2.hashString);
     });
   });
 });
