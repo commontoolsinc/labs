@@ -181,9 +181,13 @@ export class XAppView extends BaseView {
   #isRecreatingSpaceRootPattern = false;
 
   #handleRecreateSpaceRootPattern = async (e: Event) => {
-    if (!this.rt || this.#isRecreatingSpaceRootPattern) return;
-    this.#isRecreatingSpaceRootPattern = true;
     const done = (e as CustomEvent).detail?.done as (() => void) | undefined;
+    if (!this.rt) {
+      done?.();
+      return;
+    }
+    if (this.#isRecreatingSpaceRootPattern) return;
+    this.#isRecreatingSpaceRootPattern = true;
     try {
       await this.rt.recreateSpaceRootPattern();
       this._spaceRootPattern.run();
