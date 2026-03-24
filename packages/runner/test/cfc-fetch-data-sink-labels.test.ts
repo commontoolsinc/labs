@@ -9,6 +9,7 @@ import {
   cfcLabelsAddress,
   normalizePersistedLabels,
   type PersistedPathLabels,
+  resolveObservationLabel,
 } from "../src/cfc/shared.ts";
 import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -148,6 +149,14 @@ describe("fetchData sink label rewriting", () => {
     return normalizePersistedLabels(raw);
   }
 
+  async function readObservationLabel(
+    cell: { getAsNormalizedFullLink: () => NormalizedFullLink },
+    path: string,
+    op: "shape" | "value" | "enumerate" | "count" | "followRef" = "value",
+  ) {
+    return resolveObservationLabel(await readLabels(cell), path, op);
+  }
+
   async function runFetchWithSchema(schema: JSONSchema, cause: string) {
     const requestCell = runtime.getCell(space, `${cause}-request`, schema, tx);
     requestCell.withTx(tx).set({
@@ -198,12 +207,20 @@ describe("fetchData sink label rewriting", () => {
 
     expect(raw?.pending).toBe(false);
 
-    const requestLabels = await readLabels(requestCell);
-    expect(requestLabels["/url"]?.label?.classification).toEqual([[
+    expect(
+      (await readObservationLabel(requestCell, "/url", "value"))
+        ?.classification,
+    ).toEqual([[
       userAliceAtom,
     ]]);
     expect(
-      requestLabels["/options/headers/Authorization"]?.label?.classification,
+      (
+        await readObservationLabel(
+          requestCell,
+          "/options/headers/Authorization",
+          "value",
+        )
+      )?.classification,
     )
       .toEqual([[googleAuthAliceAtom]]);
 

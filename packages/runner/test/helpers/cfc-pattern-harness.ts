@@ -241,6 +241,18 @@ export class CfcPatternTestHarness {
     return normalizePersistedLabels(raw);
   }
 
+  async readObservationLabel(
+    idOrLink: string | { id: string } | NormalizedFullLink,
+    path = "/",
+    op: "shape" | "value" | "enumerate" | "count" | "followRef" = "value",
+  ): Promise<Labels | undefined> {
+    return resolveObservationLabel(
+      await this.readLabels(idOrLink),
+      path,
+      op,
+    );
+  }
+
   async readEffectiveLabel<T>(
     cell: Cell<T>,
     schema?: JSONSchema,

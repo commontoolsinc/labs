@@ -177,10 +177,12 @@ describe("CFC worked example: fact-check assurance", () => {
     expect(await publishedRun.result.pull()).toEqual({ text: "Claim text" });
 
     await harness.runtime.scheduler.idle();
-    const publishedLabels = await harness.readLabels(
+    const publishedTextLabel = await harness.readObservationLabel(
       publishedRun.outputLink.id,
+      "/text",
+      "value",
     );
-    expect(publishedLabels["/text"]?.label?.classification).toEqual([
+    expect(publishedTextLabel?.classification).toEqual([
       [publicAudienceAtom],
     ]);
   });

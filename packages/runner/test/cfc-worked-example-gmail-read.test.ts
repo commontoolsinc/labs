@@ -245,9 +245,11 @@ describe("CFC worked example: Gmail read", () => {
     });
     expect(await downstreamRun.result.pull()).toEqual({ count: 2 });
 
-    const downstreamLabels = await harness.readLabels(
+    const downstreamCountLabel = await harness.readObservationLabel(
       downstreamRun.outputLink,
+      "/count",
+      "value",
     );
-    expect(downstreamLabels["/count"]?.label?.classification).toBeUndefined();
+    expect(downstreamCountLabel?.classification).toBeUndefined();
   });
 });

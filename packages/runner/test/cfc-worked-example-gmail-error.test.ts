@@ -499,22 +499,62 @@ describe("CFC worked example: Gmail error declassification", () => {
         [secretQueryAtom],
       ]),
     );
-    expect(operatorLabels["/code"]?.label?.classification).toEqual([
+    expect(
+      (
+        await harness.readObservationLabel(
+          operatorRun.outputLink,
+          "/code",
+          "value",
+        )
+      )?.classification,
+    ).toEqual([
       [userAliceAtom],
     ]);
-    expect(operatorLabels["/status"]?.label?.classification).toEqual([
+    expect(
+      (
+        await harness.readObservationLabel(
+          operatorRun.outputLink,
+          "/status",
+          "value",
+        )
+      )?.classification,
+    ).toEqual([
       [userAliceAtom],
     ]);
-    expect(operatorLabels["/message"]?.label?.classification).toEqual([
+    expect(
+      (
+        await harness.readObservationLabel(
+          operatorRun.outputLink,
+          "/message",
+          "value",
+        )
+      )?.classification,
+    ).toEqual([
       [userAliceAtom],
     ]);
-    expect(operatorLabels["/details"]?.label?.classification).toEqual(
+    expect(
+      (
+        await harness.readObservationLabel(
+          operatorRun.outputLink,
+          "/details",
+          "value",
+        )
+      )?.classification,
+    ).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],
       ]),
     );
-    expect(operatorLabels["/headers"]?.label?.classification).toEqual(
+    expect(
+      (
+        await harness.readObservationLabel(
+          operatorRun.outputLink,
+          "/headers",
+          "value",
+        )
+      )?.classification,
+    ).toEqual(
       expect.arrayContaining([
         [userAliceAtom],
         [secretQueryAtom],
