@@ -168,4 +168,100 @@ describe("CFC convenience read decomposition", () => {
       reads.some((read) => read.path === "/error/code" && read.op === "value"),
     ).toBe(false);
   });
+
+  it("decomposes Object.hasOwn into a child shape observation", () => {
+    const cell = runtime.getCell<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      space,
+      "cfc-convenience-object-has-own",
+      undefined,
+      tx,
+    );
+    cell.set({
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        details: { reason: "scope-insufficient" },
+      },
+    });
+
+    const proxy = createQueryResultProxy<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(Object.hasOwn(proxy.error, "code")).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "enumerate"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "value"),
+    ).toBe(false);
+  });
+
+  it("decomposes propertyIsEnumerable into a child shape observation", () => {
+    const cell = runtime.getCell<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      space,
+      "cfc-convenience-property-is-enumerable",
+      undefined,
+      tx,
+    );
+    cell.set({
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        details: { reason: "scope-insufficient" },
+      },
+    });
+
+    const proxy = createQueryResultProxy<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    const propertyIsEnumerable = Reflect.get(
+      proxy.error as object,
+      "propertyIsEnumerable",
+    ) as (key: string) => boolean;
+    expect(propertyIsEnumerable("code")).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "enumerate"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "value"),
+    ).toBe(false);
+  });
 });
