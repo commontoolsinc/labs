@@ -93,6 +93,10 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
+import {
+  recordCfcReadObservation,
+  withInternalVerifierRead,
+} from "./cfc/read-observation-logging.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
@@ -1233,10 +1237,17 @@ export class CellImpl<T extends StorableValue>
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
+    const resolvedLink = resolveLink(this.runtime, tx, this.link, "top");
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, "top"),
-      options,
+      resolvedLink,
+      withInternalVerifierRead(options),
     );
+    if (options?.cfc?.internalVerifierRead !== true) {
+      recordCfcReadObservation(tx, resolvedLink, {
+        ...(options?.cfc ?? {}),
+        op: options?.cfc?.op ?? "value",
+      });
+    }
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return storable-layer values, not native ("wild
     // west") values.
