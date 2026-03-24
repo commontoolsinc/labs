@@ -1084,7 +1084,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: logical JSX fallbacks that are still opaque path-terminal call roots stay on the legacy JSX seam",
+  "Expression site policy: logical JSX fallbacks with opaque path-terminal call values use the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -1119,8 +1119,44 @@ Deno.test(
     assertEquals(
       classifyJsxExpressionSiteRoute(logical, context, analyze),
       {
-        route: "legacy-jsx",
-        reason: "legacy-control-flow-branch-local",
+        route: "shared-post-closure",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: ternary JSX branches with opaque path-terminal call values use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function cell<T>(value: T): { get(): T };
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => {
+        const user = cell<{ name: string }>({ name: "" });
+        const defaultMessage = cell("Guest");
+        return (
+          <div>
+            <span>{user.get().name.length > 0 ? user.get().name : defaultMessage.get()}</span>
+          </div>
+        );
+      });
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "shared-post-closure",
       },
     );
   },

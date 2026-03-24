@@ -393,6 +393,8 @@ function requiresLegacyJsxControlFlowHandling(
     branch: ts.Expression,
     allowWholeBranchValueWrap: boolean,
   ): boolean => {
+    const currentBranch = unwrapExpression(branch);
+
     if (isJsxLocalRewriteContainer(branch)) {
       return false;
     }
@@ -408,6 +410,13 @@ function requiresLegacyJsxControlFlowHandling(
       }
     }
 
+    if (
+      ts.isCallExpression(currentBranch) &&
+      classifyOpaquePathTerminalCall(currentBranch)
+    ) {
+      return false;
+    }
+
     if (containsReactiveArrayMethodSubexpression(branch, context, analyze)) {
       return true;
     }
@@ -418,7 +427,7 @@ function requiresLegacyJsxControlFlowHandling(
 
     if (
       allowWholeBranchValueWrap &&
-      !ts.isCallExpression(unwrapExpression(branch))
+      !ts.isCallExpression(currentBranch)
     ) {
       return false;
     }
