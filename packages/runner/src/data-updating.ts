@@ -33,6 +33,7 @@ import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
+import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
 import { recordCfcWriteSchemaContext } from "./cfc/schema-context.ts";
 import {
   collectSchemaConfidentiality,
@@ -72,10 +73,10 @@ export function diffAndUpdate(
 ): boolean {
   recordCfcWriteSchemaContext(tx, link, link.schema);
 
-  const readOptions: IReadOptions = {
+  const readOptions: IReadOptions = withInternalVerifierRead({
     ...options,
     meta: { ...options?.meta, ...markReadAsPotentialWrite },
-  };
+  });
   const changes = normalizeAndDiff(
     runtime,
     tx,

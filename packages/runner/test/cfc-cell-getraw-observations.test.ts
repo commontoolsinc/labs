@@ -11,7 +11,7 @@ const signer = await Identity.fromPassphrase(
 );
 const space = signer.did();
 
-describe("CFC cell.getRaw observations", () => {
+describe("CFC cell observations", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -93,6 +93,27 @@ describe("CFC cell.getRaw observations", () => {
     expect(reads.some((read) => read.path === "/" && read.op === "value")).toBe(
       true,
     );
+  });
+
+  it("does not surface diffing support reads during whole-value set", () => {
+    const cell = runtime.getCell<{ profile: { name: string; role: string } }>(
+      space,
+      "cfc-cell-set-root",
+      undefined,
+      tx,
+    );
+    cell.set({ profile: { name: "Ada", role: "admin" } });
+
+    const beforeReads =
+      canonicalizeBoundaryActivity(tx.journal.activity()).reads
+        .length;
+
+    cell.set({ profile: { name: "Ada", role: "operator" } });
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .slice(beforeReads)
+      .filter((read) => !read.internalVerifierRead);
+    expect(reads.length).toBe(0);
   });
 
   it("records a whole-value observation before array push appends", () => {
