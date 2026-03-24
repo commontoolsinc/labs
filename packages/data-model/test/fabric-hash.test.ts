@@ -143,20 +143,61 @@ Deno.test("FabricHash", async (t) => {
   );
 
   await t.step(
-    "isHashObject returns true for FabricHash instances",
+    "isHashObject returns true for FabricHash when modern hashing is on",
     () => {
-      const cid = new FabricHash(SAMPLE_HASH, "fid1");
-      assert(isHashObject(cid));
+      setModernHashConfig(true);
+      try {
+        const cid = new FabricHash(SAMPLE_HASH, "fid1");
+        assert(isHashObject(cid));
+      } finally {
+        resetModernHashConfig();
+      }
     },
   );
 
   await t.step(
-    "isHashObject returns true for Reference.View instances",
+    "isHashObject returns false for FabricHash when modern hashing is off",
     () => {
-      const ref = hashOf({ hello: "world" });
-      // With canonical hashing off (default), hashOf() returns a Reference.View.
-      assert(Reference.is(ref));
-      assert(isHashObject(ref));
+      setModernHashConfig(false);
+      try {
+        const cid = new FabricHash(SAMPLE_HASH, "fid1");
+        assert(!isHashObject(cid));
+      } finally {
+        resetModernHashConfig();
+      }
+    },
+  );
+
+  await t.step(
+    "isHashObject returns true for Reference.View when legacy hashing is on",
+    () => {
+      setModernHashConfig(false);
+      try {
+        const ref = hashOf({ hello: "world" });
+        assert(Reference.is(ref));
+        assert(isHashObject(ref));
+      } finally {
+        resetModernHashConfig();
+      }
+    },
+  );
+
+  await t.step(
+    "isHashObject returns false for Reference.View when modern hashing is on",
+    () => {
+      setModernHashConfig(true);
+      try {
+        // Create a legacy ref while legacy mode is temporarily active.
+        setModernHashConfig(false);
+        const ref = hashOf({ hello: "world" });
+        assert(Reference.is(ref));
+
+        // Switch to modern mode — legacy refs should not be recognized.
+        setModernHashConfig(true);
+        assert(!isHashObject(ref));
+      } finally {
+        resetModernHashConfig();
+      }
     },
   );
 

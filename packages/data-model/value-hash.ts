@@ -89,13 +89,16 @@ export function hashObjectFromString(source: string): HashObject {
 }
 
 /**
- * Type guard: returns true if the value is a content hash
- * (`LegacyHashObject` or `FabricHash`).
+ * Type guard: returns true if the value is a content hash.
+ * Modern path checks for `FabricHash`; legacy path checks for
+ * `LegacyHashObject` (merkle-reference `Reference.View`).
  */
 export function isHashObject<T extends DefinedReferent>(
   value: unknown | HashObject<T>,
 ): value is HashObject<T> {
-  return value instanceof FabricHash || isLegacyHashObject(value);
+  return modernHashEnabled
+    ? value instanceof FabricHash
+    : isLegacyHashObject(value);
 }
 
 /** Reconstructs a hash object from its JSON representation. */
