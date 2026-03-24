@@ -1,6 +1,4 @@
-import type {
-  ReactiveContextInfo,
-} from "../ast/reactive-context.ts";
+import type { ReactiveContextInfo } from "../ast/reactive-context.ts";
 
 export type ExpressionContainerKind =
   | "jsx-expression"

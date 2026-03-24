@@ -6,9 +6,7 @@ import {
   isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
-import {
-  classifyJsxExpressionSiteRoute,
-} from "./expression-site-lowering.ts";
+import { classifyJsxExpressionSiteRoute } from "./expression-site-lowering.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 
 export class OpaqueRefJSXTransformer extends Transformer {

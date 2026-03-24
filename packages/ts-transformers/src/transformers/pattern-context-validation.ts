@@ -584,7 +584,11 @@ export class PatternContextValidationTransformer extends Transformer {
       return false;
     }
 
-    const owner = this.findEnclosingPatternOwnerCallback(func, checker, context);
+    const owner = this.findEnclosingPatternOwnerCallback(
+      func,
+      checker,
+      context,
+    );
     if (!owner) {
       return false;
     }
