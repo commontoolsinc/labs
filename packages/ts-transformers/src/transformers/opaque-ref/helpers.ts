@@ -7,7 +7,6 @@ import {
   type NormalizedDataFlow,
   setParentPointers,
 } from "../../ast/mod.ts";
-import { createBindingPlan } from "./bindings.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createDeriveCall } from "../builtins/derive.ts";
 
@@ -299,8 +298,6 @@ export function createReactiveWrapperForExpression(
       context,
     });
   }
-
-  const plan = createBindingPlan(relevantDataFlows);
 
   const { factory, checker, sourceFile } = context;
 
