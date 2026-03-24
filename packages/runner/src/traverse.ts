@@ -270,12 +270,11 @@ export class MapSetStringToPathSelectors extends MapSet<
 
 /**
  * Convenience subclass of `MapSet` specialized for `string` keys and
- * `string` values. Uses the identity function as the hash function so
- * that structurally-equal string values are deduped.
+ * `string` values. Uses reference equality (plain Set) for dedup.
  */
 export class MapSetStringToStrings extends MapSet<string, string> {
   constructor() {
-    super((v) => v);
+    super();
   }
 }
 
