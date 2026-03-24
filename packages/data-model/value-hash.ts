@@ -107,19 +107,6 @@ function hashFromString(source: string): FabricHash {
   return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
 }
 
-/**
- * Parse a hash string and return it as-is after validation. Verifies the
- * format matches `<algorithmTag>:<base64urlHash>` but returns the original
- * `string` rather than constructing a `FabricHash`.
- */
-export function rawHashFromString(source: string): string {
-  const colonIndex = source.indexOf(":");
-  if (colonIndex === -1) {
-    throw new ReferenceError(`Invalid content ID string: ${source}`);
-  }
-  return source;
-}
-
 /** Shared `isContentId` implementation (same for both modes). */
 const isContentIdImpl = (<T extends DefinedReferent>(
   value: unknown | ContentId<T>,
