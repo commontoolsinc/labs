@@ -37,7 +37,6 @@ import {
   SESIsolate,
   SESRuntime,
   verifyCompiledBundleModuleFactories,
-  verifyProgramModuleScope,
 } from "../sandbox/mod.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
@@ -153,7 +152,6 @@ export class Engine extends EventTarget implements Harness {
     );
 
     const { compiler } = await this.getInternals();
-    let transformedProgram: Program | undefined;
     const resolvedProgram = await this.resolve(resolver);
 
     const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
@@ -167,7 +165,6 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: (nextProgram) => {
-        transformedProgram = nextProgram;
         options.getTransformedProgram?.(nextProgram);
       },
       diagnosticMessageTransformer,
@@ -180,7 +177,6 @@ export class Engine extends EventTarget implements Harness {
       },
     });
 
-    verifyProgramModuleScope(transformedProgram ?? resolvedProgram);
     preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
     verifyCompiledBundleModuleFactories(
       jsScript.js,
