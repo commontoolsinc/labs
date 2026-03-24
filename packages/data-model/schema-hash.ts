@@ -11,7 +11,6 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
-import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";
@@ -151,12 +150,11 @@ seedBooleanInterns();
  * already been interned.
  *
  * **Caching behaviour:** the cache key is the deep-frozen schema
- * object, not the caller's input. If the input is already deep-frozen,
- * it is used directly as the cache key and hits the cache on repeated
- * calls. If the input is *not* deep-frozen, `toDeepFrozenSchema()`
- * creates a new frozen copy each time — so passing the same mutable
- * object repeatedly will miss the identity-keyed WeakMap (though the
- * hash-keyed reverse map will still find a structurally-equal match).
+ * object, not the caller's input. `toDeepFrozenSchema()` returns the
+ * same reference if the input is already deep-frozen, so such schemas
+ * hit the cache on repeated calls. For mutable inputs, a new frozen
+ * copy is created each time — the identity-keyed WeakMap will miss,
+ * but the hash-keyed reverse map will still find a structural match.
  */
 export function internSchema(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
@@ -168,10 +166,8 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   const cached = schemaToSah.get(schema);
   if (cached) return cached;
 
-  // If already deep-frozen, use as-is; otherwise freeze a copy.
-  const frozen = isDeepFrozen(schema)
-    ? schema
-    : toDeepFrozenSchema(schema) as JSONSchemaObj;
+  // toDeepFrozenSchema returns the same reference if already deep-frozen.
+  const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
   const hash = hashSchema(frozen);
