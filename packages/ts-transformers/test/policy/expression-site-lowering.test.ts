@@ -3,7 +3,10 @@ import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
-import { getExpressionSitePolicyInfo } from "../../src/transformers/expression-site-lowering.ts";
+import {
+  classifyJsxExpressionSiteRoute,
+  getExpressionSitePolicyInfo,
+} from "../../src/transformers/expression-site-lowering.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -184,6 +187,7 @@ Deno.test(
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
+          span: any;
         }
       }
 
@@ -236,5 +240,107 @@ Deno.test(
     assertExists(siteInfo.syntheticComputeOwned);
     assertEquals(siteInfo.syntheticComputeOwned, true);
     assertEquals(siteInfo.reactiveContext.kind, "compute");
+  },
+);
+
+Deno.test(
+  "Expression site policy: top-level JSX wrapper roots defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => <div>{state.user.name}</div>);
+    `);
+
+    const propertyAccess = findFirstNode(sourceFile, ts.isPropertyAccessExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(classifyJsxExpressionSiteRoute(propertyAccess, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: array-method-owned JSX wrapper roots stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items.map((item: any) => <span>{item.name}</span>)}</div>
+      ));
+    `);
+
+    const callback = findFirstNode(
+      sourceFile,
+      (node): node is ts.ArrowFunction =>
+        ts.isArrowFunction(node) &&
+        ts.isJsxElement(node.body),
+    );
+    context.markAsArrayMethodCallback(callback);
+
+    const propertyAccess = findFirstNode(
+      sourceFile,
+      (node): node is ts.PropertyAccessExpression =>
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "item" &&
+        node.name.text === "name",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
+      { route: "skip", reason: "array-method-owned" },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX wrapper roots with reactive array-method subexpressions stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items.filter((item: any) => item.active).length}</div>
+      ));
+    `);
+
+    const propertyAccess = findFirstNode(
+      sourceFile,
+      (node): node is ts.PropertyAccessExpression =>
+        ts.isPropertyAccessExpression(node) &&
+        node.name.text === "length" &&
+        ts.isCallExpression(node.expression),
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
+      {
+        route: "legacy-jsx",
+        reason: "contains-reactive-array-method-subexpression",
+      },
+    );
   },
 );

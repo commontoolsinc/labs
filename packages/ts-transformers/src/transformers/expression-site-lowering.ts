@@ -32,6 +32,25 @@ interface RewriteExpressionSiteParams {
   readonly preferDeriveWrappers?: boolean;
 }
 
+export type JsxExpressionSiteRoute =
+  | { route: "shared-post-closure" }
+  | {
+    route: "legacy-jsx";
+    reason:
+      | "legacy-control-flow-branch-local"
+      | "contains-reactive-array-method-subexpression";
+  }
+  | {
+    route: "skip";
+    reason:
+      | "no-authored-source-site"
+      | "event-handler-jsx-attribute"
+      | "non-pattern-context"
+      | "array-method-owned"
+      | "deferred-jsx-array-method-root"
+      | "not-shared-jsx-root-kind";
+  };
+
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
   if (ts.isBinaryExpression(expr)) {
     const op = expr.operatorToken.kind;
@@ -104,6 +123,13 @@ function isPostClosureWrapperRewriteExpression(
   return false;
 }
 
+export function isPostClosureJsxWrapperRewriteExpression(
+  expr: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  return isPostClosureWrapperRewriteExpression(expr, context);
+}
+
 function isDirectDeriveCall(
   expression: ts.Expression,
   context: TransformationContext,
@@ -150,42 +176,45 @@ function isEligiblePatternOwnedWrapperCallbackSite(
   return receiverAnalysis.containsOpaqueRef;
 }
 
-export function requiresLegacyJsxControlFlowHandling(
+function containsReactiveArrayMethodSubexpression(
+  root: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  let found = false;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (node !== root && ts.isFunctionLike(node)) return;
+
+    if (
+      node !== root &&
+      ts.isExpression(node) &&
+      isDeferredJsxArrayMethodExpression(node, context, analyze)
+    ) {
+      found = true;
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(root);
+  return found;
+}
+
+function requiresLegacyJsxControlFlowHandling(
   expression: ts.Expression,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  const containsDeferredJsxArrayMethodSubexpression = (
-    root: ts.Expression,
-  ): boolean => {
-    let found = false;
-
-    const visit = (node: ts.Node): void => {
-      if (found) return;
-      if (node !== root && ts.isFunctionLike(node)) return;
-
-      if (
-        ts.isExpression(node) &&
-        isDeferredJsxArrayMethodExpression(node, context, analyze)
-      ) {
-        found = true;
-        return;
-      }
-
-      ts.forEachChild(node, visit);
-    };
-
-    visit(root);
-    return found;
-  };
-
   if (ts.isConditionalExpression(expression)) {
     const branches = [expression.whenTrue, expression.whenFalse];
     return branches.some((branch) =>
       !!findPendingComputeWrapCandidate(branch, analyze, context) ||
       (
         !isJsxLocalRewriteContainer(branch) &&
-        containsDeferredJsxArrayMethodSubexpression(branch)
+        containsReactiveArrayMethodSubexpression(branch, context, analyze)
       )
     );
   }
@@ -198,7 +227,11 @@ export function requiresLegacyJsxControlFlowHandling(
     ) ||
       (
         !isJsxLocalRewriteContainer(expression.right) &&
-        containsDeferredJsxArrayMethodSubexpression(expression.right)
+        containsReactiveArrayMethodSubexpression(
+          expression.right,
+          context,
+          analyze,
+        )
       );
   }
 
@@ -395,6 +428,59 @@ export function getExpressionSitePolicyInfo(
       isDeferredJsxArrayMethodExpression(expression, context, analyze),
     controlFlowRewriteRoot: isControlFlowRewriteExpression(expression),
   };
+}
+
+export function classifyJsxExpressionSiteRoute(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): JsxExpressionSiteRoute {
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    "jsx-expression",
+    context,
+    analyze,
+  );
+
+  if (!siteInfo.hasAuthoredSourceSite) {
+    return { route: "skip", reason: "no-authored-source-site" };
+  }
+
+  if (siteInfo.withinEventHandlerJsxAttribute) {
+    return { route: "skip", reason: "event-handler-jsx-attribute" };
+  }
+
+  if (siteInfo.reactiveContext.kind !== "pattern") {
+    return { route: "skip", reason: "non-pattern-context" };
+  }
+
+  if (siteInfo.arrayMethodOwned || siteInfo.deferredJsxArrayMethod) {
+    return {
+      route: "skip",
+      reason: siteInfo.arrayMethodOwned
+        ? "array-method-owned"
+        : "deferred-jsx-array-method-root",
+    };
+  }
+
+  if (siteInfo.controlFlowRewriteRoot) {
+    return requiresLegacyJsxControlFlowHandling(expression, context, analyze)
+      ? { route: "legacy-jsx", reason: "legacy-control-flow-branch-local" }
+      : { route: "shared-post-closure" };
+  }
+
+  if (!isPostClosureJsxWrapperRewriteExpression(expression, context)) {
+    return { route: "skip", reason: "not-shared-jsx-root-kind" };
+  }
+
+  if (containsReactiveArrayMethodSubexpression(expression, context, analyze)) {
+    return {
+      route: "legacy-jsx",
+      reason: "contains-reactive-array-method-subexpression",
+    };
+  }
+
+  return { route: "shared-post-closure" };
 }
 
 function canRewriteExpressionSite(
@@ -711,14 +797,13 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const siteInfo = getExpressionSitePolicyInfo(
-        node.expression,
-        "jsx-expression",
-        context,
-        analyze,
-      );
-
-      if (!siteInfo.controlFlowRewriteRoot) {
+      if (
+        classifyJsxExpressionSiteRoute(
+          node.expression,
+          context,
+          analyze,
+        ).route !== "shared-post-closure"
+      ) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 

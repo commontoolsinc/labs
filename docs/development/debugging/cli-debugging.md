@@ -10,6 +10,7 @@ When patterns misbehave, the CLI often provides faster diagnosis than browser De
 - Handlers don't modify state correctly
 - You need to test specific input combinations
 - Debugging reactivity chains
+- You need to inspect the exact source emitted by `ts-transformers`
 
 **Use Browser when:**
 - UI doesn't render correctly
@@ -30,6 +31,31 @@ deno task ct piece get --piece ID totalSpent ...  # May return old value!
 echo '[...]' | deno task ct piece set --piece ID expenses ...
 deno task ct piece step --piece ID ...  # Runs scheduling step, triggers recompute
 deno task ct piece get --piece ID totalSpent ...  # Now correct
+```
+
+## Inspect Transformed Output
+
+When the question is "what did the compiler emit?", use `ct check` with
+`--show-transformed` instead of reaching for ad hoc test harness code.
+
+```bash
+deno task ct check ./packages/patterns/my-pattern.tsx --root $(pwd) --show-transformed
+```
+
+This is the fastest way to inspect how `ts-transformers` rewrote:
+
+- JSX expressions
+- reactive array-method chains like `.map()` / `.filter()`
+- `computed()` / `derive()` wrapping
+- downstream schema/capability lowering effects
+
+It also works on fixture inputs while debugging the compiler itself:
+
+```bash
+deno task ct check \
+  packages/ts-transformers/test/fixtures/jsx-expressions/jsx-property-access.input.tsx \
+  --root $(pwd) \
+  --show-transformed
 ```
 
 ## Quick Diagnostic Sequence

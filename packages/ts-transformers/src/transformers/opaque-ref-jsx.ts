@@ -1,13 +1,13 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyReactiveContext,
   createDataFlowAnalyzer,
   isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
-  getExpressionSitePolicyInfo,
-  requiresLegacyJsxControlFlowHandling,
+  classifyJsxExpressionSiteRoute,
 } from "./expression-site-lowering.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 
@@ -63,27 +63,22 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const siteInfo = getExpressionSitePolicyInfo(
+      const contextInfo = classifyReactiveContext(
         node.expression,
-        "jsx-expression",
+        checker,
         context,
-        analyze,
       );
-      const contextInfo = siteInfo.reactiveContext;
       const inSafeContext = contextInfo.kind === "compute";
 
       if (
-        contextInfo.kind === "pattern" &&
-        !siteInfo.arrayMethodOwned &&
-        siteInfo.controlFlowRewriteRoot &&
-        !requiresLegacyJsxControlFlowHandling(
+        classifyJsxExpressionSiteRoute(
           node.expression,
           context,
           analyze,
-        )
+        ).route === "shared-post-closure"
       ) {
-        // Pattern-owned control-flow roots are now handled by the shared
-        // post-closure expression-site lowering pass.
+        // Pattern-owned JSX roots handled by the shared post-closure
+        // expression-site lowering pass.
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
