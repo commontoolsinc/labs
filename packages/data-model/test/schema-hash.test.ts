@@ -221,7 +221,7 @@ describe("schema-hash dispatch", () => {
     it("uses an already-deep-frozen schema by reference", () => {
       const schema = toDeepFrozenSchema({
         type: "object",
-        properties: { name: { type: "string" } },
+        properties: { uniqueField: { type: "boolean" } },
       }) as JSONSchemaObj;
       assert(isDeepFrozen(schema));
       const sah = internSchema(schema);
@@ -275,6 +275,21 @@ describe("schema-hash dispatch", () => {
       const sah1 = internSchema({ type: "object", title: "foo" });
       const sah2 = internSchema({ title: "foo", type: "object" });
       assertEquals(sah1.hashString, sah2.hashString);
+    });
+
+    it("structurally-equal but identity-different schemas intern the same", () => {
+      const a: JSONSchemaObj = {
+        type: "object",
+        properties: { x: { type: "number" } },
+      };
+      const b: JSONSchemaObj = {
+        type: "object",
+        properties: { x: { type: "number" } },
+      };
+      assertNotStrictEquals(a, b); // different objects
+      const sahA = internSchema(a);
+      const sahB = internSchema(b);
+      assertEquals(sahA.hashString, sahB.hashString);
     });
   });
 
