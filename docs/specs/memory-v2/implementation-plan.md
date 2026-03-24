@@ -80,6 +80,9 @@ memory route.
 - Add `session.ack` to advance server-side `seenSeq`.
 - Emit `session/effect` sync messages instead of `graph.update`.
 - Keep one-shot `graph.query` for non-live reads.
+- For schema-aware watches, persist the tracked doc-plus-selector frontier
+  across watch growth, reuse a persistent traversal memo only for `watchAdd`
+  style growth, and keep write-triggered refreshes on a fresh memo.
 - Recompute watch-union results per session and emit:
   - `upserts` for relevant current entity state
   - `removes` when an entity leaves the watch union

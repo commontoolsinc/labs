@@ -177,6 +177,15 @@ The server and client must continue to agree on entity reachability and graph
 membership. Reuse traversal logic rather than reimplementing a separate graph
 expander in storage code.
 
+For schema-aware live watches, keep the cache lifetimes split:
+
+- keep a persistent doc-plus-selector tracker per watched graph so `watchAdd`
+  can stop immediately at already-current frontiers
+- allow additive watch growth to reuse a persistent traversal memo for the
+  tracked graph
+- use a fresh traversal memo for write-triggered refreshes so retargets and
+  other topology changes cannot be incorrectly pruned by stale memo entries
+
 ## 12. Branch Scope
 
 This pass includes basic branches only:

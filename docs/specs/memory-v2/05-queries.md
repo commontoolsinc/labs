@@ -446,12 +446,16 @@ union:
    and the schema context used.
 2. **Watch add**: for new roots, start traversal only from those roots. If the
    traversal reaches an entity-plus-selector pair that is already tracked, stop
-   immediately and reuse the existing downstream result.
+   immediately and reuse the existing downstream result. Additive watch growth
+   may also reuse a persistent traversal memo for already-seen
+   document-path-plus-schema work.
 3. **On commit**: for each changed entity, determine whether it can affect the
    current tracked graph.
 4. **Re-evaluate affected topology**: if links or source chains changed, re-run
    the shared traversal logic only from the affected tracked entities to
-   discover newly reachable or no-longer-reachable entities.
+   discover newly reachable or no-longer-reachable entities. This refresh path
+   should use a fresh traversal memo even when the tracked frontier itself is
+   persistent.
 5. **Emit sync**: send entity upserts for newly relevant/current entities and
    removes for entities that fell out of the watch union.
 

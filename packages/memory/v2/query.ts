@@ -28,6 +28,7 @@ export interface TrackedGraphState {
   branch: string;
   tracker: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
+  memo: ReturnType<typeof createSchemaMemo>;
 }
 
 export class EngineObjectManager implements ObjectStorageManager {
@@ -210,6 +211,7 @@ export const trackGraph = (
         schemaTracker,
         manager,
       ),
+      memo: sharedMemo,
     },
   };
 };
@@ -224,7 +226,6 @@ export const extendTrackedGraph = (
   updates: Map<QueryDocKey, EntitySnapshot>;
 } => {
   const manager = new EngineObjectManager(engine, state.branch);
-  const sharedMemo = createSchemaMemo();
   const touched = new Set<QueryDocKey>();
 
   for (const root of query.roots) {
@@ -240,7 +241,7 @@ export const extendTrackedGraph = (
       { id: root.id, type: "application/json" },
       selector,
       state.tracker,
-      sharedMemo,
+      state.memo,
     );
   }
 
