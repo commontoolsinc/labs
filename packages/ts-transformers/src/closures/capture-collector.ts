@@ -132,7 +132,9 @@ export class CaptureCollector {
       }
 
       if (ts.isElementAccessExpression(node)) {
-        if (ts.isCallExpression(node.parent) && node.parent.expression === node) {
+        if (
+          ts.isCallExpression(node.parent) && node.parent.expression === node
+        ) {
           return;
         }
 
@@ -184,6 +186,13 @@ export class CaptureCollector {
     }
 
     if (this.hasExternalDeclaration(root, func)) {
+      const staticArrayCapture = this.getStaticArrayElementCaptureTarget(
+        node.expression,
+      );
+      if (staticArrayCapture) {
+        return staticArrayCapture;
+      }
+
       // Intrinsic reads on array/string-like values must capture the root
       // value itself so the generated derive input matches the shrunk schema.
       return this.getIntrinsicPropertyCaptureTarget(node) ?? node;
@@ -206,10 +215,47 @@ export class CaptureCollector {
     }
 
     if (this.hasExternalDeclaration(root, func)) {
-      return node;
+      return this.getStaticArrayElementCaptureTarget(node) ?? node;
     }
 
     return undefined;
+  }
+
+  private getStaticArrayElementCaptureTarget(
+    expr: ts.Expression,
+  ): ts.Expression | undefined {
+    let current: ts.Expression = expr;
+    let target: ts.Expression | undefined;
+
+    while (ts.isElementAccessExpression(current)) {
+      if (!this.isStaticNumericIndex(current.argumentExpression)) {
+        break;
+      }
+
+      const baseType = this.checker.getNonNullableType(
+        this.checker.getTypeAtLocation(current.expression),
+      );
+      if (!this.isArrayLikeType(baseType)) {
+        break;
+      }
+
+      target = current.expression;
+      current = current.expression;
+    }
+
+    return target;
+  }
+
+  private isStaticNumericIndex(expr: ts.Expression): boolean {
+    if (ts.isNumericLiteral(expr)) {
+      return true;
+    }
+
+    if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+      return /^\d+$/.test(expr.text);
+    }
+
+    return false;
   }
 
   private getIntrinsicPropertyCaptureTarget(

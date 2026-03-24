@@ -101,11 +101,7 @@ function remapArrayItemPaths(
   paths: readonly (readonly string[])[],
 ): readonly (readonly string[])[] {
   return uniquePaths(
-    paths.map((path) =>
-      isNumericPathSegment(path[0])
-        ? path.slice(1)
-        : path
-    ),
+    paths.map((path) => isNumericPathSegment(path[0]) ? path.slice(1) : path),
   );
 }
 
@@ -155,7 +151,9 @@ function isEffectiveArrayLikeType(
       (member.flags & ts.TypeFlags.Undefined) === 0
     );
     return nonUndefined.length > 0 &&
-      nonUndefined.every((member) => isEffectiveArrayLikeMember(member, checker));
+      nonUndefined.every((member) =>
+        isEffectiveArrayLikeMember(member, checker)
+      );
   }
 
   return false;
@@ -165,7 +163,10 @@ function unwrapDefaultArrayLikeTypeNode(
   node: ts.TypeNode,
   checker: ts.TypeChecker | undefined,
 ): ts.TypeNode | undefined {
-  if (!checker || !ts.isTypeReferenceNode(node) || !isDefaultTypeRef(node, checker)) {
+  if (
+    !checker || !ts.isTypeReferenceNode(node) ||
+    !isDefaultTypeRef(node, checker)
+  ) {
     return undefined;
   }
 

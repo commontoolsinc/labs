@@ -311,13 +311,10 @@ export default pattern((state) => {
                             }
                         },
                         indices: {
-                            type: "object",
-                            properties: {
-                                "0": {
-                                    type: ["number", "undefined"]
-                                }
-                            },
-                            required: ["0"]
+                            type: "array",
+                            items: {
+                                type: "number"
+                            }
                         }
                     },
                     required: ["items", "indices"]
@@ -328,9 +325,7 @@ export default pattern((state) => {
             type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
-                indices: {
-                    "0": state.key("indices", "0")
-                }
+                indices: state.key("indices")
             } }, ({ state }) => state.items[state.indices[0]!])}</p>
 
         {/* Array element used as index for same array */}
@@ -594,13 +589,10 @@ export default pattern((state) => {
                             }
                         },
                         indices: {
-                            type: "object",
-                            properties: {
-                                "0": {
-                                    type: ["number", "undefined"]
-                                }
-                            },
-                            required: ["0"]
+                            type: "array",
+                            items: {
+                                type: "number"
+                            }
                         }
                     },
                     required: ["items", "indices"]
@@ -611,9 +603,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
-                indices: {
-                    "0": state.key("indices", "0")
-                }
+                indices: state.key("indices")
             } }, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!)}</p>
 
         {/* Multiple element accesses in single expression */}
@@ -637,11 +627,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                arr: {
-                    "0": state.key("arr", "0"),
-                    "1": state.key("arr", "1"),
-                    "2": state.key("arr", "2")
-                }
+                arr: state.key("arr")
             } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
       </div>),
     };

@@ -27,11 +27,16 @@ export function parseCaptureExpression(
     return { root: expr.text, path: [], expression: expr };
   }
 
-  if (ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)) {
+  if (
+    ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)
+  ) {
     const segments: string[] = [];
     let current: ts.Expression = expr;
 
-    while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
       // If we encounter optional chaining (e.g., foo?.bar or foo?.[NAME]),
       // capture the expression before the optional chain so nullability is
       // preserved in the generated schema.

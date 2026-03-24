@@ -344,6 +344,94 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "static array index captures preserve array roots in emitted params objects",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface Item {",
+        "  text: string;",
+        "  done: boolean;",
+        "}",
+        "",
+        "interface Output {",
+        "  items: Item[];",
+        "}",
+        "",
+        "const List = pattern<{}, Output>(() => ({",
+        "  items: [{ text: 'first', done: false }],",
+        "}));",
+        "",
+        "export default pattern(() => {",
+        "  const list = List({});",
+        "  const firstText = computed(() => list.items[0]?.text === 'first');",
+        "  return { firstText };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes("{ list: { items: list.items } }"),
+        true,
+        `expected static array index capture to preserve list.items root in emitted params:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes('"0": list.items[0]'),
+        false,
+        `did not expect static array index capture to emit an object-like item slot:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "static local array index captures preserve array roots in emitted params objects",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, Writable, pattern } from "commontools";',
+        "",
+        "export default pattern(() => {",
+        "  const value = Writable.of(10);",
+        "  const factors = [2, 3, 4];",
+        "  const result = derive(value, (v) => v.get() * factors[1]!);",
+        "  return result;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes("factors: factors"),
+        true,
+        `expected static local array index capture to preserve whole factors array in emitted params:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes('"1": factors[1]'),
+        false,
+        `did not expect static local array index capture to emit an object-like array slot:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
     "preserves cell wrappers for array items in computed for-of loops",
     async () => {
       const source = [
@@ -1520,8 +1608,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  const preview = computed(() => {",
         "    const remaining = items.get().filter((item) => !item.done);",
         "    const names = remaining.slice(0, 10).map((item) => item.title);",
-        "    return names.join(\", \") +",
-        "      (remaining.length > 10 ? ` (+${remaining.length - 10} more)` : \"\");",
+        '    return names.join(", ") +',
+        '      (remaining.length > 10 ? ` (+${remaining.length - 10} more)` : "");',
         "  });",
         "  return { preview };",
         "});",

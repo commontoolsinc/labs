@@ -28,9 +28,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
-        factors: {
-            "1": factors[1]
-        }
+        factors: factors
     }, ({ value: v, factors }) => v.get() * factors[1]!);
     return result;
 }, false as const satisfies __ctHelpers.JSONSchema, {

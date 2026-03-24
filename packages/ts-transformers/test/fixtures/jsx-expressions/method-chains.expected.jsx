@@ -540,9 +540,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                prices: {
-                    "0": state.key("prices", "0")
-                },
+                prices: state.key("prices"),
                 discount: state.key("discount")
             } }, ({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2))}
         </p>
