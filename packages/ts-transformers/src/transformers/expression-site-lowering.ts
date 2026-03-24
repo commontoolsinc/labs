@@ -1145,6 +1145,69 @@ export function rewriteExpressionSite(
   ) as ts.Expression;
 }
 
+export function rewriteFallbackJsxExpressionSite(
+  params: Omit<RewriteExpressionSiteParams, "containerKind">,
+): ts.Expression | undefined {
+  const {
+    expression,
+    context,
+    analyze,
+    visit,
+    preferDeriveWrappers = false,
+  } = params;
+
+  const contextInfo = classifyReactiveContext(
+    expression,
+    context.checker,
+    context,
+  );
+  const inSafeContext = contextInfo.kind === "compute";
+  const analysis = analyze(expression);
+  const hasLogicalOps = containsLogicalBinaryOperator(expression);
+
+  if (inSafeContext) {
+    return undefined;
+  }
+
+  if (!analysis.requiresRewrite && !hasLogicalOps) {
+    return undefined;
+  }
+
+  if (context.options.mode === "error") {
+    context.reportDiagnostic({
+      type: "opaque-ref:jsx-expression",
+      message: "JSX expression with OpaqueRef computation should use derive",
+      node: expression,
+    });
+    return expression;
+  }
+
+  const result = rewriteExpression({
+    expression,
+    analysis,
+    context,
+    analyze,
+    reactiveContextKind: contextInfo.kind,
+    inSafeContext,
+    containerKind: "jsx-expression",
+    preferDeriveWrappers,
+  });
+
+  if (!result) {
+    return undefined;
+  }
+
+  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+    return result;
+  }
+
+  return visitEachChildWithJsx(
+    result,
+    visit,
+    context.tsContext,
+  ) as ts.Expression;
+}
+
 export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
   root: T,
   context: TransformationContext,
@@ -1266,6 +1329,38 @@ export function rewriteArrayMethodCallbackExpressionSites(
       ts.isFunctionLike(node)
     ) {
       return node;
+    }
+
+    if (ts.isJsxExpression(node)) {
+      if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const route = classifyJsxExpressionSiteRoute(
+        node.expression,
+        context,
+        analyze,
+      );
+      if (
+        route.route === "skip" &&
+        route.reason === "array-method-owned"
+      ) {
+        const rewritten = rewriteFallbackJsxExpressionSite({
+          expression: node.expression,
+          context,
+          analyze,
+          visit,
+          preferDeriveWrappers: true,
+        });
+        if (rewritten) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          );
+        }
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
     }
 
     if (ts.isExpression(node)) {

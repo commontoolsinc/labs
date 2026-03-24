@@ -1,7 +1,6 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
-  classifyReactiveContext,
   createDataFlowAnalyzer,
   isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
@@ -9,8 +8,8 @@ import {
 import {
   classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
+  rewriteFallbackJsxExpressionSite,
 } from "./expression-site-lowering.ts";
-import { rewriteExpression } from "./opaque-ref/mod.ts";
 
 export class OpaqueRefJSXTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -20,33 +19,6 @@ export class OpaqueRefJSXTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transform(context);
   }
-}
-
-/**
- * Check if an expression contains binary logical operators (&& or ||) that may
- * need when/unless transformation. This is used to determine if we should
- * process expressions in safe contexts.
- */
-function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
-  if (ts.isBinaryExpression(expr)) {
-    const op = expr.operatorToken.kind;
-    if (
-      op === ts.SyntaxKind.AmpersandAmpersandToken ||
-      op === ts.SyntaxKind.BarBarToken
-    ) {
-      return true;
-    }
-  }
-  // Check children recursively
-  let found = false;
-  expr.forEachChild((child) => {
-    if (!found && ts.isExpression(child)) {
-      if (containsLogicalBinaryOperator(child)) {
-        found = true;
-      }
-    }
-  });
-  return found;
 }
 
 function transform(context: TransformationContext): ts.SourceFile {
@@ -63,13 +35,6 @@ function transform(context: TransformationContext): ts.SourceFile {
       if (isEventHandlerJsxAttribute(node, checker)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
-
-      const contextInfo = classifyReactiveContext(
-        node.expression,
-        checker,
-        context,
-      );
-      const inSafeContext = contextInfo.kind === "compute";
 
       const route = classifyJsxExpressionSiteRoute(
         node.expression,
@@ -101,63 +66,21 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const analysis = analyze(node.expression);
-
-      // Check if expression contains && or || that may need when/unless transformation
-      const hasLogicalOps = containsLogicalBinaryOperator(node.expression);
-
-      if (contextInfo.kind === "compute") {
-        // New policy: compute JSX does not lower && / || and does not add wrappers.
+      if (route.route === "skip" && route.reason === "array-method-owned") {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      // Skip if doesn't require rewriting AND no logical operators that might need transformation
-      // We need to proceed even with requiresRewrite=false if there are && or || operators
-      // because the left side might be an OpaqueRef type (e.g., computed() returns OpaqueRef)
-      // which always needs when/unless for correct short-circuit semantics.
-      if (!analysis.requiresRewrite && !hasLogicalOps) {
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
-
-      // In safe contexts, only proceed if we have binary logical operators
-      // that may need when/unless transformation
-      if (inSafeContext && !hasLogicalOps) {
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
-
-      if (context.options.mode === "error") {
-        // Only report errors for non-safe contexts
-        if (!inSafeContext) {
-          context.reportDiagnostic({
-            type: "opaque-ref:jsx-expression",
-            message:
-              "JSX expression with OpaqueRef computation should use derive",
-            node: node.expression,
-          });
-        }
-        return node;
-      }
-
-      const result = rewriteExpression({
+      const result = rewriteFallbackJsxExpressionSite({
         expression: node.expression,
-        analysis,
         context,
         analyze,
-        reactiveContextKind: contextInfo.kind,
-        inSafeContext,
-        containerKind: "jsx-expression",
+        visit,
       });
 
       if (result) {
-        // IMPORTANT: Visit children of the rewritten expression to transform nested JSX
-        const visitedResult = visitEachChildWithJsx(
-          result,
-          visit,
-          context.tsContext,
-        ) as ts.Expression;
         return context.factory.createJsxExpression(
           node.dotDotDotToken,
-          visitedResult,
+          result,
         );
       }
 

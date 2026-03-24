@@ -620,7 +620,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: array-method-owned JSX wrapper roots stay on the legacy JSX seam",
+  "Expression site policy: array-method-owned JSX wrapper roots stay out of the shared JSX routes",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -1205,7 +1205,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: array-method-owned JSX wrapper roots with reactive array-method subexpressions stay on the legacy JSX seam",
+  "Expression site policy: array-method-owned JSX wrapper roots with reactive array-method subexpressions stay out of the shared JSX routes",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
