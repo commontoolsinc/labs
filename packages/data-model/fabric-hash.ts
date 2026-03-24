@@ -11,6 +11,8 @@ import { FabricPrimitive } from "./interface.ts";
 import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
 
 export class FabricHash extends FabricPrimitive {
+  readonly #stringForm: string;
+
   constructor(
     /** The raw hash bytes. */
     readonly hash: Uint8Array,
@@ -18,6 +20,7 @@ export class FabricHash extends FabricPrimitive {
     readonly algorithmTag: string,
   ) {
     super();
+    this.#stringForm = `${algorithmTag}:${toUnpaddedBase64url(hash)}`;
     Object.freeze(this);
   }
 
@@ -43,7 +46,7 @@ export class FabricHash extends FabricPrimitive {
 
   /** Returns `<algorithmTag>:<base64urlHash>` (unpadded base64url). */
   override toString(): string {
-    return `${this.algorithmTag}:${toUnpaddedBase64url(this.hash)}`;
+    return this.#stringForm;
   }
 
   /**
