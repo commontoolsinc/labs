@@ -3,25 +3,25 @@
  *
  * Delegates to `hashOfModern()` from `value-hash-modern.ts` to produce
  * deterministic hashes using the modern (non-merkle-reference) hashing
- * pipeline. The string representation of the resulting `FabricHash` is
- * returned.
+ * pipeline. Returns `FabricHash` directly.
  *
  * Follows the same modern/legacy split pattern used by
  * `value-hash-modern.ts` and `fabric-value-modern.ts`.
  */
 
 import type { JSONSchema } from "@commontools/api";
+import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
-import { hashOfAsRawStringModern } from "./value-hash-modern.ts";
+import { hashOfModern } from "./value-hash-modern.ts";
 
 /** Modern hash of a JSONSchema. */
-export function hashSchemaModern(schema: JSONSchema): string {
-  return hashOfAsRawStringModern(schema);
+export function hashSchemaModern(schema: JSONSchema): FabricHash {
+  return hashOfModern(schema);
 }
 
 /** Modern hash of a schema-related item. */
 export function hashSchemaItemModern(
   item: FabricValue,
-): string {
-  return hashOfAsRawStringModern(item);
+): FabricHash {
+  return hashOfModern(item);
 }

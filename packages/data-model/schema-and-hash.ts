@@ -5,7 +5,7 @@
  */
 import type { JSONSchema } from "@commontools/api";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "./fabric-hash.ts";
+import type { FabricHash } from "./fabric-hash.ts";
 import { hashSchema } from "./schema-hash.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
 
@@ -38,12 +38,10 @@ export class SchemaAndHash {
 
   /**
    * Create a `SchemaAndHash` from a schema. The schema is deep-frozen via
-   * `toDeepFrozenSchema()`, and the hash is computed via `hashSchema()`
-   * then parsed into a `FabricHash`.
+   * `toDeepFrozenSchema()`, and the hash is computed via `hashSchema()`.
    */
   static from(schema: JSONSchema): SchemaAndHash {
     const frozen = toDeepFrozenSchema(schema);
-    const hash = FabricHash.fromString(hashSchema(frozen));
-    return new SchemaAndHash(frozen, hash);
+    return new SchemaAndHash(frozen, hashSchema(frozen));
   }
 }

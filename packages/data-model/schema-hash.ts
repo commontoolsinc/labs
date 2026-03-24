@@ -1,8 +1,8 @@
 /**
  * Schema hashing dispatch layer.
  *
- * Provides `hashSchema` and `hashSchemaItem` — deterministic string
- * hashes for schemas and general schema-related items. Dispatches between
+ * Provides `hashSchema` and `hashSchemaItem` — deterministic `FabricHash`
+ * values for schemas and general schema-related items. Dispatches between
  * legacy `stableStringify` (schema-hash-legacy.ts) and canonical hashing
  * (schema-hash-modern.ts) based on a runtime flag.
  *
@@ -11,6 +11,7 @@
  */
 
 import type { JSONSchema } from "@commontools/api";
+import type { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import {
   hashSchemaItemLegacy,
@@ -50,21 +51,21 @@ export function resetSchemaHashConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Compute a deterministic string hash of a JSONSchema.
+ * Compute a deterministic hash of a JSONSchema.
  * Structurally-equal schemas always produce the same hash.
  */
-export function hashSchema(schema: JSONSchema): string {
+export function hashSchema(schema: JSONSchema): FabricHash {
   return modernSchemaHashEnabled
     ? hashSchemaModern(schema)
     : hashSchemaLegacy(schema);
 }
 
 /**
- * Compute a deterministic string hash of a schema-related item (e.g. a
+ * Compute a deterministic hash of a schema-related item (e.g. a
  * path selector, a value descriptor, etc.). Structurally-equal items
  * always produce the same hash.
  */
-export function hashSchemaItem(item: FabricValue): string {
+export function hashSchemaItem(item: FabricValue): FabricHash {
   return modernSchemaHashEnabled
     ? hashSchemaItemModern(item)
     : hashSchemaItemLegacy(item);

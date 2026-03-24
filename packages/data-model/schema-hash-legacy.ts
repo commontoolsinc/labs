@@ -11,6 +11,7 @@
  */
 
 import type { JSONSchema } from "@commontools/api";
+import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 
 const _hashCache = new WeakMap<object, string>();
@@ -53,12 +54,18 @@ function stableStringify(value: unknown): string {
   return result;
 }
 
+/** Wrap a stableStringify result as a FabricHash with algorithm tag "legacy". */
+function makeLegacyFabricHash(s: string): FabricHash {
+  const bytes = new TextEncoder().encode(s);
+  return new FabricHash(bytes, "legacy");
+}
+
 /** Legacy hash of a JSONSchema. */
-export function hashSchemaLegacy(schema: JSONSchema): string {
-  return stableStringify(schema);
+export function hashSchemaLegacy(schema: JSONSchema): FabricHash {
+  return makeLegacyFabricHash(stableStringify(schema));
 }
 
 /** Legacy hash of a schema-related item. */
-export function hashSchemaItemLegacy(item: FabricValue): string {
-  return stableStringify(item);
+export function hashSchemaItemLegacy(item: FabricValue): FabricHash {
+  return makeLegacyFabricHash(stableStringify(item));
 }

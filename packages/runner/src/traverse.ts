@@ -264,7 +264,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? hashSchemaItem : undefined);
+    super(hashValues ? (v) => hashSchemaItem(v).toString() : undefined);
   }
 }
 
@@ -341,7 +341,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey);
+    const hash = hashSchemaItem(extraKey).toString();
     if (existing.has(hash)) {
       return null;
     }
@@ -365,7 +365,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey);
+    const hash = hashSchemaItem(extraKey).toString();
     return existing.get(hash);
   }
 }
@@ -1346,7 +1346,8 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = hashSchema(flagSchema) + "|" + hashSchema(schema);
+  const key = hashSchema(flagSchema).toString() + "|" +
+    hashSchema(schema).toString();
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1406,7 +1407,8 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = hashSchema(parentSchema) + "|" + hashSchema(linkSchema);
+  const key = hashSchema(parentSchema).toString() + "|" +
+    hashSchema(linkSchema).toString();
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1960,7 +1962,7 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          hashSchema(schema);
+          hashSchema(schema).toString();
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -2906,7 +2908,8 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = hashSchema(outerSchema) + "|" + hashSchema(innerSchema);
+  const key = hashSchema(outerSchema).toString() + "|" +
+    hashSchema(innerSchema).toString();
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isRecord(innerSchema)
@@ -3014,8 +3017,8 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = hashSchema(outerSchema) + "||" +
-    branches.map(hashSchema).join("|");
+  const key = hashSchema(outerSchema).toString() + "||" +
+    branches.map((b) => hashSchema(b).toString()).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3097,7 +3100,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // Deduplicate schemas using hashSchema
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(hashSchema(s), s);
+      uniqueHashes.set(hashSchema(s).toString(), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

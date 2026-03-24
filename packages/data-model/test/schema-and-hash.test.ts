@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -11,20 +11,8 @@ import { FabricHash } from "../fabric-hash.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
-import { resetSchemaHashConfig, setSchemaHashConfig } from "../schema-hash.ts";
-import { resetModernHashConfig, setModernHashConfig } from "../value-hash.ts";
 
 describe("SchemaAndHash", () => {
-  beforeEach(() => {
-    setSchemaHashConfig(true);
-    setModernHashConfig(true);
-  });
-
-  afterEach(() => {
-    resetSchemaHashConfig();
-    resetModernHashConfig();
-  });
-
   describe("constructor", () => {
     it("throws if schema is not deep-frozen", () => {
       const hash = new FabricHash(new Uint8Array(32), "fid1");
