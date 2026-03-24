@@ -77,7 +77,7 @@ const treeBuilder = Reference.Tree.createBuilder(
   wrappedNodeBuilder,
 );
 
-export const referLegacy = <T extends DefinedReferent>(
+export const hashOfLegacy = <T extends DefinedReferent>(
   source: T,
 ): HashObject<T> => {
   return treeBuilder.refer(source) as unknown as HashObject<T>;
@@ -112,7 +112,7 @@ const isUnclaimed = (
  * Legacy `hashOf` implementation using merkle-reference, with caching for
  * unclaimed {the, of} patterns.
  */
-export const referLegacyCached = <T extends DefinedReferent>(
+export const hashOfLegacyCached = <T extends DefinedReferent>(
   source: T,
 ): HashObject<T> => {
   // Cache {the, of} patterns (unclaimed facts)
@@ -120,18 +120,18 @@ export const referLegacyCached = <T extends DefinedReferent>(
     const key = `${source.the}\0${source.of}`;
     const cached = unclaimedCache.get(key);
     if (cached) return cached as HashObject<T>;
-    const result = referLegacy(source);
+    const result = hashOfLegacy(source);
     unclaimedCache.put(key, result);
     return result;
   }
-  return referLegacy(source);
+  return hashOfLegacy(source);
 };
 
 /** Legacy `hashObjectFromJson` using merkle-reference. */
 export const hashObjectFromJsonLegacy = Reference.fromJSON;
 
 /** Legacy `fromString` using merkle-reference. */
-export const fromStringLegacy = Reference.fromString as (
+export const hashObjectFromStringLegacy = Reference.fromString as (
   source: string,
 ) => HashObject;
 

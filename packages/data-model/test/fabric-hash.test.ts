@@ -134,7 +134,7 @@ Deno.test("FabricHash", async (t) => {
         assertThrows(
           () => fromString("nocolonhere"),
           ReferenceError,
-          "Invalid content ID string",
+          "Invalid content hash string",
         );
       } finally {
         resetCanonicalHashConfig();
@@ -182,7 +182,7 @@ Deno.test("FabricHash", async (t) => {
         const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
         assertInstanceOf(innerRef, FabricHash);
 
-        // Wrap it in a fact-like structure and hashOf again. modernHash
+        // Wrap it in a fact-like structure and hashOf again. hashOfModern
         // handles FabricHash via TAG_CONTENT_ID, so this must not throw.
         const outerSource = {
           cause: innerRef,

@@ -103,7 +103,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     case "number":
       if (!Number.isFinite(value)) {
         throw new Error(
-          `modernHash: non-finite number not allowed: ${value}`,
+          `hashOfModern: non-finite number not allowed: ${value}`,
         );
       }
       hasher.update(TAG_NUMBER_BYTES);
@@ -142,7 +142,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `modernHash: unsupported type: ${typeof value}`,
+        `hashOfModern: unsupported type: ${typeof value}`,
       );
   }
 }
@@ -216,7 +216,7 @@ function feedObjectValue(
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
         throw new Error(
-          `modernHash: FabricInstance missing typeTag property`,
+          `hashOfModern: FabricInstance missing typeTag property`,
         );
       }
       const typeTagUtf8 = encoder.encode(typeTag);
@@ -233,7 +233,7 @@ function feedObjectValue(
   }
 
   throw new Error(
-    `modernHash: unsupported object type: ${
+    `hashOfModern: unsupported object type: ${
       value?.constructor?.name ?? typeof value
     }`,
   );
@@ -349,7 +349,7 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
-export function modernHash(value: unknown): FabricHash {
+export function hashOfModern(value: unknown): FabricHash {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;

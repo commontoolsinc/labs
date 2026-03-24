@@ -4,7 +4,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { modernHash as canonicalHashRaw } from "../value-hash-modern.ts";
+import { hashOfModern as canonicalHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";

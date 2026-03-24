@@ -9,13 +9,13 @@
  * Follows the same inline-flag-test dispatch pattern used by
  * `fabric-value.ts`.
  */
-import { modernHash } from "./value-hash-modern.ts";
+import { hashOfModern } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import {
-  fromStringLegacy,
   hashObjectFromJsonLegacy,
+  hashObjectFromStringLegacy,
+  hashOfLegacyCached,
   Reference,
-  referLegacyCached,
 } from "./value-hash-legacy.ts";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ export function resetCanonicalHashConfig(): void {
 export function hashObjectFromString(source: string): HashObject {
   return canonicalHashingEnabled
     ? FabricHash.fromString(source)
-    : fromStringLegacy(source);
+    : hashObjectFromStringLegacy(source);
 }
 
 /**
@@ -109,7 +109,7 @@ export function hashObjectFromJson(source: { "/": string }): HashObject {
 export function fromString(source: string): HashObject {
   return canonicalHashingEnabled
     ? FabricHash.fromString(source)
-    : fromStringLegacy(source);
+    : hashObjectFromStringLegacy(source);
 }
 
 /** Compute a content hash for the given source value. */
@@ -117,6 +117,6 @@ export function hashOf<T extends DefinedReferent>(
   source: T,
 ): HashObject<T> {
   return canonicalHashingEnabled
-    ? modernHash(source)
-    : referLegacyCached(source);
+    ? hashOfModern(source)
+    : hashOfLegacyCached(source);
 }
