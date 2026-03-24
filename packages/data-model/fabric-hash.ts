@@ -1,3 +1,6 @@
+import { FabricPrimitive } from "./interface.ts";
+import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
+
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
  * Extends `FabricPrimitive` -- treated like a primitive in the fabric
@@ -6,24 +9,29 @@
  * Stringification produces `<algorithmTag>:<base64urlHash>` where
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
+ *
+ * Instances are frozen at construction time. The string form is cached
+ * internally so that repeated `toString()` calls are O(1).
  */
-import { FabricPrimitive } from "./interface.ts";
-import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
-
 export class FabricHash extends FabricPrimitive {
   readonly #stringForm: string;
 
+  /**
+   * Constructs a `FabricHash` from raw hash bytes and an algorithm tag.
+   * The instance is frozen after construction.
+   *
+   * **Ownership transfer:** the caller must not mutate `hash` after passing
+   * it to the constructor. `Object.freeze` freezes the object reference but
+   * not the underlying `ArrayBuffer`, so the bytes remain technically
+   * mutable. The cached string form is computed once at construction time;
+   * post-construction mutation of `hash` would cause `hash` and `toString()`
+   * to diverge.
+   *
+   * @param hash - The raw hash bytes (ownership transferred to this instance).
+   * @param algorithmTag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
+   */
   constructor(
-    /**
-     * The raw hash bytes. **Ownership transfer:** the caller must not mutate
-     * this array after passing it to the constructor. `Object.freeze` freezes
-     * the object reference but not the underlying `ArrayBuffer`, so the bytes
-     * remain technically mutable. The cached `#stringForm` is computed once at
-     * construction time from these bytes; post-construction mutation would
-     * cause `hash` and `toString()` to diverge.
-     */
     readonly hash: Uint8Array,
-    /** Algorithm identifier (e.g., `"fid1"` for fabric ID v1). */
     readonly algorithmTag: string,
   ) {
     super();
