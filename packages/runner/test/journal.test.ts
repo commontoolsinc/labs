@@ -194,6 +194,43 @@ describe("Journal", () => {
       const result = reader!.read(address, { meta: { source: "test" } as any });
       expect(result.error?.name).toBe("InvalidReadOptionsError");
     });
+
+    it("requires an observation op for non-internal CFC read annotations", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:reader-cfc-op-required",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = reader!.read(address, {
+        cfc: { maxConfidentiality: ["secret"] },
+      });
+
+      expect(result.error?.name).toBe("InvalidReadOptionsError");
+      expect(result.error?.message).toContain(
+        "op is required for non-internal CFC reads",
+      );
+    });
+
+    it("allows internal verifier CFC reads without an observation op", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:reader-internal-cfc-no-op",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = reader!.read(address, {
+        cfc: {
+          internalVerifierRead: true,
+          maxConfidentiality: ["secret"],
+        },
+      });
+
+      expect(result.ok).toBeDefined();
+      expect(result.error).toBeUndefined();
+    });
   });
 
   describe("Writer Operations", () => {

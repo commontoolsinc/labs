@@ -339,6 +339,14 @@ function validateCfcAnnotations(
     return { error: selectorResult.error };
   }
   const selector = selectorResult.ok;
+  if (internalVerifierRead !== true && op === undefined) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        "op is required for non-internal CFC reads",
+      ),
+    };
+  }
   return {
     ok: {
       ...(internalVerifierRead === true ? { internalVerifierRead: true } : {}),

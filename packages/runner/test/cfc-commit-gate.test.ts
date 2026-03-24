@@ -167,6 +167,7 @@ describe("computeCfcActivityDigest", () => {
           path: ["value", "field"],
           meta: meta1,
           cfc: {
+            op: "value",
             maxConfidentiality: ["secret", "confidential"],
             requiredIntegrity: ["sourceB", "sourceA"],
           },
@@ -191,6 +192,7 @@ describe("computeCfcActivityDigest", () => {
           path: ["value", "field"],
           meta: meta2,
           cfc: {
+            op: "value",
             maxConfidentiality: ["confidential", "secret"],
             requiredIntegrity: ["sourceA", "sourceB"],
           },
@@ -249,7 +251,7 @@ describe("computeCfcActivityDigest", () => {
         type: "application/json",
         path: ["value", "field"],
         meta: {},
-        cfc: { maxConfidentiality: [level] },
+        cfc: { op: "value", maxConfidentiality: [level] },
       },
     }];
 
