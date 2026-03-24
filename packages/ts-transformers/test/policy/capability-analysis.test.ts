@@ -365,7 +365,7 @@ Deno.test("Capability analysis marks for...in over tracked source as wildcard", 
   assertEquals(input.wildcard, true);
 });
 
-Deno.test("Capability analysis marks for...of over tracked source as wildcard", () => {
+Deno.test("Capability analysis aliases for...of loop variable instead of marking wildcard", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
       for (const item of input) {
@@ -376,10 +376,11 @@ Deno.test("Capability analysis marks for...of over tracked source as wildcard", 
   const summary = analyzeFunctionCapabilities(fn);
   const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
+  assertEquals(input.wildcard, false);
+  assertEquals(input.passthrough, true);
 });
 
-Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard", () => {
+Deno.test("Capability analysis tracks for...of over sub-path as item access", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
       for (const item of input.items) {
@@ -390,7 +391,7 @@ Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard"
   const summary = analyzeFunctionCapabilities(fn);
   const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
+  assertEquals(input.wildcard, false);
   assert(input.readPaths.includes("items"));
 });
 

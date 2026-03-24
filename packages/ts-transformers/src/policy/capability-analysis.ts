@@ -5,6 +5,7 @@ import type {
   ReactiveCapability,
 } from "../core/mod.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
+import { isFallbackOperator } from "../utils/reactive-keys.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
 type CapabilityAnalyzableFunction =
@@ -77,6 +78,8 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
+const KNOWN_SYMBOL_IDENTIFIERS = new Set(["NAME", "UI", "SELF"]);
+
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -131,6 +134,11 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
       optional ||= !!current.questionDotToken;
       if (isLiteralElement(current.argumentExpression)) {
         path.unshift(getLiteralElementText(current.argumentExpression));
+      } else if (
+        ts.isIdentifier(current.argumentExpression) &&
+        KNOWN_SYMBOL_IDENTIFIERS.has(current.argumentExpression.text)
+      ) {
+        path.unshift(current.argumentExpression.text);
       } else {
         dynamic = true;
       }
@@ -467,6 +475,10 @@ export function analyzeFunctionCapabilities(
     // the blanket read if the alias already has a more specific path.
     const aliasesWithSpecificPaths = new Set<string>();
 
+    // for-of loop variables alias to array items. Passing one through an
+    // opaque call site should not mark the whole iterable as wildcard.
+    const forOfLoopVars = new Set<string>();
+
     const resolveFromAccess = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
@@ -547,6 +559,13 @@ export function analyzeFunctionCapabilities(
             dynamic: receiverRef.dynamic,
           };
         }
+      }
+
+      if (
+        ts.isBinaryExpression(current) &&
+        isFallbackOperator(current.operatorToken.kind)
+      ) {
+        return resolveSourceRef(current.left);
       }
 
       return undefined;
@@ -987,6 +1006,7 @@ export function analyzeFunctionCapabilities(
           if (!argument) continue;
           const unwrappedArgument = unwrapExpression(argument);
           if (!ts.isIdentifier(unwrappedArgument)) continue;
+          if (forOfLoopVars.has(unwrappedArgument.text)) continue;
           const source = resolveSourceRef(unwrappedArgument);
           if (!source) continue;
           if (source.dynamic || source.path.length > 0) continue;
@@ -1048,8 +1068,32 @@ export function analyzeFunctionCapabilities(
         }
       }
 
-      if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      if (ts.isForInStatement(node)) {
         markWildcardFromExpression(node.expression);
+      }
+
+      if (ts.isForOfStatement(node)) {
+        const ref = resolveSourceRef(node.expression);
+        if (ref) {
+          if (ts.isVariableDeclarationList(node.initializer)) {
+            const decl = node.initializer.declarations[0];
+            if (decl) {
+              assignBindingAlias(decl.name, ref);
+              if (ts.isIdentifier(decl.name)) {
+                forOfLoopVars.add(decl.name.text);
+              }
+            }
+          } else {
+            assignExpressionPatternAlias(node.initializer, ref);
+            if (ts.isIdentifier(node.initializer)) {
+              forOfLoopVars.add(node.initializer.text);
+            }
+          }
+        } else {
+          visit(node.expression);
+        }
+        visit(node.statement);
+        return;
       }
 
       ts.forEachChild(node, visit);

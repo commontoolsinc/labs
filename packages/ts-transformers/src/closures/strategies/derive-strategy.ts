@@ -1,5 +1,9 @@
 import ts from "typescript";
-import type { TransformationContext } from "../../core/mod.ts";
+import type {
+  CapabilityParamDefault,
+  CapabilityParamSummary,
+  TransformationContext,
+} from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
@@ -7,7 +11,9 @@ import {
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { analyzeFunctionCapabilities } from "../../policy/mod.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
+import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -17,6 +23,215 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+
+function getPropertySignatureName(
+  name: ts.PropertyName,
+): string | undefined {
+  if (
+    ts.isIdentifier(name) || ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text;
+  }
+  return undefined;
+}
+
+function findDescendantCaptureExpression(
+  node: CaptureTreeNode,
+): ts.Expression | undefined {
+  if (node.expression) {
+    return node.expression;
+  }
+  for (const child of node.properties.values()) {
+    const expression = findDescendantCaptureExpression(child);
+    if (expression) {
+      return expression;
+    }
+  }
+  return undefined;
+}
+
+function findCaptureRootExpression(
+  rootName: string,
+  node: CaptureTreeNode,
+): ts.Expression | undefined {
+  const expression = findDescendantCaptureExpression(node);
+  if (!expression) {
+    return undefined;
+  }
+
+  let current: ts.Expression = expression;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  if (ts.isIdentifier(current) && current.text === rootName) {
+    return current;
+  }
+
+  return expression;
+}
+
+function sliceCapabilityDefaultsForRoot(
+  defaults: readonly CapabilityParamDefault[] | undefined,
+  rootName: string,
+): readonly CapabilityParamDefault[] | undefined {
+  if (!defaults || defaults.length === 0) {
+    return undefined;
+  }
+
+  const next = defaults.flatMap((entry) => {
+    if (entry.path[0] !== rootName) {
+      return [];
+    }
+    return [{
+      path: entry.path.slice(1),
+      defaultType: entry.defaultType,
+    }];
+  });
+
+  return next.length > 0 ? next : undefined;
+}
+
+function sliceCapabilitySummaryForRoot(
+  paramSummary: CapabilityParamSummary,
+  rootName: string,
+): CapabilityParamSummary | undefined {
+  const readPaths = paramSummary.readPaths
+    .filter((path) => path[0] === rootName)
+    .map((path) => path.slice(1));
+  const writePaths = paramSummary.writePaths
+    .filter((path) => path[0] === rootName)
+    .map((path) => path.slice(1));
+  const defaults = sliceCapabilityDefaultsForRoot(
+    paramSummary.defaults,
+    rootName,
+  );
+
+  if (
+    readPaths.length === 0 &&
+    writePaths.length === 0 &&
+    (!defaults || defaults.length === 0)
+  ) {
+    return undefined;
+  }
+
+  return {
+    name: rootName,
+    capability: paramSummary.capability,
+    readPaths,
+    writePaths,
+    passthrough: false,
+    wildcard: false,
+    defaults,
+  };
+}
+
+function tryGetTypeAtLocation(
+  checker: ts.TypeChecker,
+  expression: ts.Expression | undefined,
+): ts.Type | undefined {
+  if (!expression) {
+    return undefined;
+  }
+  try {
+    return checker.getTypeAtLocation(expression);
+  } catch {
+    return undefined;
+  }
+}
+
+function tryShrinkMergedInputTypeLiteralMembers(
+  inputTypeNode: ts.TypeNode,
+  paramSummary: CapabilityParamSummary,
+  originalInputParamName: string,
+  originalInput: ts.Expression,
+  captureTree: Map<string, CaptureTreeNode>,
+  captureNameMap: Map<string, string>,
+  hadZeroParameters: boolean,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.TypeNode | undefined {
+  if (!ts.isTypeLiteralNode(inputTypeNode)) {
+    return undefined;
+  }
+
+  if (paramSummary.wildcard || paramSummary.passthrough) {
+    return undefined;
+  }
+
+  if (
+    paramSummary.readPaths.some((path) => path.length === 0) ||
+    paramSummary.writePaths.some((path) => path.length === 0)
+  ) {
+    return undefined;
+  }
+
+  const rootTypes = new Map<string, ts.Type | undefined>();
+  if (!hadZeroParameters) {
+    rootTypes.set(
+      originalInputParamName,
+      tryGetTypeAtLocation(checker, originalInput),
+    );
+  }
+
+  for (const [originalName, node] of captureTree) {
+    const renamedName = captureNameMap.get(originalName) ?? originalName;
+    rootTypes.set(
+      renamedName,
+      tryGetTypeAtLocation(
+        checker,
+        findCaptureRootExpression(originalName, node),
+      ),
+    );
+  }
+
+  const nextMembers = inputTypeNode.members.map((member) => {
+    if (!ts.isPropertySignature(member) || !member.type) {
+      return member;
+    }
+
+    const propertyName = getPropertySignatureName(member.name);
+    if (!propertyName) {
+      return member;
+    }
+
+    const propertySummary = sliceCapabilitySummaryForRoot(
+      paramSummary,
+      propertyName,
+    );
+    if (!propertySummary) {
+      return member;
+    }
+
+    const nextType = applyShrinkAndWrap(
+      propertySummary,
+      member.type,
+      rootTypes.get(propertyName),
+      false,
+      checker,
+      sourceFile,
+      factory,
+    );
+
+    return factory.updatePropertySignature(
+      member,
+      member.modifiers,
+      member.name,
+      member.questionToken,
+      nextType,
+    );
+  });
+
+  return factory.updateTypeLiteralNode(
+    inputTypeNode,
+    factory.createNodeArray(nextMembers),
+  );
+}
 
 /**
  * Pre-register unwrapped types for captured identifiers in a callback body.
@@ -511,13 +726,46 @@ export function transformDeriveCall(
 
   // Build TypeNodes for schema generation
   const schemaFactory = new SchemaFactory(context);
-  const inputTypeNode = schemaFactory.createDeriveInputSchema(
+  let inputTypeNode = schemaFactory.createDeriveInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
     captureNameMap,
     hadZeroParameters,
   );
+
+  let inputType: ts.Type | undefined;
+  try {
+    inputType = checker.getTypeAtLocation(mergedInput);
+  } catch {
+    inputType = undefined;
+  }
+
+  const capabilitySummary = analyzeFunctionCapabilities(newCallback);
+  const inputParamSummary = capabilitySummary.params[0];
+  if (inputParamSummary) {
+    inputTypeNode = tryShrinkMergedInputTypeLiteralMembers(
+      inputTypeNode,
+      inputParamSummary,
+      originalInputParamName,
+      originalInput,
+      captureTree,
+      captureNameMap,
+      hadZeroParameters,
+      checker,
+      context.sourceFile,
+      factory,
+    ) ??
+      applyShrinkAndWrap(
+        inputParamSummary,
+        inputTypeNode,
+        inputType,
+        false,
+        checker,
+        context.sourceFile,
+        factory,
+      );
+  }
 
   // Build the derive call expression
   const deriveExpr = context.ctHelpers.getHelperExpr("derive");

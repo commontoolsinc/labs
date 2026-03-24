@@ -127,6 +127,65 @@ export function printTypeNode(
   return printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
 }
 
+function extractArrayItemTypeNode(node: ts.TypeNode): ts.TypeNode | undefined {
+  if (ts.isArrayTypeNode(node)) {
+    return node.elementType;
+  }
+  if (
+    ts.isTypeOperatorNode(node) &&
+    node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+    ts.isArrayTypeNode(node.type)
+  ) {
+    return node.type.elementType;
+  }
+  if (
+    ts.isTypeReferenceNode(node) &&
+    ts.isIdentifier(node.typeName) &&
+    (node.typeName.text === "Array" ||
+      node.typeName.text === "ReadonlyArray") &&
+    node.typeArguments &&
+    node.typeArguments.length > 0
+  ) {
+    return node.typeArguments[0];
+  }
+  return undefined;
+}
+
+function rewrapArrayTypeNode(
+  node: ts.TypeNode | undefined,
+  itemType: ts.TypeNode,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
+  if (node) {
+    if (ts.isArrayTypeNode(node)) {
+      return factory.createArrayTypeNode(itemType);
+    }
+    if (
+      ts.isTypeOperatorNode(node) &&
+      node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+      ts.isArrayTypeNode(node.type)
+    ) {
+      return factory.createTypeOperatorNode(
+        ts.SyntaxKind.ReadonlyKeyword,
+        factory.createArrayTypeNode(itemType),
+      );
+    }
+    if (
+      ts.isTypeReferenceNode(node) &&
+      ts.isIdentifier(node.typeName) &&
+      (node.typeName.text === "Array" ||
+        node.typeName.text === "ReadonlyArray")
+    ) {
+      return factory.updateTypeReferenceNode(
+        node,
+        node.typeName,
+        factory.createNodeArray([itemType]),
+      );
+    }
+  }
+  return factory.createArrayTypeNode(itemType);
+}
+
 // ---------------------------------------------------------------------------
 // Core type-shrinking
 // ---------------------------------------------------------------------------
@@ -137,6 +196,7 @@ function buildShrunkTypeNodeFromType(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
+  visited?: Set<ts.Type>,
 ): ts.TypeNode | undefined {
   const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
     ts.NodeBuilderFlags.UseStructuralFallback;
@@ -144,151 +204,184 @@ function buildShrunkTypeNodeFromType(
   if (normalized.length === 0) {
     return undefined;
   }
+  const hasDirectAccess = normalized.some((path) => path.length === 0);
+  const nonEmptyPaths = normalized.filter((path) => path.length > 0);
 
-  // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
-  // breaks runtime schema matching for downstream derives/lifts.
-  // However, when only array-intrinsic properties like `length` are accessed
-  // (no item-level access), shrink the item type to `unknown` to avoid
-  // fetching full item schemas unnecessarily.
-  const typeChecker = checker as ts.TypeChecker & {
-    isArrayType?: (type: ts.Type) => boolean;
-    isTupleType?: (type: ts.Type) => boolean;
-  };
-  const isArrayLike = typeChecker.isArrayType?.(type) ||
-    typeChecker.isTupleType?.(type) ||
-    !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-  if (isArrayLike) {
-    const allNonItem = normalized.every(
-      (path) =>
-        path.length === 1 && path[0] !== undefined &&
-        NON_ITEM_PROPS.has(path[0]),
+  const visitedSet = visited ?? new Set<ts.Type>();
+  if (visitedSet.has(type)) {
+    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+
+  visitedSet.add(type);
+  try {
+    const originalTypeNode = checker.typeToTypeNode(
+      type,
+      sourceFile,
+      typeToNodeFlags,
     );
-    if (allNonItem) {
-      // No item access — emit unknown[] to avoid fetching item schemas.
-      return factory.createArrayTypeNode(
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    const typeChecker = checker as ts.TypeChecker & {
+      isArrayType?: (type: ts.Type) => boolean;
+    };
+    const isArrayLike = !!typeChecker.isArrayType?.(type) ||
+      (!!originalTypeNode && !!extractArrayItemTypeNode(originalTypeNode));
+
+    // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
+    // breaks runtime schema matching for downstream derives/lifts.
+    if (isArrayLike) {
+      const allNonItem = normalized.every(
+        (path) =>
+          path.length === 1 && path[0] !== undefined &&
+          NON_ITEM_PROPS.has(path[0]),
       );
+      if (allNonItem) {
+        return rewrapArrayTypeNode(
+          originalTypeNode,
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          factory,
+        );
+      }
+
+      const itemPaths = normalized.filter(
+        (path) =>
+          path.length > 0 &&
+          !(path.length === 1 && path[0] !== undefined &&
+            NON_ITEM_PROPS.has(path[0])),
+      );
+      const itemType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+      if (itemType && itemPaths.length > 0) {
+        const shrunkItem = buildShrunkTypeNodeFromType(
+          itemType,
+          itemPaths,
+          checker,
+          sourceFile,
+          factory,
+          visitedSet,
+        );
+        if (shrunkItem) {
+          return rewrapArrayTypeNode(originalTypeNode, shrunkItem, factory);
+        }
+      }
+
+      return originalTypeNode ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
     }
-    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-  }
 
-  if (normalized.some((path) => path.length === 0)) {
-    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-  }
+    // Strip nullish constituents from union types (e.g. `T | undefined`) so the
+    // shrinking logic can resolve properties on the non-nullish part. This runs
+    // after the direct-access check above so leaf types like `string | undefined`
+    // are returned as-is when they have an empty-path access.
+    // After shrinking, re-wrap with the nullish members to preserve the union
+    // semantics (e.g. `foo?.bar` means `undefined` is still a valid value for foo).
+    if ((type.flags & ts.TypeFlags.Union) !== 0) {
+      const nonNullable = checker.getNonNullableType(type);
+      if (nonNullable !== type) {
+        const shrunkInner = buildShrunkTypeNodeFromType(
+          nonNullable,
+          hasDirectAccess ? nonEmptyPaths : paths,
+          checker,
+          sourceFile,
+          factory,
+          visitedSet,
+        );
+        if (!shrunkInner) return undefined;
+        const nullishMembers: ts.TypeNode[] = [];
+        if (type.isUnion()) {
+          for (const constituent of type.types) {
+            if (
+              constituent.flags &
+              (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
+            ) {
+              const node = checker.typeToTypeNode(
+                constituent,
+                sourceFile,
+                typeToNodeFlags,
+              );
+              if (node) nullishMembers.push(node);
+            }
+          }
+        }
+        if (nullishMembers.length === 0) return shrunkInner;
+        return factory.createUnionTypeNode([shrunkInner, ...nullishMembers]);
+      }
+    }
 
-  // Strip nullish constituents from union types (e.g. `T | undefined`) so the
-  // shrinking logic can resolve properties on the non-nullish part. This runs
-  // after the direct-access check above so leaf types like `string | undefined`
-  // are returned as-is when they have an empty-path access.
-  // After shrinking, re-wrap with the nullish members to preserve the union
-  // semantics (e.g. `foo?.bar` means `undefined` is still a valid value for foo).
-  if ((type.flags & ts.TypeFlags.Union) !== 0) {
-    const nonNullable = checker.getNonNullableType(type);
-    if (nonNullable !== type) {
-      const shrunkInner = buildShrunkTypeNodeFromType(
-        nonNullable,
-        paths,
+    if (hasDirectAccess) {
+      return originalTypeNode ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
+
+    const grouped = groupPathsByHead(normalized);
+    const properties: ts.TypeElement[] = [];
+
+    for (const [head, childPaths] of grouped) {
+      let propType: ts.Type | undefined;
+      let isOptional = false;
+
+      const prop = type.getProperty(head);
+      if (prop) {
+        const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
+          sourceFile;
+        propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
+        isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
+          (propType ? typeIncludesUndefined(propType) : false);
+      } else {
+        const numericIndex = Number.isFinite(Number(head));
+        const indexType = checker.getIndexTypeOfType(
+          type,
+          numericIndex ? ts.IndexKind.Number : ts.IndexKind.String,
+        ) ?? checker.getIndexTypeOfType(type, ts.IndexKind.String);
+        if (!indexType) continue;
+        propType = indexType;
+        isOptional = typeIncludesUndefined(indexType);
+      }
+
+      const hasDirectAccess = childPaths.some((path) => path.length === 0);
+
+      if (!propType) {
+        continue;
+      }
+
+      if (!hasDirectAccess && isAnyOrUnknownType(propType)) {
+        continue;
+      }
+
+      const shrunkChild = buildShrunkTypeNodeFromType(
+        propType,
+        childPaths,
         checker,
         sourceFile,
         factory,
+        visitedSet,
       );
-      if (!shrunkInner) return undefined;
-      // Collect the nullish members to re-append
-      const nullishMembers: ts.TypeNode[] = [];
-      if (type.isUnion()) {
-        for (const constituent of type.types) {
-          if (
-            constituent.flags &
-            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
-          ) {
-            const node = checker.typeToTypeNode(
-              constituent,
-              sourceFile,
-              typeToNodeFlags,
-            );
-            if (node) nullishMembers.push(node);
-          }
-        }
+      if (!shrunkChild && !hasDirectAccess) {
+        continue;
       }
-      if (nullishMembers.length === 0) return shrunkInner;
-      return factory.createUnionTypeNode([shrunkInner, ...nullishMembers]);
+
+      const propTypeNode = shrunkChild ??
+        checker.typeToTypeNode(propType, sourceFile, typeToNodeFlags) ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          createPropertyName(head, factory),
+          isOptional
+            ? factory.createToken(ts.SyntaxKind.QuestionToken)
+            : undefined,
+          propTypeNode,
+        ),
+      );
     }
+
+    if (properties.length === 0) {
+      return undefined;
+    }
+
+    return factory.createTypeLiteralNode(properties);
+  } finally {
+    visitedSet.delete(type);
   }
-
-  const grouped = groupPathsByHead(normalized);
-  const properties: ts.TypeElement[] = [];
-
-  for (const [head, childPaths] of grouped) {
-    let propType: ts.Type | undefined;
-    let isOptional = false;
-
-    const prop = type.getProperty(head);
-    if (prop) {
-      const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
-        sourceFile;
-      propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
-      isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-        (propType ? typeIncludesUndefined(propType) : false);
-    } else {
-      // Numeric/unknown-key accesses can be represented via index signatures
-      // rather than named properties. Use the index type when available.
-      const numericIndex = Number.isFinite(Number(head));
-      const indexType = checker.getIndexTypeOfType(
-        type,
-        numericIndex ? ts.IndexKind.Number : ts.IndexKind.String,
-      ) ?? checker.getIndexTypeOfType(type, ts.IndexKind.String);
-      if (!indexType) continue;
-      propType = indexType;
-      isOptional = typeIncludesUndefined(indexType);
-    }
-
-    const hasDirectAccess = childPaths.some((path) => path.length === 0);
-
-    if (!propType) {
-      continue;
-    }
-
-    if (!hasDirectAccess && isAnyOrUnknownType(propType)) {
-      // Preserve node-based precision for unresolved nested members.
-      continue;
-    }
-
-    const shrunkChild = buildShrunkTypeNodeFromType(
-      propType,
-      childPaths,
-      checker,
-      sourceFile,
-      factory,
-    );
-    if (!shrunkChild && !hasDirectAccess) {
-      // We failed to materialize a deeper path; let caller fall back to
-      // node-based shrinking instead of widening to the full property shape.
-      continue;
-    }
-
-    const propTypeNode = shrunkChild ??
-      checker.typeToTypeNode(propType, sourceFile, typeToNodeFlags) ??
-      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-    properties.push(
-      factory.createPropertySignature(
-        undefined,
-        createPropertyName(head, factory),
-        isOptional
-          ? factory.createToken(ts.SyntaxKind.QuestionToken)
-          : undefined,
-        propTypeNode,
-      ),
-    );
-  }
-
-  if (properties.length === 0) {
-    return undefined;
-  }
-
-  return factory.createTypeLiteralNode(properties);
 }
 
 function buildShrunkTypeNodeFromTypeNode(
@@ -301,8 +394,10 @@ function buildShrunkTypeNodeFromTypeNode(
   if (normalized.length === 0) {
     return undefined;
   }
+  const hasDirectAccess = normalized.some((path) => path.length === 0);
+  const nonEmptyPaths = normalized.filter((path) => path.length > 0);
 
-  if (normalized.some((path) => path.length === 0)) {
+  if (hasDirectAccess) {
     // For Cell-like types, an empty path typically comes from `.get()` being
     // tracked as a full read.  If there are also longer paths (e.g. from
     // `.get().length`), try shrinking the inner type using those paths.
@@ -312,7 +407,6 @@ function buildShrunkTypeNodeFromTypeNode(
       node.typeArguments &&
       node.typeArguments.length > 0
     ) {
-      const nonEmptyPaths = normalized.filter((path) => path.length > 0);
       if (nonEmptyPaths.length > 0) {
         const [inner, ...rest] = node.typeArguments;
         if (inner) {
@@ -332,7 +426,9 @@ function buildShrunkTypeNodeFromTypeNode(
         }
       }
     }
-    return node;
+    if (nonEmptyPaths.length === 0) {
+      return node;
+    }
   }
 
   // Shrink array types: when only array-intrinsic properties (e.g. `length`)
@@ -341,14 +437,8 @@ function buildShrunkTypeNodeFromTypeNode(
   // Handles `Item[]` (ArrayTypeNode), `Array<Item>` (TypeReferenceNode), and
   // type aliases that resolve to arrays (via the type checker).
   {
-    let isArray = ts.isArrayTypeNode(node) ||
-      // readonly T[]  →  TypeOperator(readonly, ArrayTypeNode)
-      (ts.isTypeOperatorNode(node) &&
-        node.operator === ts.SyntaxKind.ReadonlyKeyword &&
-        ts.isArrayTypeNode(node.type)) ||
-      (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
-        (node.typeName.text === "Array" ||
-          node.typeName.text === "ReadonlyArray"));
+    const itemTypeNode = extractArrayItemTypeNode(node);
+    let isArray = !!itemTypeNode;
     // Fall back to the checker for type aliases that resolve to arrays
     // (but not tuples or numeric-indexed objects, which have different
     // schema semantics).
@@ -366,17 +456,36 @@ function buildShrunkTypeNodeFromTypeNode(
           NON_ITEM_PROPS.has(path[0]),
       );
       if (allNonItem) {
-        return factory.createArrayTypeNode(
+        return rewrapArrayTypeNode(
+          node,
           factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          factory,
         );
       }
-      // Item access or other paths — keep full array type.
+      const itemPaths = normalized.filter(
+        (path) =>
+          path.length > 0 &&
+          !(path.length === 1 && path[0] !== undefined &&
+            NON_ITEM_PROPS.has(path[0])),
+      );
+      if (itemPaths.length > 0 && itemTypeNode) {
+        const shrunkItem = buildShrunkTypeNodeFromTypeNode(
+          itemTypeNode,
+          itemPaths,
+          factory,
+          checker,
+        );
+        if (shrunkItem && shrunkItem !== itemTypeNode) {
+          return rewrapArrayTypeNode(node, shrunkItem, factory);
+        }
+      }
       return node;
     }
   }
 
   // Shrink object type literals by filtering to only the accessed members.
   if (ts.isTypeLiteralNode(node)) {
+    if (hasDirectAccess) return node;
     return shrinkTypeLiteralMembers(node.members, normalized, factory, checker);
   }
 
@@ -406,6 +515,7 @@ function buildShrunkTypeNodeFromTypeNode(
   // TypeNodes (e.g. Date, string-literal unions) that would be lost by the
   // type-driven fallback.
   if (ts.isTypeReferenceNode(node) && checker) {
+    if (hasDirectAccess) return node;
     const members = resolveTypeReferenceMembers(node, checker);
     if (members) {
       const shrunk = shrinkTypeLiteralMembers(
@@ -439,7 +549,7 @@ function buildShrunkTypeNodeFromTypeNode(
     const shrunkMembers = nonNullish.map((member) => {
       const s = buildShrunkTypeNodeFromTypeNode(
         member,
-        normalized,
+        hasDirectAccess ? nonEmptyPaths : normalized,
         factory,
         checker,
       );
@@ -1077,6 +1187,9 @@ export function applyShrinkAndWrap(
       );
       shrunk = typeDriven ?? nodeDriven;
       if (typeDriven && nodeDriven) {
+        const baseText = printTypeNode(baseTypeNode, sourceFile);
+        const typeDrivenText = printTypeNode(typeDriven, sourceFile);
+        const nodeDrivenText = printTypeNode(nodeDriven, sourceFile);
         if (
           containsAnyOrUnknownTypeNode(typeDriven) &&
           !containsAnyOrUnknownTypeNode(nodeDriven)
@@ -1094,6 +1207,15 @@ export function applyShrinkAndWrap(
           // `unknown` (e.g. Cell<Item[]> where only .length is accessed).
           // Type-driven can't shrink through Cell wrappers since it operates
           // on ts.Type which doesn't expose the Cell's inner type.
+          shrunk = nodeDriven;
+        } else if (
+          typeDrivenText === baseText &&
+          nodeDrivenText !== baseText
+        ) {
+          // When the type-driven pass effectively preserves the authored type
+          // but the node-driven pass can see a narrower member surface
+          // (common with source-authored interfaces and optional array items),
+          // prefer the narrower node-driven result.
           shrunk = nodeDriven;
         }
       }

@@ -1108,6 +1108,131 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "derive for-of callbacks shrink array item schemas to the accessed item surface",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, pattern } from "commontools";',
+        "",
+        "interface Item {",
+        "  name: string;",
+        "  category: string;",
+        "  price: number;",
+        "}",
+        "",
+        "export default pattern<{ items: Item[] }>(({ items }) => {",
+        "  const names = derive({ items }, ({ items }) => {",
+        "    const result: string[] = [];",
+        "    for (const item of items) {",
+        "      result.push(item.name);",
+        "    }",
+        "    return result;",
+        "  });",
+        "  return { names };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `derive for-of shrink had errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const schemas = extractSchemas(result.output);
+      assertGreater(schemas.length, 0, "expected transformed schemas");
+      const inputSchema = schemas[0]!;
+
+      assertEquals(
+        /name:\s*{\s*type:\s*"string"/.test(inputSchema),
+        true,
+        `expected shrunk item schema to keep name only:\n${inputSchema}`,
+      );
+      assertEquals(
+        /category:\s*{\s*type:\s*"string"/.test(inputSchema),
+        false,
+        `did not expect full item schema to keep category:\n${inputSchema}`,
+      );
+      assertEquals(
+        /price:\s*{\s*type:\s*"number"/.test(inputSchema),
+        false,
+        `did not expect full item schema to keep price:\n${inputSchema}`,
+      );
+    },
+  );
+
+  await t.step(
+    "computed nested for-of callbacks shrink captured array/object schemas to the accessed surface",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface NotebookPiece {",
+        "  title?: string;",
+        "  notes?: NotePiece[];",
+        "  isNotebook?: boolean;",
+        "}",
+        "",
+        "interface NotePiece {",
+        "  title?: string;",
+        "  content?: string;",
+        "}",
+        "",
+        "export default pattern<{ notebooks: NotebookPiece[]; query: string }>(",
+        "  ({ notebooks, query }) => {",
+        "    const matchingNotes = computed(() => {",
+        "      const result: NotePiece[] = [];",
+        "      for (const nb of notebooks) {",
+        "        for (const note of nb?.notes ?? []) {",
+        "          if (note?.title?.includes(query)) {",
+        "            result.push(note);",
+        "          }",
+        "        }",
+        "      }",
+        "      return result;",
+        "    });",
+        "    return { matchingNotes };",
+        "  },",
+        ");",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `computed for-of shrink had errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const schemas = extractSchemas(result.output);
+      assertGreater(schemas.length, 0, "expected transformed schemas");
+      const inputSchema = schemas[0]!;
+
+      assertEquals(
+        /notes:\s*{/.test(inputSchema),
+        true,
+        `expected shrunk notebook schema to keep notes:\n${inputSchema}`,
+      );
+      assertEquals(
+        /notes:\s*{[\s\S]*items:\s*{[\s\S]*title:\s*{[\s\S]*type:\s*"string"/
+          .test(inputSchema),
+        true,
+        `expected shrunk note schema to keep title:\n${inputSchema}`,
+      );
+      assertEquals(
+        /isNotebook:\s*{\s*type:\s*"boolean"/.test(inputSchema),
+        false,
+        `did not expect notebook shrink to keep isNotebook:\n${inputSchema}`,
+      );
+      assertEquals(
+        /content:\s*{\s*type:\s*"string"/.test(inputSchema),
+        false,
+        `did not expect note shrink to keep content:\n${inputSchema}`,
+      );
+    },
+  );
 });
 
 function getShrinkErrors(
