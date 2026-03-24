@@ -940,27 +940,29 @@ export class CellBridge {
             // Skip if the raw name hasn't changed.
             if (newRawName === currentName) return;
 
-            // Collision-resolve the new name using the same logic as addPieceToSpace.
-            // Temporarily remove the current name so we don't collide with ourselves.
-            state.usedNames.delete(currentName);
+            // Collision-resolve the new name. We need to exclude currentName
+            // from the used-name check (the piece is vacating it), but we
+            // must NOT mutate usedNames until after tree.rename() succeeds —
+            // a thrown rename would otherwise leave tracking inconsistent.
             let newName = newRawName;
-            if (state.usedNames.has(newName)) {
+            if (state.usedNames.has(newName) && newName !== currentName) {
               let suffix = 2;
-              while (state.usedNames.has(`${newName}-${suffix}`)) suffix++;
+              while (
+                state.usedNames.has(`${newName}-${suffix}`) &&
+                `${newName}-${suffix}` !== currentName
+              ) suffix++;
               newName = `${newName}-${suffix}`;
             }
 
             // Skip if the resolved name is unchanged.
-            if (newName === currentName) {
-              state.usedNames.add(currentName);
-              return;
-            }
+            if (newName === currentName) return;
 
             // Look up the controller and subs before mutating maps.
             const controller = state.pieceControllers.get(currentName);
             const subs = state.pieceSubs.get(currentName);
 
-            // Rename the directory in the tree.
+            // Rename the directory in the tree — do this before any map
+            // mutations so a thrown error leaves state fully consistent.
             this.tree.rename(
               state.piecesIno,
               currentName,
@@ -968,7 +970,9 @@ export class CellBridge {
               newName,
             );
 
-            // Update all four state maps.
+            // Tree rename succeeded — now update all four state maps atomically.
+            state.usedNames.delete(currentName);
+            state.usedNames.add(newName);
             state.pieceMap.delete(currentName);
             state.pieceMap.set(newName, piece.id);
             state.pieceControllers.delete(currentName);
@@ -979,7 +983,6 @@ export class CellBridge {
             if (subs !== undefined) {
               state.pieceSubs.set(newName, subs);
             }
-            state.usedNames.add(newName);
 
             // Rebuild .index.json.
             this.updateIndexJson(state);

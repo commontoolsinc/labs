@@ -232,7 +232,7 @@ interface Output {
   backlinks: MentionablePiece[];
   createNote: Stream<{ title: string; content: string }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
-  setTitle: Stream<{ newTitle: string }>;
+  setTitle: Stream<string>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;
