@@ -1024,8 +1024,7 @@ function assertPlainData(
 ): asserts value is ModuleSafeValueV1;
 
 function freezeVerifiedPlainData<T>(value: T): T {
-  assertPlainData(value);
-  return hardenModuleSafeData(value);
+  return snapshotAndHardenModuleSafeData(value);
 }
 ```
 
@@ -1034,20 +1033,21 @@ edge cases. Runtime acceptance may still include cyclic graphs, sparse arrays,
 symbol-keyed properties, extra own data properties, and non-finite numbers so
 long as the surviving value remains inert and freezable.
 
-`assertPlainData()` MUST validate structure without triggering user-defined
-behavior. In particular, the checker must:
+`assertPlainData()` and `freezeVerifiedPlainData()` validate the value that
+survives module load, not a JSON-normalized subset of JavaScript. The checker
+or freezer MAY materialize ordinary property reads and collection iteration
+while constructing the final inert snapshot. In particular, the implementation
+must:
 
-- inspect own property descriptors before reading property values
-- reject accessor properties without invoking getters
-- reject proxies or other exotic objects that cannot be inspected and frozen
-  without invoking user-defined behavior
+- allow accessors and proxies only by evaluating them as part of the one-time
+  snapshot that escapes module load
 - reject any object whose runtime kind is neither a plain object, an array, an
   exact intrinsic `Map`, nor an exact intrinsic `Set`
 - recursively validate `Map` keys and values and `Set` values
 - reject any `StorableValue` members outside the approved v1 subset
 - allow shape-level cases such as sparse arrays, symbol keys, cycles, reserved
-  property names, non-finite numbers, and extra own data properties if they can
-  be preserved and frozen without introducing executable behavior
+  property names, non-finite numbers, and extra own data properties if the
+  surviving snapshot is inert
 
 `freezeVerifiedPlainData()` MUST preserve the accepted `Map` / `Set` contents
 while removing mutability from the surviving collection object. A plain
@@ -1055,7 +1055,9 @@ while removing mutability from the surviving collection object. A plain
 mutators remain callable. The freezer MAY preserve sparse arrays, symbol-keyed
 properties, cyclic graphs, non-finite numbers, reserved property names, and
 extra own data properties; those are semantic/storage concerns, not sandboxing
-concerns, so long as the resulting graph is inert.
+concerns, so long as the resulting graph is inert. Accessor properties may be
+materialized into data properties, and proxy-backed values may be accepted if
+their one-time snapshot satisfies the same inert-data rules.
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is
@@ -1089,43 +1091,23 @@ to the main verified-bundle entry rule.
 
 Debugging sandboxed code presents unique challenges. This section details how to maintain a good developer experience while running code in SES Compartments.
 
-### 8.1 SES Error Taming Options
+### 8.1 Current Error Strategy
 
-SES provides configurable "taming" for error objects that controls the security/debuggability trade-off:
+The live SES runtime uses `errorTaming: 'safe'` and reconstructs host-visible
+stack frames after an exception crosses the Compartment boundary. In practice:
 
-#### Safe Mode (`errorTaming: 'safe'`)
+- guest code does not receive raw unsafe stack objects from SES
+- the host uses SES's stack-string utility to materialize frames after the
+  throw
+- those frames are then source-map translated back to original authored source
 
-```javascript
-// Stack traces are sanitized
-Error: Something went wrong
-    at <anonymous>
-    at <anonymous>
-    at <anonymous>
-```
-
-- File paths, line numbers, and column numbers are hidden
-- Prevents attackers from probing system structure via errors
-- Error messages may be genericized
-- **Use case**: Production with untrusted third-party patterns
-
-#### Unsafe Mode (`errorTaming: 'unsafe'`)
-
-```javascript
-// Full stack traces preserved
-TypeError: Cannot read property 'map' of undefined
-    at myLift (/patterns/MyPattern.tsx:42:15)
-    at invokePattern (runner.ts:1254:12)
-    at SandboxedRunner.invoke (ses-runtime.ts:89:5)
-```
-
-- Real file names and line numbers
-- Original error messages intact
-- Better debugging experience
-- **Use case**: Development, or production with trusted patterns
+This preserves source locations for debugging without switching the authored
+module Compartment to globally unsafe error taming.
 
 ### 8.2 The Source Map Challenge
 
-Even with `errorTaming: 'unsafe'`, stack traces point to **compiled/transformed code**, not original source:
+Even with recovered host-visible stack frames, traces point to
+**compiled/transformed code** until source maps are applied:
 
 ```
 Original TypeScript (MyPattern.tsx)
@@ -1798,14 +1780,16 @@ fail closed.
 
 Implement a runtime helper that proves a value is a versioned, recursively inert
 subset of `StorableValue` and then hardens it. This helper is stricter than
-`harden()` alone and stricter than Endo pass-style checks. It must inspect
-descriptors without triggering getters and reject executable or authority-bearing
-structures such as accessors, proxies, exotic/custom prototypes, and all
-non-approved `StorableValue` members. It must also preserve accepted `Map` /
-`Set` contents while converting the surviving collection object to immutable
-semantics rather than relying on `harden()` alone. Shape-level cases such as
-cycles, symbol keys, sparse arrays, reserved property names, non-finite
-numbers, and extra own data properties are not sandbox failures by themselves.
+`harden()` alone and stricter than Endo pass-style checks. It must reject
+unsupported runtime kinds such as exotic/custom prototypes and non-approved
+`StorableValue` members, preserve accepted `Map` / `Set` contents while
+converting the surviving collection object to immutable semantics rather than
+relying on `harden()` alone, and ensure that the value which escapes module
+load is recursively inert. Shape-level cases such as cycles, symbol keys,
+sparse arrays, reserved property names, non-finite numbers, and extra own data
+properties are not sandbox failures by themselves. Accessors and proxies are
+acceptable if they are only observed as part of constructing the final inert
+snapshot that escapes module load.
 
 **Likely files:**
 - new `packages/runner/src/sandbox/plain-data.ts`
@@ -1901,9 +1885,10 @@ private instantiateJavaScriptNode(
 
 #### 4.2 Remove UnsafeEvalIsolate Usage
 
-Remove the legacy fallback to `harness.getInvocation()` / `UnsafeEvalIsolate`.
-The runtime may keep a harness abstraction, but once SES verification is
-enabled it must route either:
+The runtime no longer exposes a live `unsafe-eval` authored-module path.
+`harness.getInvocation()` still exists as an internal seam, but it now
+delegates to SES function-source evaluation rather than `UnsafeEvalIsolate`.
+The runtime routes either:
 
 - verified module load through the main SES module path, or
 - lazy string-backed callback rehydration through the smaller SES callback
@@ -1980,14 +1965,17 @@ describe('SES Sandbox Security', () => {
     expect(Object.isFrozen(exp.implementation)).toBe(true);
   });
 
-  it('rejects accessor-based plain-data escapes', async () => {
+  it('materializes accessor-based plain-data snapshots', async () => {
     const pattern = `
-      const BAD = freezeVerifiedPlainData({
+      export const DATA = freezeVerifiedPlainData({
         get value() { return 1; }
       });
     `;
 
-    await expect(loadPattern(pattern)).rejects.toThrow();
+    const compartment = await loadPattern(pattern);
+    const data = compartment.exports.get('DATA');
+
+    expect(data.value).toBe(1);
   });
 
   it('accepts inert non-canonical JS data shapes', async () => {
