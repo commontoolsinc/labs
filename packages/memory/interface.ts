@@ -1,6 +1,6 @@
 import type {
-  ContentId,
   DefinedReferent,
+  HashObject,
 } from "@commontools/data-model/value-hash";
 import type { JSONValue } from "@commontools/api";
 
@@ -31,7 +31,7 @@ export interface Principal<ID extends DID = DID> {
  */
 export interface Authority extends Principal {
   authorize<T extends DefinedReferent>(
-    access: Iterable<ContentId<T> | T>,
+    access: Iterable<HashObject<T> | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
 
@@ -69,7 +69,7 @@ export type UCAN<Command extends Invocation> = {
  * Proof of authorization for a given access.
  */
 export interface Proof<Access extends DefinedReferent = DefinedReferent> {
-  [link: AsString<ContentId<Access>>]: Unit;
+  [link: AsString<HashObject<Access>>]: Unit;
 }
 
 /**
@@ -408,18 +408,18 @@ export type Receipt<
 > =
   | {
     the: "task/return";
-    of: InvocationURL<ContentId<Command>>;
+    of: InvocationURL<HashObject<Command>>;
     is: Awaited<Result>;
   }
   | (Effect extends never ? never
     : {
       the: "task/effect";
-      of: InvocationURL<ContentId<Command>>;
+      of: InvocationURL<HashObject<Command>>;
       is: Effect;
     });
 
 export type Effect<Of extends NonNullable<unknown>, Command> = {
-  of: ContentId<Of>;
+  of: HashObject<Of>;
   run: Command;
   is?: undefined;
 };
@@ -428,7 +428,7 @@ export type Return<
   Of extends NonNullable<unknown>,
   Result extends DefinedReferent,
 > = {
-  of: ContentId<Of>;
+  of: HashObject<Of>;
   is: Result;
   run?: undefined;
 };
@@ -579,9 +579,9 @@ export interface Assertion<
   of: Of;
   is: Is;
   cause:
-    | ContentId<Assertion<T, Of, Is>>
-    | ContentId<Retraction<T, Of, Is>>
-    | ContentId<Unclaimed<T, Of>>;
+    | HashObject<Assertion<T, Of, Is>>
+    | HashObject<Retraction<T, Of, Is>>
+    | HashObject<Unclaimed<T, Of>>;
 }
 
 /**
@@ -596,7 +596,7 @@ export interface Retraction<
   the: T;
   of: Of;
   is?: undefined;
-  cause: ContentId<Assertion<T, Of, Is>>;
+  cause: HashObject<Assertion<T, Of, Is>>;
 }
 
 export interface Invariant<
@@ -606,7 +606,7 @@ export interface Invariant<
 > {
   the: T;
   of: Of;
-  fact: ContentId<Fact<T, Of, Is>>;
+  fact: HashObject<Fact<T, Of, Is>>;
 
   is?: undefined;
   cause?: undefined;
@@ -787,7 +787,7 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/unsubscribe",
   Space,
-  { source: InvocationURL<ContentId<Subscribe<Space>>> }
+  { source: InvocationURL<HashObject<Subscribe<Space>>> }
 >;
 
 export type SchemaQueryArgs = {
@@ -936,7 +936,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: ContentId<Fact> | null;
+  expected: HashObject<Fact> | null;
 
   /**
    * Actual memory state in the replica repository.

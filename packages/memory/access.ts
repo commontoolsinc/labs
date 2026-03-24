@@ -7,7 +7,7 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type ContentId, hashOf } from "@commontools/data-model/value-hash";
+import { type HashObject, hashOf } from "@commontools/data-model/value-hash";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
@@ -108,7 +108,7 @@ export const claim = async <Access extends Invocation>(
 /**
  * Issues verifiable authorization signed by the given signer.
  */
-export const authorize = async <Access extends ContentId[]>(
+export const authorize = async <Access extends HashObject[]>(
   access: Access,
   as: Signer,
 ): AsyncResult<Authorization<Access[number]>, Error> => {

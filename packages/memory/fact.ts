@@ -12,7 +12,7 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import {
-  ContentId,
+  HashObject,
   contentIdFromJSON,
   fromString,
   hashOf,
@@ -44,7 +44,7 @@ const frozenUnclaimedCache = new Map<
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): ContentId<Unclaimed> => {
+): HashObject<Unclaimed> => {
   const key = `${the}\0${of}`;
   let frozen = frozenUnclaimedCache.get(key);
   if (!frozen) {
@@ -67,7 +67,7 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | ContentId<Fact> | null | undefined;
+  cause?: Fact | HashObject<Fact> | null | undefined;
 }) =>
   ({
     the,
@@ -136,9 +136,9 @@ export function normalizeFact<
     of: Of;
     is: Is;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | HashObject<Assertion<T, Of, Is>>
+      | HashObject<Retraction<T, Of, Is>>
+      | HashObject<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -153,9 +153,9 @@ export function normalizeFact<
     the: T;
     of: Of;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | HashObject<Assertion<T, Of, Is>>
+      | HashObject<Retraction<T, Of, Is>>
+      | HashObject<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -171,9 +171,9 @@ export function normalizeFact<
     of: Of;
     is?: Is;
     cause?:
-      | ContentId<Assertion<T, Of, Is>>
-      | ContentId<Retraction<T, Of, Is>>
-      | ContentId<Unclaimed<T, Of>>
+      | HashObject<Assertion<T, Of, Is>>
+      | HashObject<Retraction<T, Of, Is>>
+      | HashObject<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -206,6 +206,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): ContentId<Fact> => {
+export const factReference = (fact: Fact): HashObject<Fact> => {
   return hashOf(normalizeFact(fact));
 };

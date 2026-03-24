@@ -49,8 +49,8 @@ import type {
 } from "./interface.ts";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
-  type ContentId,
   contentIdFromJSON,
+  type HashObject,
   hashOf,
 } from "@commontools/data-model/value-hash";
 import * as Socket from "./socket.ts";
@@ -157,7 +157,7 @@ class MemoryConsumerSession<
     >
     | undefined;
   invocations: Map<
-    InvocationURL<ContentId<Invocation>>,
+    InvocationURL<HashObject<Invocation>>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
@@ -388,7 +388,7 @@ class MemoryConsumerSession<
 
   private executeAuthorized<
     Ability extends string,
-    Access extends ContentId[],
+    Access extends HashObject[],
   >(
     authorizationResult: Result<Authorization<Access[number]>, Error>,
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
@@ -594,7 +594,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   source: ConsumerInvocationFor<Ability, Protocol>;
 
-  #reference: ContentId<Invocation>;
+  #reference: HashObject<Invocation>;
 
   static create<Ability extends string, Protocol extends Proto>(
     as: DID,

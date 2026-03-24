@@ -37,7 +37,7 @@ import { FabricDatum } from "@commontools/data-model/fabric-value";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
-  type ContentId,
+  type HashObject,
   fromString as causeFromString,
   hashOf,
 } from "@commontools/data-model/value-hash";
@@ -200,7 +200,7 @@ export * as Subscription from "./subscription.ts";
 export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
-type JobId = InvocationURL<ContentId<ConsumerCommandInvocation<Protocol>>>;
+type JobId = InvocationURL<HashObject<ConsumerCommandInvocation<Protocol>>>;
 export type Options = Memory.Options;
 
 export const open = async (
@@ -322,10 +322,10 @@ class MemoryProviderSession<
     | ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>
     | undefined;
 
-  channels: Map<InvocationURL<ContentId<Subscribe>>, Set<string>> = new Map();
+  channels: Map<InvocationURL<HashObject<Subscribe>>, Set<string>> = new Map();
   // Reverse index: watchAddress → Set of channel IDs that watch it.
   // Allows O(changes) commit matching instead of O(channels × changes).
-  private watchIndex: Map<string, Set<InvocationURL<ContentId<Subscribe>>>> =
+  private watchIndex: Map<string, Set<InvocationURL<HashObject<Subscribe>>>> =
     new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
@@ -492,14 +492,14 @@ class MemoryProviderSession<
       return this.perform({
         the: "task/return",
         of: `job:${hashOf(invocation)}` as InvocationURL<
-          ContentId<ConsumerCommandInvocation<MemoryProtocol>>
+          HashObject<ConsumerCommandInvocation<MemoryProtocol>>
         >,
         is: { error },
       });
     }
 
     const of = `job:${hashOf(invocation)}` as InvocationURL<
-      ContentId<ConsumerCommandInvocation<Protocol>>
+      HashObject<ConsumerCommandInvocation<Protocol>>
     >;
 
     switch (invocation.cmd) {
@@ -869,10 +869,10 @@ class MemoryProviderSession<
    */
   private findMatchingChannels(
     transaction: Transaction<MemorySpace>,
-  ): InvocationURL<ContentId<Subscribe>>[] {
+  ): InvocationURL<HashObject<Subscribe>>[] {
     if (this.watchIndex.size === 0) return [];
 
-    const matched = new Set<InvocationURL<ContentId<Subscribe>>>();
+    const matched = new Set<InvocationURL<HashObject<Subscribe>>>();
     const space = transaction.sub;
 
     // Check commit-log watchers first
@@ -890,7 +890,7 @@ class MemoryProviderSession<
 
   /** Look up the 4 watch address variants and add matching channel IDs. */
   private collectWatchMatches(
-    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    matched: Set<InvocationURL<HashObject<Subscribe>>>,
     space: string,
     of: string,
     the: string,
@@ -916,7 +916,7 @@ class MemoryProviderSession<
   }
 
   private addWatchHits(
-    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    matched: Set<InvocationURL<HashObject<Subscribe>>>,
     addr: string,
   ) {
     const ids = this.watchIndex.get(addr);
@@ -926,7 +926,7 @@ class MemoryProviderSession<
   }
 
   /** Remove a channel and clean up its entries in the watchIndex. */
-  private removeChannel(id: InvocationURL<ContentId<Subscribe>>) {
+  private removeChannel(id: InvocationURL<HashObject<Subscribe>>) {
     const addresses = this.channels.get(id);
     if (addresses) {
       for (const addr of addresses) {
@@ -1244,8 +1244,8 @@ class MemoryProviderSession<
    */
   private findCommitLogChannels(
     space: MemorySpace,
-  ): InvocationURL<ContentId<Subscribe>>[] {
-    const matched = new Set<InvocationURL<ContentId<Subscribe>>>();
+  ): InvocationURL<HashObject<Subscribe>>[] {
+    const matched = new Set<InvocationURL<HashObject<Subscribe>>>();
     this.collectWatchMatches(matched, space, space, COMMIT_LOG_TYPE);
     return [...matched];
   }

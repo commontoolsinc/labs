@@ -25,7 +25,7 @@ import {
 /**
  * Type constraint for content identifier referents — i.e., any value
  * including `null` but _not_ `undefined`.
- * Used by `ContentId<T>` and related generic types.
+ * Used by `HashObject<T>` and related generic types.
  */
 export type DefinedReferent = NonNullable<unknown> | null;
 
@@ -39,7 +39,7 @@ export type DefinedReferent = NonNullable<unknown> | null;
  * The phantom type parameter `T` is kept for compatibility with generic call
  * sites; `FabricHash` ignores it (no phantom member).
  */
-export type ContentId<
+export type HashObject<
   T extends DefinedReferent = DefinedReferent,
 > = Reference.View<T> | FabricHash;
 
@@ -82,21 +82,21 @@ export function resetCanonicalHashConfig(): void {
  * (`Reference.View` or `FabricHash`).
  */
 export function isHashObject<T extends DefinedReferent>(
-  value: unknown | ContentId<T>,
-): value is ContentId<T> {
+  value: unknown | HashObject<T>,
+): value is HashObject<T> {
   if (value instanceof FabricHash) return true;
   return Reference.is(value);
 }
 
 /** Reconstructs a content identifier from its JSON representation. */
-export function contentIdFromJSON(source: { "/": string }): ContentId {
+export function contentIdFromJSON(source: { "/": string }): HashObject {
   return canonicalHashingEnabled
     ? FabricHash.fromString(source["/"])
     : contentIdFromJSONLegacy(source);
 }
 
 /** Reconstruct a content identifier from its string representation. */
-export function fromString(source: string): ContentId {
+export function fromString(source: string): HashObject {
   return canonicalHashingEnabled
     ? FabricHash.fromString(source)
     : fromStringLegacy(source);
@@ -111,7 +111,7 @@ export function fromString(source: string): ContentId {
  */
 export function hashOf<T extends DefinedReferent>(
   source: T,
-): ContentId<T> {
+): HashObject<T> {
   return canonicalHashingEnabled
     ? modernHash(source)
     : referLegacyCached(source);

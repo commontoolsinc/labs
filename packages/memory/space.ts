@@ -9,8 +9,8 @@ import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
 import {
-  type ContentId,
   fromString,
+  type HashObject,
   hashOf,
 } from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
@@ -565,7 +565,7 @@ const recall = <Space extends MemorySpace>(
       of,
       cause: (row.cause
         ? fromString(row.cause)
-        : unclaimedRef({ the, of })) as ContentId<Assertion>,
+        : unclaimedRef({ the, of })) as HashObject<Assertion>,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with hashOf()
     };
@@ -654,7 +654,7 @@ const getFact = <Space extends MemorySpace>(
     cause:
       (row.cause
         ? fromString(row.cause)
-        : unclaimedRef(row as FactAddress)) as ContentId<Assertion>,
+        : unclaimedRef(row as FactAddress)) as HashObject<Assertion>,
     since: row.since,
   };
   if (row.is) {
@@ -842,7 +842,7 @@ const swap = <Space extends MemorySpace>(
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
   const base = unclaimedRef({ the, of }).toString();
-  const expected = cause === base ? null : (expect as ContentId<Fact>);
+  const expected = cause === base ? null : (expect as HashObject<Fact>);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
@@ -963,9 +963,9 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
-      fromString(row.fact) as ContentId<Assertion>,
+      fromString(row.fact) as HashObject<Assertion>,
     ]
-    : [0, unclaimedRef({ the, of }) as ContentId as ContentId<Assertion>];
+    : [0, unclaimedRef({ the, of }) as HashObject as HashObject<Assertion>];
 
   const commit = createCommit({
     space: of,
