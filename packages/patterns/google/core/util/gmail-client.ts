@@ -15,7 +15,7 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import { getPatternEnvironment, Writable } from "commonfabric";
+import { getPatternEnvironment, nonPrivateRandom, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 
@@ -254,7 +254,7 @@ export class GmailClient {
   async fetchBatch(messages: { id: string }[]): Promise<any[]> {
     if (messages.length === 0) return [];
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
     debugLog(this.debugMode, `Processing batch of ${messages.length} messages`);
 
     const batchBody = messages
@@ -393,7 +393,7 @@ Accept: application/json
       return results;
     }
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
     debugLog(
       this.debugMode,
       `Processing attachment batch of ${attachments.length} items`,

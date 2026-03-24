@@ -6,6 +6,7 @@ import {
   ifElse,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
   patternTool,
   Stream,
@@ -122,7 +123,7 @@ export default pattern<OmniboxFABInput>(
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result!;
     const sandboxId = Writable.of(
-      `omnibot-${Math.random().toString(36).slice(2, 10)}`,
+      `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
     );
 
     const profile = wish<string>({ query: "#profile" });

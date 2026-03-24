@@ -164,7 +164,7 @@ describe("Engine.compile()", () => {
     expect(main?.default).toBe("Open");
   });
 
-  it("rewrites Date.now() and Math.random() to explicit SES-safe helpers", async () => {
+  it("preserves explicit SES-safe snapshot helpers in CTS modules", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -172,14 +172,15 @@ describe("Engine.compile()", () => {
           name: "/main.ts",
           contents: [
             "/// <cts-enable />",
-            "const startedAt = Date.now();",
-            "const seed = Math.random();",
+            'import { nonPrivateRandom, safeDateNow } from "commontools";',
+            "const startedAt = safeDateNow();",
+            "const seed = nonPrivateRandom();",
             "export default function probe() {",
             "  return {",
             "    startedAt,",
             "    seed,",
-            "    now: Date.now(),",
-            "    random: Math.random(),",
+            "    now: safeDateNow(),",
+            "    random: nonPrivateRandom(),",
             "  };",
             "}",
           ].join("\n"),
@@ -190,6 +191,8 @@ describe("Engine.compile()", () => {
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toContain("safeDateNow");
     expect(jsScript.js).toContain("nonPrivateRandom");
+    expect(jsScript.js).not.toContain("__ctHelpers.safeDateNow");
+    expect(jsScript.js).not.toContain("__ctHelpers.nonPrivateRandom");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     const result = main?.default();

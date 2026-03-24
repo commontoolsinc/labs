@@ -31,6 +31,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -84,7 +85,10 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
     if (trigger > 0) {
       // NON-IDEMPOTENT SIDE EFFECT: Always append
       const current = nonIdempotentArray.get();
-      nonIdempotentArray.set([...current, { trigger, timestamp: Date.now() }]);
+      nonIdempotentArray.set([...current, {
+        trigger,
+        timestamp: safeDateNow(),
+      }]);
 
       // Increment counter to show how many times this ran
       nonIdempotentCounter.set(nonIdempotentCounter.get() + 1);
@@ -112,7 +116,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
       if (!(key in current)) {
         idempotentMap.set({
           ...current,
-          [key]: { trigger, timestamp: Date.now() },
+          [key]: { trigger, timestamp: safeDateNow() },
         });
       }
 

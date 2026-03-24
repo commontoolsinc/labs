@@ -32,7 +32,9 @@ import {
   ifElse,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   wish,
@@ -311,7 +313,7 @@ export interface GmailAgenticSearchOutput {
 //   const existingKeys = new Set(currentItems.map(i => `${i.field1}:${i.field2}`.toLowerCase()));
 //
 //   if (!existingKeys.has(dedupeKey)) {
-//     const id = `record-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+//     const id = `record-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
 //     const newRecord = {
 //       id,
 //       field1: input.field1,
@@ -388,7 +390,7 @@ const stopScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan stopped");
@@ -403,7 +405,7 @@ const completeScanHandler = handler<
     isScanning: Writable<Default<boolean, false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(Date.now());
+  state.lastScanAt.set(safeDateNow());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan completed");
@@ -432,7 +434,7 @@ const addDebugLogEntry = (
   entry: Omit<DebugLogEntry, "timestamp">,
 ) => {
   try {
-    logCell.push({ ...entry, timestamp: Date.now() });
+    logCell.push({ ...entry, timestamp: safeDateNow() });
   } catch (err) {
     // Log to console but don't let debug logging errors crash the agent
     console.error("[GmailAgenticSearch] Debug log error:", err);
@@ -620,7 +622,7 @@ const searchGmailHandler = handler<
           {
             query: input.query,
             emailCount: emails.length,
-            timestamp: Date.now(),
+            timestamp: safeDateNow(),
           },
         ],
         status: "analyzing",
@@ -638,7 +640,7 @@ const searchGmailHandler = handler<
         // Update existing query using .key().key().set() for atomic updates
         const existing = currentLocalQueries[existingQueryIndex];
         const itemCell = state.localQueries.key(existingQueryIndex);
-        itemCell.key("lastUsed").set(Date.now());
+        itemCell.key("lastUsed").set(safeDateNow());
         itemCell.key("useCount").set(existing.useCount + 1);
         // Auto-increase effectiveness if it found results (capped at 5)
         itemCell.key("effectiveness").set(
@@ -650,14 +652,14 @@ const searchGmailHandler = handler<
         state.lastExecutedQueryIdCell.set(existing.id);
       } else if (emails.length > 0) {
         // Only add new query if it found results
-        const newQueryId = `query-${Date.now()}-${
-          Math.random().toString(36).slice(2, 8)
+        const newQueryId = `query-${safeDateNow()}-${
+          nonPrivateRandom().toString(36).slice(2, 8)
         }`;
         const newQuery: LocalQuery = {
           id: newQueryId,
           query: input.query,
-          createdAt: Date.now(),
-          lastUsed: Date.now(),
+          createdAt: safeDateNow(),
+          lastUsed: safeDateNow(),
           useCount: 1,
           effectiveness: 1, // Start at 1 since it found results
           shareStatus: "private",
@@ -1219,7 +1221,7 @@ const GmailAgenticSearch = pattern<
       if (!a?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return Date.now() > (a.expiresAt - bufferMs);
+      return safeDateNow() > (a.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
@@ -2840,7 +2842,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                             (pendingWritable.key(idx).key(
                                               "submittedAt",
                                             ) as Writable<number | undefined>)
-                                              .set(Date.now());
+                                              .set(safeDateNow());
                                           }
 
                                           // Update local query status to submitted

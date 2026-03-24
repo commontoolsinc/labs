@@ -96,13 +96,15 @@ export default function next(value: number) {
     assertStringIncludes(main, "__ctHardenFn(next);");
   });
 
-  it("rewrites Date.now() and Math.random() to explicit helpers", async () => {
+  it("wraps explicit snapshot helpers with __ctHelpers.__ct_data", async () => {
     const source = `/// <cts-enable />
-const startedAt = Date.now();
-const seed = Math.random();
+import { nonPrivateRandom, safeDateNow } from "commontools";
+
+const startedAt = safeDateNow();
+const seed = nonPrivateRandom();
 
 export default function probe() {
-  return [Date.now(), Math.random(), startedAt, seed];
+  return [safeDateNow(), nonPrivateRandom(), startedAt, seed];
 }
 `;
 
@@ -113,15 +115,19 @@ export default function probe() {
 
     assertStringIncludes(
       main,
-      "const startedAt = __ctHelpers.__ct_data(__ctHelpers.safeDateNow());",
+      "const startedAt = __ctHelpers.__ct_data(safeDateNow());",
     );
     assertStringIncludes(
       main,
-      "const seed = __ctHelpers.__ct_data(__ctHelpers.nonPrivateRandom());",
+      "const seed = __ctHelpers.__ct_data(nonPrivateRandom());",
     );
-    assertStringIncludes(
-      main,
-      "return [__ctHelpers.safeDateNow(), __ctHelpers.nonPrivateRandom(), startedAt, seed];",
+    assert(
+      !main.includes("__ctHelpers.safeDateNow"),
+      "explicit helper calls should not be rewritten",
+    );
+    assert(
+      !main.includes("__ctHelpers.nonPrivateRandom"),
+      "explicit helper calls should not be rewritten",
     );
   });
 });

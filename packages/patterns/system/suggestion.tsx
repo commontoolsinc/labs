@@ -7,6 +7,7 @@ import {
   handler,
   ifElse,
   llmDialog,
+  nonPrivateRandom,
   pattern,
   patternTool,
   type Stream,
@@ -145,7 +146,7 @@ export default pattern<
   });
 
   const sandboxId = Writable.of(
-    `suggestion-${Math.random().toString(36).slice(2, 10)}`,
+    `suggestion-${nonPrivateRandom().toString(36).slice(2, 10)}`,
   );
 
   const systemPrompt = computed(() => {

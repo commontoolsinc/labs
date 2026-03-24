@@ -5,6 +5,7 @@ import {
   handler,
   NAME,
   navigateTo,
+  nonPrivateRandom,
   pattern,
   UI,
   Writable,
@@ -73,7 +74,7 @@ type FactoryOutput = {
 type InputEvent = { detail: { message: string } };
 
 const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
-  const piece = Counter({ value: Math.round(Math.random() * 10) });
+  const piece = Counter({ value: Math.round(nonPrivateRandom() * 10) });
   return navigateTo(piece);
 });
 

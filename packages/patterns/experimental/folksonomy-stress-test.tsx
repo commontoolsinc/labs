@@ -19,7 +19,9 @@ import {
   computed,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -374,12 +376,12 @@ function generateEvents(
 
   for (let i = 0; i < count; i++) {
     // Zipf-like: lower-index tags are much more likely
-    const tagIndex = Math.floor(Math.pow(Math.random(), 2) * tagsPerScope);
+    const tagIndex = Math.floor(Math.pow(nonPrivateRandom(), 2) * tagsPerScope);
     events.push({
       scope: scopes[i % scopeCount],
       tag: tags[tagIndex],
-      action: Math.random() > 0.1 ? "add" : "remove", // 90% adds
-      timestamp: Date.now() - (count - i) * 1000,
+      action: nonPrivateRandom() > 0.1 ? "add" : "remove", // 90% adds
+      timestamp: safeDateNow() - (count - i) * 1000,
     });
   }
   return events;
@@ -416,12 +418,12 @@ const loadScale = handler<
       loadedTags,
     },
   ) => {
-    const t0 = Date.now();
+    const t0 = safeDateNow();
     const generated = generateEvents(count, scopeCount, tagsPerScope);
-    const t1 = Date.now();
+    const t1 = safeDateNow();
 
     eventsCell.set(generated);
-    const t2 = Date.now();
+    const t2 = safeDateNow();
 
     statusText.set(
       `Loaded ${count.toLocaleString()} events (${scopeCount} scopes, ${tagsPerScope} tags/scope)`,

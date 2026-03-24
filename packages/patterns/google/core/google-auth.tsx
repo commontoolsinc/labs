@@ -6,6 +6,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -77,7 +78,7 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
  * Helper to create preview UI for picker display.
  * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
  *
- * NOTE: Date.now() is captured at call time. This is intentional — the preview
+ * NOTE: safeDateNow() is captured at call time. This is intentional — the preview
  * is a snapshot shown in the picker card, not a live-updating display. The main
  * pattern UI has its own reactive clock for real-time expiry tracking.
  */
@@ -91,7 +92,7 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -340,7 +341,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
@@ -405,7 +406,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {

@@ -26,6 +26,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -137,7 +138,7 @@ const triggerReanalyze = handler<
   unknown,
   { reanalyzeFlag: Writable<number> }
 >((_event, { reanalyzeFlag }) => {
-  reanalyzeFlag.set(Date.now());
+  reanalyzeFlag.set(safeDateNow());
 });
 
 // =============================================================================

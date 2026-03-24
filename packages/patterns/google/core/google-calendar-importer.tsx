@@ -9,6 +9,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  safeDateNow,
   str,
   UI,
   Writable,
@@ -48,14 +49,14 @@ const DEBUG_DERIVE = false;
 
 let deriveCallCount = 0;
 let perRowDeriveCount = 0;
-let lastLogTime = Date.now();
-const startTime = Date.now();
+let lastLogTime = safeDateNow();
+const startTime = safeDateNow();
 
 function logDeriveCall(name: string, isPerRow = false) {
   if (!DEBUG_DERIVE) return;
   deriveCallCount++;
   if (isPerRow) perRowDeriveCount++;
-  const now = Date.now();
+  const now = safeDateNow();
   const elapsed = now - startTime;
   // Log on milestones or every second
   if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
@@ -70,7 +71,7 @@ function logDeriveCall(name: string, isPerRow = false) {
 if (DEBUG_DERIVE) {
   try {
     setInterval(() => {
-      const elapsed = Date.now() - startTime;
+      const elapsed = safeDateNow() - startTime;
       console.log(
         `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
       );

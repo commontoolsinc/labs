@@ -36,7 +36,9 @@ import {
   derive,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -52,9 +54,9 @@ const updateNames = handler<
   { firstName: Writable<string>; lastName: Writable<string> }
 >((_event, { firstName, lastName }) => {
   const names = ["Alice", "Bob", "Charlie", "Diana"];
-  const randomName = names[Math.floor(Math.random() * names.length)];
+  const randomName = names[Math.floor(nonPrivateRandom() * names.length)];
   firstName.set(randomName);
-  lastName.set(`Smith-${Date.now() % 1000}`);
+  lastName.set(`Smith-${safeDateNow() % 1000}`);
 });
 
 export default pattern<TestInput>(({ firstName, lastName, age }) => {

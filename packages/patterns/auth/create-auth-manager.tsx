@@ -23,6 +23,7 @@ import {
   lift,
   navigateTo,
   pattern,
+  safeDateNow,
   UI,
   wish,
   Writable,
@@ -130,7 +131,7 @@ const attemptRefresh = handler<
   }
   refreshing.set(true);
   refreshFailed.set(false);
-  refreshStartedAt.set(Date.now());
+  refreshStartedAt.set(safeDateNow());
 
   refreshStream.send({});
 
@@ -331,7 +332,7 @@ export function createAuthManager<T, R>(
         scope: [".", "~"],
       });
 
-      const now = Writable.of(Date.now());
+      const now = Writable.of(safeDateNow());
       startReactiveClock(now);
 
       // Normalize the wish-provided UI into a local render-node contract so

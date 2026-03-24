@@ -64,6 +64,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -122,10 +123,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Date.now() capture is intentional — createPreviewUI produces a static
+  // safeDateNow() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -332,7 +333,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -399,7 +400,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -426,7 +427,7 @@ export default pattern<Input, Output>(
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = Date.now();
+      const now = safeDateNow();
       const expiresAt = auth?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -568,12 +569,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <cf-checkbox
+                  <ct-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </cf-checkbox>
+                  </ct-checkbox>
                 </label>
               ))}
             </div>
@@ -693,7 +694,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <cf-oauth
+          <ct-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"
@@ -2052,6 +2053,7 @@ All patterns start with:
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
+  safeDateNow, nonPrivateRandom,
 } from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
@@ -2091,19 +2093,19 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 
 ### UI Components
 
-Use \`cf-*\` custom elements:
+Use \`ct-*\` custom elements:
 
-- \`<cf-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
-- \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
-- \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
-- \`<cf-select $value={cell} items={[{label, value}]} />\` — Select dropdown
-- \`<cf-button onClick={handler}>Label</cf-button>\` — Button
-- \`<cf-card>...</cf-card>\` — Styled card container
-- \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout
-- \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
+- \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
+- \`<ct-checkbox $checked={cell}>Label</ct-checkbox>\` — Checkbox with bidirectional binding
+- \`<ct-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
+- \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
+- \`<ct-button onClick={handler}>Label</ct-button>\` — Button
+- \`<ct-card>...</ct-card>\` — Styled card container
+- \`<ct-vstack gap={N}>...</ct-vstack>\` — Vertical stack layout
+- \`<ct-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style
-\`style={{ camelCase: "value" }}\`. Custom \`cf-*\` elements use string-style
+\`style={{ camelCase: "value" }}\`. Custom \`ct-*\` elements use string-style
 \`style="kebab-case: value;"\`.
 
 ### Anti-Patterns to Avoid
@@ -2123,7 +2125,7 @@ For a provider named "acme":
 packages/patterns/acme/
   acme-importer.tsx          # Main importer pattern
   core/
-    acme-auth.tsx            # Auth pattern (thin, uses cf-oauth)
+    acme-auth.tsx            # Auth pattern (thin, uses ct-oauth)
     util/
       acme-auth-manager.tsx  # Auth manager (token lifecycle, wish-based discovery)
       acme-client.ts         # Typed API client with pagination + retry
@@ -2272,7 +2274,7 @@ file in a fenced code block with the file path as a comment on the first line.
 
 ## File 1: \`packages/patterns/${providerName}/core/${providerName}-auth.tsx\`
 
-A thin auth pattern that wraps the \`<cf-oauth>\` component. Follow the Airtable
+A thin auth pattern that wraps the \`<ct-oauth>\` component. Follow the Airtable
 auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
 from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
@@ -2288,7 +2290,7 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 - Use the \`#${
     hashTag.slice(1)
   }\` tag in the Output interface JSDoc comment for wish() discovery
-- Use \`<cf-oauth>\` with:
+- Use \`<ct-oauth>\` with:
   - \`provider="${providerName}"\`
   - \`providerLabel="${providerLabel}"\`
   - \`brandColor="${brandColor}"\`
@@ -2350,7 +2352,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - First line: \`/// <cts-enable />\`
-- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
+- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable, safeDateNow, nonPrivateRandom (only when needed)
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
   - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)

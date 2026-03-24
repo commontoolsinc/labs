@@ -373,10 +373,9 @@ A data initializer MUST NOT call:
 - arbitrary imported runtime-module functions
 
 Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
-stable SES contract. In the current implementation, CTS may rewrite those calls
-to `safeDateNow()` and `nonPrivateRandom()` as a compatibility assist, and the
-verifier treats those helpers as explicit narrow exceptions that yield plain
-data snapshots.
+stable SES contract. Pattern authors should call `safeDateNow()` and
+`nonPrivateRandom()` explicitly, and the verifier treats those helpers as
+explicit narrow exceptions that yield plain data snapshots.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commontools/memory`'s `StorableValue`:
@@ -2117,7 +2116,6 @@ const startTime = Date.now();  // Side effect at module scope
 ```typescript
 import { safeDateNow } from "commontools";
 
-// Or let CTS rewrite direct Date.now() during migration
 const getStartTime = lift(() => safeDateNow());
 ```
 

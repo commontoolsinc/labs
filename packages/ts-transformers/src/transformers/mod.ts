@@ -10,4 +10,3 @@ export { PatternContextValidationTransformer } from "./pattern-context-validatio
 export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";
-export { TimeRandomHelperRewriteTransformer } from "./time-random-helper-rewrite.ts";

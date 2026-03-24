@@ -6,6 +6,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -64,10 +65,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Date.now() capture is intentional — createPreviewUI produces a static
+  // safeDateNow() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = Date.now();
+  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -274,7 +275,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - Date.now();
+    const timeRemaining = expiresAt - safeDateNow();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -341,7 +342,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(Date.now());
+    const now = Writable.of(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -368,7 +369,7 @@ export default pattern<Input, Output>(
       const email = auth?.user?.email || "";
       const name = auth?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = Date.now();
+      const now = safeDateNow();
       const expiresAt = auth?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&

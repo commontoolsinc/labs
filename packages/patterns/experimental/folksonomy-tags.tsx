@@ -35,6 +35,7 @@ import {
   lift,
   NAME,
   pattern,
+  safeDateNow,
   type Stream,
   UI,
   type VNode,
@@ -137,7 +138,7 @@ const _postTelemetryEvent = handler<
     scope,
     tag: event.tag,
     action: event.action,
-    timestamp: Date.now(),
+    timestamp: safeDateNow(),
   };
 
   // Stream from derive() is a Cell containing the stream - call .send() directly
@@ -170,7 +171,7 @@ const onRemoveTag = handler<
         scope,
         tag: removedTag,
         action: "remove",
-        timestamp: Date.now(),
+        timestamp: safeDateNow(),
       });
     } catch (e) {
       console.warn("[folksonomy-tags] Failed to post remove event:", e);
@@ -213,7 +214,7 @@ const onTagsChanged = handler<
           scope,
           tag,
           action: "add",
-          timestamp: Date.now(),
+          timestamp: safeDateNow(),
         });
       }
     } catch (e) {

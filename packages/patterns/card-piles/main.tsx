@@ -5,6 +5,7 @@ import {
   Default,
   handler,
   NAME,
+  nonPrivateRandom,
   pattern,
   Stream,
   UI,
@@ -143,7 +144,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
   const shuffle = action(() => {
     const all = [...pile1.get(), ...pile2.get()];
     for (let i = all.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(nonPrivateRandom() * (i + 1));
       [all[i], all[j]] = [all[j], all[i]];
     }
     const mid = Math.ceil(all.length / 2);

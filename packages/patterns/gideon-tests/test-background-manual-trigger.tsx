@@ -20,7 +20,7 @@
  * FULL BACKGROUND SERVICE SETUP (for live server-side testing):
  * 1. Registration API: POST /api/integrations/bg with {pieceId, space, integration}
  *    - CLI: curl -X POST localhost:8000/api/integrations/bg -d '{"pieceId":"...","space":"did:key:...","integration":"..."}'
- *    - UI: <cf-updater> component (has CORS issue locally)
+ *    - UI: <ct-updater> component (has CORS issue locally)
  * 2. Space DID derivation: Identity.fromPassphrase("common user").derive(spaceName).did()
  * 3. System space: did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88 (common user + toolshed-system)
  * 4. Service requires ACL authorization to access system space
@@ -31,7 +31,15 @@
  * - Requires production-style ACL configuration
  * - Code review verification is sufficient for claim validation
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  safeDateNow,
+  UI,
+  Writable,
+} from "commonfabric";
 
 interface Input {
   runCount: Default<number, 0>;
@@ -43,7 +51,7 @@ const browserTrigger = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = Date.now();
+  const now = safeDateNow();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
   state.logs.push(`[BROWSER] Run #${count} at ${new Date(now).toISOString()}`);
@@ -66,7 +74,7 @@ const bgUpdateHandler = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = Date.now();
+  const now = safeDateNow();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
   state.logs.push(
@@ -131,12 +139,12 @@ export default pattern<Input>(({ runCount, logs }) => {
         </div>
 
         <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-          <cf-button onClick={browserTrigger({ runCount, logs })}>
+          <ct-button onClick={browserTrigger({ runCount, logs })}>
             Browser Trigger (click me)
-          </cf-button>
-          <cf-button onClick={clearLogs({ runCount, logs })}>
+          </ct-button>
+          <ct-button onClick={clearLogs({ runCount, logs })}>
             Clear Logs
-          </cf-button>
+          </ct-button>
         </div>
 
         <div
@@ -223,7 +231,7 @@ export default pattern<Input>(({ runCount, logs }) => {
         </div>
 
         <div style={{ marginTop: "15px" }}>
-          <cf-updater $state={runCount} integration="folk-wisdom-test" />
+          <ct-updater $state={runCount} integration="folk-wisdom-test" />
         </div>
       </div>
     ),

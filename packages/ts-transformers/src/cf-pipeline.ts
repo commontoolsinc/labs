@@ -11,7 +11,6 @@ import {
   PatternOwnedExpressionSiteLoweringTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
-  TimeRandomHelperRewriteTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";
@@ -66,7 +65,6 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
-      new TimeRandomHelperRewriteTransformer(sharedOps),
       new ModuleScopeCtDataTransformer(sharedOps),
       new ModuleScopeFunctionHardeningTransformer(sharedOps),
     );

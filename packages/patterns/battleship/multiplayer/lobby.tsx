@@ -16,6 +16,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -102,7 +103,7 @@ const joinAsPlayer = handler<
       name,
       ships,
       color: getRandomColor(playerSlot - 1),
-      joinedAt: Date.now(),
+      joinedAt: safeDateNow(),
     };
 
     // Store player data directly (no JSON serialization)
@@ -222,7 +223,7 @@ const joinPlayer1Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(0),
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 
   player1.set(playerData);
@@ -258,7 +259,7 @@ const joinPlayer2Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(1),
-    joinedAt: Date.now(),
+    joinedAt: safeDateNow(),
   };
 
   player2.set(playerData);
