@@ -308,6 +308,17 @@ export class MapSetStringToPathSelectors extends MapSet<
   }
 }
 
+/**
+ * Convenience subclass of `MapSet` specialized for `string` keys and
+ * `string` values. Uses the identity function as the hash function so
+ * that structurally-equal string values are deduped.
+ */
+export class MapSetStringToStrings extends MapSet<string, string> {
+  constructor() {
+    super((v) => v);
+  }
+}
+
 // SchemaPathSelectors are relative to the doc root, so if we want to look at
 // the value of the doc, we need to have "value" in the path.
 const DefaultSelector: SchemaPathSelector = { path: ["value"], schema: true };
