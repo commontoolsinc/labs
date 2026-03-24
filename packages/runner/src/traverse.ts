@@ -1346,8 +1346,8 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = hashSchema(flagSchema).toString() + "|" +
-    hashSchema(schema).toString();
+  const key = hashSchema(flagSchema) + "|" +
+    hashSchema(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1407,8 +1407,8 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = hashSchema(parentSchema).toString() + "|" +
-    hashSchema(linkSchema).toString();
+  const key = hashSchema(parentSchema) + "|" +
+    hashSchema(linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1962,7 +1962,7 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          hashSchema(schema).toString();
+          hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -2908,8 +2908,8 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = hashSchema(outerSchema).toString() + "|" +
-    hashSchema(innerSchema).toString();
+  const key = hashSchema(outerSchema) + "|" +
+    hashSchema(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isRecord(innerSchema)
@@ -3017,8 +3017,8 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = hashSchema(outerSchema).toString() + "||" +
-    branches.map((b) => hashSchema(b).toString()).join("|");
+  const key = hashSchema(outerSchema) + "||" +
+    branches.map((b) => "" + hashSchema(b)).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3100,7 +3100,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // Deduplicate schemas using hashSchema
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(hashSchema(s).toString(), s);
+      uniqueHashes.set("" + hashSchema(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
