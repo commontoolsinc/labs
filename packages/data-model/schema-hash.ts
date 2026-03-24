@@ -110,8 +110,8 @@ const hashToRef = new Map<string, WeakRef<JSONSchemaObj>>();
 
 // Dummy sentinel objects for boolean interns (kept alive by booleanSentinels).
 let booleanSentinels = {
-  true: Object.freeze({}) as JSONSchemaObj,
-  false: Object.freeze({}) as JSONSchemaObj,
+  true: Object.freeze({ cacheSentinel: true }) as JSONSchemaObj,
+  false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
 };
 let booleanInterns = {
   true: new SchemaAndHash(true, hashSchema(true)),
@@ -154,8 +154,8 @@ function resetInternCache(): void {
     }
   });
   booleanSentinels = {
-    true: Object.freeze({}) as JSONSchemaObj,
-    false: Object.freeze({}) as JSONSchemaObj,
+    true: Object.freeze({ cacheSentinel: true }) as JSONSchemaObj,
+    false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
   };
   booleanInterns = {
     true: new SchemaAndHash(true, hashSchema(true)),
