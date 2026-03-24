@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
-import { cfcLabelsAddress } from "../src/cfc/shared.ts";
 import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -181,6 +178,13 @@ const gmailOperatorViewInputSchema = {
   type: "object",
   properties: {
     error: true,
+  },
+} as const satisfies JSONSchema;
+
+const gmailOperatorMaterializationInputSchema = {
+  type: "object",
+  properties: {
+    operatorView: gmailOperatorViewSchema,
   },
 } as const satisfies JSONSchema;
 
@@ -626,72 +630,35 @@ describe("CFC worked example: Gmail error declassification", () => {
       },
     });
 
-    const operatorLabels = await harness.readLabels(operatorRun.outputLink);
-    const seedTx = harness.runtime.edit();
-    const sourceCell = harness.getCell(
-      "gmail-error-materialization-source",
+    const republishMaterializedOperatorView = harness.lift(
       gmailOperatorViewSchema,
-      seedTx,
-    );
-    sourceCell.set({
-      code: 403,
-      status: "PERMISSION_DENIED",
-      message: "Insufficient authentication scopes.",
-      details: [
-        {
-          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-          reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
-        },
-      ],
-      headers: {
-        "Content-Type": "application/json",
-        "X-Trace": "gmail-secret-trace",
-      },
-    } as never);
-    seedTx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: sourceCell.getAsNormalizedFullLink().id,
-        type: "application/json",
+      gmailSanitizedOperatorViewSchema,
+      (operatorView: any) => ({
+        code: operatorView?.code ?? 0,
+        status: operatorView?.status ?? "",
+        message: operatorView?.message ?? "",
       }),
-      operatorLabels as never,
     );
-    await prepareCfcCommitIfNeeded(seedTx, { enforceBoundary: false });
-    const seeded = await seedTx.commit();
-    expect(seeded.error).toBeUndefined();
-    const materializationSource = sourceCell.getAsNormalizedFullLink();
+    const materializationPattern = harness.pattern<{ operatorView: any }>(
+      ({ operatorView }: { operatorView: any }) =>
+        republishMaterializedOperatorView(operatorView),
+      gmailOperatorMaterializationInputSchema,
+      gmailSanitizedOperatorViewSchema,
+    );
 
-    const tx = harness.runtime.edit();
-    try {
-      const operatorCell = harness.getCellFromLink(
-        materializationSource,
-        gmailOperatorViewSchema,
-        tx,
-      );
-      const materialized = operatorCell.withTx(tx).get() as {
-        code?: number;
-        status?: string;
-        message?: string;
-      };
+    const materializationRun = await harness.runPattern({
+      id: "gmail-error-materialized-sanitized-view",
+      pattern: materializationPattern,
+      inputs: { operatorView: operatorRun.outputCell },
+      outputSchema: gmailSanitizedOperatorViewSchema,
+    });
+    expect(await materializationRun.result.pull()).toBeUndefined();
 
-      harness.getCell(
-        "gmail-error-materialized-sanitized-view",
-        gmailSanitizedOperatorViewSchema,
-        tx,
-      ).set({
-        code: materialized.code ?? 0,
-        status: materialized.status ?? "",
-        message: materialized.message ?? "",
-      });
-
-      const error = await assertRejects(() => prepareCfcCommitIfNeeded(tx));
-      expect(error).toMatchObject({
-        name: "CfcOutputTransitionViolationError",
-        requirement: "confidentialityMonotonicity",
-      });
-    } finally {
-      const abortResult = tx.abort("gmail-error-materialization-complete");
-      expect(abortResult.error).toBeUndefined();
-    }
+    await harness.restart();
+    const persistedMaterializedView = harness.getCell(
+      "gmail-error-materialized-sanitized-view",
+      gmailSanitizedOperatorViewSchema,
+    );
+    expect(await persistedMaterializedView.pull()).toBeUndefined();
   });
 });
