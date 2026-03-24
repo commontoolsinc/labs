@@ -28,6 +28,7 @@ tools/ralph/logs/
 tools/ralph/smoketest/
 .playwright-mcp/
 .worktrees
+tmp/
 
 # Claude Code blackboard
 .claude/blackboard.db
