@@ -1,7 +1,12 @@
 import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
-import { detectCallKind } from "../../../ast/mod.ts";
+import {
+  classifyArrayMethodResultSinkCall,
+  classifyReactiveContext,
+  detectCallKind,
+  findEnclosingCallbackContext,
+} from "../../../ast/mod.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
@@ -23,6 +28,53 @@ function getConditionalHelperArgLabel(
   }
 
   return index === 0 ? "unless condition" : "unless value";
+}
+
+function shouldFilterNestedLocalsForCallWrapper(
+  expression: ts.CallExpression,
+  context: Parameters<Emitter>[0]["context"],
+  analyze: Parameters<Emitter>[0]["analyze"],
+): boolean {
+  const reactiveContext = classifyReactiveContext(
+    expression,
+    context.checker,
+    context,
+  );
+  if (
+    reactiveContext.kind !== "pattern" ||
+    (reactiveContext.owner !== "pattern" && reactiveContext.owner !== "render")
+  ) {
+    return false;
+  }
+
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (
+    callbackContext &&
+    (context.isArrayMethodCallback(callbackContext.callback) ||
+      detectCallKind(callbackContext.call, context.checker)?.kind ===
+        "array-method")
+  ) {
+    return false;
+  }
+
+  const sinkCall = classifyArrayMethodResultSinkCall(
+    expression,
+    context.checker,
+  );
+  if (!sinkCall || sinkCall.sink !== "join") {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  const receiverAnalysis = analyze(callee.expression);
+  return receiverAnalysis.containsOpaqueRef;
 }
 
 export const emitCallExpression: Emitter = ({
@@ -134,6 +186,11 @@ export const emitCallExpression: Emitter = ({
     relevantDataFlows,
     context,
     {
+      filterNestedFunctionLocalCaptures: shouldFilterNestedLocalsForCallWrapper(
+        expression,
+        context,
+        analyze,
+      ),
       preferDeriveWrapper: preferDeriveWrappers,
     },
   );

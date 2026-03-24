@@ -82,6 +82,12 @@ export interface ArrayMethodAccessKind {
   readonly lowered: boolean;
 }
 
+export interface ArrayMethodResultSinkCallInfo {
+  readonly sink: "join";
+  readonly receiverFamily: ArrayMethodFamilyName;
+  readonly receiverLowered: boolean;
+}
+
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "when"; symbol?: ts.Symbol }
@@ -236,6 +242,61 @@ export function classifyArrayMethodCall(
   call: ts.CallExpression,
 ): ArrayMethodAccessKind | undefined {
   return classifyArrayMethodAccess(call.expression);
+}
+
+export function classifyArrayMethodResultSinkCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): ArrayMethodResultSinkCallInfo | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  const receiver = stripWrappers(target.expression);
+  if (!ts.isCallExpression(receiver)) {
+    return undefined;
+  }
+
+  const receiverMethod = classifyArrayMethodCall(receiver);
+  if (!receiverMethod) {
+    return undefined;
+  }
+
+  if (checker) {
+    const symbol = checker.getSymbolAtLocation(target.name);
+    const resolved = symbol
+      ? (resolveAlias(symbol, checker, new Set()) ?? symbol)
+      : undefined;
+
+    for (const declaration of resolved?.getDeclarations() ?? []) {
+      if (!hasIdentifierName(declaration)) continue;
+
+      const owner = findOwnerName(declaration);
+      if (!owner) continue;
+
+      if (
+        ARRAY_OWNER_NAMES.has(owner) &&
+        declaration.name.text === "join"
+      ) {
+        return {
+          sink: "join",
+          receiverFamily: receiverMethod.family,
+          receiverLowered: receiverMethod.lowered,
+        };
+      }
+    }
+  }
+
+  if (target.name.text === "join") {
+    return {
+      sink: "join",
+      receiverFamily: receiverMethod.family,
+      receiverLowered: receiverMethod.lowered,
+    };
+  }
+
+  return undefined;
 }
 
 function isReactiveOriginKind(callKind: CallKind): boolean {

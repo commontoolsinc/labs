@@ -1,9 +1,11 @@
 export {
   type ArrayMethodAccessKind,
   type ArrayMethodFamilyName,
+  type ArrayMethodResultSinkCallInfo,
   type CallKind,
   classifyArrayMethodAccess,
   classifyArrayMethodCall,
+  classifyArrayMethodResultSinkCall,
   classifyWildcardTraversalCall,
   detectCallKind,
   detectDirectBuilderCall,

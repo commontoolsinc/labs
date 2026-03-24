@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   classifyArrayMethodCall,
+  classifyArrayMethodResultSinkCall,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -256,6 +257,31 @@ function isSharedPostClosureCallRoot(
   return ts.isCallExpression(expression) &&
     classifyCallExpressionRoot(expression, context, analyze) ===
       "free-function";
+}
+
+function isSharedJsxArrayMethodResultSinkCallRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  owner: ExpressionSitePolicyInfo["reactiveContext"]["owner"],
+): boolean {
+  if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  if (owner !== "pattern" && owner !== "render") {
+    return false;
+  }
+
+  const sinkCall = classifyArrayMethodResultSinkCall(
+    expression,
+    context.checker,
+  );
+  if (!sinkCall) {
+    return false;
+  }
+  return sinkCall.sink === "join" &&
+    containsReactiveArrayMethodSubexpression(expression, context, analyze);
 }
 
 function isDirectDeriveCall(
@@ -618,6 +644,17 @@ export function classifyJsxExpressionSiteRoute(
       classifyOpaquePathTerminalCall(expression)
     ) {
       return { route: "skip", reason: "not-shared-jsx-root-kind" };
+    }
+
+    if (
+      isSharedJsxArrayMethodResultSinkCallRoot(
+        expression,
+        context,
+        analyze,
+        siteInfo.reactiveContext.owner,
+      )
+    ) {
+      return { route: "shared-post-closure" };
     }
 
     return containsReactiveArrayMethodSubexpression(

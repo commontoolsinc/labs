@@ -309,17 +309,21 @@ export function createReactiveWrapperForExpression(
   options: {
     allowDirectExpressionWrap?: boolean;
     preferDeriveWrapper?: boolean;
+    filterNestedFunctionLocalCaptures?: boolean;
   } = {},
 ): ts.Expression | undefined {
-  const wrapperDataFlows = ts.isCallExpression(expression)
-    ? [...relevantDataFlows]
-    : relevantDataFlows.filter((dataFlow) =>
+  const shouldFilterNestedLocals = options.filterNestedFunctionLocalCaptures ??
+    !ts.isCallExpression(expression);
+
+  const wrapperDataFlows = shouldFilterNestedLocals
+    ? relevantDataFlows.filter((dataFlow) =>
       !isNestedFunctionLocalCapture(
         dataFlow.expression,
         expression,
         context.checker,
       )
-    );
+    )
+    : [...relevantDataFlows];
 
   if (wrapperDataFlows.length === 0) return undefined;
 
