@@ -115,7 +115,7 @@ describe("verifyProgramModuleScope()", () => {
             "  }",
             "  return years;",
             "}",
-            'const scopeMap = { gmail: "gmail.readonly" } as const;',
+            'const scopeMap = __ct_data({ gmail: "gmail.readonly" } as const);',
             "const years = __ct_data(buildYears());",
             "const scopes = __ct_data(",
             "  Object.fromEntries(",
@@ -129,5 +129,82 @@ describe("verifyProgramModuleScope()", () => {
     };
 
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
+  it("rejects nested closure captures of unsafe top-level state", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "const state = { count: 0 };",
+            "export default lift(() => {",
+            "  const local = 1;",
+            "  return () => state.count + local;",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).toThrow(
+      "Callback captures top-level data binding 'state'",
+    );
+  });
+
+  it("accepts verified __ct_data() accessors with inert bodies", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { __ct_data } from "commontools";',
+            "const data = __ct_data({",
+            "  get value() {",
+            "    return 1;",
+            "  },",
+            "  set value(_next) {",
+            '    "use strict";',
+            "  },",
+            "});",
+            "export default data;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
+  it("rejects __ct_data() accessors that capture unsafe top-level state", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { __ct_data } from "commontools";',
+            'import { state } from "./helper.ts";',
+            "const data = __ct_data({",
+            "  get value() {",
+            "    return state;",
+            "  },",
+            "});",
+            "export default data;",
+          ].join("\n"),
+        },
+        {
+          name: "/helper.ts",
+          contents: "export const state = 1;",
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).toThrow(
+      "__ct_data() cannot capture unsafe top-level identifier 'state'",
+    );
   });
 });

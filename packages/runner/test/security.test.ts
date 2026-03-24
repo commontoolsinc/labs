@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { evaluateFunctionSourceInSES } from "../src/sandbox/mod.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -121,5 +122,19 @@ describe("SES security regressions", () => {
       hasFetch: true,
       hasConsoleHook: false,
     });
+  });
+
+  it("preserves non-Error throws during SES source evaluation", () => {
+    let thrown: unknown;
+    try {
+      evaluateFunctionSourceInSES(
+        `(() => { throw "boom"; })()`,
+        { lockdown: true },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe("boom");
   });
 });

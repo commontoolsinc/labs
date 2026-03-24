@@ -500,13 +500,6 @@ function classifyTopLevelExpression(
     };
   }
 
-  if (isTopLevelDataExpression(expr, env)) {
-    return {
-      kind: "data",
-      captureSafe: isCaptureSafeDataExpression(expr, env),
-    };
-  }
-
   if (
     ts.isPropertyAccessExpression(expr) ||
     ts.isElementAccessExpression(expr)
@@ -521,6 +514,13 @@ function classifyTopLevelExpression(
       env,
       pendingCaptureChecks,
     );
+  }
+
+  if (isTopLevelDataExpression(expr, env)) {
+    return {
+      kind: "data",
+      captureSafe: isCaptureSafeDataExpression(expr, env),
+    };
   }
 
   if (ts.isIdentifier(expr)) {
@@ -940,16 +940,40 @@ function collectFreeIdentifiers(fn: ts.FunctionLikeDeclaration): Set<string> {
     }
   };
   const isBound = (name: string) => scopes.some((scope) => scope.has(name));
+  const visitNestedFunction = (node: ts.FunctionLikeDeclaration) => {
+    const nestedBindings = [
+      ...(node.name && ts.isIdentifier(node.name) ? [node.name.text] : []),
+      ...node.parameters.flatMap((parameter: ts.ParameterDeclaration) =>
+        bindingNames(parameter.name)
+      ),
+    ];
+    withScope(nestedBindings, () => {
+      for (const parameter of node.parameters) {
+        if (parameter.initializer) {
+          visit(parameter.initializer);
+        }
+      }
+      if (node.body) {
+        visit(node.body);
+      }
+    });
+  };
 
   const visit = (node: ts.Node): void => {
     if (ts.isTypeNode(node)) return;
 
-    if (ts.isFunctionLike(node) && node !== fn) {
+    if (isTrackedFunctionLike(node) && node !== fn) {
+      visitNestedFunction(node);
       return;
     }
 
     if (ts.isBlock(node) || ts.isModuleBlock(node)) {
-      withScope([], () => ts.forEachChild(node, visit));
+      const hoistedBindings = node.statements.flatMap((statement) =>
+        ts.isFunctionDeclaration(statement) && statement.name
+          ? [statement.name.text]
+          : []
+      );
+      withScope(hoistedBindings, () => ts.forEachChild(node, visit));
       return;
     }
 
@@ -1000,6 +1024,18 @@ function bindingNames(name: ts.BindingName): string[] {
   return name.elements.flatMap((element: ts.ArrayBindingElement) =>
     ts.isOmittedExpression(element) ? [] : bindingNames(element.name)
   );
+}
+
+function isTrackedFunctionLike(
+  node: ts.Node,
+): node is ts.FunctionLikeDeclaration {
+  return ts.isFunctionDeclaration(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node);
 }
 
 function isReferenceIdentifier(node: ts.Identifier): boolean {
@@ -1197,6 +1233,7 @@ function verifyCtDataExpression(
         ts.isGetAccessorDeclaration(property) ||
         ts.isSetAccessorDeclaration(property)
       ) {
+        verifyCtDataFunctionLike(property, sourceFile, env, locals, new Set());
         continue;
       }
       throw verificationError(
@@ -1240,6 +1277,11 @@ function verifyCtDataExpression(
   }
 
   if (ts.isPrefixUnaryExpression(expr)) {
+    verifyCtDataExpression(expr.operand, sourceFile, env, locals);
+    return;
+  }
+
+  if (ts.isPostfixUnaryExpression(expr)) {
     verifyCtDataExpression(expr.operand, sourceFile, env, locals);
     return;
   }

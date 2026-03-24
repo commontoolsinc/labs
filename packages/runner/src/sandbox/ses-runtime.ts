@@ -204,9 +204,10 @@ export function evaluateFunctionSourceInSES(
   try {
     return compartment.evaluate(`(${source})`);
   } catch (e: unknown) {
-    const error = e as Error;
-    materializeHostVisibleStack(error);
-    throw error;
+    if (e instanceof Error) {
+      materializeHostVisibleStack(e);
+    }
+    throw e;
   }
 }
 

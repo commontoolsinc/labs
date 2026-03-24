@@ -117,4 +117,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
+
+  it("rejects nested closure captures of unsafe top-level state in compiled callbacks", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const state = { count: 0 };
+    exports.default = (0, commontools_1.lift)(() => {
+      const local = 1;
+      return () => state.count + local;
+    });
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Callback captures top-level data binding 'state'",
+    );
+  });
 });

@@ -1,4 +1,4 @@
-import { FrozenMap, FrozenSet } from "@commontools/memory/frozen-builtins";
+import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
 
 export interface ModuleSafeRecord {
   readonly [key: string]: ModuleSafeValue;

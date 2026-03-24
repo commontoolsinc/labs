@@ -172,7 +172,9 @@ function isTsLibHelperDeclaration(statement: ts.Statement): boolean {
 
   const declaration = statement.declarationList.declarations[0];
   return ts.isIdentifier(declaration.name) &&
-    ALLOWED_TSLIB_HELPERS.has(declaration.name.text);
+    ALLOWED_TSLIB_HELPERS.has(declaration.name.text) &&
+    !!declaration.initializer &&
+    isSafeTsLibHelperInitializer(declaration.initializer);
 }
 
 function isDefineCallStatement(statement: ts.Statement): boolean {
@@ -184,7 +186,7 @@ function isDefineCallStatement(statement: ts.Statement): boolean {
 
 function isTailStatement(statement: ts.Statement): boolean {
   if (ts.isReturnStatement(statement)) {
-    return true;
+    return isTailReturnStatement(statement);
   }
 
   if (
@@ -194,23 +196,11 @@ function isTailStatement(statement: ts.Statement): boolean {
   }
 
   if (ts.isVariableStatement(statement)) {
-    const declaration = statement.declarationList.declarations[0];
-    return !!declaration && ts.isIdentifier(declaration.name) &&
-      (declaration.name.text === "main" ||
-        declaration.name.text === "exportMap");
+    return statement.declarationList.declarations.length === 1 &&
+      isTailVariableDeclaration(statement.declarationList.declarations[0]);
   }
 
-  if (
-    ts.isBinaryExpression(statement.expression) &&
-    statement.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    ts.isElementAccessExpression(statement.expression.left) &&
-    ts.isIdentifier(statement.expression.left.expression) &&
-    statement.expression.left.expression.text === "exportMap"
-  ) {
-    return true;
-  }
-
-  return false;
+  return isTailExportMapAssignment(statement.expression);
 }
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -219,4 +209,211 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
     expr = expr.expression;
   }
   return expr;
+}
+
+function isSafeTsLibHelperInitializer(expression: ts.Expression): boolean {
+  const expr = unwrapExpression(expression);
+
+  if (
+    ts.isIdentifier(expr) ||
+    ts.isFunctionExpression(expr) ||
+    ts.isArrowFunction(expr) ||
+    ts.isStringLiteral(expr) ||
+    ts.isNumericLiteral(expr)
+  ) {
+    return true;
+  }
+
+  if (
+    expr.kind === ts.SyntaxKind.ThisKeyword ||
+    expr.kind === ts.SyntaxKind.NullKeyword ||
+    expr.kind === ts.SyntaxKind.TrueKeyword ||
+    expr.kind === ts.SyntaxKind.FalseKeyword
+  ) {
+    return true;
+  }
+
+  if (ts.isPropertyAccessExpression(expr)) {
+    return isSafeTsLibHelperInitializer(expr.expression);
+  }
+
+  if (ts.isElementAccessExpression(expr)) {
+    return isSafeTsLibHelperInitializer(expr.expression) &&
+      !!expr.argumentExpression &&
+      isSafeTsLibHelperInitializer(expr.argumentExpression);
+  }
+
+  if (ts.isBinaryExpression(expr)) {
+    return (
+      expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+      expr.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      expr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    ) &&
+      isSafeTsLibHelperInitializer(expr.left) &&
+      isSafeTsLibHelperInitializer(expr.right);
+  }
+
+  if (ts.isConditionalExpression(expr)) {
+    return isSafeTsLibHelperInitializer(expr.condition) &&
+      isSafeTsLibHelperInitializer(expr.whenTrue) &&
+      isSafeTsLibHelperInitializer(expr.whenFalse);
+  }
+
+  if (ts.isCallExpression(expr)) {
+    return isSafeTsLibHelperInitializerIife(expr);
+  }
+
+  if (ts.isPrefixUnaryExpression(expr)) {
+    return (
+      expr.operator === ts.SyntaxKind.ExclamationToken ||
+      expr.operator === ts.SyntaxKind.PlusToken ||
+      expr.operator === ts.SyntaxKind.MinusToken ||
+      expr.operator === ts.SyntaxKind.TildeToken
+    ) &&
+      isSafeTsLibHelperInitializer(expr.operand);
+  }
+
+  return false;
+}
+
+function isSafeTsLibHelperInitializerIife(
+  expression: ts.CallExpression,
+): boolean {
+  if (expression.arguments.length !== 0) {
+    return false;
+  }
+
+  const callee = unwrapExpression(expression.expression);
+  if (
+    !ts.isFunctionExpression(callee) &&
+    !ts.isArrowFunction(callee)
+  ) {
+    return false;
+  }
+
+  return isSafeTsLibHelperIifeBody(callee.body);
+}
+
+function isSafeTsLibHelperIifeBody(body: ts.ConciseBody): boolean {
+  if (!ts.isBlock(body)) {
+    return isSafeTsLibHelperInitializer(body);
+  }
+
+  let sawReturn = false;
+  for (let i = 0; i < body.statements.length; i++) {
+    const statement = body.statements[i];
+    if (ts.isVariableStatement(statement)) {
+      if (!isSafeTsLibHelperIifeVariableStatement(statement)) {
+        return false;
+      }
+      continue;
+    }
+
+    if (ts.isReturnStatement(statement)) {
+      if (i !== body.statements.length - 1 || !statement.expression) {
+        return false;
+      }
+      if (!isSafeTsLibHelperInitializer(statement.expression)) {
+        return false;
+      }
+      sawReturn = true;
+      continue;
+    }
+
+    return false;
+  }
+
+  return sawReturn;
+}
+
+function isSafeTsLibHelperIifeVariableStatement(
+  statement: ts.VariableStatement,
+): boolean {
+  return statement.declarationList.declarations.every((declaration) =>
+    ts.isIdentifier(declaration.name) &&
+    !!declaration.initializer &&
+    isSafeTsLibHelperInitializer(declaration.initializer)
+  );
+}
+
+function isTailVariableDeclaration(
+  declaration: ts.VariableDeclaration,
+): boolean {
+  if (!ts.isIdentifier(declaration.name) || !declaration.initializer) {
+    return false;
+  }
+
+  if (declaration.name.text === "main") {
+    return isRequireCall(declaration.initializer);
+  }
+
+  if (declaration.name.text === "exportMap") {
+    return isObjectCreateNullCall(declaration.initializer);
+  }
+
+  return false;
+}
+
+function isTailReturnStatement(statement: ts.ReturnStatement): boolean {
+  if (!statement.expression) return false;
+
+  const value = unwrapExpression(statement.expression);
+  if (isRequireCall(value)) {
+    return true;
+  }
+
+  if (!ts.isObjectLiteralExpression(value) || value.properties.length !== 2) {
+    return false;
+  }
+
+  const names = new Set<string>();
+  for (const property of value.properties) {
+    if (
+      !ts.isShorthandPropertyAssignment(property) ||
+      (property.name.text !== "main" && property.name.text !== "exportMap")
+    ) {
+      return false;
+    }
+    names.add(property.name.text);
+  }
+
+  return names.has("main") && names.has("exportMap");
+}
+
+function isTailExportMapAssignment(expression: ts.Expression): boolean {
+  if (
+    !ts.isBinaryExpression(expression) ||
+    expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !ts.isElementAccessExpression(expression.left) ||
+    !ts.isIdentifier(expression.left.expression) ||
+    expression.left.expression.text !== "exportMap" ||
+    !expression.left.argumentExpression
+  ) {
+    return false;
+  }
+
+  const key = unwrapExpression(expression.left.argumentExpression);
+  return (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) &&
+    isRequireCall(expression.right);
+}
+
+function isRequireCall(expression: ts.Expression): boolean {
+  const expr = unwrapExpression(expression);
+  return ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === "require" &&
+    expr.arguments.length === 1 &&
+    (ts.isStringLiteral(expr.arguments[0]) ||
+      ts.isNoSubstitutionTemplateLiteral(expr.arguments[0]));
+}
+
+function isObjectCreateNullCall(expression: ts.Expression): boolean {
+  const expr = unwrapExpression(expression);
+  return ts.isCallExpression(expr) &&
+    ts.isPropertyAccessExpression(expr.expression) &&
+    ts.isIdentifier(expr.expression.expression) &&
+    expr.expression.expression.text === "Object" &&
+    expr.expression.name.text === "create" &&
+    expr.arguments.length === 1 &&
+    expr.arguments[0].kind === ts.SyntaxKind.NullKeyword;
 }
