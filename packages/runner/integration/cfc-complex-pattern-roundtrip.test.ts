@@ -9,9 +9,16 @@ import {
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
+import { normalizeConfidentialityLabel } from "../src/cfc/label-algebra.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
-import type { URI } from "../src/storage/interface.ts";
+import {
+  normalizePersistedLabels,
+  type PersistedPathLabels,
+  resolveObservationLabel,
+} from "../src/cfc/shared.ts";
+import type { ReadObservationOp } from "../src/cfc/read-observation.ts";
+import type { Labels, URI } from "../src/storage/interface.ts";
 import { env } from "@commontools/integration";
 
 const API_URL = new URL(env.API_URL);
@@ -101,6 +108,8 @@ const trustedNumberReadSchema = {
     maxConfidentiality: ["secret"],
   },
 } as const satisfies JSONSchema;
+
+const secretConfidentiality = normalizeConfidentialityLabel(["secret"]);
 
 interface TestContext {
   runtime: Runtime;
@@ -322,6 +331,54 @@ async function syncDocumentPath(
   }
 }
 
+async function readPersistedSchemaHash(
+  ctx: TestContext,
+  space: MemorySpace,
+  id: string,
+): Promise<string> {
+  await syncDocumentPath(ctx, space, id, ["cfc", "schemaHash"]);
+  const persistedHashValue = await readDocumentPath(
+    ctx,
+    space,
+    id,
+    ["cfc", "schemaHash"],
+  );
+  if (
+    typeof persistedHashValue !== "string" ||
+    persistedHashValue.length === 0
+  ) {
+    throw new Error(`missing persisted cfc.schemaHash on ${id}`);
+  }
+  return persistedHashValue;
+}
+
+async function readPersistedLabels(
+  ctx: TestContext,
+  space: MemorySpace,
+  id: string,
+): Promise<PersistedPathLabels> {
+  await syncDocumentPath(ctx, space, id, ["cfc", "labels"]);
+  return normalizePersistedLabels(
+    await readDocumentPath(ctx, space, id, ["cfc", "labels"]),
+  );
+}
+
+function expectResolvedObservationLabel(
+  labelsByPath: PersistedPathLabels,
+  path: string,
+  op: ReadObservationOp,
+  expected: Labels | undefined,
+): void {
+  assertEquals(resolveObservationLabel(labelsByPath, path, op), expected);
+}
+
+function secretIntegrityLabel(integrity: string): Labels {
+  return {
+    ...(secretConfidentiality ? { classification: secretConfidentiality } : {}),
+    integrity: [integrity],
+  };
+}
+
 function resetReplicaCacheIfSupported(
   ctx: TestContext,
   space: MemorySpace,
@@ -438,50 +495,54 @@ async function runTwoPatternScenario(args: {
   assertEquals(Number(restoredProducer.count ?? 0), 3);
 
   const metadataId = producerResultEntityId;
-  await syncDocumentPath(
+  const persistedHash = await readPersistedSchemaHash(
     phase2,
     space,
     metadataId,
-    ["cfc", "schemaHash"],
   );
-  const persistedHashValue = await readDocumentPath(
-    phase2,
-    space,
-    metadataId,
-    ["cfc", "schemaHash"],
-  );
-  if (
-    typeof persistedHashValue !== "string" ||
-    persistedHashValue.length === 0
-  ) {
-    throw new Error(
-      "missing persisted cfc.schemaHash on producer result entity",
-    );
-  }
-  const persistedHash = persistedHashValue;
 
   assertEquals(
     persistedHash,
     await computeCfcSchemaHash(producerOutputSchema),
   );
 
-  await syncDocumentPath(
-    phase2,
-    space,
-    metadataId,
-    ["cfc", "labels"],
+  const persistedLabels = await readPersistedLabels(phase2, space, metadataId);
+  const expectedProducerValueLabel = secretIntegrityLabel(
+    args.producerIntegrity,
   );
-  const persistedLabels = await readDocumentPath(
-    phase2,
-    space,
-    metadataId,
-    ["cfc", "labels"],
-  ) as Record<string, { classification?: string[]; integrity?: string[] }>;
-  assertExists(persistedLabels["/items"]);
-  assertEquals(persistedLabels["/items"].classification, ["secret"]);
-  assertEquals(
-    persistedLabels["/count"].integrity,
-    [args.producerIntegrity],
+  assertExists(persistedLabels["/items"]?.label);
+  assertExists(persistedLabels["/count"]?.label);
+  assertEquals(persistedLabels["/items"]?.label, expectedProducerValueLabel);
+  assertEquals(persistedLabels["/count"]?.label, expectedProducerValueLabel);
+  expectResolvedObservationLabel(
+    persistedLabels,
+    "/items",
+    "value",
+    expectedProducerValueLabel,
+  );
+  expectResolvedObservationLabel(
+    persistedLabels,
+    "/items",
+    "shape",
+    expectedProducerValueLabel,
+  );
+  expectResolvedObservationLabel(
+    persistedLabels,
+    "/items",
+    "count",
+    expectedProducerValueLabel,
+  );
+  expectResolvedObservationLabel(
+    persistedLabels,
+    "/count",
+    "value",
+    expectedProducerValueLabel,
+  );
+  expectResolvedObservationLabel(
+    persistedLabels,
+    "/tick",
+    "value",
+    undefined,
   );
 
   await syncDocumentPath(
@@ -544,10 +605,14 @@ async function runTwoPatternScenario(args: {
   }
 
   if (args.expectedConsumerFailure) {
-    assertEquals(
-      (prepareError as { name?: string } | undefined)?.name,
-      args.expectedConsumerFailure,
-    );
+    const inputError = prepareError as {
+      name?: string;
+      requirement?: string;
+      path?: string;
+    } | undefined;
+    assertEquals(inputError?.name, args.expectedConsumerFailure);
+    assertEquals(inputError?.requirement, "requiredIntegrity");
+    assertEquals(inputError?.path, "/count");
     await disposeContext(phase2);
     return;
   }
@@ -563,8 +628,59 @@ async function runTwoPatternScenario(args: {
 
   await consumerRun.pull();
   await waitForIdle(phase2.runtime);
+  const consumerPulse = consumerResultCell.key("pulse") as {
+    send: (event: { step: number }) => void;
+  };
+  consumerPulse.send({ step: 4 });
+  await waitForIdle(phase2.runtime);
+  await consumerRun.pull();
+
+  const consumerMetadataId = consumerResultCell.getAsNormalizedFullLink().id;
+  await phase2.runtime.storageManager.synced();
 
   await disposeContext(phase2);
+
+  const phase3 = createContext(identity);
+  resetReplicaCacheIfSupported(phase3, space);
+  await syncDocumentPath(
+    phase3,
+    space,
+    consumerMetadataId,
+    ["value"],
+  );
+  const restoredConsumerValue = await readDocumentPath(
+    phase3,
+    space,
+    consumerMetadataId,
+    ["value"],
+  ) as {
+    shifted?: {
+      $alias?: {
+        cell?: { "/": string };
+        path?: string[];
+      };
+    };
+    observedCount?: {
+      $alias?: {
+        cell?: { "/": string };
+        path?: string[];
+      };
+    };
+  };
+  assertExists(restoredConsumerValue.shifted?.$alias);
+  assertExists(restoredConsumerValue.shifted.$alias.cell?.["/"]);
+  assertEquals(
+    restoredConsumerValue.shifted.$alias.path,
+    ["argument", "upstream", "items"],
+  );
+  assertExists(restoredConsumerValue.observedCount?.$alias);
+  assertExists(restoredConsumerValue.observedCount.$alias.cell?.["/"]);
+  assertEquals(
+    restoredConsumerValue.observedCount.$alias.path,
+    ["argument", "upstream", "count"],
+  );
+
+  await disposeContext(phase3);
 }
 
 async function runWithTimeout(fn: () => Promise<void>): Promise<void> {
