@@ -700,15 +700,9 @@ export default pattern((state) => {
                         properties: {
                             name: {
                                 type: "string"
-                            },
-                            age: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
                             }
                         },
-                        required: ["name", "age", "active"]
+                        required: ["name"]
                     }
                 },
                 required: ["element"]

@@ -38,50 +38,14 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             items: {
-                anyOf: [{
-                        type: "array",
-                        items: {
-                            type: "unknown"
-                        }
-                    }, {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }],
+                type: "array",
+                items: {
+                    type: "unknown"
+                },
                 asCell: true
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    label: {
-                        type: "string"
-                    },
-                    tags: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Tag"
-                        }
-                    },
-                    selectedIndex: {
-                        type: "number"
-                    }
-                },
-                required: ["label", "tags", "selectedIndex"]
-            },
-            Tag: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    }
-                },
-                required: ["name"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);

@@ -309,6 +309,76 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "pattern instance nested array index access preserves nested array item schemas",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "type SquareState = 'empty' | 'miss' | 'hit';",
+        "",
+        "interface PlayerState {",
+        "  shots: SquareState[][];",
+        "}",
+        "",
+        "interface GameState {",
+        "  player1: PlayerState;",
+        "  player2: PlayerState;",
+        "  currentTurn: number;",
+        "}",
+        "",
+        "interface Output {",
+        "  game: GameState;",
+        "}",
+        "",
+        "const BattleshipLike = pattern<{}, Output>(() => ({",
+        "  game: {",
+        "    player1: { shots: [['empty']] },",
+        "    player2: { shots: [['miss']] },",
+        "    currentTurn: 1,",
+        "  },",
+        "}));",
+        "",
+        "export default pattern(() => {",
+        "  const game = BattleshipLike({});",
+        "  const miss = computed(() => game.game.player2.shots[0][0] === 'miss');",
+        "  const hit = computed(() => game.game.player1.shots[0][0] === 'hit');",
+        "  return { miss, hit };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'shots: { type: "array", items: { type: "array", items: { $ref: "#/$defs/SquareState" } } }',
+        ) ||
+          normalized.includes(
+            'shots: { type: "array", items: { type: "array", items: { enum: ["empty", "miss", "hit"] } } }',
+          ) ||
+          normalized.includes(
+            'shots: { type: "array", items: { type: "array", items: { type: "string" } } }',
+          ),
+        true,
+        `expected nested shots access to preserve array-of-array shape:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes('"0": { type: "string" }'),
+        false,
+        `did not expect nested array index access to collapse inner arrays into object members:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
     "errors when parameter is 'unknown' but code accesses properties",
     async () => {
       const source = [
@@ -1051,6 +1121,131 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "computed .get().length on Default array cells emits a single array-cell schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, Default, NAME, pattern, Writable } from "commontools";',
+        "",
+        "interface Item {",
+        "  name: string;",
+        "}",
+        "",
+        "interface Input {",
+        "  items: Writable<Default<Item[], []>>;",
+        "}",
+        "",
+        "interface Output {",
+        "  [NAME]: string;",
+        "  label: string;",
+        "  itemCount: number;",
+        "}",
+        "",
+        "export default pattern<Input, Output>(({ items }) => {",
+        "  const label = computed(() => `Total: ${items.get().length}`);",
+        "  const itemCount = computed(() => items.get().length);",
+        '  return { [NAME]: "Default Length Repro", label, itemCount };',
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'const label = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { type: "unknown" }, asCell: true } }, required: ["items"] }',
+        ),
+        true,
+        `expected label .get().length capture to use a single array-cell schema:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'const itemCount = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { type: "unknown" }, asCell: true } }, required: ["items"] }',
+        ),
+        true,
+        `expected itemCount .get().length capture to use a single array-cell schema:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'const label = __ctHelpers.derive({ type: "object", properties: { items: { anyOf:',
+        ),
+        false,
+        `did not expect label .get().length capture to keep Default-array anyOf wrappers:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'const itemCount = __ctHelpers.derive({ type: "object", properties: { items: { anyOf:',
+        ),
+        false,
+        `did not expect itemCount .get().length capture to keep Default-array anyOf wrappers:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "computed .get().length plus .set() on Default array cells still shrinks to a single array-cell schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, Default, pattern, Writable } from "commontools";',
+        "",
+        "interface Department {",
+        "  name: string;",
+        "}",
+        "",
+        "interface Input {",
+        "  departments: Writable<Default<Department[], []>>;",
+        "}",
+        "",
+        "export default pattern<Input>(({ departments }) => {",
+        "  const init = computed(() => {",
+        "    const current = departments.get();",
+        "    if (current.length === 0) {",
+        "      queueMicrotask(() => {",
+        '        departments.set([{ name: "Bakery" }]);',
+        "      });",
+        "    }",
+        "    return true;",
+        "  });",
+        "  return { init };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'const init = __ctHelpers.derive({ type: "object", properties: { departments: { type: "array", items: { type: "unknown" }, asCell: true } }, required: ["departments"] }',
+        ),
+        true,
+        `expected .get().length + .set() capture to use a single array-cell schema:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'const init = __ctHelpers.derive({ type: "object", properties: { departments: { anyOf:',
+        ),
+        false,
+        `did not expect .get().length + .set() capture to keep Default-array anyOf wrappers:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
     "computed preserves cell wrappers when filtering items from a captured cell array",
     async () => {
       const source = [
@@ -1097,6 +1292,127 @@ Deno.test("Schema Shrink Validation", async (t) => {
         normalized.includes('items: { type: "unknown" }'),
         false,
         `did not expect filteredItems input schema to collapse items to unknown:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "computed .get().filter(...).length keeps array cell shape and predicate fields",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, Default, pattern, Writable } from "commontools";',
+        "",
+        "interface Item {",
+        "  done: boolean;",
+        "  title: string;",
+        "}",
+        "",
+        "interface Input {",
+        "  items: Writable<Default<Item[], []>>;",
+        "}",
+        "",
+        "export default pattern<Input>(({ items }) => {",
+        "  const doneCount = computed(() =>",
+        "    items.get().filter((item) => item.done).length",
+        "  );",
+        "  return { doneCount };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'const doneCount = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] }, "default": [], asCell: true } }, required: ["items"] }',
+        ) ||
+          normalized.includes(
+            'const doneCount = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] }, asCell: true } }, required: ["items"] }',
+          ) ||
+          normalized.includes(
+            'const doneCount = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { $ref: "#/$defs/Item" }, "default": [], asCell: true } }, required: ["items"] }',
+          ) ||
+          normalized.includes(
+            'const doneCount = __ctHelpers.derive({ type: "object", properties: { items: { type: "array", items: { $ref: "#/$defs/Item" }, asCell: true } }, required: ["items"] }',
+          ),
+        true,
+        `expected filter(...).length to keep items as an array cell with done retained:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'items: { type: "object", properties: { length: { type: "number" } }, required: ["length"], asCell: true }',
+        ),
+        false,
+        `did not expect filter(...).length to collapse items to a cell-backed length object:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "computed preserves array cell item fields through filter-slice-map preview chains",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, Default, pattern, Writable } from "commontools";',
+        "",
+        "interface Item {",
+        "  done: boolean;",
+        "  title: string;",
+        "  aisle: string;",
+        "}",
+        "",
+        "interface Input {",
+        "  items: Writable<Default<Item[], []>>;",
+        "}",
+        "",
+        "export default pattern<Input>(({ items }) => {",
+        "  const preview = computed(() => {",
+        "    const remaining = items.get().filter((item) => !item.done);",
+        "    const names = remaining.slice(0, 10).map((item) => item.title);",
+        "    return names.join(\", \") +",
+        "      (remaining.length > 10 ? ` (+${remaining.length - 10} more)` : \"\");",
+        "  });",
+        "  return { preview };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'items: { type: "array", items: { type: "object", properties: { done: { type: "boolean" }, title: { type: "string" } }, required: ["done", "title"] }, "default": [], asCell: true }',
+        ) ||
+          normalized.includes(
+            'items: { type: "array", items: { type: "object", properties: { title: { type: "string" }, done: { type: "boolean" } }, required: ["title", "done"] }, "default": [], asCell: true }',
+          ) ||
+          normalized.includes(
+            'items: { type: "array", items: { $ref: "#/$defs/Item" }, "default": [], asCell: true }',
+          ),
+        true,
+        `expected preview chain to keep array item done/title fields:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'items: { type: "object", properties: { length: { type: "number" } }, required: ["length"], asCell: true }',
+        ),
+        false,
+        `did not expect preview chain to collapse items to a cell-backed length object:\n${result.output}`,
       );
     },
   );
@@ -2584,6 +2900,88 @@ Deno.test("Schema Shrink Validation", async (t) => {
         normalized.includes("config: true"),
         false,
         `did not expect derive capture wrapper to collapse to true:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "computed preserves record value item schemas through aliased fallback record access",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface Suggestion {",
+        "  tag: string;",
+        "  count: number;",
+        "  source: string;",
+        "}",
+        "",
+        "interface AggregatorOutput {",
+        "  suggestions: Record<string, Suggestion[]>;",
+        "}",
+        "",
+        "const Aggregator = pattern<Record<string, never>, AggregatorOutput>(() => ({",
+        "  suggestions: {} as Record<string, Suggestion[]>,",
+        "}));",
+        "",
+        "export default pattern(() => {",
+        "  const aggregator = Aggregator({});",
+        "  const ok = computed(() => {",
+        "    const suggs = (aggregator.suggestions || {}) as Record<string, Suggestion[]>;",
+        '    const alpha = (suggs["scope-a"] || []).find((item) => item.tag === "alpha");',
+        "    return alpha?.count === 5;",
+        "  });",
+        "  return { ok };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const schemas = extractSchemas(result.output);
+      assertGreater(schemas.length, 0, "expected transformed schemas");
+      const inputSchema = schemas.find((schema) =>
+        schema.includes("aggregator:") && schema.includes("suggestions:")
+      );
+      assertEquals(
+        !!inputSchema,
+        true,
+        `expected a computed input schema for aggregator.suggestions:\n${result.output}`,
+      );
+      const normalizedInputSchema = inputSchema!.replace(/\s+/g, " ");
+
+      assertEquals(
+        normalizedInputSchema.includes(
+          'suggestions: { type: "object", properties: { "scope-a": { type: "array", items: { type: "object", properties: { tag: { type: "string" }',
+        ),
+        true,
+        `expected aliased fallback record access to preserve scope-a item tag schema:\n${inputSchema}`,
+      );
+      assertEquals(
+        normalizedInputSchema.includes(
+          'count: { type: "number" }',
+        ),
+        true,
+        `expected aliased fallback record access to preserve scope-a item count schema:\n${inputSchema}`,
+      );
+      assertEquals(
+        normalizedInputSchema.includes(
+          'suggestions: { type: "object", properties: {} }',
+        ),
+        false,
+        `did not expect record shrink to erase additionalProperties/item schemas:\n${inputSchema}`,
+      );
+      assertEquals(
+        normalizedInputSchema.includes(
+          'source: { type: "string" }',
+        ),
+        false,
+        `did not expect unused suggestion.source to be retained:\n${inputSchema}`,
       );
     },
   );

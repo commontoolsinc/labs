@@ -79,31 +79,20 @@ export default pattern((__ct_pattern_input) => {
                             tasks: {
                                 type: "array",
                                 items: {
-                                    $ref: "#/$defs/Item"
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["name"]
                                 }
-                            },
-                            view: {
-                                type: "string"
                             }
                         },
-                        required: ["tasks", "view"]
+                        required: ["tasks"]
                     }
                 },
-                required: ["result"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "done"]
-                    }
-                }
+                required: ["result"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "array",
                 items: {

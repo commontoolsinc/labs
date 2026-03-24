@@ -29,17 +29,6 @@ export default pattern(() => {
         type: "object",
         properties: {
             point: {
-                $ref: "#/$defs/Point",
-                asCell: true
-            },
-            multiplier: {
-                type: "number",
-                asCell: true
-            }
-        },
-        required: ["point", "multiplier"],
-        $defs: {
-            Point: {
                 type: "object",
                 properties: {
                     x: {
@@ -49,9 +38,15 @@ export default pattern(() => {
                         type: "number"
                     }
                 },
-                required: ["x", "y"]
+                required: ["x", "y"],
+                asCell: true
+            },
+            multiplier: {
+                type: "number",
+                asCell: true
             }
-        }
+        },
+        required: ["point", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {

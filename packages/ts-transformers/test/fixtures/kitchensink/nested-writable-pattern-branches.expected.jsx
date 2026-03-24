@@ -434,14 +434,11 @@ export default pattern((state) => {
                                     section: {
                                         type: "object",
                                         properties: {
-                                            id: {
-                                                type: "string"
-                                            },
                                             title: {
                                                 type: "string"
                                             }
                                         },
-                                        required: ["id", "title"]
+                                        required: ["title"]
                                     },
                                     sectionIndex: {
                                         type: "number"
@@ -584,14 +581,11 @@ export default pattern((state) => {
                             state: {
                                 type: "object",
                                 properties: {
-                                    globalAccent: {
-                                        type: "string"
-                                    },
                                     showCompleted: {
                                         type: "boolean"
                                     }
                                 },
-                                required: ["globalAccent", "showCompleted"]
+                                required: ["showCompleted"]
                             },
                             selectedTaskId: {
                                 type: ["string", "undefined"],

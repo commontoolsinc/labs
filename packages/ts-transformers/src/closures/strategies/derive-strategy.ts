@@ -13,7 +13,7 @@ import {
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
-import { setParentPointers } from "../../ast/utils.ts";
+import { isDefaultAliasSymbol, setParentPointers } from "../../ast/utils.ts";
 import { analyzeFunctionCapabilities } from "../../policy/mod.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
@@ -103,6 +103,107 @@ function unwrapCellLikeType(
   return getTypeReferenceArgument(type) ?? type;
 }
 
+function synthesizeTupleTypeNode(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  visited: Set<ts.Type>,
+): ts.TypeNode | undefined {
+  const typeChecker = checker as ts.TypeChecker & {
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  if (!typeChecker.isTupleType?.(type)) {
+    return undefined;
+  }
+
+  const tupleArgs = checker.getTypeArguments(type as ts.TypeReference);
+  const elements = tupleArgs.map((elementType) =>
+    synthesizePrintableTypeNode(
+      elementType,
+      checker,
+      sourceFile,
+      visited,
+    ) ?? checker.typeToTypeNode(
+      elementType,
+      sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    )
+  );
+
+  if (elements.some((element) => !element)) {
+    return undefined;
+  }
+
+  return ts.factory.createTupleTypeNode(elements as ts.TypeNode[]);
+}
+
+function synthesizePrintableTypeNode(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  visited: Set<ts.Type>,
+): ts.TypeNode | undefined {
+  if (visited.has(type)) {
+    return undefined;
+  }
+
+  visited.add(type);
+  try {
+    const direct = checker.typeToTypeNode(
+      type,
+      sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const alias = type as ts.Type & {
+      aliasSymbol?: ts.Symbol;
+      aliasTypeArguments?: readonly ts.Type[];
+    };
+    const aliasTypeArguments = alias.aliasTypeArguments;
+    if (
+      isDefaultAliasSymbol(alias.aliasSymbol) &&
+      aliasTypeArguments &&
+      aliasTypeArguments.length >= 2
+    ) {
+      const [valueType, defaultType] = aliasTypeArguments;
+      if (!valueType || !defaultType) {
+        return undefined;
+      }
+
+      const valueTypeNode = synthesizePrintableTypeNode(
+        valueType,
+        checker,
+        sourceFile,
+        visited,
+      );
+      const defaultTypeNode = synthesizePrintableTypeNode(
+        defaultType,
+        checker,
+        sourceFile,
+        visited,
+      ) ?? synthesizeTupleTypeNode(defaultType, checker, sourceFile, visited);
+
+      if (!valueTypeNode || !defaultTypeNode) {
+        return undefined;
+      }
+
+      return ts.factory.createTypeReferenceNode(
+        ts.factory.createIdentifier("Default"),
+        [valueTypeNode, defaultTypeNode],
+      );
+    }
+
+    return synthesizeTupleTypeNode(type, checker, sourceFile, visited);
+  } finally {
+    visited.delete(type);
+  }
+}
+
 function recoverPrintableTypeNode(
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -120,11 +221,11 @@ function recoverPrintableTypeNode(
   while (current && !seen.has(current)) {
     seen.add(current);
 
-    const typeNode = checker.typeToTypeNode(
+    const typeNode = synthesizePrintableTypeNode(
       current,
+      checker,
       sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
+      new Set<ts.Type>(),
     );
     if (typeNode) {
       return { type: current, typeNode };
@@ -204,6 +305,36 @@ function sliceCapabilitySummaryForRoot(
     passthrough: false,
     wildcard: false,
     defaults,
+  };
+}
+
+function stripLeadingCellAccessorPath(
+  path: readonly string[],
+): readonly string[] {
+  const [head, ...tail] = path;
+  if (head === "get" || head === "set" || head === "update") {
+    return tail;
+  }
+  return path;
+}
+
+function normalizeCellLikeSummaryForInnerValue(
+  paramSummary: CapabilityParamSummary,
+): CapabilityParamSummary {
+  const readPaths = paramSummary.readPaths.map(stripLeadingCellAccessorPath);
+  const writePaths = paramSummary.writePaths.map(stripLeadingCellAccessorPath);
+  const hasSpecificPath = [...readPaths, ...writePaths].some((path) =>
+    path.length > 0
+  );
+
+  return {
+    ...paramSummary,
+    readPaths: hasSpecificPath
+      ? readPaths.filter((path) => path.length > 0)
+      : readPaths,
+    writePaths: hasSpecificPath
+      ? writePaths.filter((path) => path.length > 0)
+      : writePaths,
   };
 }
 
@@ -306,9 +437,12 @@ function tryShrinkMergedInputTypeLiteralMembers(
         ? (unwrapCellLikeType(rootType, checker) ?? rootType)
         : rootType
     );
+    const effectiveSummary = shouldWrap
+      ? normalizeCellLikeSummaryForInnerValue(propertySummary)
+      : propertySummary;
 
     const nextType = applyShrinkAndWrap(
-      propertySummary,
+      effectiveSummary,
       baseTypeNode,
       baseType,
       shouldWrap,

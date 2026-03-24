@@ -71,35 +71,14 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             people: {
-                anyOf: [{
-                        type: "array",
-                        items: {
-                            type: "unknown"
-                        }
-                    }, {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Person"
-                        }
-                    }],
+                type: "array",
+                items: {
+                    type: "unknown"
+                },
                 asCell: true
             }
         },
-        required: ["people"],
-        $defs: {
-            Person: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    rank: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "rank"]
-            }
-        }
+        required: ["people"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
