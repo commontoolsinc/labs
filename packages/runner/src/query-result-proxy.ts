@@ -80,6 +80,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 type InitialObservationMode = "auto" | "skip";
+type ShapeOnlyPropertyCheck = "hasOwnProperty" | "propertyIsEnumerable";
 
 function observeLink(
   tx: IExtendedStorageTransaction | undefined,
@@ -144,6 +145,12 @@ function normalizeArrayAtIndex(
   }
 
   return normalizedIndex;
+}
+
+function isShapeOnlyPropertyCheck(
+  prop: PropertyKey,
+): prop is ShapeOnlyPropertyCheck {
+  return prop === "hasOwnProperty" || prop === "propertyIsEnumerable";
 }
 
 export function createQueryResultProxy<T>(
@@ -304,6 +311,20 @@ export function createQueryResultProxy<T>(
         const returnValue = Reflect.get(current, prop, current);
         if (typeof returnValue === "function") return returnValue.bind(current);
         else return returnValue;
+      }
+
+      if (isShapeOnlyPropertyCheck(prop)) {
+        const method = Object.prototype[prop];
+        return (key: string | symbol) => {
+          const readTx = (tx?.status().status === "ready")
+            ? tx
+            : runtime.edit();
+          const current = readValueInternally(readTx, link);
+          if (typeof key === "string") {
+            observeLink(tx, { ...link, path: [...link.path, key] }, "shape");
+          }
+          return method.call(current, key);
+        };
       }
 
       if (

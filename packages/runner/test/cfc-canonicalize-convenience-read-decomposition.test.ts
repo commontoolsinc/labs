@@ -118,4 +118,54 @@ describe("CFC convenience read decomposition", () => {
       ),
     ).toBe(false);
   });
+
+  it("decomposes hasOwnProperty into a child shape observation", () => {
+    const cell = runtime.getCell<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      space,
+      "cfc-convenience-has-own-property",
+      undefined,
+      tx,
+    );
+    cell.set({
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        details: { reason: "scope-insufficient" },
+      },
+    });
+
+    const proxy = createQueryResultProxy<
+      { error: { code: number; status: string; details: { reason: string } } }
+    >(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    const hasOwn = Reflect.get(
+      proxy.error as object,
+      "hasOwnProperty",
+    ) as (key: string) => boolean;
+    expect(hasOwn("code")).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error" && read.op === "enumerate"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/error/code" && read.op === "value"),
+    ).toBe(false);
+  });
 });
