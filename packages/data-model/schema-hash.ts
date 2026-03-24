@@ -87,36 +87,56 @@ export function hashSchemaItem(item: FabricValue): FabricHash {
  * All intern state is flag-dependent (legacy vs modern produce different
  * hashes) and is wiped whenever the flag changes via `resetInternCache()`.
  *
- * - `schemaToSah`: object schema → SchemaAndHash (WeakMap so schemas can be
- *   GC'd when no longer referenced elsewhere).
- * - `hashToSah`: hash string → { sah, ref } where `ref` is a WeakRef to the
- *   frozen schema (dead entries cleaned up by `schemaFinalizer` and on lookup).
- *   Entries with no `ref` are permanent (boolean interns).
- * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSah`
- *   entries when interned schemas are garbage-collected.
- * - `booleanInterns`: prefab SchemaAndHash for `true` and `false` (boolean
- *   schemas are primitives — seeded into `hashToSah` as permanent entries).
+ * The cache is split into two maps to avoid strong retention:
+ *
+ * - `schemaToSah`: `WeakMap<JSONSchemaObj, SchemaAndHash>` — forward lookup.
+ *   When the schema object is GC'd, the entry (and with it the
+ *   `SchemaAndHash`) becomes unreachable.
+ * - `hashToRef`: `Map<string, WeakRef<JSONSchemaObj>>` — reverse lookup
+ *   (hash string → schema). Stores only a `WeakRef`, so the schema is not
+ *   retained. Dead refs are cleaned up by `schemaFinalizer` and on lookup.
+ *
+ * To look up by hash: deref the `WeakRef` from `hashToRef`, then look up
+ * the `SchemaAndHash` from `schemaToSah`. This ensures `SchemaAndHash` is
+ * only reachable while the schema object itself is alive.
+ *
+ * - `booleanInterns`: prefab `SchemaAndHash` for `true` and `false` (boolean
+ *   schemas are primitives and can't be WeakMap/WeakRef targets, so they
+ *   are stored separately and seeded into `hashToRef` with a dummy strong-
+ *   referenced sentinel object).
  */
 let schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
-const hashToSah = new Map<
-  string,
-  { sah: SchemaAndHash; ref?: WeakRef<JSONSchemaObj> }
->();
+const hashToRef = new Map<string, WeakRef<JSONSchemaObj>>();
+
+// Dummy sentinel objects for boolean interns (kept alive by booleanSentinels).
+let booleanSentinels = {
+  true: Object.freeze({}) as JSONSchemaObj,
+  false: Object.freeze({}) as JSONSchemaObj,
+};
 let booleanInterns = {
   true: new SchemaAndHash(true, hashSchema(true)),
   false: new SchemaAndHash(false, hashSchema(false)),
 };
 let schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
-  const entry = hashToSah.get(hashStr);
-  if (entry && entry.ref && entry.ref.deref() === undefined) {
-    hashToSah.delete(hashStr);
+  const ref = hashToRef.get(hashStr);
+  if (ref && ref.deref() === undefined) {
+    hashToRef.delete(hashStr);
   }
 });
 
-/** Seeds `hashToSah` with the current boolean interns. */
+/** Seeds the caches with the current boolean interns. */
 function seedBooleanInterns(): void {
-  hashToSah.set(booleanInterns.true.hashString, { sah: booleanInterns.true });
-  hashToSah.set(booleanInterns.false.hashString, { sah: booleanInterns.false });
+  // Use sentinel objects as WeakMap keys and WeakRef targets for booleans.
+  schemaToSah.set(booleanSentinels.true, booleanInterns.true);
+  schemaToSah.set(booleanSentinels.false, booleanInterns.false);
+  hashToRef.set(
+    booleanInterns.true.hashString,
+    new WeakRef(booleanSentinels.true),
+  );
+  hashToRef.set(
+    booleanInterns.false.hashString,
+    new WeakRef(booleanSentinels.false),
+  );
 }
 
 /**
@@ -126,13 +146,17 @@ function seedBooleanInterns(): void {
  */
 function resetInternCache(): void {
   schemaToSah = new WeakMap();
-  hashToSah.clear();
+  hashToRef.clear();
   schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
-    const entry = hashToSah.get(hashStr);
-    if (entry && entry.ref && entry.ref.deref() === undefined) {
-      hashToSah.delete(hashStr);
+    const ref = hashToRef.get(hashStr);
+    if (ref && ref.deref() === undefined) {
+      hashToRef.delete(hashStr);
     }
   });
+  booleanSentinels = {
+    true: Object.freeze({}) as JSONSchemaObj,
+    false: Object.freeze({}) as JSONSchemaObj,
+  };
   booleanInterns = {
     true: new SchemaAndHash(true, hashSchema(true)),
     false: new SchemaAndHash(false, hashSchema(false)),
@@ -173,23 +197,24 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   const hash = hashSchema(frozen);
   const hashStr = hash.toString();
 
-  const entry = hashToSah.get(hashStr);
-  if (entry) {
-    // Permanent entries (booleans) have no ref; WeakRef entries need a liveness check.
-    if (!entry.ref || entry.ref.deref() !== undefined) {
-      // Still alive — reuse the cached SchemaAndHash.
-      schemaToSah.set(schema, entry.sah);
-      return entry.sah;
+  const ref = hashToRef.get(hashStr);
+  if (ref) {
+    const existing = ref.deref();
+    if (existing !== undefined) {
+      // Still alive — look up its SchemaAndHash and cache for the caller's key.
+      const existingSah = schemaToSah.get(existing)!;
+      schemaToSah.set(schema, existingSah);
+      return existingSah;
     }
     // WeakRef is dead — clean up.
-    hashToSah.delete(hashStr);
+    hashToRef.delete(hashStr);
   }
 
   // Not interned yet — create, cache, and return.
   const sah = new SchemaAndHash(frozen, hash);
   schemaToSah.set(frozen, sah);
   schemaToSah.set(schema, sah);
-  hashToSah.set(hashStr, { sah, ref: new WeakRef(frozen) });
+  hashToRef.set(hashStr, new WeakRef(frozen));
   schemaFinalizer.register(frozen, hashStr);
 
   return sah;
@@ -205,17 +230,15 @@ export function findInternedSchema(
 ): SchemaAndHash | undefined {
   const hashStr = typeof hash === "string" ? hash : hash.toString();
 
-  const entry = hashToSah.get(hashStr);
-  if (!entry) return undefined;
+  const ref = hashToRef.get(hashStr);
+  if (!ref) return undefined;
 
-  // Permanent entries (booleans) have no ref.
-  if (!entry.ref) return entry.sah;
-
-  if (entry.ref.deref() === undefined) {
+  const schema = ref.deref();
+  if (schema === undefined) {
     // WeakRef is dead — clean up.
-    hashToSah.delete(hashStr);
+    hashToRef.delete(hashStr);
     return undefined;
   }
 
-  return entry.sah;
+  return schemaToSah.get(schema);
 }
