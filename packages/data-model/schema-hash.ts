@@ -80,26 +80,33 @@ export function hashSchemaItem(item: FabricValue): FabricHash {
 /**
  * Bidirectional intern cache for schemas.
  *
- * - `schemaToHash`: object schema → hash string (WeakMap so schemas can be
+ * - `schemaToSah`: object schema → SchemaAndHash (WeakMap so schemas can be
  *   GC'd when no longer referenced elsewhere).
- * - `hashToSchema`: hash string → WeakRef to interned schema (dead entries
- *   cleaned up by `schemaFinalizer` and on lookup).
- * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSchema`
+ * - `hashToSah`: hash string → { sah, ref } where `ref` is a WeakRef to the
+ *   frozen schema (dead entries cleaned up by `schemaFinalizer` and on lookup).
+ * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSah`
  *   entries when interned schemas are garbage-collected.
- * - `booleanInterns`: cached SchemaAndHash for `true` and `false` (boolean
- *   schemas are primitives and can't be WeakMap/WeakRef targets).
+ * - `booleanInterns`: prefab SchemaAndHash for `true` and `false` (boolean
+ *   schemas are primitives — initialized at module load).
  */
-const schemaToHash = new WeakMap<JSONSchemaObj, string>();
-const hashToSchema = new Map<string, WeakRef<JSONSchemaObj>>();
-const booleanInterns: { true?: SchemaAndHash; false?: SchemaAndHash } = {};
+const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
+const hashToSah = new Map<
+  string,
+  { sah: SchemaAndHash; ref: WeakRef<JSONSchemaObj> }
+>();
 
-/** Removes dead `hashToSchema` entries when interned schemas are GC'd. */
+const booleanInterns = {
+  true: new SchemaAndHash(true, hashSchema(true)),
+  false: new SchemaAndHash(false, hashSchema(false)),
+} as const;
+
+/** Removes dead `hashToSah` entries when interned schemas are GC'd. */
 const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
-  const ref = hashToSchema.get(hashStr);
+  const entry = hashToSah.get(hashStr);
   // Only delete if the entry still points to a dead ref — a new schema with
   // the same hash may have replaced it.
-  if (ref && ref.deref() === undefined) {
-    hashToSchema.delete(hashStr);
+  if (entry && entry.ref.deref() === undefined) {
+    hashToSah.delete(hashStr);
   }
 });
 
@@ -110,45 +117,39 @@ const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
  * already been interned.
  */
 export function internSchema(schema: JSONSchema): SchemaAndHash {
-  // Boolean schemas are primitives — handle separately.
+  // Boolean schemas are primitives — return prefab instances.
   if (typeof schema === "boolean") {
-    const key = schema ? "true" : "false";
-    const existing = booleanInterns[key];
-    if (existing) return existing;
-    const frozen = toDeepFrozenSchema(schema);
-    const sah = new SchemaAndHash(frozen, hashSchema(frozen));
-    booleanInterns[key] = sah;
-    return sah;
+    return schema ? booleanInterns.true : booleanInterns.false;
   }
 
   // Object schema — check the WeakMap first.
-  const cachedHashStr = schemaToHash.get(schema);
-  if (cachedHashStr !== undefined) {
-    const ref = hashToSchema.get(cachedHashStr);
-    if (ref) {
-      const cached = ref.deref();
-      if (cached !== undefined) {
-        // Reconstruct SchemaAndHash from the cached mapping.
-        return new SchemaAndHash(
-          cached,
-          hashSchema(cached),
-        );
-      }
-      // WeakRef is dead — clean up.
-      hashToSchema.delete(cachedHashStr);
-    }
-  }
+  const cached = schemaToSah.get(schema);
+  if (cached) return cached;
 
-  // Not interned yet — freeze, hash, and cache.
+  // Check the hash-keyed reverse map (structurally-equal but different object).
   const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
   const hash = hashSchema(frozen);
   const hashStr = hash.toString();
 
-  schemaToHash.set(frozen, hashStr);
-  hashToSchema.set(hashStr, new WeakRef(frozen));
+  const entry = hashToSah.get(hashStr);
+  if (entry) {
+    if (entry.ref.deref() !== undefined) {
+      // Still alive — reuse the cached SchemaAndHash.
+      schemaToSah.set(schema, entry.sah);
+      return entry.sah;
+    }
+    // WeakRef is dead — clean up.
+    hashToSah.delete(hashStr);
+  }
+
+  // Not interned yet — create, cache, and return.
+  const sah = new SchemaAndHash(frozen, hash);
+  schemaToSah.set(frozen, sah);
+  schemaToSah.set(schema, sah);
+  hashToSah.set(hashStr, { sah, ref: new WeakRef(frozen) });
   schemaFinalizer.register(frozen, hashStr);
 
-  return new SchemaAndHash(frozen, hash);
+  return sah;
 }
 
 /**
@@ -162,19 +163,17 @@ export function findInternedSchema(
   const hashStr = typeof hash === "string" ? hash : hash.toString();
 
   // Check boolean interns first.
-  for (const sah of [booleanInterns.true, booleanInterns.false]) {
-    if (sah && sah.hashString === hashStr) return sah;
-  }
+  if (booleanInterns.true.hashString === hashStr) return booleanInterns.true;
+  if (booleanInterns.false.hashString === hashStr) return booleanInterns.false;
 
-  const ref = hashToSchema.get(hashStr);
-  if (!ref) return undefined;
+  const entry = hashToSah.get(hashStr);
+  if (!entry) return undefined;
 
-  const schema = ref.deref();
-  if (schema === undefined) {
+  if (entry.ref.deref() === undefined) {
     // WeakRef is dead — clean up.
-    hashToSchema.delete(hashStr);
+    hashToSah.delete(hashStr);
     return undefined;
   }
 
-  return new SchemaAndHash(schema, hashSchema(schema));
+  return entry.sah;
 }
