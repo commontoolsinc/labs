@@ -140,5 +140,5 @@ export type LegacyHashObject<
   T extends DefinedReferent = DefinedReferent,
 > = Reference.View<T>;
 
-/** Legacy `isHashObject` using merkle-reference. */
+/** Re-export for internal use by `value-hash.ts` (`Reference.is()` type guard). */
 export { Reference };

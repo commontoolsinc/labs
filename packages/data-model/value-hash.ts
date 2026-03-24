@@ -15,6 +15,7 @@ import {
   hashObjectFromJsonLegacy,
   hashObjectFromStringLegacy,
   hashOfLegacyCached,
+  type LegacyHashObject,
   Reference,
 } from "./value-hash-legacy.ts";
 
@@ -32,7 +33,7 @@ export type DefinedReferent = NonNullable<unknown> | null;
 /**
  * Content hash -- a hash-based reference to a value.
  *
- * Union of `Reference.View` (legacy merkle-reference) and
+ * Union of `LegacyHashObject` (legacy merkle-reference) and
  * `FabricHash` (canonical hashing). Both branches provide `.bytes`,
  * `.toString()`, `.toJSON()`, and `"/"`.
  *
@@ -41,7 +42,7 @@ export type DefinedReferent = NonNullable<unknown> | null;
  */
 export type HashObject<
   T extends DefinedReferent = DefinedReferent,
-> = Reference.View<T> | FabricHash;
+> = LegacyHashObject<T> | FabricHash;
 
 // ---------------------------------------------------------------------------
 // Canonical hashing mode flag
@@ -89,7 +90,7 @@ export function hashObjectFromString(source: string): HashObject {
 
 /**
  * Type guard: returns true if the value is a content hash
- * (`Reference.View` or `FabricHash`).
+ * (`LegacyHashObject` or `FabricHash`).
  */
 export function isHashObject<T extends DefinedReferent>(
   value: unknown | HashObject<T>,
