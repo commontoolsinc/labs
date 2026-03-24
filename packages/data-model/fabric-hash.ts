@@ -14,7 +14,14 @@ export class FabricHash extends FabricPrimitive {
   readonly #stringForm: string;
 
   constructor(
-    /** The raw hash bytes. */
+    /**
+     * The raw hash bytes. **Ownership transfer:** the caller must not mutate
+     * this array after passing it to the constructor. `Object.freeze` freezes
+     * the object reference but not the underlying `ArrayBuffer`, so the bytes
+     * remain technically mutable. The cached `#stringForm` is computed once at
+     * construction time from these bytes; post-construction mutation would
+     * cause `hash` and `toString()` to diverge.
+     */
     readonly hash: Uint8Array,
     /** Algorithm identifier (e.g., `"fid1"` for fabric ID v1). */
     readonly algorithmTag: string,
