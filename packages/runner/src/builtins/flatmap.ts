@@ -6,6 +6,10 @@ import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { recordFlowPrecisionOutputSource } from "../cfc/flow-precision.ts";
+import {
+  recordCfcReadObservation,
+  withInternalVerifierRead,
+} from "../cfc/read-observation-logging.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -156,7 +160,8 @@ export function flatMap(
         .get();
       const sourceAddress = list[i].getAsNormalizedFullLink();
       if (Array.isArray(elemResult)) {
-        tx.readValueOrThrow(sourceAddress);
+        tx.readValueOrThrow(sourceAddress, withInternalVerifierRead());
+        recordCfcReadObservation(tx, sourceAddress, { op: "value" });
         // forEach skips holes in sub-arrays (sparse-safe)
         elemResult.forEach((v) => {
           recordFlowPrecisionOutputSource(tx, {
@@ -166,7 +171,8 @@ export function flatMap(
           newArrayValue.push(v);
         });
       } else if (elemResult !== undefined) {
-        tx.readValueOrThrow(sourceAddress);
+        tx.readValueOrThrow(sourceAddress, withInternalVerifierRead());
+        recordCfcReadObservation(tx, sourceAddress, { op: "value" });
         recordFlowPrecisionOutputSource(tx, {
           ...resultAddress,
           path: [...resultAddress.path, String(newArrayValue.length)],

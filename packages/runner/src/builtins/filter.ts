@@ -6,6 +6,10 @@ import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { recordFlowPrecisionOutputSource } from "../cfc/flow-precision.ts";
+import {
+  recordCfcReadObservation,
+  withInternalVerifierRead,
+} from "../cfc/read-observation-logging.ts";
 
 /**
  * Implementation of built-in filter module. Like map, this is called once at
@@ -151,7 +155,8 @@ export function filter(
       const included = elementRuns.get(elementKey)!.resultCell.withTx(tx).get();
       if (included) {
         const sourceAddress = list[i].getAsNormalizedFullLink();
-        tx.readValueOrThrow(sourceAddress);
+        tx.readValueOrThrow(sourceAddress, withInternalVerifierRead());
+        recordCfcReadObservation(tx, sourceAddress, { op: "value" });
         recordFlowPrecisionOutputSource(tx, {
           ...resultAddress,
           path: [...resultAddress.path, String(newArrayValue.length)],
