@@ -44,7 +44,7 @@ export type JsxExpressionSiteRoute =
   | { route: "shared-post-closure" }
   | {
     route: "owned-pre-closure";
-    owner: "opaque-path-terminal-root";
+    owner: "opaque-path-terminal-root" | "deferred-jsx-array-method-root";
   }
   | {
     route: "legacy-jsx";
@@ -677,6 +677,37 @@ function isDeferredJsxArrayMethodExpression(
   return detectCallKind(current, context.checker)?.kind === "array-method";
 }
 
+function isOwnedDeferredJsxArrayMethodRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const current = unwrapExpression(expression);
+  if (!ts.isCallExpression(current)) {
+    return false;
+  }
+
+  if (!isDeferredJsxArrayMethodExpression(current, context, analyze)) {
+    return false;
+  }
+
+  const callee = current.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  const receiverAnalysis = analyze(callee.expression);
+  return receiverAnalysis.containsOpaqueRef;
+}
+
+function isDirectArrayMethodRootExpression(expression: ts.Expression): boolean {
+  const current = unwrapExpression(expression);
+  return ts.isCallExpression(current) && !!classifyArrayMethodCall(current);
+}
+
 export function getExpressionSitePolicyInfo(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -712,7 +743,11 @@ export function classifyJsxExpressionSiteRoute(
   expression: ts.Expression,
   context: TransformationContext,
   analyze: AnalyzeFn,
+  options?: {
+    allowDeferredRootOwner?: boolean;
+  },
 ): JsxExpressionSiteRoute {
+  const allowDeferredRootOwner = options?.allowDeferredRootOwner ?? false;
   const siteInfo = getExpressionSitePolicyInfo(
     expression,
     "jsx-expression",
@@ -732,12 +767,27 @@ export function classifyJsxExpressionSiteRoute(
     return { route: "skip", reason: "non-pattern-context" };
   }
 
-  if (siteInfo.arrayMethodOwned || siteInfo.deferredJsxArrayMethod) {
+  if (siteInfo.arrayMethodOwned) {
     return {
       route: "skip",
-      reason: siteInfo.arrayMethodOwned
-        ? "array-method-owned"
-        : "deferred-jsx-array-method-root",
+      reason: "array-method-owned",
+    };
+  }
+
+  if (siteInfo.deferredJsxArrayMethod) {
+    if (
+      allowDeferredRootOwner &&
+      isOwnedDeferredJsxArrayMethodRoot(expression, context, analyze)
+    ) {
+      return {
+        route: "owned-pre-closure",
+        owner: "deferred-jsx-array-method-root",
+      };
+    }
+
+    return {
+      route: "skip",
+      reason: "deferred-jsx-array-method-root",
     };
   }
 
@@ -1355,6 +1405,10 @@ export function rewriteArrayMethodCallbackExpressionSites(
 
     if (ts.isJsxExpression(node)) {
       if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      if (isDirectArrayMethodRootExpression(node.expression)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 

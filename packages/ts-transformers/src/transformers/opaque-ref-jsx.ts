@@ -41,6 +41,7 @@ function transform(context: TransformationContext): ts.SourceFile {
         node.expression,
         context,
         analyze,
+        { allowDeferredRootOwner: true },
       );
 
       if (route.route === "shared-post-closure") {
@@ -72,6 +73,26 @@ function transform(context: TransformationContext): ts.SourceFile {
         route.owner === "opaque-path-terminal-root"
       ) {
         const rewritten = rewriteOpaquePathTerminalJsxExpressionSite({
+          expression: node.expression,
+          context,
+          analyze,
+          visit,
+        });
+        if (rewritten) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          );
+        }
+
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      if (
+        route.route === "owned-pre-closure" &&
+        route.owner === "deferred-jsx-array-method-root"
+      ) {
+        const rewritten = rewriteFallbackJsxExpressionSite({
           expression: node.expression,
           context,
           analyze,

@@ -181,7 +181,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: JSX map expressions are marked as deferred array-method sites",
+  "Expression site policy: reactive direct JSX array-method roots use the explicit deferred array-method owner",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -191,9 +191,11 @@ Deno.test(
         }
       }
 
-      declare const rows: any;
+      declare function pattern<T>(fn: (state: any) => T): T;
 
-      const view = <div>{rows.map((row: any) => row.done ? "Done" : "Pending")}</div>;
+      const view = pattern((state: any) => (
+        <div>{state.items.map((row: any) => row.done ? "Done" : "Pending")}</div>
+      ));
     `);
 
     const mapCall = findFirstNode(
@@ -213,6 +215,123 @@ Deno.test(
 
     assertEquals(siteInfo.deferredJsxArrayMethod, true);
     assertEquals(siteInfo.containerKind, "jsx-expression");
+    assertEquals(classifyJsxExpressionSiteRoute(mapCall, context, analyze), {
+      route: "skip",
+      reason: "deferred-jsx-array-method-root",
+    });
+    assertEquals(
+      classifyJsxExpressionSiteRoute(mapCall, context, analyze, {
+        allowDeferredRootOwner: true,
+      }),
+      {
+        route: "owned-pre-closure",
+        owner: "deferred-jsx-array-method-root",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: nested JSX array-method roots inside authored callbacks stay array-method-owned",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          section: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.sections.map((section: any) => (
+            <section>
+              {section.tasks.map((task: any) => <span>{task.label}</span>)}
+            </section>
+          ))}
+        </div>
+      ));
+    `);
+
+    const nestedMapCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "map" &&
+        node.expression.expression.getText(sourceFile) === "section.tasks",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      nestedMapCall,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.arrayMethodOwned, true);
+    assertEquals(
+      classifyJsxExpressionSiteRoute(nestedMapCall, context, analyze),
+      {
+        route: "skip",
+        reason: "array-method-owned",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: non-reactive direct JSX array-method roots stay skipped",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => {
+        const rows = [{ done: true }, { done: false }];
+        return <div>{rows.map((row: any) => row.done ? "Done" : "Pending")}</div>;
+      });
+    `);
+
+    const mapCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "map",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      mapCall,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.deferredJsxArrayMethod, true);
+    assertEquals(classifyJsxExpressionSiteRoute(mapCall, context, analyze), {
+      route: "skip",
+      reason: "deferred-jsx-array-method-root",
+    });
+    assertEquals(
+      classifyJsxExpressionSiteRoute(mapCall, context, analyze, {
+        allowDeferredRootOwner: true,
+      }),
+      {
+        route: "skip",
+        reason: "deferred-jsx-array-method-root",
+      },
+    );
   },
 );
 
