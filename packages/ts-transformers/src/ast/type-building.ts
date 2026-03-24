@@ -17,6 +17,69 @@ import {
 export const DEFAULT_TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
+function isOptionalBindingElementIdentifier(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+): boolean {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (!symbol) {
+    return false;
+  }
+  if (isOptionalSymbol(symbol)) {
+    return true;
+  }
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (!ts.isBindingElement(declaration)) {
+      continue;
+    }
+
+    const bindingPattern = declaration.parent;
+    if (!ts.isObjectBindingPattern(bindingPattern)) {
+      continue;
+    }
+
+    const propertyName = declaration.propertyName &&
+        ts.isIdentifier(declaration.propertyName)
+      ? declaration.propertyName.text
+      : ts.isIdentifier(declaration.name)
+      ? declaration.name.text
+      : undefined;
+    if (!propertyName) {
+      continue;
+    }
+
+    const bindingContainer = bindingPattern.parent;
+    let containerType: ts.Type | undefined;
+
+    if (
+      ts.isParameter(bindingContainer) ||
+      ts.isVariableDeclaration(bindingContainer)
+    ) {
+      if (bindingContainer.type) {
+        containerType = checker.getTypeFromTypeNode(bindingContainer.type);
+      } else if (bindingContainer.initializer) {
+        containerType = checker.getTypeAtLocation(bindingContainer.initializer);
+      } else {
+        containerType = checker.getTypeAtLocation(bindingContainer);
+      }
+    } else {
+      containerType = checker.getTypeAtLocation(bindingPattern);
+    }
+
+    if (!containerType) {
+      continue;
+    }
+
+    const propertySymbol = containerType.getProperty(propertyName);
+    if (propertySymbol && isOptionalSymbol(propertySymbol)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Converts a Type to a TypeNode, optionally registering it in the type registry.
  * Provides a central place for type-to-typenode conversion with consistent flags.
@@ -114,6 +177,11 @@ export function buildTypeElementsFromCaptureTree(
         ) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
+      } else if (
+        ts.isIdentifier(childNode.expression) &&
+        isOptionalBindingElementIdentifier(childNode.expression, checker)
+      ) {
+        questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
       }
     } else if (childNode.properties.size > 0) {
       // Intermediate node - need to get type to check optionality

@@ -390,8 +390,7 @@ function buildShrunkTypeNodeFromType(
         const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
           sourceFile;
         propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
-        isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-          (propType ? typeIncludesUndefined(propType) : false);
+        isOptional = !!(prop.flags & ts.SymbolFlags.Optional);
       } else {
         const numericIndex = Number.isFinite(Number(head));
         const indexType = checker.getIndexTypeOfType(
@@ -736,10 +735,7 @@ function shrinkTypeLiteralMembers(
         member,
         member.modifiers,
         member.name,
-        member.questionToken ??
-          (typeNodeIncludesUndefined(shrunkChild)
-            ? factory.createToken(ts.SyntaxKind.QuestionToken)
-            : undefined),
+        member.questionToken,
         shrunkChild,
       ),
     );

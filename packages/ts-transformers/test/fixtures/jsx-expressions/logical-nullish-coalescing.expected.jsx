@@ -51,13 +51,7 @@ export default pattern((_state) => {
                 config: {
                     type: "object",
                     properties: {
-                        timeout: {
-                            anyOf: [{
-                                    type: "number"
-                                }, {
-                                    type: "null"
-                                }]
-                        }
+                        timeout: true
                     },
                     required: ["timeout"],
                     asCell: true
@@ -82,9 +76,14 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {
                         retries: {
-                            type: ["number", "undefined"]
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "undefined"
+                                }]
                         }
                     },
+                    required: ["retries"],
                     asCell: true
                 }
             },

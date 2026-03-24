@@ -96,15 +96,15 @@ export default pattern((__ct_pattern_input) => {
             properties: {
                 matchingNotes: {
                     type: "array",
-                    items: true
+                    items: {
+                        type: "unknown"
+                    }
                 }
             },
             required: ["matchingNotes"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { matchingNotes: {
-                length: matchingNotes.key("length")
-            } }, ({ matchingNotes }) => matchingNotes.length)}</div>,
+        } as const satisfies __ctHelpers.JSONSchema, { matchingNotes: matchingNotes }, ({ matchingNotes }) => matchingNotes.length)}</div>,
     };
 }, {
     type: "object",

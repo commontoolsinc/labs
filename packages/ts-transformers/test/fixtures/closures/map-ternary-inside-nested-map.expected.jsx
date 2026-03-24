@@ -37,10 +37,17 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
+                anyOf: [{
+                        type: "array",
+                        items: {
+                            type: "unknown"
+                        }
+                    }, {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Item"
+                        }
+                    }],
                 asCell: true
             }
         },
@@ -113,15 +120,24 @@ export default pattern((__ct_pattern_input) => {
             } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                 type: "object",
                 properties: {
-                    item: true
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                type: "array",
+                                items: {
+                                    type: "unknown"
+                                }
+                            }
+                        },
+                        required: ["tags"]
+                    }
                 },
                 required: ["item"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    tags: {
-                        length: item.key("tags").length
-                    }
+                    tags: item.key("tags")
                 } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -143,7 +159,15 @@ export default pattern((__ct_pattern_input) => {
                             showInactive: {
                                 type: "boolean"
                             },
-                            tag: true
+                            tag: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"]
+                            }
                         },
                         required: ["showInactive", "tag"]
                     } as const satisfies __ctHelpers.JSONSchema, {

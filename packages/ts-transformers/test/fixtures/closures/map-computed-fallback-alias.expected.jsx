@@ -24,9 +24,34 @@ export default pattern((__ct_pattern_input) => {
                 const messageReactions = __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        msg: true
+                        msg: {
+                            type: "object",
+                            properties: {
+                                reactions: {
+                                    anyOf: [{
+                                            type: "array",
+                                            items: {
+                                                $ref: "#/$defs/Reaction"
+                                            }
+                                        }, {
+                                            type: "undefined"
+                                        }]
+                                }
+                            }
+                        }
                     },
-                    required: ["msg"]
+                    required: ["msg"],
+                    $defs: {
+                        Reaction: {
+                            type: "object",
+                            properties: {
+                                emoji: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["emoji"]
+                        }
+                    }
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "array",
                     items: {

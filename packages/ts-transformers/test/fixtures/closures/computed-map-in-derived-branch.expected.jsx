@@ -70,10 +70,17 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             people: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Person"
-                },
+                anyOf: [{
+                        type: "array",
+                        items: {
+                            type: "unknown"
+                        }
+                    }, {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Person"
+                        }
+                    }],
                 asCell: true
             }
         },
@@ -125,17 +132,14 @@ export default pattern((__ct_pattern_input) => {
                     items: {
                         type: "object",
                         properties: {
-                            name: {
-                                type: "string"
-                            },
-                            rank: {
-                                type: "number"
-                            },
                             isFirst: {
                                 type: "boolean"
+                            },
+                            name: {
+                                type: "string"
                             }
                         },
-                        required: ["name", "rank", "isFirst"]
+                        required: ["isFirst", "name"]
                     }
                 }
             },

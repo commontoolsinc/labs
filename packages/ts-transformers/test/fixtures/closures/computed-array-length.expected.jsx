@@ -55,30 +55,30 @@ export default pattern(() => {
             properties: {
                 allCharms: {
                     type: "array",
-                    items: true
+                    items: {
+                        type: "unknown"
+                    }
                 }
             },
             required: ["allCharms"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { allCharms: {
-                length: allCharms.length
-            } }, ({ allCharms }) => `Charms (${allCharms.length})`),
+        } as const satisfies __ctHelpers.JSONSchema, { allCharms: allCharms }, ({ allCharms }) => `Charms (${allCharms.length})`),
         [UI]: (<div>
         <span>Count: {__ctHelpers.derive({
             type: "object",
             properties: {
                 allCharms: {
                     type: "array",
-                    items: true
+                    items: {
+                        type: "unknown"
+                    }
                 }
             },
             required: ["allCharms"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { allCharms: {
-                length: allCharms.length
-            } }, ({ allCharms }) => allCharms.length)}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { allCharms: allCharms }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
           {allCharms.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const charm = __ct_pattern_input.key("element");

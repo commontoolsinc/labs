@@ -364,6 +364,10 @@ function refineUnknownInputMembersFromMergedInput(
       return member;
     }
 
+    if (ts.isTypeLiteralNode(member.type)) {
+      return member;
+    }
+
     const propertyName = getPropertySignatureName(member.name);
     if (!propertyName) {
       return member;

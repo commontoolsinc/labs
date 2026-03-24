@@ -29,13 +29,9 @@ export default pattern(() => {
                     type: "number"
                 },
                 asCell: true
-            },
-            multiplier: {
-                type: "number",
-                asCell: true
             }
         },
-        required: ["numbers", "multiplier"]
+        required: ["numbers"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {

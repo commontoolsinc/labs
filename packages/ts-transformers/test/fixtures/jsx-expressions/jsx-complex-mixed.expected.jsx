@@ -35,7 +35,13 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"]
                             }
                         },
                         filter: {
@@ -45,27 +51,7 @@ export default pattern((state) => {
                     required: ["items", "filter"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -86,7 +72,15 @@ export default pattern((state) => {
                 - Discounted: ${__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: true,
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
                         state: {
                             type: "object",
                             properties: {
@@ -114,7 +108,15 @@ export default pattern((state) => {
                 ${__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: true,
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
                         state: {
                             type: "object",
                             properties: {
@@ -228,34 +230,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -320,34 +308,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -370,34 +344,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["active"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -422,34 +382,20 @@ export default pattern((state) => {
                         items: {
                             type: "array",
                             items: {
-                                $ref: "#/$defs/Item"
+                                type: "object",
+                                properties: {
+                                    price: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["price"]
                             }
                         }
                     },
                     required: ["items"]
                 }
             },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -465,13 +411,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         filter: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
+                            type: "string"
                         }
                     },
                     required: ["filter"]
@@ -481,9 +421,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                filter: {
-                    length: state.key("filter").length
-                }
+                filter: state.key("filter")
             } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
           Object attributes
         </div>

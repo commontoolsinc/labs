@@ -84,7 +84,22 @@ export default pattern((state) => {
                     threads: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Thread"
+                            type: "object",
+                            properties: {
+                                comments: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            flagged: {
+                                                type: "boolean"
+                                            }
+                                        },
+                                        required: ["flagged"]
+                                    }
+                                }
+                            },
+                            required: ["comments"]
                         }
                     },
                     showFlagged: {
@@ -94,51 +109,7 @@ export default pattern((state) => {
                 required: ["threads", "showFlagged"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Thread: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    title: {
-                        type: "string"
-                    },
-                    muted: {
-                        type: "boolean"
-                    },
-                    comments: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Comment"
-                        }
-                    }
-                },
-                required: ["id", "title", "muted", "comments"]
-            },
-            Comment: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    flagged: {
-                        type: "boolean"
-                    },
-                    reactions: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["id", "text", "flagged", "reactions"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -224,16 +195,50 @@ export default pattern((state) => {
                 items: {
                     type: "object",
                     properties: {
-                        thread: true,
-                        outerIndex: {
-                            type: "number"
+                        thread: {
+                            type: "object",
+                            properties: {
+                                title: {
+                                    type: "string"
+                                },
+                                id: {
+                                    type: "string"
+                                },
+                                muted: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["title", "id", "muted"]
                         },
                         visibleComments: {
                             type: "array",
-                            items: true
+                            items: {
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "string"
+                                    },
+                                    flagged: {
+                                        type: "boolean"
+                                    },
+                                    text: {
+                                        type: "string"
+                                    },
+                                    reactions: {
+                                        type: "array",
+                                        items: {
+                                            type: "string"
+                                        }
+                                    }
+                                },
+                                required: ["id", "flagged", "text", "reactions"]
+                            }
+                        },
+                        outerIndex: {
+                            type: "number"
                         }
                     },
-                    required: ["thread", "outerIndex", "visibleComments"]
+                    required: ["thread", "visibleComments", "outerIndex"]
                 }
             },
             selectedCommentId: {
@@ -299,10 +304,35 @@ export default pattern((state) => {
             properties: {
                 visibleComments: {
                     type: "array",
-                    items: true
+                    items: {
+                        $ref: "#/$defs/Comment"
+                    }
                 }
             },
-            required: ["visibleComments"]
+            required: ["visibleComments"],
+            $defs: {
+                Comment: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "string"
+                        },
+                        text: {
+                            type: "string"
+                        },
+                        flagged: {
+                            type: "boolean"
+                        },
+                        reactions: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["id", "text", "flagged", "reactions"]
+                }
+            }
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {

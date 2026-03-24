@@ -21,7 +21,21 @@ export default pattern((state: State) => {
                 type: "number",
                 asCell: true
             },
-            state: true
+            state: {
+                type: "object",
+                properties: {
+                    counter: {
+                        type: "object",
+                        properties: {
+                            value: {
+                                type: "number"
+                            }
+                        },
+                        required: ["value"]
+                    }
+                },
+                required: ["counter"]
+            }
         },
         required: ["value", "state"]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -30,7 +44,7 @@ export default pattern((state: State) => {
         value,
         state: {
             counter: {
-                value: state.key("counter").value
+                value: state.key("counter", "value")
             }
         }
     }, ({ value: v, state }) => v.get() + state.counter.value);

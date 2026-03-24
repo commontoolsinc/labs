@@ -50,9 +50,7 @@ export default pattern((state) => {
             required: ["summary"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { summary: {
-                length: summary.key("length")
-            } }, ({ summary }) => summary.length),
+        } as const satisfies __ctHelpers.JSONSchema, { summary: summary }, ({ summary }) => summary.length),
     };
 }, {
     type: "object",

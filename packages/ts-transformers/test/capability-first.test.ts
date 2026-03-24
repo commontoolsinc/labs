@@ -837,7 +837,7 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
 );
 
 Deno.test(
-  "Capability-first: shrunk undefined-union field stays optional in schema",
+  "Capability-first: shrunk undefined-union field preserves explicit undefined in schema",
   async () => {
     const source = `/// <cts-enable />
 import { lift, type Writable } from "commontools";
@@ -853,7 +853,8 @@ const fn = lift((input: Writable<{ foo: string | undefined; bar: string }>) =>
     assertStringIncludes(output, "asCell: true");
     assertStringIncludes(output, '"foo"');
     assert(!output.includes('"bar"'));
-    assert(!output.includes('required: ["foo"]'));
+    assertStringIncludes(output, 'type: ["string", "undefined"]');
+    assertStringIncludes(output, 'required: ["foo"]');
   },
 );
 

@@ -44,55 +44,20 @@ export default pattern((state) => {
                     projects: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Project"
+                            type: "object",
+                            properties: {
+                                archived: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["archived"]
                         }
                     }
                 },
                 required: ["showArchived", "projects"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Project: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    archived: {
-                        type: "boolean"
-                    },
-                    members: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    badges: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Badge"
-                        }
-                    }
-                },
-                required: ["id", "name", "archived", "members", "badges"]
-            },
-            Badge: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["text", "active"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -151,7 +116,30 @@ export default pattern((state) => {
         properties: {
             visibleProjects: {
                 type: "array",
-                items: true
+                items: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        badges: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    active: {
+                                        type: "boolean"
+                                    },
+                                    text: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["active", "text"]
+                            }
+                        }
+                    },
+                    required: ["name", "badges"]
+                }
             },
             state: {
                 type: "object",

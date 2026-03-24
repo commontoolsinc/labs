@@ -192,7 +192,18 @@ export default pattern((state) => {
                             } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                                 type: "object",
                                 properties: {
-                                    task: true
+                                    task: {
+                                        type: "object",
+                                        properties: {
+                                            note: {
+                                                anyOf: [{
+                                                        type: "string"
+                                                    }, {
+                                                        type: "undefined"
+                                                    }]
+                                            }
+                                        }
+                                    }
                                 },
                                 required: ["task"]
                             } as const satisfies __ctHelpers.JSONSchema, {
@@ -202,7 +213,18 @@ export default pattern((state) => {
                                 } }, ({ task }) => task.note !== undefined), __ctHelpers.derive({
                                 type: "object",
                                 properties: {
-                                    task: true
+                                    task: {
+                                        type: "object",
+                                        properties: {
+                                            note: {
+                                                anyOf: [{
+                                                        type: "string"
+                                                    }, {
+                                                        type: "undefined"
+                                                    }]
+                                            }
+                                        }
+                                    }
                                 },
                                 required: ["task"]
                             } as const satisfies __ctHelpers.JSONSchema, {
@@ -249,7 +271,15 @@ export default pattern((state) => {
                                     }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), __ctHelpers.derive({
                                         type: "object",
                                         properties: {
-                                            section: true,
+                                            section: {
+                                                type: "object",
+                                                properties: {
+                                                    title: {
+                                                        type: "string"
+                                                    }
+                                                },
+                                                required: ["title"]
+                                            },
                                             tag: {
                                                 type: "string"
                                             }
@@ -274,7 +304,15 @@ export default pattern((state) => {
                                                 },
                                                 required: ["showCompleted"]
                                             },
-                                            task: true,
+                                            task: {
+                                                type: "object",
+                                                properties: {
+                                                    done: {
+                                                        type: "boolean"
+                                                    }
+                                                },
+                                                required: ["done"]
+                                            },
                                             tag: {
                                                 type: "string"
                                             }
@@ -483,7 +521,21 @@ export default pattern((state) => {
                   </div>, __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        section: true
+                        section: {
+                            type: "object",
+                            properties: {
+                                tasks: {
+                                    type: "array",
+                                    items: {
+                                        type: "unknown"
+                                    }
+                                },
+                                title: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["tasks", "title"]
+                        }
                     },
                     required: ["section"]
                 } as const satisfies __ctHelpers.JSONSchema, {
@@ -507,9 +559,7 @@ export default pattern((state) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, { section: {
-                        tasks: {
-                            length: section.key("tasks").length
-                        },
+                        tasks: section.key("tasks"),
                         title: section.key("title")
                     } }, ({ section }) => 
                 // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):

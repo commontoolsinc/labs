@@ -17,7 +17,16 @@ export default pattern((state) => {
         properties: {
             prefs: {
                 type: "array",
-                items: true
+                items: {
+                    type: "object",
+                    properties: {
+                        ingredient: {
+                            type: "string"
+                        },
+                        preference: true
+                    },
+                    required: ["ingredient", "preference"]
+                }
             },
             food: {
                 type: "string"

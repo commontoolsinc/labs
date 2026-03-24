@@ -36,7 +36,15 @@ export default pattern((state) => {
                             },
                             required: ["prefix", "suffix"]
                         },
-                        item: true
+                        item: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
                     },
                     required: ["state", "item"]
                 } as const satisfies __ctHelpers.JSONSchema, {

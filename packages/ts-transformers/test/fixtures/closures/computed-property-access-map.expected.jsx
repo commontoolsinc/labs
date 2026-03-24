@@ -25,7 +25,15 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             items: {
                 type: "array",
-                items: true
+                items: {
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
+                }
             }
         },
         required: ["items"]
@@ -71,13 +79,18 @@ export default pattern((__ct_pattern_input) => {
                         properties: {
                             tasks: {
                                 type: "array",
-                                items: true
-                            },
-                            view: {
-                                type: "string"
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["name"]
+                                }
                             }
                         },
-                        required: ["tasks", "view"]
+                        required: ["tasks"]
                     }
                 },
                 required: ["result"]

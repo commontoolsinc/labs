@@ -24,7 +24,15 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             items: {
                 type: "array",
-                items: true
+                items: {
+                    type: "object",
+                    properties: {
+                        price: {
+                            type: "number"
+                        }
+                    },
+                    required: ["price"]
+                }
             }
         },
         required: ["items"]
@@ -55,7 +63,15 @@ export default pattern((__ct_pattern_input) => {
                 properties: {
                     filtered: {
                         type: "array",
-                        items: true
+                        items: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
                     }
                 },
                 required: ["filtered"]

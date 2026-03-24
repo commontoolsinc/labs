@@ -42,7 +42,15 @@ export default pattern((__ct_pattern_input) => {
     const hasDescription = __ctHelpers.derive({
         type: "object",
         properties: {
-            card: true
+            card: {
+                type: "object",
+                properties: {
+                    description: {
+                        type: "string"
+                    }
+                },
+                required: ["description"]
+            }
         },
         required: ["card"]
     } as const satisfies __ctHelpers.JSONSchema, {

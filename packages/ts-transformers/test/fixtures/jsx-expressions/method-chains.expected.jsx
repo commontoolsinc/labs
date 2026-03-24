@@ -289,14 +289,14 @@ export default pattern((state) => {
                                 type: "number"
                             }
                         },
-                        start: {
+                        end: {
                             type: "number"
                         },
-                        end: {
+                        start: {
                             type: "number"
                         }
                     },
-                    required: ["items", "start", "end"]
+                    required: ["items", "end", "start"]
                 }
             },
             required: ["state"]
@@ -617,9 +617,6 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
                                     age: {
                                         type: "number"
                                     },
@@ -627,7 +624,7 @@ export default pattern((state) => {
                                         type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["age", "active"]
                             }
                         },
                         minAge: {
@@ -666,15 +663,9 @@ export default pattern((state) => {
                             properties: {
                                 name: {
                                     type: "string"
-                                },
-                                age: {
-                                    type: "number"
-                                },
-                                active: {
-                                    type: "boolean"
                                 }
                             },
-                            required: ["name", "age", "active"]
+                            required: ["name"]
                         }
                     },
                     required: ["u"]
@@ -690,15 +681,9 @@ export default pattern((state) => {
                             properties: {
                                 name: {
                                     type: "string"
-                                },
-                                age: {
-                                    type: "number"
-                                },
-                                active: {
-                                    type: "boolean"
                                 }
                             },
-                            required: ["name", "age", "active"]
+                            required: ["name"]
                         }
                     },
                     required: ["u"]
@@ -772,17 +757,11 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
                                     age: {
                                         type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["age"]
                             }
                         },
                         minAge: {
@@ -819,17 +798,11 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
                                     active: {
                                         type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["active"]
                             }
                         }
                     },

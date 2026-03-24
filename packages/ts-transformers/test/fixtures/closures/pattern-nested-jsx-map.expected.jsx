@@ -38,10 +38,17 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
+                anyOf: [{
+                        type: "array",
+                        items: {
+                            type: "unknown"
+                        }
+                    }, {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Item"
+                        }
+                    }],
                 asCell: true
             }
         },
@@ -122,7 +129,15 @@ export default pattern((__ct_pattern_input) => {
                             i: {
                                 type: "number"
                             },
-                            item: true
+                            item: {
+                                type: "object",
+                                properties: {
+                                    selectedIndex: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["selectedIndex"]
+                            }
                         },
                         required: ["i", "item"]
                     } as const satisfies __ctHelpers.JSONSchema, {

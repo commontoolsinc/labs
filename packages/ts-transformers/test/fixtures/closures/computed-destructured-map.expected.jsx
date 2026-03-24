@@ -24,7 +24,15 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             items: {
                 type: "array",
-                items: true
+                items: {
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
+                }
             }
         },
         required: ["items"]
@@ -70,7 +78,9 @@ export default pattern((__ct_pattern_input) => {
                         properties: {
                             tasks: {
                                 type: "array",
-                                items: true
+                                items: {
+                                    $ref: "#/$defs/Item"
+                                }
                             },
                             view: {
                                 type: "string"
@@ -79,7 +89,21 @@ export default pattern((__ct_pattern_input) => {
                         required: ["tasks", "view"]
                     }
                 },
-                required: ["result"]
+                required: ["result"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            done: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["name", "done"]
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "array",
                 items: {

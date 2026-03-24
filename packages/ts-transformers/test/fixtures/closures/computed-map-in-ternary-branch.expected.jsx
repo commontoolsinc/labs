@@ -71,10 +71,17 @@ export default pattern((__ct_pattern_input) => {
         type: "object",
         properties: {
             people: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Person"
-                },
+                anyOf: [{
+                        type: "array",
+                        items: {
+                            type: "unknown"
+                        }
+                    }, {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Person"
+                        }
+                    }],
                 asCell: true
             }
         },

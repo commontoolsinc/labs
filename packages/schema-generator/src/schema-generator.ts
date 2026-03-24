@@ -654,7 +654,15 @@ export class SchemaGenerator implements ISchemaGenerator {
             continue;
           }
 
-          const schemaTypeNode = member.questionToken
+          const preservesExplicitUndefined = member.questionToken &&
+            this.syntheticOptionalMemberPreservesUndefined(
+              member.type,
+              checker,
+              typeRegistry,
+            );
+
+          const schemaTypeNode = member.questionToken &&
+              !preservesExplicitUndefined
             ? this.stripUndefinedFromOptionalTypeNode(member.type)
             : member.type;
 
@@ -666,7 +674,7 @@ export class SchemaGenerator implements ISchemaGenerator {
             propType = checker.getTypeFromTypeNode(member.type);
           }
 
-          if (member.questionToken) {
+          if (member.questionToken && !preservesExplicitUndefined) {
             propType = this.stripUndefinedFromOptionalType(propType, checker);
           }
 
@@ -863,6 +871,56 @@ export class SchemaGenerator implements ISchemaGenerator {
       ) => ts.Type;
     };
     return checkerWithInternals.getUnionType?.(members) ?? type;
+  }
+
+  private syntheticOptionalMemberPreservesUndefined(
+    typeNode: ts.TypeNode,
+    checker: ts.TypeChecker,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  ): boolean {
+    if (this.syntheticTypeNodeIncludesUndefined(typeNode)) {
+      return true;
+    }
+
+    const registeredType = typeRegistry?.get(typeNode);
+    if (registeredType && this.syntheticTypeIncludesUndefined(registeredType)) {
+      return true;
+    }
+
+    try {
+      return this.syntheticTypeIncludesUndefined(
+        checker.getTypeFromTypeNode(typeNode),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private syntheticTypeIncludesUndefined(type: ts.Type): boolean {
+    if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
+      return true;
+    }
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      return false;
+    }
+    return (type as ts.UnionType).types.some((member) =>
+      (member.flags & ts.TypeFlags.Undefined) !== 0
+    );
+  }
+
+  private syntheticTypeNodeIncludesUndefined(typeNode: ts.TypeNode): boolean {
+    if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) {
+      return true;
+    }
+    if (ts.isUnionTypeNode(typeNode)) {
+      return typeNode.types.some((member) =>
+        this.syntheticTypeNodeIncludesUndefined(member)
+      );
+    }
+    if (ts.isParenthesizedTypeNode(typeNode)) {
+      return this.syntheticTypeNodeIncludesUndefined(typeNode.type);
+    }
+    return false;
   }
 
   private stripUndefinedFromOptionalTypeNode(

@@ -25,7 +25,24 @@ export default pattern((state) => {
                 return (<span>{__ctHelpers.derive({
                     type: "object",
                     properties: {
-                        item: true
+                        item: {
+                            type: "object",
+                            properties: {
+                                maybe: {
+                                    anyOf: [{
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value"]
+                                        }, {
+                                            type: "undefined"
+                                        }]
+                                }
+                            }
+                        }
                     },
                     required: ["item"]
                 } as const satisfies __ctHelpers.JSONSchema, {

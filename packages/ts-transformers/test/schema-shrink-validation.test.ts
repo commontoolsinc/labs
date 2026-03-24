@@ -159,6 +159,48 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "computed preserves typed outer wrappers in zero-parameter closures",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface MyInput {",
+        "  value: number;",
+        "}",
+        "",
+        "export default pattern((input: MyInput) => {",
+        "  return {",
+        "    result: computed(() => input.value * 2),",
+        "  };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const normalized = result.output.replace(/\s+/g, " ");
+
+      assertEquals(
+        normalized.includes(
+          'input: { type: "object", properties: { value: { type: "number" } }, required: ["value"] }',
+        ),
+        true,
+        `expected computed input wrapper to retain value:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes("input: true"),
+        false,
+        `did not expect computed input wrapper to collapse to true:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
     "preserves cell wrappers for array items in computed for-of loops",
     async () => {
       const source = [
@@ -191,24 +233,77 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const normalized = output.replace(/\s+/g, " ");
 
       assertEquals(
-        normalized.includes(
-          'mentionable: { type: "array", items: { type: "object", properties: { summary: { type: "string" } }, asCell: true }',
-        ) ||
-          (
-            normalized.includes(
-              'mentionable: { type: "array", items: { $ref: "#/$defs/Piece", asCell: true } }',
-            ) &&
-            normalized.includes(
-              'Piece: { type: "object", properties: { summary: { type: "string" } } }',
-            )
+        /mentionable:\s*{\s*(?:type:\s*"array"[\s\S]*items:\s*{\s*(?:type:\s*"object"[\s\S]*summary:\s*{\s*type:\s*"string"|(?:\$ref:\s*"#\/\$defs\/Piece",\s*asCell:\s*true))|anyOf:\s*\[\{\s*type:\s*"array"[\s\S]*items:\s*{\s*(?:type:\s*"object"[\s\S]*summary:\s*{\s*type:\s*"string"|(?:\$ref:\s*"#\/\$defs\/Piece",\s*asCell:\s*true))[\s\S]*\},\s*\{\s*type:\s*"undefined"\s*\}\])/
+          .test(
+            normalized,
           ),
         true,
+        `expected mentionable schema to preserve cell-backed array items:\n${output}`,
       );
       assertEquals(
         normalized.includes(
           "mentionable: true",
         ),
         false,
+      );
+    },
+  );
+
+  await t.step(
+    "JSX derives preserve narrowed outer wrappers for element access",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern, UI } from "commontools";',
+        "",
+        "interface State {",
+        "  items: string[];",
+        "  index: number;",
+        "  matrix: number[][];",
+        "  row: number;",
+        "  col: number;",
+        "}",
+        "",
+        "export default pattern<State>((state) => {",
+        "  return {",
+        "    [UI]: (",
+        "      <div>",
+        "        <p>Item: {state.items[state.index]}</p>",
+        "        <p>Last: {state.items[state.items.length - 1]}</p>",
+        "        <p>Matrix: {state.matrix[state.row]![state.col]}</p>",
+        "      </div>",
+        "    ),",
+        "  };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const normalized = result.output.replace(/\s+/g, " ");
+
+      assertEquals(
+        normalized.includes(
+          'state: { type: "object", properties: { items: { type: "array", items: { type: "string" } }, index: { type: "number" } }, required: ["items", "index"] }',
+        ),
+        true,
+        `expected first element-access derive to keep state.items and state.index:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'state: { type: "object", properties: { matrix: { type: "array", items: { type: "array", items: { type: "number" } } }, row: { type: "number" }, col: { type: "number" } }, required: ["matrix", "row", "col"] }',
+        ),
+        true,
+        `expected matrix element-access derive to keep matrix/row/col:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes("state: true"),
+        false,
+        `did not expect JSX derive wrappers to collapse to true:\n${result.output}`,
       );
     },
   );
@@ -2393,6 +2488,102 @@ Deno.test("Schema Shrink Validation", async (t) => {
         /content:\s*{\s*type:\s*"string"/.test(inputSchema),
         false,
         `did not expect note shrink to keep content:\n${inputSchema}`,
+      );
+    },
+  );
+
+  await t.step(
+    "action captures preserve explicit undefined for Partial cell members",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { Cell, pattern, action } from "commontools";',
+        "",
+        "interface BaseState {",
+        "  a: Cell<string>;",
+        "  b: Cell<number>;",
+        "}",
+        "",
+        "type PartState = Partial<BaseState>;",
+        "",
+        "export default pattern<PartState>(({ a, b }) => {",
+        "  return {",
+        "    readA: action(() => console.log(a)),",
+        "    readB: action(() => console.log(b)),",
+        "  };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const normalized = result.output.replace(/\s+/g, " ");
+
+      assertEquals(
+        normalized.includes(
+          'handler(false as const satisfies __ctHelpers.JSONSchema, { type: "object", properties: { a: { anyOf: [{ type: "undefined" }, { type: "string", asCell: true }] } } } as const satisfies __ctHelpers.JSONSchema',
+        ),
+        true,
+        `expected action capture for a to preserve explicit undefined:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'handler(false as const satisfies __ctHelpers.JSONSchema, { type: "object", properties: { b: { anyOf: [{ type: "undefined" }, { type: "number", asCell: true }] } } } as const satisfies __ctHelpers.JSONSchema',
+        ),
+        true,
+        `expected action capture for b to preserve explicit undefined:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "derive captures preserve explicit undefined inside narrowed object wrappers",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { Writable, derive, pattern } from "commontools";',
+        "",
+        "interface Config {",
+        "  required: number;",
+        "  unionUndefined: number | undefined;",
+        "}",
+        "",
+        "export default pattern((config: Config) => {",
+        "  const value = Writable.of(10);",
+        "  const result = derive(value, (v) =>",
+        "    v.get() + config.required + (config.unionUndefined ?? 0)",
+        "  );",
+        "  return result;",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+      const normalized = result.output.replace(/\s+/g, " ");
+
+      assertEquals(
+        normalized.includes(
+          'config: { type: "object", properties: { required: { type: "number" }, unionUndefined: { type: ["number", "undefined"] } }, required: ["required", "unionUndefined"] }',
+        ) ||
+          normalized.includes(
+            'config: { type: "object", properties: { required: { type: "number" }, unionUndefined: { anyOf: [{ type: "number" }, { type: "undefined" }] } }, required: ["required", "unionUndefined"] }',
+          ),
+        true,
+        `expected derive capture schema to preserve config.required and config.unionUndefined:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes("config: true"),
+        false,
+        `did not expect derive capture wrapper to collapse to true:\n${result.output}`,
       );
     },
   );

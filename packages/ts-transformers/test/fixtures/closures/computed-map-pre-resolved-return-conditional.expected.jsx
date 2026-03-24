@@ -22,25 +22,20 @@ export default pattern((state) => {
                     items: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Item"
+                            type: "object",
+                            properties: {
+                                done: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["done"]
                         }
                     }
                 },
                 required: ["items"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
