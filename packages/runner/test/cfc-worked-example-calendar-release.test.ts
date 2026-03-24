@@ -1,20 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import {
   createCfcMultiPartyConsentIntent,
   deriveCfcConsentedByAtom,
   deriveCfcMultiPartyResultLabels,
 } from "../src/cfc/multi-party-consent.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { Labels } from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example calendar release test",
@@ -22,12 +15,26 @@ const signer = await Identity.fromPassphrase(
 const space = signer.did();
 const bobDid = "did:key:bob-calendar-participant";
 const carolDid = "did:key:carol-calendar-participant";
-const daveDid = "did:key:dave-nonparticipant";
+const daveSigner = await Identity.fromPassphrase(
+  "cfc worked example calendar release dave",
+);
 
 const userAliceAtom = {
   type: "https://commonfabric.org/cfc/atom/User",
   subject: space,
 } as const;
+
+const stringSchema = {
+  type: "string",
+} as const satisfies JSONSchema;
+
+const calendarReleaseInputSchema = {
+  type: "object",
+  properties: {
+    result: stringSchema,
+  },
+  required: ["result"],
+} as const satisfies JSONSchema;
 
 function createConsent(participant: string) {
   return createCfcMultiPartyConsentIntent({
@@ -81,32 +88,33 @@ function calendarReleaseSchema(
 }
 
 describe("CFC worked example: calendar participant release", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      storageManager,
+    harness = createCfcPatternTestHarness({
+      signer,
       apiUrl: new URL(import.meta.url),
     });
-    runtime.scheduler.disablePullMode();
   });
 
   afterEach(async () => {
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
-  async function readPersistedLabels(id: `${string}:${string}`) {
-    const tx = runtime.edit();
-    const raw = tx.readOrThrow(cfcLabelsAddress({
-      space,
-      id,
-      type: "application/json",
-    }));
-    await tx.abort();
-    return normalizePersistedLabels(raw);
+  function createCalendarReleasePattern(
+    testHarness: ReturnType<typeof createCfcPatternTestHarness>,
+    consentAtom: ReturnType<typeof deriveCfcConsentedByAtom>,
+  ) {
+    return testHarness.pattern<{ result: string }>(
+      ({ result }) =>
+        testHarness.lift(
+          stringSchema,
+          calendarReleaseSchema(consentAtom),
+          (value) => value,
+        )(result),
+      calendarReleaseInputSchema,
+      calendarReleaseSchema(consentAtom),
+    );
   }
 
   it("releases a multi-party result to a participant via $actingUser membership", async () => {
@@ -119,52 +127,45 @@ describe("CFC worked example: calendar participant release", () => {
       carolConsent,
     ]);
 
-    let tx = runtime.edit();
-    const result = runtime.getCell<string>(
-      space,
-      "calendar-release-result",
-      undefined,
-      tx,
-    );
-    const aliceView = runtime.getCell<string>(
-      space,
-      "calendar-release-alice-view",
-      undefined,
-      tx,
-    );
-    result.set("2026-03-20T17:00:00Z");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: result.getAsNormalizedFullLink().id,
-        type: "application/json",
+    await harness.seedLabeledValue({
+      id: "calendar-release-result",
+      schema: stringSchema,
+      value: "2026-03-20T17:00:00Z",
+      labels: deriveCfcMultiPartyResultLabels({
+        consents: [bobConsent, carolConsent, aliceConsent],
+        codeHash: "sha256:findMeetingTimes-v1",
       }),
-      {
-        "/": deriveCfcMultiPartyResultLabels({
-          consents: [bobConsent, carolConsent, aliceConsent],
-          codeHash: "sha256:findMeetingTimes-v1",
-        }),
-      } satisfies Record<string, Labels>,
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    });
 
-    tx = runtime.edit();
-    const value = result.withTx(tx).get() ?? "";
-    aliceView.withTx(tx).asSchema(calendarReleaseSchema(consentAtom)).set(
-      value,
-    );
+    await harness.restart();
 
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).resolves.toBeUndefined();
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    const labels = await readPersistedLabels(
-      aliceView.getAsNormalizedFullLink().id,
+    const persistedResult = harness.getCell<string>(
+      "calendar-release-result",
+      stringSchema,
     );
-    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+    const run = await harness.runPattern({
+      id: "calendar-release-alice-view",
+      pattern: createCalendarReleasePattern(harness, consentAtom),
+      inputs: { result: persistedResult },
+      outputSchema: calendarReleaseSchema(consentAtom),
+      initialOutput: "",
+      prepare: "cfc",
+    });
+
+    expect(await run.result.pull()).toEqual("2026-03-20T17:00:00Z");
+
+    await harness.restart();
+
+    const persistedView = harness.getCell<string>(
+      "calendar-release-alice-view",
+      calendarReleaseSchema(consentAtom),
+    );
+    expect(
+      (await harness.readEffectiveLabel(
+        persistedView,
+        calendarReleaseSchema(consentAtom),
+      ))?.classification,
+    ).toEqual([[userAliceAtom]]);
   });
 
   it("fails closed for a non-participant acting user", async () => {
@@ -176,46 +177,47 @@ describe("CFC worked example: calendar participant release", () => {
       bobConsent,
       carolConsent,
     ]);
+    const daveHarness = createCfcPatternTestHarness({
+      signer,
+      apiUrl: new URL(import.meta.url),
+      actingPrincipalOverride: daveSigner.did(),
+    });
 
-    let tx = runtime.edit();
-    const result = runtime.getCell<string>(
-      space,
-      "calendar-release-result-miss",
-      undefined,
-      tx,
-    );
-    const daveView = runtime.getCell<string>(
-      space,
-      "calendar-release-dave-view",
-      undefined,
-      tx,
-    );
-    result.set("2026-03-20T17:00:00Z");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: result.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": deriveCfcMultiPartyResultLabels({
+    try {
+      await daveHarness.seedLabeledValue({
+        id: "calendar-release-result-miss",
+        schema: stringSchema,
+        value: "2026-03-20T17:00:00Z",
+        labels: deriveCfcMultiPartyResultLabels({
           consents: [aliceConsent, bobConsent, carolConsent],
           codeHash: "sha256:findMeetingTimes-v1",
         }),
-      } satisfies Record<string, Labels>,
-    );
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+      });
 
-    tx = runtime.edit();
-    const value = result.withTx(tx).get() ?? "";
-    daveView.withTx(tx).asSchema(calendarReleaseSchema(consentAtom)).set(value);
+      await daveHarness.restart();
 
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: daveDid }),
-    ).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
-      requirement: "confidentialityMonotonicity",
-    });
+      const persistedResult = daveHarness.getCell<string>(
+        "calendar-release-result-miss",
+        stringSchema,
+      );
+
+      const run = await daveHarness.runPattern({
+        id: "calendar-release-dave-view",
+        pattern: createCalendarReleasePattern(daveHarness, consentAtom),
+        inputs: { result: persistedResult },
+        outputSchema: calendarReleaseSchema(consentAtom),
+        prepare: "cfc",
+      });
+      expect(await run.result.pull()).toBeUndefined();
+
+      await daveHarness.restart();
+      const persistedDaveView = daveHarness.getCell<string>(
+        "calendar-release-dave-view",
+        calendarReleaseSchema(consentAtom),
+      );
+      expect(await persistedDaveView.pull()).toBeUndefined();
+    } finally {
+      await daveHarness.dispose();
+    }
   });
 });

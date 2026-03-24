@@ -1,21 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import {
   createCfcMultiPartyConsentIntent,
   deriveCfcConsentedByAtom,
   deriveCfcMultiPartyResultLabels,
 } from "../src/cfc/multi-party-consent.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedLabels,
-} from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcIntegrityLabel } from "../src/cfc/label-algebra.ts";
 import type { Labels } from "../src/storage/interface.ts";
+import { createCfcPatternTestHarness } from "./helpers/cfc-pattern-harness.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc worked example runtime placement test",
@@ -90,6 +84,18 @@ const audioExecutionIntegrity = [
     imageHash: "sha256:approved-audio-image",
   },
 ] as const;
+
+const stringSchema = {
+  type: "string",
+} as const satisfies JSONSchema;
+
+const releaseInputSchema = {
+  type: "object",
+  properties: {
+    source: stringSchema,
+  },
+  required: ["source"],
+} as const satisfies JSONSchema;
 
 function createConsent(participant: string) {
   return createCfcMultiPartyConsentIntent({
@@ -205,36 +211,75 @@ const ownerTierReleaseSchema = {
 } as const satisfies JSONSchema;
 
 describe("CFC worked example: runtime placement variants", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
+  let harness: ReturnType<typeof createCfcPatternTestHarness>;
   let executionIntegrity: CfcIntegrityLabel | undefined;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime(Object.assign({
-      storageManager,
-      apiUrl: new URL(import.meta.url),
-    }, {
-      cfcExecutionIntegrity: () => executionIntegrity,
-    }));
-    runtime.scheduler.disablePullMode();
     executionIntegrity = undefined;
+    harness = createCfcPatternTestHarness({
+      signer,
+      apiUrl: new URL(import.meta.url),
+      runtimeOptions: {
+        cfcExecutionIntegrity: () => executionIntegrity,
+      },
+    });
   });
 
   afterEach(async () => {
-    await runtime.dispose();
-    await storageManager.close();
+    await harness.dispose();
   });
 
-  async function readPersistedLabels(id: `${string}:${string}`) {
-    const tx = runtime.edit();
-    const raw = tx.readOrThrow(cfcLabelsAddress({
-      space,
-      id,
-      type: "application/json",
-    }));
-    await tx.abort();
-    return normalizePersistedLabels(raw);
+  function createReleasePattern(outputSchema: JSONSchema) {
+    return harness.pattern<{ source: string }>(
+      ({ source }) =>
+        harness.lift(
+          stringSchema,
+          outputSchema,
+          (value) => value,
+        )(source),
+      releaseInputSchema,
+      outputSchema,
+    );
+  }
+
+  async function runReleasePattern(
+    options: {
+      sourceId: string;
+      outputId: string;
+      outputSchema: JSONSchema;
+    },
+  ) {
+    const source = harness.getCell<string>(options.sourceId, stringSchema);
+    return await harness.runPattern({
+      id: options.outputId,
+      pattern: createReleasePattern(options.outputSchema),
+      inputs: { source },
+      outputSchema: options.outputSchema,
+      prepare: "cfc",
+    });
+  }
+
+  async function expectBlockedOutputMissing(
+    outputId: string,
+    outputSchema: JSONSchema,
+  ) {
+    await harness.restart();
+    const persistedOutput = harness.getCell<string>(outputId, outputSchema);
+    expect(await persistedOutput.pull()).toBeUndefined();
+  }
+
+  async function expectReleasedAsAlice(
+    outputId: string,
+    outputSchema: JSONSchema,
+    expectedValue: string,
+  ) {
+    await harness.restart();
+    const persistedOutput = harness.getCell<string>(outputId, outputSchema);
+    expect(await persistedOutput.pull()).toEqual(expectedValue);
+    expect(
+      (await harness.readEffectiveLabel(persistedOutput, outputSchema))
+        ?.classification,
+    ).toEqual([[userAliceAtom]]);
   }
 
   it("releases a calendar result only inside the approved shared CC profile", async () => {
@@ -246,157 +291,93 @@ describe("CFC worked example: runtime placement variants", () => {
       bobConsent,
       carolConsent,
     ]);
-
-    let tx = runtime.edit();
-    const result = runtime.getCell<string>(
-      space,
-      "runtime-placement-calendar-result",
-      undefined,
-      tx,
-    );
-    const participantView = runtime.getCell<string>(
-      space,
-      "runtime-placement-calendar-view",
-      undefined,
-      tx,
-    );
-    result.set("2026-03-20T17:00:00Z");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: result.getAsNormalizedFullLink().id,
-        type: "application/json",
+    await harness.seedLabeledValue({
+      id: "runtime-placement-calendar-result",
+      schema: stringSchema,
+      value: "2026-03-20T17:00:00Z",
+      labels: deriveCfcMultiPartyResultLabels({
+        consents: [aliceConsent, bobConsent, carolConsent],
+        codeHash: "sha256:findMeetingTimes-v1",
       }),
-      {
-        "/": deriveCfcMultiPartyResultLabels({
-          consents: [aliceConsent, bobConsent, carolConsent],
-          codeHash: "sha256:findMeetingTimes-v1",
-        }),
-      } satisfies Record<string, Labels>,
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    tx = runtime.edit();
-    const value = result.withTx(tx).get() ?? "";
-    participantView.withTx(tx).asSchema(
-      calendarSharedCcReleaseSchema(consentAtom),
-    ).set(value);
-
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
     });
-    await tx.abort();
 
-    executionIntegrity = sharedCcExecutionIntegrity;
+    await harness.restart();
 
-    tx = runtime.edit();
-    participantView.withTx(tx).asSchema(
+    const blockedRun = await runReleasePattern({
+      sourceId: "runtime-placement-calendar-result",
+      outputId: "runtime-placement-calendar-view-blocked",
+      outputSchema: calendarSharedCcReleaseSchema(consentAtom),
+    });
+    expect(await blockedRun.result.pull()).toBeUndefined();
+    await expectBlockedOutputMissing(
+      "runtime-placement-calendar-view-blocked",
       calendarSharedCcReleaseSchema(consentAtom),
-    ).set(result.withTx(tx).get() ?? "");
-
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).resolves.toBeUndefined();
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    const labels = await readPersistedLabels(
-      participantView.getAsNormalizedFullLink().id,
     );
-    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
+
+    executionIntegrity = [...sharedCcExecutionIntegrity];
+
+    await runReleasePattern({
+      sourceId: "runtime-placement-calendar-result",
+      outputId: "runtime-placement-calendar-view",
+      outputSchema: calendarSharedCcReleaseSchema(consentAtom),
+    });
+
+    await expectReleasedAsAlice(
+      "runtime-placement-calendar-view",
+      calendarSharedCcReleaseSchema(consentAtom),
+      "2026-03-20T17:00:00Z",
+    );
   });
 
   it("releases filtered audio only when trigger, filter, and runtime evidence are present", async () => {
-    let tx = runtime.edit();
-    const rawAudio = runtime.getCell<string>(
-      space,
-      "runtime-placement-raw-audio",
-      undefined,
-      tx,
-    );
-    const filteredAudio = runtime.getCell<string>(
-      space,
-      "runtime-placement-filtered-audio",
-      undefined,
-      tx,
-    );
-    rawAudio.set("filtered-song-features");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: rawAudio.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": {
-          classification: [[userAliceAtom], [rawAudioCaveatAtom]],
-        },
-      } satisfies Record<string, Labels>,
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-
-    tx = runtime.edit();
-    filteredAudio.withTx(tx).asSchema(filteredAudioSchema).set(
-      rawAudio.withTx(tx).get() ?? "",
-    );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
+    await harness.seedLabeledValue({
+      id: "runtime-placement-raw-audio",
+      schema: stringSchema,
+      value: "filtered-song-features",
+      labels: {
+        classification: [[userAliceAtom], [rawAudioCaveatAtom]],
+      } satisfies Labels,
     });
-    await tx.abort();
 
-    executionIntegrity = audioExecutionIntegrity;
+    await harness.restart();
 
-    tx = runtime.edit();
-    filteredAudio.withTx(tx).asSchema(filteredAudioSchema).set(
-      rawAudio.withTx(tx).get() ?? "",
+    const blockedRun = await runReleasePattern({
+      sourceId: "runtime-placement-raw-audio",
+      outputId: "runtime-placement-filtered-audio-blocked",
+      outputSchema: filteredAudioSchema,
+    });
+    expect(await blockedRun.result.pull()).toBeUndefined();
+    await expectBlockedOutputMissing(
+      "runtime-placement-filtered-audio-blocked",
+      filteredAudioSchema,
     );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).resolves.toBeUndefined();
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
 
-    const labels = await readPersistedLabels(
-      filteredAudio.getAsNormalizedFullLink().id,
+    executionIntegrity = [...audioExecutionIntegrity];
+
+    await runReleasePattern({
+      sourceId: "runtime-placement-raw-audio",
+      outputId: "runtime-placement-filtered-audio",
+      outputSchema: filteredAudioSchema,
+    });
+
+    await expectReleasedAsAlice(
+      "runtime-placement-filtered-audio",
+      filteredAudioSchema,
+      "filtered-song-features",
     );
-    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("allows exact-device release only on the enrolled device identity", async () => {
-    let tx = runtime.edit();
-    const localAvailability = runtime.getCell<string>(
-      space,
-      "runtime-placement-local-availability",
-      undefined,
-      tx,
-    );
-    const releasedAvailability = runtime.getCell<string>(
-      space,
-      "runtime-placement-device-release",
-      undefined,
-      tx,
-    );
-    localAvailability.set("09:00-10:00");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: localAvailability.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": {
-          classification: [[userAliceAtom], [alicePhoneDeviceAtom]],
-        },
-      } satisfies Record<string, Labels>,
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    await harness.seedLabeledValue({
+      id: "runtime-placement-local-availability",
+      schema: stringSchema,
+      value: "09:00-10:00",
+      labels: {
+        classification: [[userAliceAtom], [alicePhoneDeviceAtom]],
+      } satisfies Labels,
+    });
+
+    await harness.restart();
 
     executionIntegrity = [
       {
@@ -406,64 +387,43 @@ describe("CFC worked example: runtime placement variants", () => {
       strongClientAppAttestedAtom,
     ];
 
-    tx = runtime.edit();
-    releasedAvailability.withTx(tx).asSchema(exactDeviceReleaseSchema).set(
-      localAvailability.withTx(tx).get() ?? "",
-    );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
+    const blockedRun = await runReleasePattern({
+      sourceId: "runtime-placement-local-availability",
+      outputId: "runtime-placement-device-release-blocked",
+      outputSchema: exactDeviceReleaseSchema,
     });
-    await tx.abort();
+    expect(await blockedRun.result.pull()).toBeUndefined();
+    await expectBlockedOutputMissing(
+      "runtime-placement-device-release-blocked",
+      exactDeviceReleaseSchema,
+    );
 
     executionIntegrity = [alicePhoneDeviceAtom, strongClientAppAttestedAtom];
 
-    tx = runtime.edit();
-    releasedAvailability.withTx(tx).asSchema(exactDeviceReleaseSchema).set(
-      localAvailability.withTx(tx).get() ?? "",
-    );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).resolves.toBeUndefined();
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    await runReleasePattern({
+      sourceId: "runtime-placement-local-availability",
+      outputId: "runtime-placement-device-release",
+      outputSchema: exactDeviceReleaseSchema,
+    });
 
-    const labels = await readPersistedLabels(
-      releasedAvailability.getAsNormalizedFullLink().id,
+    await expectReleasedAsAlice(
+      "runtime-placement-device-release",
+      exactDeviceReleaseSchema,
+      "09:00-10:00",
     );
-    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 
   it("allows owner-tier release on same-owner managed devices but rejects others", async () => {
-    let tx = runtime.edit();
-    const localAvailability = runtime.getCell<string>(
-      space,
-      "runtime-placement-tier-source",
-      undefined,
-      tx,
-    );
-    const releasedAvailability = runtime.getCell<string>(
-      space,
-      "runtime-placement-tier-release",
-      undefined,
-      tx,
-    );
-    localAvailability.set("10:00-11:00");
-    tx.writeOrThrow(
-      cfcLabelsAddress({
-        space,
-        id: localAvailability.getAsNormalizedFullLink().id,
-        type: "application/json",
-      }),
-      {
-        "/": {
-          classification: [[userAliceAtom], [aliceManagedHighTierAtom]],
-        },
-      } satisfies Record<string, Labels>,
-    );
-    let committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    await harness.seedLabeledValue({
+      id: "runtime-placement-tier-source",
+      schema: stringSchema,
+      value: "10:00-11:00",
+      labels: {
+        classification: [[userAliceAtom], [aliceManagedHighTierAtom]],
+      } satisfies Labels,
+    });
+
+    await harness.restart();
 
     executionIntegrity = [
       {
@@ -474,35 +434,32 @@ describe("CFC worked example: runtime placement variants", () => {
       strongClientAppAttestedAtom,
     ];
 
-    tx = runtime.edit();
-    releasedAvailability.withTx(tx).asSchema(ownerTierReleaseSchema).set(
-      localAvailability.withTx(tx).get() ?? "",
-    );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).rejects.toMatchObject({
-      name: "CfcOutputTransitionViolationError",
+    const blockedRun = await runReleasePattern({
+      sourceId: "runtime-placement-tier-source",
+      outputId: "runtime-placement-tier-release-blocked",
+      outputSchema: ownerTierReleaseSchema,
     });
-    await tx.abort();
+    expect(await blockedRun.result.pull()).toBeUndefined();
+    await expectBlockedOutputMissing(
+      "runtime-placement-tier-release-blocked",
+      ownerTierReleaseSchema,
+    );
 
     executionIntegrity = [
       aliceManagedHighTierAtom,
       strongClientAppAttestedAtom,
     ];
 
-    tx = runtime.edit();
-    releasedAvailability.withTx(tx).asSchema(ownerTierReleaseSchema).set(
-      localAvailability.withTx(tx).get() ?? "",
-    );
-    await expect(
-      prepareBoundaryCommit(tx, { actingPrincipal: space }),
-    ).resolves.toBeUndefined();
-    committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
+    await runReleasePattern({
+      sourceId: "runtime-placement-tier-source",
+      outputId: "runtime-placement-tier-release",
+      outputSchema: ownerTierReleaseSchema,
+    });
 
-    const labels = await readPersistedLabels(
-      releasedAvailability.getAsNormalizedFullLink().id,
+    await expectReleasedAsAlice(
+      "runtime-placement-tier-release",
+      ownerTierReleaseSchema,
+      "10:00-11:00",
     );
-    expect(labels["/"]?.label?.classification).toEqual([[userAliceAtom]]);
   });
 });

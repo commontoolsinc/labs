@@ -7,6 +7,7 @@ import type { Cell } from "../../src/cell.ts";
 import { canonicalizeStoragePath } from "../../src/cfc/canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "../../src/cfc/internal-markers.ts";
 import { setPatternEnvironment } from "../../src/env.ts";
+import type { PrepareBoundaryCommitOptions } from "../../src/cfc/prepare-engine.ts";
 import { prepareBoundaryCommit } from "../../src/cfc/prepare-engine.ts";
 import { prepareCfcCommitIfNeeded } from "../../src/cfc/prepare-shim.ts";
 import { resolveLink } from "../../src/link-resolution.ts";
@@ -21,6 +22,7 @@ import { Runtime, type RuntimeOptions } from "../../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageManager,
   Labels,
   MediaType,
   MemorySpace,
@@ -35,6 +37,8 @@ type HarnessOptions = {
   disablePullMode?: boolean;
   patternEnvironment?: RuntimeOptions["patternEnvironment"];
   runtimeOptions?: Omit<RuntimeOptions, "apiUrl" | "storageManager">;
+  storageManager?: IStorageManager;
+  actingPrincipalOverride?: string;
 };
 
 type RunPatternOptions<TInputs extends Record<string, unknown>> = {
@@ -44,6 +48,7 @@ type RunPatternOptions<TInputs extends Record<string, unknown>> = {
   outputSchema?: JSONSchema;
   initialOutput?: unknown;
   prepare?: PrepareMode;
+  prepareOptions?: PrepareBoundaryCommitOptions;
 };
 
 type SettledPullOptions = {
@@ -64,6 +69,7 @@ type WriteCellValueOptions<T> = {
   schema?: JSONSchema;
   labels?: Labels;
   prepare?: PrepareMode;
+  prepareOptions?: PrepareBoundaryCommitOptions;
 };
 
 function delay(ms: number): Promise<void> {
@@ -78,7 +84,7 @@ export function createCfcPatternTestHarness(
 
 export class CfcPatternTestHarness {
   readonly space: MemorySpace;
-  readonly storageManager: ReturnType<typeof StorageManager.emulate>;
+  readonly storageManager: IStorageManager;
   readonly pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   readonly byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
   readonly lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
@@ -91,14 +97,19 @@ export class CfcPatternTestHarness {
   #originalFetch?: typeof globalThis.fetch;
   #patternEnvironment?: RuntimeOptions["patternEnvironment"];
   #runtimeOptions: Omit<RuntimeOptions, "apiUrl" | "storageManager">;
+  #ownsStorageManager: boolean;
+  #actingPrincipalOverride?: string;
 
   constructor(options: HarnessOptions) {
     this.space = options.signer.did();
-    this.storageManager = StorageManager.emulate({ as: options.signer });
+    this.storageManager = options.storageManager ??
+      StorageManager.emulate({ as: options.signer });
     this.#apiUrl = options.apiUrl;
     this.#disablePullMode = options.disablePullMode ?? true;
     this.#patternEnvironment = options.patternEnvironment;
     this.#runtimeOptions = options.runtimeOptions ?? {};
+    this.#ownsStorageManager = options.storageManager === undefined;
+    this.#actingPrincipalOverride = options.actingPrincipalOverride;
 
     const { commontools } = createBuilder();
     this.pattern = commontools.pattern;
@@ -119,6 +130,11 @@ export class CfcPatternTestHarness {
       apiUrl: this.#apiUrl,
       ...this.#runtimeOptions,
     });
+    if (this.#actingPrincipalOverride) {
+      (runtime as { userIdentityDID: Runtime["userIdentityDID"] })
+        .userIdentityDID = this
+          .#actingPrincipalOverride as Runtime["userIdentityDID"];
+    }
     if (this.#disablePullMode) {
       runtime.scheduler.disablePullMode();
     }
@@ -128,6 +144,9 @@ export class CfcPatternTestHarness {
   async dispose(): Promise<void> {
     this.restoreFetch();
     await this.runtime.dispose();
+    if (this.#ownsStorageManager) {
+      await this.storageManager.close();
+    }
   }
 
   async restart(): Promise<void> {
@@ -141,12 +160,19 @@ export class CfcPatternTestHarness {
 
   async withCommittedEdit<T>(
     edit: (tx: IExtendedStorageTransaction) => Promise<T> | T,
-    options: { prepare?: PrepareMode } = {},
+    options: {
+      prepare?: PrepareMode;
+      prepareOptions?: PrepareBoundaryCommitOptions;
+    } = {},
   ): Promise<T> {
     const tx = this.runtime.edit();
     try {
       const value = await edit(tx);
-      await this.#prepare(tx, options.prepare ?? "none");
+      await this.#prepare(
+        tx,
+        options.prepare ?? "none",
+        options.prepareOptions,
+      );
       const committed = await tx.commit();
       expect(committed.error).toBeUndefined();
       return value;
@@ -211,7 +237,10 @@ export class CfcPatternTestHarness {
           { "/": { label: options.labels } } as never,
         );
       }
-    }, { prepare: options.prepare ?? "none" });
+    }, {
+      prepare: options.prepare ?? "none",
+      prepareOptions: options.prepareOptions,
+    });
     return this.getCell<T>(options.id, options.schema);
   }
 
@@ -290,30 +319,39 @@ export class CfcPatternTestHarness {
     options: RunPatternOptions<TInputs>,
   ) {
     const tx = this.runtime.edit();
-    const outputCell = this.getCell(
-      options.id,
-      options.outputSchema,
-      tx,
-    );
-    if (options.initialOutput !== undefined) {
-      outputCell.set(options.initialOutput);
+    try {
+      const outputCell = this.getCell(
+        options.id,
+        options.outputSchema,
+        tx,
+      );
+      if (options.initialOutput !== undefined) {
+        outputCell.set(options.initialOutput);
+      }
+      const result = this.runtime.run(
+        tx,
+        options.pattern,
+        options.inputs,
+        outputCell,
+      );
+      await this.#prepare(
+        tx,
+        options.prepare ?? "cfc",
+        options.prepareOptions,
+      );
+      const committed = await tx.commit();
+      expect(committed.error).toBeUndefined();
+      const value = await result.pull();
+      return {
+        outputCell,
+        outputLink: outputCell.getAsNormalizedFullLink(),
+        result,
+        value,
+      };
+    } catch (error) {
+      await tx.abort(error);
+      throw error;
     }
-    const result = this.runtime.run(
-      tx,
-      options.pattern,
-      options.inputs,
-      outputCell,
-    );
-    await this.#prepare(tx, options.prepare ?? "cfc");
-    const committed = await tx.commit();
-    expect(committed.error).toBeUndefined();
-    const value = await result.pull();
-    return {
-      outputCell,
-      outputLink: outputCell.getAsNormalizedFullLink(),
-      result,
-      value,
-    };
   }
 
   async pullSettledResult<T>(
@@ -344,15 +382,16 @@ export class CfcPatternTestHarness {
   async #prepare(
     tx: IExtendedStorageTransaction,
     prepare: PrepareMode,
+    prepareOptions?: PrepareBoundaryCommitOptions,
   ): Promise<void> {
     switch (prepare) {
       case "none":
         return;
       case "cfc":
-        await prepareCfcCommitIfNeeded(tx);
+        await prepareCfcCommitIfNeeded(tx, prepareOptions);
         return;
       case "boundary":
-        await prepareBoundaryCommit(tx);
+        await prepareBoundaryCommit(tx, prepareOptions);
         return;
     }
   }
