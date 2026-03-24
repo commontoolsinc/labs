@@ -180,7 +180,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. See `link-resolution-key.bench.ts`. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. [Tests needed.](#perf-3-link-resolution) |
 
 ### Likely High-Impact (pending profiling confirmation)
 
@@ -214,8 +214,8 @@ these tests first.**
 
 **<a id="perf-3-link-resolution"></a>PERF-3 (link resolution):** Good existing coverage (28 tests). Add 2-3 tests for
 cross-space cycles and separator edge cases. The replacement key function must
-not collide on path segments containing the separator (confirmed via
-`link-resolution-key.bench.ts`). **Can ship alongside the fix.**
+not collide on path segments containing the separator. **Can ship alongside the
+fix.**
 
 **<a id="perf-4-engine-files"></a>PERF-4 (engine files):** No test verifies the sandbox receives all needed files —
 current tests pass because the superset always includes everything. **Add
