@@ -225,10 +225,10 @@ export function fabricFromNativeValueModern(
 ): FabricValue {
   // Identity optimization: if the value is already a deep-frozen
   // FabricValue, return it without copying.
-  if (freeze && isDeepFrozenStorableValue(value)) {
+  if (freeze && isDeepFrozenFabricValue(value)) {
     return value as FabricValue;
   }
-  return storableFromNativeValueRichInternal(
+  return fabricFromNativeValueRichInternal(
     value,
     new Map(),
     freeze,
@@ -238,16 +238,16 @@ export function fabricFromNativeValueModern(
 /**
  * Naive recursive check: is the value a deep-frozen FabricValue?
  * Returns `true` if the value is a primitive, or a frozen object/array
- * whose children are all also deep-frozen StorableValues.
+ * whose children are all also deep-frozen FabricValues.
  */
-function isDeepFrozenStorableValue(value: unknown): boolean {
+function isDeepFrozenFabricValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value !== "object") return true; // primitives
   if (!Object.isFrozen(value)) return false;
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      if (i in value && !isDeepFrozenStorableValue(value[i])) return false;
+      if (i in value && !isDeepFrozenFabricValue(value[i])) return false;
     }
     return true;
   }
@@ -262,7 +262,7 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
   if (value instanceof FabricInstance) return true;
 
   for (const v of Object.values(value)) {
-    if (!isDeepFrozenStorableValue(v)) return false;
+    if (!isDeepFrozenFabricValue(v)) return false;
   }
   return true;
 }
@@ -274,7 +274,7 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
  * Unlike the legacy version, this never returns OMIT -- `undefined` values
  * are preserved.
  */
-function storableFromNativeValueRichInternal(
+function fabricFromNativeValueRichInternal(
   original: unknown,
   converted: Map<object, unknown>,
   freeze: boolean,
@@ -369,7 +369,7 @@ function storableFromNativeValueRichInternal(
         // This keeps the hole distinct from `undefined`.
         resultArray.length = i + 1;
       } else {
-        resultArray[i] = storableFromNativeValueRichInternal(
+        resultArray[i] = fabricFromNativeValueRichInternal(
           value[i],
           converted,
           freeze,
@@ -385,7 +385,7 @@ function storableFromNativeValueRichInternal(
     const proto = Object.getPrototypeOf(value);
     const obj = Object.create(proto) as Record<string, FabricValue>;
     for (const [key, val] of Object.entries(value)) {
-      obj[key] = storableFromNativeValueRichInternal(
+      obj[key] = fabricFromNativeValueRichInternal(
         val,
         converted,
         freeze,
@@ -431,7 +431,7 @@ function convertErrorInternals(
 
   // Recursively convert cause -- it could be a raw Error, Map, etc.
   if (error.cause !== undefined) {
-    result.cause = storableFromNativeValueRichInternal(
+    result.cause = fabricFromNativeValueRichInternal(
       error.cause,
       converted,
       freeze,
@@ -444,7 +444,7 @@ function convertErrorInternals(
   for (const key of Object.keys(error)) {
     if (SKIP_KEYS.has(key) || UNSAFE_KEYS.has(key)) continue;
     (result as unknown as Record<string, unknown>)[key] =
-      storableFromNativeValueRichInternal(
+      fabricFromNativeValueRichInternal(
         (error as unknown as Record<string, unknown>)[key],
         converted,
         freeze,
@@ -517,7 +517,7 @@ export function isFabricValueModern(
 }
 
 // ---------------------------------------------------------------------------
-// canBeStored: deep check for storability (FabricValue | FabricNativeObject)
+// canBeStored: deep check for fabric compatibility (FabricValue | FabricNativeObject)
 // ---------------------------------------------------------------------------
 
 /**
@@ -625,7 +625,7 @@ function trackForCircularity(
  * matches the requested state. When `force` is true, always copies (unless
  * the value is a primitive or special primitive).
  *
- * Deep mode uses `isDeepFrozenStorableValue` for identity optimization;
+ * Deep mode uses `isDeepFrozenFabricValue` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
  */
 function cloneHelper(
@@ -636,12 +636,12 @@ function cloneHelper(
   seen: Set<object> | null,
 ): FabricValue {
   // Identity optimization: when force is off, check if the value's frozenness
-  // already matches the requested state. Deep mode uses isDeepFrozenStorableValue;
+  // already matches the requested state. Deep mode uses isDeepFrozenFabricValue;
   // shallow mode uses Object.isFrozen(v) === frozen.
   function canReturnAsIs(v: FabricValue): boolean {
     if (force) return false;
     if (deep) {
-      if (frozen && isDeepFrozenStorableValue(v)) return true;
+      if (frozen && isDeepFrozenFabricValue(v)) return true;
       if (!frozen && !Object.isFrozen(v)) return true;
       return false;
     }
