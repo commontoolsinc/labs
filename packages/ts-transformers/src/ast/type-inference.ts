@@ -127,8 +127,10 @@ export function widenLiteralType(
 export function inferWidenedTypeFromExpression(
   expr: ts.Expression,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.Type {
-  const type = checker.getTypeAtLocation(expr);
+  const type = getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
+    checker.getTypeAtLocation(expr);
   return widenLiteralType(type, checker);
 }
 

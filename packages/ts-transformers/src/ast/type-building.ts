@@ -53,7 +53,11 @@ export function expressionToTypeNode(
 ): ts.TypeNode {
   // Use inferWidenedTypeFromExpression to widen literal types
   // This ensures `const x = 5` produces `number`, not `5`
-  const type = inferWidenedTypeFromExpression(expr, context.checker);
+  const type = inferWidenedTypeFromExpression(
+    expr,
+    context.checker,
+    context.options.typeRegistry,
+  );
   return typeToTypeNodeWithRegistry(
     type,
     context,

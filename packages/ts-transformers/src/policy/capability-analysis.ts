@@ -41,11 +41,42 @@ interface SourceRef {
   readonly dynamic: boolean;
 }
 
+interface StructuredBinding {
+  readonly properties: ReadonlyMap<string, Binding>;
+}
+
+type Binding = SourceRef | StructuredBinding;
+
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
 const READER_METHODS = new Set(["get"]);
 const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
+const ITEM_PRESERVING_ARRAY_METHODS = new Set([
+  "at",
+  "filter",
+  "find",
+  "findLast",
+  "reverse",
+  "slice",
+  "sort",
+  "toReversed",
+  "toSorted",
+]);
+const ARRAY_ITEM_CALLBACK_METHODS = new Set([
+  "every",
+  "filter",
+  "find",
+  "findIndex",
+  "findLast",
+  "findLastIndex",
+  "flatMap",
+  "forEach",
+  "map",
+  "some",
+]);
+const ARRAY_SORT_CALLBACK_METHODS = new Set(["sort", "toSorted"]);
+const ARRAY_REDUCER_CALLBACK_METHODS = new Set(["reduce", "reduceRight"]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -279,14 +310,16 @@ function isCallOrNewArgumentUsage(
 function clearBindingAliases(
   name: ts.BindingName,
   aliases: Map<string, SourceRef>,
+  structuredAliases?: Map<string, StructuredBinding>,
 ): void {
   if (ts.isIdentifier(name)) {
     aliases.delete(name.text);
+    structuredAliases?.delete(name.text);
     return;
   }
   for (const element of name.elements) {
     if (ts.isOmittedExpression(element)) continue;
-    clearBindingAliases(element.name, aliases);
+    clearBindingAliases(element.name, aliases, structuredAliases);
   }
 }
 
@@ -397,6 +430,9 @@ export function analyzeFunctionCapabilities(
 
     const states = new Map<string, MutableCapabilityState>();
     const aliases = new Map<string, SourceRef>();
+    const structuredAliases = new Map<string, StructuredBinding>();
+    const arrayItemBindings = new Map<string, Binding>();
+    const mapValueBindings = new Map<string, Binding>();
     const parameterStateKeys: string[] = [];
 
     const ensureState = (name: string): MutableCapabilityState => {
@@ -427,6 +463,90 @@ export function analyzeFunctionCapabilities(
 
     const markPassthrough = (name: string): void => {
       ensureState(name).passthrough = true;
+    };
+
+    const isStructuredBinding = (
+      binding: Binding | undefined,
+    ): binding is StructuredBinding => !!binding && "properties" in binding;
+
+    const getIdentifierBinding = (name: string): Binding | undefined =>
+      aliases.get(name) ?? structuredAliases.get(name);
+
+    const setIdentifierBinding = (
+      name: string,
+      binding: Binding | undefined,
+    ): void => {
+      aliases.delete(name);
+      structuredAliases.delete(name);
+      if (!binding) return;
+      if (isStructuredBinding(binding)) {
+        structuredAliases.set(name, binding);
+      } else {
+        aliases.set(name, binding);
+      }
+    };
+
+    const resolveStructuredBindingPath = (
+      binding: StructuredBinding,
+      path: readonly string[],
+      dynamic: boolean,
+    ): SourceRef | undefined => {
+      let current: Binding = binding;
+      let index = 0;
+
+      while (index < path.length) {
+        if (!isStructuredBinding(current)) {
+          return {
+            root: current.root,
+            path: [...current.path, ...path.slice(index)],
+            dynamic: current.dynamic || dynamic,
+          };
+        }
+        const next = current.properties.get(path[index]!);
+        if (!next) return undefined;
+        current = next;
+        index += 1;
+      }
+
+      if (isStructuredBinding(current)) {
+        return undefined;
+      }
+
+      return {
+        root: current.root,
+        path: [...current.path],
+        dynamic: current.dynamic || dynamic,
+      };
+    };
+
+    const mergeBindings = (
+      left: Binding | undefined,
+      right: Binding | undefined,
+    ): Binding | undefined => {
+      if (!left) return right;
+      if (!right) return left;
+      if (!isStructuredBinding(left) && !isStructuredBinding(right)) {
+        return left.root === right.root &&
+            left.dynamic === right.dynamic &&
+            left.path.length === right.path.length &&
+            left.path.every((segment, index) => segment === right.path[index])
+          ? left
+          : undefined;
+      }
+      if (isStructuredBinding(left) && isStructuredBinding(right)) {
+        const properties = new Map<string, Binding>();
+        for (const [key, value] of left.properties.entries()) {
+          properties.set(key, value);
+        }
+        for (const [key, value] of right.properties.entries()) {
+          properties.set(
+            key,
+            mergeBindings(properties.get(key), value) ?? value,
+          );
+        }
+        return { properties };
+      }
+      return undefined;
     };
 
     for (let index = 0; index < fn.parameters.length; index++) {
@@ -493,12 +613,76 @@ export function analyzeFunctionCapabilities(
       };
     };
 
+    const resolveBindingFromExpression = (
+      expression: ts.Expression,
+    ): Binding | undefined => {
+      const ref = resolveSourceRef(expression);
+      if (ref) return ref;
+
+      const current = unwrapExpression(expression);
+      if (ts.isIdentifier(current)) {
+        return getIdentifierBinding(current.text);
+      }
+
+      if (ts.isObjectLiteralExpression(current)) {
+        const properties = new Map<string, Binding>();
+        for (const property of current.properties) {
+          if (ts.isSpreadAssignment(property)) continue;
+          if (ts.isShorthandPropertyAssignment(property)) {
+            const binding = getIdentifierBinding(property.name.text);
+            if (binding) {
+              properties.set(property.name.text, binding);
+            }
+            continue;
+          }
+          if (!ts.isPropertyAssignment(property)) continue;
+          let key: string | undefined;
+          if (ts.isIdentifier(property.name)) {
+            key = property.name.text;
+          } else if (ts.isStringLiteral(property.name)) {
+            key = property.name.text;
+          } else if (ts.isNumericLiteral(property.name)) {
+            key = property.name.text;
+          }
+          if (!key) continue;
+          const binding = resolveBindingFromExpression(property.initializer);
+          if (binding) {
+            properties.set(key, binding);
+          }
+        }
+        return properties.size > 0 ? { properties } : undefined;
+      }
+
+      if (
+        ts.isCallExpression(current) &&
+        ts.isPropertyAccessExpression(current.expression) &&
+        ts.isIdentifier(current.expression.expression) &&
+        current.expression.name.text === "get"
+      ) {
+        return mapValueBindings.get(current.expression.expression.text);
+      }
+
+      return undefined;
+    };
+
     const resolveSourceRef = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
       const current = unwrapExpression(expression);
       const byAccess = resolveFromAccess(current);
       if (byAccess) return byAccess;
+
+      const accessInfo = extractAccessPath(current);
+      if (accessInfo) {
+        const structured = structuredAliases.get(accessInfo.root);
+        if (structured) {
+          return resolveStructuredBindingPath(
+            structured,
+            accessInfo.path,
+            accessInfo.dynamic,
+          );
+        }
+      }
 
       // Handle property/element access on resolved call expressions.
       // e.g. notes.get().length → resolve notes.get() then append "length"
@@ -559,6 +743,9 @@ export function analyzeFunctionCapabilities(
             dynamic: receiverRef.dynamic,
           };
         }
+        if (ITEM_PRESERVING_ARRAY_METHODS.has(methodName)) {
+          return receiverRef;
+        }
       }
 
       if (
@@ -589,25 +776,50 @@ export function analyzeFunctionCapabilities(
 
     const assignBindingAlias = (
       name: ts.BindingName,
-      source: SourceRef | undefined,
+      binding: Binding | undefined,
     ): void => {
       if (ts.isIdentifier(name)) {
-        if (source) {
-          aliases.set(name.text, source);
-        } else {
-          aliases.delete(name.text);
-        }
+        setIdentifierBinding(name.text, binding);
         return;
       }
 
-      if (!source) {
-        clearBindingAliases(name, aliases);
+      if (!binding) {
+        clearBindingAliases(name, aliases, structuredAliases);
         return;
       }
 
       if (ts.isArrayBindingPattern(name)) {
-        markWildcard(source.root);
-        clearBindingAliases(name, aliases);
+        if (!isStructuredBinding(binding)) {
+          markWildcard(binding.root);
+        }
+        clearBindingAliases(name, aliases, structuredAliases);
+        return;
+      }
+
+      if (isStructuredBinding(binding)) {
+        for (const element of name.elements) {
+          if (ts.isOmittedExpression(element)) continue;
+          let key: string | undefined;
+          if (!element.propertyName) {
+            if (ts.isIdentifier(element.name)) {
+              key = element.name.text;
+            }
+          } else if (ts.isIdentifier(element.propertyName)) {
+            key = element.propertyName.text;
+          } else if (ts.isStringLiteral(element.propertyName)) {
+            key = element.propertyName.text;
+          } else if (ts.isNumericLiteral(element.propertyName)) {
+            key = element.propertyName.text;
+          }
+          if (!key) {
+            clearBindingAliases(element.name, aliases, structuredAliases);
+            continue;
+          }
+          assignBindingAlias(
+            element.name,
+            binding.properties.get(key),
+          );
+        }
         return;
       }
 
@@ -615,8 +827,8 @@ export function analyzeFunctionCapabilities(
         if (ts.isOmittedExpression(element)) continue;
 
         if (element.dotDotDotToken || element.initializer) {
-          markWildcard(source.root);
-          clearBindingAliases(element.name, aliases);
+          markWildcard(binding.root);
+          clearBindingAliases(element.name, aliases, structuredAliases);
           continue;
         }
 
@@ -632,19 +844,18 @@ export function analyzeFunctionCapabilities(
         } else if (ts.isNumericLiteral(element.propertyName)) {
           key = element.propertyName.text;
         } else {
-          markWildcard(source.root);
+          markWildcard(binding.root);
         }
 
         if (!key) {
-          clearBindingAliases(element.name, aliases);
+          clearBindingAliases(element.name, aliases, structuredAliases);
           continue;
         }
 
-        trackRead(source.root, [...source.path, key]);
         assignBindingAlias(element.name, {
-          root: source.root,
-          path: [...source.path, key],
-          dynamic: source.dynamic,
+          root: binding.root,
+          path: [...binding.path, key],
+          dynamic: binding.dynamic,
         });
       }
     };
@@ -660,9 +871,9 @@ export function analyzeFunctionCapabilities(
 
       if (ts.isIdentifier(pattern)) {
         if (source) {
-          aliases.set(pattern.text, source);
+          setIdentifierBinding(pattern.text, source);
         } else {
-          aliases.delete(pattern.text);
+          setIdentifierBinding(pattern.text, undefined);
         }
         return;
       }
@@ -671,7 +882,7 @@ export function analyzeFunctionCapabilities(
         if (!source) {
           for (const property of pattern.properties) {
             if (ts.isShorthandPropertyAssignment(property)) {
-              aliases.delete(property.name.text);
+              setIdentifierBinding(property.name.text, undefined);
             } else if (ts.isPropertyAssignment(property)) {
               assignExpressionPatternAlias(property.initializer, undefined);
             }
@@ -687,7 +898,7 @@ export function analyzeFunctionCapabilities(
 
           if (ts.isShorthandPropertyAssignment(property)) {
             trackRead(source.root, [...source.path, property.name.text]);
-            aliases.set(property.name.text, {
+            setIdentifierBinding(property.name.text, {
               root: source.root,
               path: [...source.path, property.name.text],
               dynamic: source.dynamic,
@@ -776,6 +987,139 @@ export function analyzeFunctionCapabilities(
       });
     };
 
+    const visitScopedCallback = (
+      callback: ts.ArrowFunction | ts.FunctionExpression,
+      bindings: readonly {
+        readonly parameter: ts.ParameterDeclaration;
+        readonly source: Binding | undefined;
+      }[],
+    ): void => {
+      const previousAliases = new Map(aliases);
+      const previousStructuredAliases = new Map(structuredAliases);
+      const previousArrayItemBindings = new Map(arrayItemBindings);
+      const previousMapValueBindings = new Map(mapValueBindings);
+      const previousForOfLoopVars = new Set(forOfLoopVars);
+      const previousAliasesWithSpecificPaths = new Set(
+        aliasesWithSpecificPaths,
+      );
+      const previousResolvedGetCalls = new Set(resolvedGetCalls);
+
+      try {
+        for (const { parameter, source } of bindings) {
+          if (parameter.dotDotDotToken || parameter.initializer) {
+            if (source && !isStructuredBinding(source)) {
+              markWildcard(source.root);
+            }
+            clearBindingAliases(parameter.name, aliases, structuredAliases);
+            continue;
+          }
+          assignBindingAlias(parameter.name, source);
+        }
+
+        if (ts.isBlock(callback.body)) {
+          for (const statement of callback.body.statements) {
+            visit(statement);
+          }
+        } else {
+          visit(callback.body);
+        }
+      } finally {
+        aliases.clear();
+        for (const [name, source] of previousAliases.entries()) {
+          aliases.set(name, source);
+        }
+
+        structuredAliases.clear();
+        for (const [name, binding] of previousStructuredAliases.entries()) {
+          structuredAliases.set(name, binding);
+        }
+
+        arrayItemBindings.clear();
+        for (const [name, binding] of previousArrayItemBindings.entries()) {
+          arrayItemBindings.set(name, binding);
+        }
+
+        mapValueBindings.clear();
+        for (const [name, binding] of previousMapValueBindings.entries()) {
+          mapValueBindings.set(name, binding);
+        }
+
+        forOfLoopVars.clear();
+        for (const name of previousForOfLoopVars) {
+          forOfLoopVars.add(name);
+        }
+
+        aliasesWithSpecificPaths.clear();
+        for (const name of previousAliasesWithSpecificPaths) {
+          aliasesWithSpecificPaths.add(name);
+        }
+
+        resolvedGetCalls.clear();
+        for (const call of previousResolvedGetCalls) {
+          resolvedGetCalls.add(call);
+        }
+      }
+    };
+
+    const analyzeInlineArrayCallback = (call: ts.CallExpression): void => {
+      if (!ts.isPropertyAccessExpression(call.expression)) return;
+
+      const receiver = resolveSourceRef(call.expression.expression);
+      const localReceiver = ts.isIdentifier(call.expression.expression)
+        ? arrayItemBindings.get(call.expression.expression.text)
+        : undefined;
+      const itemBinding = receiver ?? localReceiver;
+      if (!itemBinding) return;
+
+      const methodName = call.expression.name.text;
+      const callback = call.arguments[0];
+      if (
+        !callback ||
+        (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
+      ) {
+        return;
+      }
+
+      const bindings: {
+        parameter: ts.ParameterDeclaration;
+        source: Binding | undefined;
+      }[] = [];
+
+      if (ARRAY_ITEM_CALLBACK_METHODS.has(methodName)) {
+        const itemParam = callback.parameters[0];
+        if (itemParam) {
+          bindings.push({ parameter: itemParam, source: itemBinding });
+        }
+        const arrayParam = callback.parameters[2];
+        if (arrayParam && receiver) {
+          bindings.push({ parameter: arrayParam, source: receiver });
+        }
+      } else if (ARRAY_SORT_CALLBACK_METHODS.has(methodName)) {
+        const leftParam = callback.parameters[0];
+        const rightParam = callback.parameters[1];
+        if (leftParam) {
+          bindings.push({ parameter: leftParam, source: itemBinding });
+        }
+        if (rightParam) {
+          bindings.push({ parameter: rightParam, source: itemBinding });
+        }
+      } else if (ARRAY_REDUCER_CALLBACK_METHODS.has(methodName)) {
+        const currentValueParam = callback.parameters[1];
+        if (currentValueParam) {
+          bindings.push({ parameter: currentValueParam, source: itemBinding });
+        }
+        const arrayParam = callback.parameters[3];
+        if (arrayParam && receiver) {
+          bindings.push({ parameter: arrayParam, source: receiver });
+        }
+      } else {
+        return;
+      }
+
+      if (bindings.length === 0) return;
+      visitScopedCallback(callback, bindings);
+    };
+
     const visit = (node: ts.Node): void => {
       if (
         ts.isBinaryExpression(node) &&
@@ -790,12 +1134,10 @@ export function analyzeFunctionCapabilities(
         const operator = node.operatorToken.kind;
         if (operator === ts.SyntaxKind.EqualsToken) {
           if (ts.isIdentifier(node.left)) {
-            const nextRef = resolveSourceRef(node.right);
-            if (nextRef) {
-              aliases.set(node.left.text, nextRef);
-            } else {
-              aliases.delete(node.left.text);
-            }
+            setIdentifierBinding(
+              node.left.text,
+              resolveBindingFromExpression(node.right),
+            );
           } else if (
             ts.isObjectLiteralExpression(node.left) ||
             ts.isArrayLiteralExpression(node.left)
@@ -807,7 +1149,7 @@ export function analyzeFunctionCapabilities(
           }
         } else {
           if (ts.isIdentifier(node.left)) {
-            aliases.delete(node.left.text);
+            setIdentifierBinding(node.left.text, undefined);
           } else {
             markFromExpression(node.left, trackWrite);
             markFromExpression(node.left, trackRead);
@@ -929,6 +1271,8 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isCallExpression(node)) {
+        analyzeInlineArrayCallback(node);
+
         const interproceduralHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
         if (calleeSummary) {
@@ -973,8 +1317,35 @@ export function analyzeFunctionCapabilities(
 
         if (ts.isPropertyAccessExpression(node.expression)) {
           const receiver = resolveSourceRef(node.expression.expression);
+          const methodName = node.expression.name.text;
+
+          if (!receiver && ts.isIdentifier(node.expression.expression)) {
+            const receiverName = node.expression.expression.text;
+            if (methodName === "push" || methodName === "unshift") {
+              for (const argument of node.arguments) {
+                const merged = mergeBindings(
+                  arrayItemBindings.get(receiverName),
+                  resolveBindingFromExpression(argument),
+                );
+                if (merged) {
+                  arrayItemBindings.set(receiverName, merged);
+                }
+              }
+            } else if (methodName === "set") {
+              const valueArg = node.arguments[1];
+              if (valueArg) {
+                const merged = mergeBindings(
+                  mapValueBindings.get(receiverName),
+                  resolveBindingFromExpression(valueArg),
+                );
+                if (merged) {
+                  mapValueBindings.set(receiverName, merged);
+                }
+              }
+            }
+          }
+
           if (receiver) {
-            const methodName = node.expression.name.text;
             if (methodName === "key") {
               const argPath = extractLiteralPathArguments(node.arguments);
               if (argPath.dynamic) {
@@ -1040,10 +1411,15 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isVariableDeclaration(node)) {
-        const initRef = node.initializer && ts.isExpression(node.initializer)
-          ? resolveSourceRef(node.initializer)
-          : undefined;
-        assignBindingAlias(node.name, initRef);
+        if (ts.isIdentifier(node.name)) {
+          arrayItemBindings.delete(node.name.text);
+          mapValueBindings.delete(node.name.text);
+        }
+        const initBinding =
+          node.initializer && ts.isExpression(node.initializer)
+            ? resolveBindingFromExpression(node.initializer)
+            : undefined;
+        assignBindingAlias(node.name, initBinding);
       }
 
       if (
@@ -1074,17 +1450,24 @@ export function analyzeFunctionCapabilities(
 
       if (ts.isForOfStatement(node)) {
         const ref = resolveSourceRef(node.expression);
-        if (ref) {
+        const localBinding = !ref && ts.isIdentifier(node.expression)
+          ? arrayItemBindings.get(node.expression.text)
+          : undefined;
+        if (ref || localBinding) {
+          const binding = ref ?? localBinding;
           if (ts.isVariableDeclarationList(node.initializer)) {
             const decl = node.initializer.declarations[0];
             if (decl) {
-              assignBindingAlias(decl.name, ref);
+              assignBindingAlias(decl.name, binding);
               if (ts.isIdentifier(decl.name)) {
                 forOfLoopVars.add(decl.name.text);
               }
             }
           } else {
-            assignExpressionPatternAlias(node.initializer, ref);
+            assignExpressionPatternAlias(
+              node.initializer,
+              !isStructuredBinding(binding) ? binding : undefined,
+            );
             if (ts.isIdentifier(node.initializer)) {
               forOfLoopVars.add(node.initializer.text);
             }

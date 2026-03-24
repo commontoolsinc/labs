@@ -148,3 +148,49 @@ Deno.test("Schema Injection - Cell-like classes", async () => {
     ),
   );
 });
+
+Deno.test("Schema Injection - pattern outputs with NAME/UI stay object-shaped", async () => {
+  const code = `
+    /// <cts-enable />
+    import {
+      Default,
+      NAME,
+      pattern,
+      Stream,
+      UI,
+      type VNode,
+      Writable,
+    } from "commontools";
+
+    interface Output {
+      [NAME]: string;
+      [UI]: VNode;
+      value: number;
+      increment: Stream<void>;
+    }
+
+    export default pattern<{ value?: Writable<Default<number, 0>> }, Output>(
+      ({ value }) => ({
+        [NAME]: "Counter",
+        [UI]: <div>{value}</div>,
+        value,
+        increment: {} as any,
+      }),
+    );
+  `.trim();
+
+  const result = await transformSource(code);
+  const normalize = (s: string) => s.replace(/\s+/g, " ");
+
+  assert(
+    normalize(result).includes(
+      '{ type: "object", properties: { value: { type: "number" }, increment: { asStream: true } }',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      "additionalProperties: true",
+    ),
+  );
+  assert(!normalize(result).includes('{ type: "array", items: true }'));
+});

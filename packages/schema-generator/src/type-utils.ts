@@ -524,6 +524,11 @@ export function getArrayElementInfo(
   checker: ts.TypeChecker,
   typeNode?: ts.TypeNode,
 ): ArrayElementInfo | undefined {
+  const tc = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+
   if (typeNode) {
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
@@ -673,6 +678,18 @@ export function getArrayElementInfo(
     "array numeric index",
   );
   if (elementType) {
+    if (tc.isArrayType?.(type) || tc.isTupleType?.(type)) {
+      return { elementType };
+    }
+
+    // Some object types pick up a numeric index through unresolved computed
+    // property names (for example [NAME] / [UI]) without actually being
+    // arrays. Treat the numeric fallback as array-like only when the shape
+    // also exposes the usual array-style length surface.
+    if (!type.getProperty("length")) {
+      return undefined;
+    }
+
     return { elementType };
   }
 

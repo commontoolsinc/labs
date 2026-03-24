@@ -161,7 +161,7 @@ export class CaptureCollector {
   private shouldCapturePropertyAccess(
     node: ts.PropertyAccessExpression,
     func: ts.FunctionLikeDeclaration,
-  ): ts.PropertyAccessExpression | undefined {
+  ): ts.Expression | undefined {
     // Get the root object (e.g., 'state' in 'state.discount')
     let root = node.expression;
     while (ts.isPropertyAccessExpression(root)) {
@@ -213,11 +213,49 @@ export class CaptureCollector {
     });
 
     if (hasExternalDeclaration) {
-      // Capture the whole property access expression
-      return node;
+      // Intrinsic reads on array/string-like values must capture the root
+      // value itself so the generated derive input matches the shrunk schema.
+      return this.getIntrinsicPropertyCaptureTarget(node) ?? node;
     }
 
     return undefined;
+  }
+
+  private getIntrinsicPropertyCaptureTarget(
+    node: ts.PropertyAccessExpression,
+  ): ts.Expression | undefined {
+    if (node.name.text !== "length") {
+      return undefined;
+    }
+
+    const baseType = this.checker.getTypeAtLocation(node.expression);
+    const nonNullable = this.checker.getNonNullableType(baseType);
+    if (
+      this.isArrayLikeType(nonNullable) ||
+      this.isAtomicPrimitiveType(nonNullable)
+    ) {
+      return node.expression;
+    }
+
+    return undefined;
+  }
+
+  private isArrayLikeType(type: ts.Type): boolean {
+    const typeChecker = this.checker as ts.TypeChecker & {
+      isArrayType?: (type: ts.Type) => boolean;
+      isTupleType?: (type: ts.Type) => boolean;
+    };
+    return !!typeChecker.isArrayType?.(type) ||
+      !!typeChecker.isTupleType?.(type);
+  }
+
+  private isAtomicPrimitiveType(type: ts.Type): boolean {
+    const flags = type.getFlags();
+    return (flags & ts.TypeFlags.StringLike) !== 0 ||
+      (flags & ts.TypeFlags.NumberLike) !== 0 ||
+      (flags & ts.TypeFlags.BooleanLike) !== 0 ||
+      (flags & ts.TypeFlags.BigIntLike) !== 0 ||
+      (flags & ts.TypeFlags.ESSymbolLike) !== 0;
   }
 
   /**

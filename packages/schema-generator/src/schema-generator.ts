@@ -654,6 +654,10 @@ export class SchemaGenerator implements ISchemaGenerator {
             continue;
           }
 
+          const schemaTypeNode = member.questionToken
+            ? this.stripUndefinedFromOptionalTypeNode(member.type)
+            : member.type;
+
           // Get the property type - check typeRegistry first, then resolve from node
           let propType: ts.Type;
           if (typeRegistry && typeRegistry.has(member.type)) {
@@ -662,12 +666,16 @@ export class SchemaGenerator implements ISchemaGenerator {
             propType = checker.getTypeFromTypeNode(member.type);
           }
 
+          if (member.questionToken) {
+            propType = this.stripUndefinedFromOptionalType(propType, checker);
+          }
+
           // Use formatChildType - it will auto-detect whether to use type-based
           // or node-based analysis depending on whether propType is reliable
           const propSchema = this.formatChildType(
             propType,
             context,
-            member.type,
+            schemaTypeNode,
           );
 
           properties[propName] = propSchema;
@@ -702,6 +710,52 @@ export class SchemaGenerator implements ISchemaGenerator {
       return { type: "array", items };
     }
 
+    if (ts.isParenthesizedTypeNode(typeNode)) {
+      return this.analyzeTypeNodeStructure(typeNode.type, checker, context);
+    }
+
+    // `readonly T[]` is emitted as a TypeOperatorNode wrapping an ArrayTypeNode.
+    // Readonly does not change JSON schema shape, so analyze the wrapped array.
+    if (
+      ts.isTypeOperatorNode(typeNode) &&
+      typeNode.operator === ts.SyntaxKind.ReadonlyKeyword &&
+      ts.isArrayTypeNode(typeNode.type)
+    ) {
+      return this.analyzeTypeNodeStructure(typeNode.type, checker, context);
+    }
+
+    // Synthetic intersections commonly arise from branded helpers like
+    // Default<T, V>. Try the normal type-based formatter path first so the
+    // existing IntersectionFormatter can discard brand-only constituents.
+    if (ts.isIntersectionTypeNode(typeNode)) {
+      const intersectionType = typeRegistry?.get(typeNode) ??
+        checker.getTypeFromTypeNode(typeNode);
+      if (!(intersectionType.flags & ts.TypeFlags.Any)) {
+        return this.formatChildType(intersectionType, context, typeNode);
+      }
+
+      const memberSchemas = typeNode.types.map((member) =>
+        this.analyzeTypeNodeStructure(member, checker, context)
+      );
+
+      if (memberSchemas.some((schema) => schema === false)) {
+        return false as SchemaDefinition;
+      }
+
+      const constrainedMembers = memberSchemas.filter((schema) =>
+        !this.isNeutralIntersectionSchema(schema)
+      ) as Exclude<SchemaDefinition, boolean>[];
+
+      if (constrainedMembers.length === 0) {
+        return true as SchemaDefinition;
+      }
+      if (constrainedMembers.length === 1) {
+        return constrainedMembers[0]!;
+      }
+
+      return { allOf: constrainedMembers };
+    }
+
     // Handle unions in synthetic nodes. Keep all members including undefined
     // to match the type-based UnionFormatter which emits { type: "undefined" }
     // explicitly. Keyword types (string, number, boolean, undefined, null) are
@@ -713,10 +767,28 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (memberSchemas.some((schema) => schema === true)) {
         return true as SchemaDefinition;
       }
-      if (memberSchemas.length === 1) {
-        return memberSchemas[0]!;
+
+      const uniqueSchemas: SchemaDefinition[] = [];
+      const seenSchemas = new Set<string>();
+      for (const schema of memberSchemas) {
+        if (schema === false) {
+          continue;
+        }
+        const key = JSON.stringify(schema);
+        if (seenSchemas.has(key)) {
+          continue;
+        }
+        seenSchemas.add(key);
+        uniqueSchemas.push(schema);
       }
-      return { anyOf: memberSchemas as Exclude<SchemaDefinition, boolean>[] };
+
+      if (uniqueSchemas.length === 0) {
+        return false as SchemaDefinition;
+      }
+      if (uniqueSchemas.length === 1) {
+        return uniqueSchemas[0]!;
+      }
+      return { anyOf: uniqueSchemas as Exclude<SchemaDefinition, boolean>[] };
     }
 
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
@@ -766,6 +838,74 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Fallback: accept any value
     return true as SchemaDefinition;
+  }
+
+  private stripUndefinedFromOptionalType(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): ts.Type {
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      return type;
+    }
+    const members = (type as ts.UnionType).types.filter((member) =>
+      (member.flags & ts.TypeFlags.Undefined) === 0
+    );
+    if (members.length === 0) {
+      return type;
+    }
+    if (members.length === 1) {
+      return members[0]!;
+    }
+    const checkerWithInternals = checker as ts.TypeChecker & {
+      getUnionType?: (
+        types: readonly ts.Type[],
+        unionReduction?: unknown,
+      ) => ts.Type;
+    };
+    return checkerWithInternals.getUnionType?.(members) ?? type;
+  }
+
+  private stripUndefinedFromOptionalTypeNode(
+    typeNode: ts.TypeNode,
+  ): ts.TypeNode {
+    if (!ts.isUnionTypeNode(typeNode)) {
+      return typeNode;
+    }
+    const members = typeNode.types.filter((member) =>
+      member.kind !== ts.SyntaxKind.UndefinedKeyword
+    );
+    if (members.length === 0) {
+      return typeNode;
+    }
+    if (members.length === 1) {
+      return members[0]!;
+    }
+    return ts.factory.createUnionTypeNode(members);
+  }
+
+  private isNeutralIntersectionSchema(schema: SchemaDefinition): boolean {
+    if (schema === true) {
+      return true;
+    }
+    if (!isRecord(schema)) {
+      return false;
+    }
+    if (schema.type !== "object") {
+      return false;
+    }
+    if (
+      !isRecord(schema.properties) || Object.keys(schema.properties).length > 0
+    ) {
+      return false;
+    }
+    return !("required" in schema) &&
+      !("additionalProperties" in schema) &&
+      !("patternProperties" in schema) &&
+      !("$ref" in schema) &&
+      !("allOf" in schema) &&
+      !("anyOf" in schema) &&
+      !("oneOf" in schema) &&
+      !("$defs" in schema);
   }
 
   private resolveTypeReferenceFromScope(

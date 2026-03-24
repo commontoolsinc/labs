@@ -137,6 +137,26 @@ function getInitializerTypeFallback(
   }
 
   const initializer = declaration.initializer;
+  if (
+    ts.isPropertyAccessExpression(initializer) &&
+    initializer.name.text === "result" &&
+    ts.isCallExpression(initializer.expression)
+  ) {
+    const [typeArg] = initializer.expression.typeArguments ?? [];
+    if (typeArg) {
+      try {
+        const resultType = checker.getTypeFromTypeNode(typeArg);
+        if (
+          (resultType.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0
+        ) {
+          return resultType;
+        }
+      } catch {
+        // Fall through to the other initializer fallbacks.
+      }
+    }
+  }
+
   const originalInitializer = ts.getOriginalNode(initializer);
   const registryType = typeRegistry?.get(initializer) ??
     (originalInitializer !== initializer

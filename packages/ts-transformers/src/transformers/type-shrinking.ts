@@ -32,6 +32,43 @@ const NON_ITEM_PROPS = new Set([
   "update",
 ]);
 
+function isArrayNonItemPropForType(
+  head: string,
+  itemType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!NON_ITEM_PROPS.has(head)) {
+    return false;
+  }
+  if (head !== "key") {
+    return true;
+  }
+  if (!itemType) {
+    return true;
+  }
+  return !typeHasHead(itemType, head, checker);
+}
+
+function isArrayNonItemPropForTypeNode(
+  head: string,
+  itemTypeNode: ts.TypeNode | undefined,
+  checker?: ts.TypeChecker,
+): boolean {
+  if (!NON_ITEM_PROPS.has(head)) {
+    return false;
+  }
+  if (head !== "key") {
+    return true;
+  }
+  if (!itemTypeNode) {
+    return true;
+  }
+  if (!checker) {
+    return false;
+  }
+  return !typeNodeHasHead(itemTypeNode, head, checker);
+}
+
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
@@ -151,6 +188,15 @@ function extractArrayItemTypeNode(node: ts.TypeNode): ts.TypeNode | undefined {
   return undefined;
 }
 
+function isAtomicPrimitiveType(type: ts.Type): boolean {
+  const flags = type.flags;
+  return (flags & ts.TypeFlags.StringLike) !== 0 ||
+    (flags & ts.TypeFlags.NumberLike) !== 0 ||
+    (flags & ts.TypeFlags.BooleanLike) !== 0 ||
+    (flags & ts.TypeFlags.BigIntLike) !== 0 ||
+    (flags & ts.TypeFlags.ESSymbolLike) !== 0;
+}
+
 function rewrapArrayTypeNode(
   node: ts.TypeNode | undefined,
   itemType: ts.TypeNode,
@@ -229,10 +275,11 @@ function buildShrunkTypeNodeFromType(
     // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
     // breaks runtime schema matching for downstream derives/lifts.
     if (isArrayLike) {
+      const itemType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
       const allNonItem = normalized.every(
         (path) =>
           path.length === 1 && path[0] !== undefined &&
-          NON_ITEM_PROPS.has(path[0]),
+          isArrayNonItemPropForType(path[0], itemType, checker),
       );
       if (allNonItem) {
         return rewrapArrayTypeNode(
@@ -246,9 +293,8 @@ function buildShrunkTypeNodeFromType(
         (path) =>
           path.length > 0 &&
           !(path.length === 1 && path[0] !== undefined &&
-            NON_ITEM_PROPS.has(path[0])),
+            isArrayNonItemPropForType(path[0], itemType, checker)),
       );
-      const itemType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
       if (itemType && itemPaths.length > 0) {
         const shrunkItem = buildShrunkTypeNodeFromType(
           itemType,
@@ -265,6 +311,27 @@ function buildShrunkTypeNodeFromType(
 
       return originalTypeNode ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
+
+    // Intrinsic primitives remain atomic in schemas even when member reads
+    // like `.length` are observed. Emitting `{ length: number }` for `string`
+    // breaks handler payload validation and runtime event matching.
+    if (isAtomicPrimitiveType(type)) {
+      return originalTypeNode ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
+
+    if (originalTypeNode && isCellLikeTypeNode(originalTypeNode)) {
+      const shrunkCell = buildShrunkTypeNodeFromTypeNode(
+        originalTypeNode,
+        normalized,
+        factory,
+        checker,
+      );
+      if (shrunkCell) {
+        return shrunkCell;
+      }
+      return originalTypeNode;
     }
 
     // Strip nullish constituents from union types (e.g. `T | undefined`) so the
@@ -453,7 +520,7 @@ function buildShrunkTypeNodeFromTypeNode(
       const allNonItem = normalized.every(
         (path) =>
           path.length === 1 && path[0] !== undefined &&
-          NON_ITEM_PROPS.has(path[0]),
+          isArrayNonItemPropForTypeNode(path[0], itemTypeNode, checker),
       );
       if (allNonItem) {
         return rewrapArrayTypeNode(
@@ -466,7 +533,7 @@ function buildShrunkTypeNodeFromTypeNode(
         (path) =>
           path.length > 0 &&
           !(path.length === 1 && path[0] !== undefined &&
-            NON_ITEM_PROPS.has(path[0])),
+            isArrayNonItemPropForTypeNode(path[0], itemTypeNode, checker)),
       );
       if (itemPaths.length > 0 && itemTypeNode) {
         const shrunkItem = buildShrunkTypeNodeFromTypeNode(
@@ -577,6 +644,17 @@ function resolveTypeReferenceMembers(
   checker: ts.TypeChecker,
 ): readonly ts.TypeElement[] | undefined {
   const type = checker.getTypeFromTypeNode(node);
+  const resolvedMembers = checker.getPropertiesOfType(type)
+    .map((property) =>
+      property.declarations?.find((decl): decl is ts.PropertySignature =>
+        ts.isPropertySignature(decl) && !!decl.name && !!decl.type
+      )
+    )
+    .filter((member): member is ts.PropertySignature => !!member);
+  if (resolvedMembers.length > 0) {
+    return resolvedMembers;
+  }
+
   const symbol = type.aliasSymbol ?? type.symbol;
   if (!symbol?.declarations?.length) return undefined;
   for (const decl of symbol.declarations) {
@@ -683,6 +761,14 @@ function typeNodeHasHead(
   head: string,
   checker: ts.TypeChecker,
 ): boolean {
+  const itemTypeNode = extractArrayItemTypeNode(node);
+  if (itemTypeNode) {
+    if (Number.isFinite(Number(head))) {
+      return true;
+    }
+    return typeNodeHasHead(itemTypeNode, head, checker);
+  }
+
   if (ts.isTypeLiteralNode(node)) {
     return node.members.some(
       (m) =>
@@ -718,6 +804,11 @@ function typeHasHead(
   head: string,
   checker: ts.TypeChecker,
 ): boolean {
+  const tc = checker as ts.TypeChecker & {
+    isArrayType?: (t: ts.Type) => boolean;
+    isTupleType?: (t: ts.Type) => boolean;
+  };
+
   // Direct property lookup (works for simple object types)
   if (type.getProperty(head)) return true;
 
@@ -731,14 +822,22 @@ function typeHasHead(
 
   // Numeric heads are valid on array-like types (index access)
   if (Number.isFinite(Number(head))) {
-    const tc = checker as ts.TypeChecker & {
-      isArrayType?: (t: ts.Type) => boolean;
-      isTupleType?: (t: ts.Type) => boolean;
-    };
     if (
       tc.isArrayType?.(type) || tc.isTupleType?.(type) ||
       !!checker.getIndexTypeOfType(type, ts.IndexKind.Number)
     ) {
+      return true;
+    }
+  }
+
+  // Capability analysis records item reads on direct array parameters as
+  // heads on the array root (for example `for (const item of entries) item.id`
+  // becomes `["id"]` on `entries`). Validation needs to accept those heads
+  // against the array item type rather than only the array object itself.
+  const itemType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  if (itemType && itemType !== type) {
+    const nonNullableItem = checker.getNonNullableType(itemType);
+    if (typeHasHead(nonNullableItem, head, checker)) {
       return true;
     }
   }

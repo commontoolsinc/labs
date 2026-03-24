@@ -7,13 +7,20 @@ import type {
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
+  getTypeAtLocationWithFallback,
+  getTypeReferenceArgument,
   isFunctionLikeExpression,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { setParentPointers } from "../../ast/utils.ts";
 import { analyzeFunctionCapabilities } from "../../policy/mod.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
-import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
+import {
+  applyShrinkAndWrap,
+  isCellLikeTypeNode,
+} from "../../transformers/type-shrinking.ts";
+import { expressionToTypeNode } from "../../ast/type-building.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -73,6 +80,76 @@ function findCaptureRootExpression(
   }
 
   return expression;
+}
+
+function extractCellLikeInnerTypeNode(
+  node: ts.TypeNode,
+): ts.TypeNode | undefined {
+  if (!isCellLikeTypeNode(node)) return undefined;
+  if (!ts.isTypeReferenceNode(node)) return undefined;
+  if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
+  return node.typeArguments[0];
+}
+
+function unwrapCellLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (!type) return undefined;
+  const opaqueUnwrapped = unwrapOpaqueLikeType(type, checker);
+  if (opaqueUnwrapped && opaqueUnwrapped !== type) {
+    return opaqueUnwrapped;
+  }
+  return getTypeReferenceArgument(type) ?? type;
+}
+
+function recoverPrintableTypeNode(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): { type: ts.Type; typeNode: ts.TypeNode } | undefined {
+  if (!type) return undefined;
+
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+
+  let current: ts.Type | undefined = type;
+  const seen = new Set<ts.Type>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+
+    const typeNode = checker.typeToTypeNode(
+      current,
+      sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    );
+    if (typeNode) {
+      return { type: current, typeNode };
+    }
+
+    if (
+      typeChecker.isArrayType?.(current) || typeChecker.isTupleType?.(current)
+    ) {
+      break;
+    }
+
+    const opaqueUnwrapped = unwrapOpaqueLikeType(current, checker);
+    if (opaqueUnwrapped && opaqueUnwrapped !== current) {
+      current = opaqueUnwrapped;
+      continue;
+    }
+
+    const next = getTypeReferenceArgument(current);
+    if (!next || next === current) {
+      break;
+    }
+    current = next;
+  }
+
+  return undefined;
 }
 
 function sliceCapabilityDefaultsForRoot(
@@ -208,11 +285,33 @@ function tryShrinkMergedInputTypeLiteralMembers(
       return member;
     }
 
+    const rootType = rootTypes.get(propertyName);
+    const rootCellKind = rootType ? getCellKind(rootType, checker) : undefined;
+    const cellLikeRoot = rootCellKind === "cell" || rootCellKind === "stream";
+    const recoveredType = cellLikeRoot &&
+        (member.type.kind === ts.SyntaxKind.UnknownKeyword ||
+          member.type.kind === ts.SyntaxKind.AnyKeyword) &&
+        rootType
+      ? recoverPrintableTypeNode(rootType, checker, sourceFile)
+      : undefined;
+    const resolvedMemberType = recoveredType?.typeNode ?? member.type;
+    const innerTypeNode = recoveredType
+      ? undefined
+      : extractCellLikeInnerTypeNode(resolvedMemberType);
+    const shouldWrap = cellLikeRoot || !!innerTypeNode;
+    const baseTypeNode = recoveredType?.typeNode ?? innerTypeNode ??
+      resolvedMemberType;
+    const baseType = recoveredType?.type ?? (
+      shouldWrap
+        ? (unwrapCellLikeType(rootType, checker) ?? rootType)
+        : rootType
+    );
+
     const nextType = applyShrinkAndWrap(
       propertySummary,
-      member.type,
-      rootTypes.get(propertyName),
-      false,
+      baseTypeNode,
+      baseType,
+      shouldWrap,
       checker,
       sourceFile,
       factory,
@@ -231,6 +330,149 @@ function tryShrinkMergedInputTypeLiteralMembers(
     inputTypeNode,
     factory.createNodeArray(nextMembers),
   );
+}
+
+function refineUnknownInputMembersFromMergedInput(
+  inputTypeNode: ts.TypeNode,
+  mergedInput: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode {
+  if (
+    !ts.isTypeLiteralNode(inputTypeNode) ||
+    !ts.isObjectLiteralExpression(mergedInput)
+  ) {
+    return inputTypeNode;
+  }
+
+  const initializerByName = new Map<string, ts.Expression>();
+  for (const property of mergedInput.properties) {
+    if (ts.isShorthandPropertyAssignment(property)) {
+      initializerByName.set(property.name.text, property.name);
+      continue;
+    }
+    if (!ts.isPropertyAssignment(property)) {
+      continue;
+    }
+    const name = getPropertySignatureName(property.name);
+    if (name) {
+      initializerByName.set(name, property.initializer);
+    }
+  }
+
+  const nextMembers = inputTypeNode.members.map((member) => {
+    if (!ts.isPropertySignature(member) || !member.type) {
+      return member;
+    }
+
+    const propertyName = getPropertySignatureName(member.name);
+    if (!propertyName) {
+      return member;
+    }
+
+    const initializer = initializerByName.get(propertyName);
+    if (!initializer) {
+      return member;
+    }
+
+    const initializerType = getTypeAtLocationWithFallback(
+      initializer,
+      context.checker,
+      context.options.typeRegistry,
+    );
+    const memberType = getTypeAtLocationWithFallback(
+      member.type,
+      context.checker,
+      context.options.typeRegistry,
+    );
+    if (
+      ts.isIdentifier(initializer) &&
+      initializerType &&
+      (initializerType.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) ===
+        0 &&
+      !ts.isTypeLiteralNode(member.type)
+    ) {
+      return context.factory.updatePropertySignature(
+        member,
+        member.modifiers,
+        member.name,
+        member.questionToken,
+        expressionToTypeNode(initializer, context),
+      );
+    }
+
+    if (
+      member.type.kind !== ts.SyntaxKind.UnknownKeyword &&
+      member.type.kind !== ts.SyntaxKind.AnyKeyword &&
+      (!memberType ||
+        (memberType.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0)
+    ) {
+      return member;
+    }
+
+    return context.factory.updatePropertySignature(
+      member,
+      member.modifiers,
+      member.name,
+      member.questionToken,
+      expressionToTypeNode(initializer, context),
+    );
+  });
+
+  return context.factory.updateTypeLiteralNode(
+    inputTypeNode,
+    context.factory.createNodeArray(nextMembers),
+  );
+}
+
+function registerMergedInputIdentifierTypes(
+  mergedInput: ts.Expression,
+  captureTree: Map<string, CaptureTreeNode>,
+  captureNameMap: Map<string, string>,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+): void {
+  if (!typeRegistry || !ts.isObjectLiteralExpression(mergedInput)) {
+    return;
+  }
+
+  const originalNameByProperty = new Map<string, string>();
+  for (const [originalName] of captureTree) {
+    originalNameByProperty.set(
+      captureNameMap.get(originalName) ?? originalName,
+      originalName,
+    );
+  }
+
+  for (const property of mergedInput.properties) {
+    let propertyName: string | undefined;
+    let initializer: ts.Expression | undefined;
+
+    if (ts.isShorthandPropertyAssignment(property)) {
+      propertyName = property.name.text;
+      initializer = property.name;
+    } else if (ts.isPropertyAssignment(property)) {
+      propertyName = getPropertySignatureName(property.name);
+      initializer = property.initializer;
+    }
+
+    if (!propertyName || !initializer || !ts.isIdentifier(initializer)) {
+      continue;
+    }
+
+    const originalName = originalNameByProperty.get(propertyName);
+    const captureNode = originalName
+      ? captureTree.get(originalName)
+      : undefined;
+    if (!originalName || !captureNode) {
+      continue;
+    }
+
+    const captureRoot = findCaptureRootExpression(originalName, captureNode);
+    const captureType = tryGetTypeAtLocation(checker, captureRoot);
+    if (captureType) {
+      typeRegistry.set(initializer, captureType);
+    }
+  }
 }
 
 /**
@@ -723,15 +965,28 @@ export function transformDeriveCall(
     null, // derive merges captures into top-level object
     hasExplicitReturnType ? resultTypeNode : null,
   );
+  setParentPointers(newCallback);
 
   // Build TypeNodes for schema generation
   const schemaFactory = new SchemaFactory(context);
+  registerMergedInputIdentifierTypes(
+    mergedInput,
+    captureTree,
+    captureNameMap,
+    checker,
+    context.options.typeRegistry,
+  );
   let inputTypeNode = schemaFactory.createDeriveInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
     captureNameMap,
     hadZeroParameters,
+  );
+  inputTypeNode = refineUnknownInputMembersFromMergedInput(
+    inputTypeNode,
+    mergedInput,
+    context,
   );
 
   let inputType: ts.Type | undefined;
@@ -777,6 +1032,7 @@ export function transformDeriveCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
     [mergedInput, newCallback],
   );
+  setParentPointers(newDeriveCall, deriveCall.parent);
 
   // Register the type of the derive call expression itself
   if (options.typeRegistry) {
