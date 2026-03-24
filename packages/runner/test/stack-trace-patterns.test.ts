@@ -79,6 +79,12 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: lift value too large");
+  assertEquals(
+    stack.includes("/packages/runner/src/sandbox/ses-runtime.ts"),
+    false,
+    `stack should not leak SES runtime internals:\n${stack}`,
+  );
+  assertMatch(stack, /at <CT_INTERNAL>/);
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
@@ -155,6 +161,12 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
 
   const stack = capturedError!.stack ?? "";
   assertEquals(stack.split("\n")[0], "Error: handler crash on purpose");
+  assertEquals(
+    stack.includes("/packages/runner/src/sandbox/ses-runtime.ts"),
+    false,
+    `stack should not leak SES runtime internals:\n${stack}`,
+  );
+  assertMatch(stack, /at <CT_INTERNAL>/);
 
   // First frame must point to the throw location in main.tsx
   const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));

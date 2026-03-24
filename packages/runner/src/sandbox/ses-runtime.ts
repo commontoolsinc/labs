@@ -67,7 +67,7 @@ class SESInternals {
   }
 
   parseStack(stack: string): string {
-    return this.sourceMaps.parse(stack);
+    return sanitizeInternalFrames(this.sourceMaps.parse(stack));
   }
 
   clear(): void {
@@ -80,7 +80,7 @@ class SESInternals {
     }
     materializeHostVisibleStack(error);
     if (error.stack) {
-      error.stack = this.sourceMaps.parse(error.stack);
+      error.stack = this.parseStack(error.stack);
     }
     return error;
   }
@@ -289,3 +289,13 @@ function isPromiseLike(
 ): value is Promise<unknown> {
   return !!value && typeof (value as { catch?: unknown }).catch === "function";
 }
+
+function sanitizeInternalFrames(stack: string): string {
+  return stack.split("\n").map((line) =>
+    RUNNER_INTERNAL_FRAME_PATTERN.test(line) ? CT_INTERNAL : line
+  ).join("\n");
+}
+
+const CT_INTERNAL = "    at <CT_INTERNAL>";
+const RUNNER_INTERNAL_FRAME_PATTERN =
+  /^\s*at(?: .*?)? \(?(?:file:\/\/)?[^)\n]*\/packages\/runner\/src\/[^)\n]+:\d+:\d+\)?$/;
