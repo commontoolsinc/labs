@@ -9,6 +9,7 @@ import {
   classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
   rewriteFallbackJsxExpressionSite,
+  rewriteOpaquePathTerminalJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
 export class OpaqueRefJSXTransformer extends Transformer {
@@ -52,6 +53,26 @@ function transform(context: TransformationContext): ts.SourceFile {
         const rewritten = rewriteExpressionSite({
           expression: node.expression,
           containerKind: "jsx-expression",
+          context,
+          analyze,
+          visit,
+        });
+        if (rewritten) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          );
+        }
+
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      if (
+        route.route === "owned-pre-closure" &&
+        route.owner === "opaque-path-terminal-root"
+      ) {
+        const rewritten = rewriteOpaquePathTerminalJsxExpressionSite({
+          expression: node.expression,
           context,
           analyze,
           visit,

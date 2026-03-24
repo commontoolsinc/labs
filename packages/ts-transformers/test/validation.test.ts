@@ -225,7 +225,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     assertEquals(
       errors.length,
       0,
-      ".get() inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+      ".get() inside JSX should be allowed (explicit opaque-path-terminal JSX owner handles it)",
     );
   });
 });

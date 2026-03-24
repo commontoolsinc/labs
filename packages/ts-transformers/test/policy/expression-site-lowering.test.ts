@@ -512,7 +512,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: JSX opaque path-terminal calls stay out of the shared receiver-method slice",
+  "Expression site policy: JSX opaque path-terminal calls use the explicit opaque-path-terminal owner",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -550,8 +550,8 @@ Deno.test(
 
     assertEquals(siteInfo.callRootKind, "receiver-method");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
-      route: "skip",
-      reason: "not-shared-jsx-root-kind",
+      route: "owned-pre-closure",
+      owner: "opaque-path-terminal-root",
     });
   },
 );

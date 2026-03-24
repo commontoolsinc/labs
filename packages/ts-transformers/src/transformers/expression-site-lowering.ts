@@ -43,6 +43,10 @@ export type JsxExpressionSiteRoute =
   | { route: "shared-pre-closure" }
   | { route: "shared-post-closure" }
   | {
+    route: "owned-pre-closure";
+    owner: "opaque-path-terminal-root";
+  }
+  | {
     route: "legacy-jsx";
     reason:
       | "legacy-control-flow-branch-local"
@@ -756,7 +760,10 @@ export function classifyJsxExpressionSiteRoute(
       ts.isCallExpression(expression) &&
       classifyOpaquePathTerminalCall(expression)
     ) {
-      return { route: "skip", reason: "not-shared-jsx-root-kind" };
+      return {
+        route: "owned-pre-closure",
+        owner: "opaque-path-terminal-root",
+      };
     }
 
     if (
@@ -1206,6 +1213,20 @@ export function rewriteFallbackJsxExpressionSite(
     visit,
     context.tsContext,
   ) as ts.Expression;
+}
+
+export function rewriteOpaquePathTerminalJsxExpressionSite(
+  params: Omit<RewriteExpressionSiteParams, "containerKind">,
+): ts.Expression | undefined {
+  const { expression } = params;
+
+  if (
+    !ts.isCallExpression(expression) || !classifyOpaquePathTerminalCall(expression)
+  ) {
+    return undefined;
+  }
+
+  return rewriteFallbackJsxExpressionSite(params);
 }
 
 export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
