@@ -4,11 +4,10 @@ import { FrozenMap, FrozenSet } from "@commontools/memory/frozen-builtins";
 import {
   assertPlainData,
   freezeVerifiedPlainData,
-  PlainDataValidationError,
 } from "../src/sandbox/plain-data.ts";
 
 describe("plain-data sandbox helper", () => {
-  it("freezes plain objects and arrays", () => {
+  it("returns a frozen snapshot for plain objects and arrays", () => {
     const value = {
       name: "test",
       nested: {
@@ -19,7 +18,9 @@ describe("plain-data sandbox helper", () => {
 
     const result = freezeVerifiedPlainData(value);
 
-    expect(result).toBe(value);
+    expect(result).not.toBe(value);
+    expect(result.nested).not.toBe(value.nested);
+    expect(result.list).not.toBe(value.list);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.nested)).toBe(true);
     expect(Object.isFrozen(result.list)).toBe(true);
@@ -35,10 +36,11 @@ describe("plain-data sandbox helper", () => {
     const result = freezeVerifiedPlainData(value);
 
     expect(result).toBeInstanceOf(FrozenMap);
-    expect(key).toBeDefined();
-    expect(Object.isFrozen(key)).toBe(true);
+    const [resultKey] = result.keys();
+    expect(resultKey).not.toBe(key);
+    expect(Object.isFrozen(resultKey as object)).toBe(true);
 
-    const nested = result.get(key);
+    const nested = result.get(resultKey);
     expect(nested).toBeInstanceOf(FrozenSet);
     expect((nested as ReadonlySet<number>).has(2)).toBe(true);
 
@@ -71,29 +73,69 @@ describe("plain-data sandbox helper", () => {
     expect(value.nested).not.toBeInstanceOf(FrozenMap);
   });
 
-  it("rejects accessor properties", () => {
+  it("materializes accessor properties once into data properties", () => {
+    let reads = 0;
     const value = Object.defineProperty({}, "secret", {
       get() {
-        return 1;
+        reads += 1;
+        return { ok: true };
       },
       enumerable: true,
     });
 
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      PlainDataValidationError,
-    );
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      "Object properties must be data properties",
-    );
+    const result = freezeVerifiedPlainData(
+      value,
+    ) as Record<string, unknown>;
+
+    expect(reads).toBe(1);
+    expect(result.secret).toEqual({ ok: true });
+    expect(reads).toBe(1);
+    expect(Object.getOwnPropertyDescriptor(result, "secret")).toMatchObject({
+      enumerable: true,
+      value: { ok: true },
+    });
+    expect(
+      Object.getOwnPropertyDescriptor(result, "secret")?.get,
+    ).toBeUndefined();
   });
 
-  it("rejects sparse arrays", () => {
-    const value = [1, 2];
-    delete value[1];
-
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      "Sparse arrays are not allowed",
+  it("accepts proxy-wrapped plain objects by snapshotting them", () => {
+    const source = new Proxy(
+      {
+        count: 1,
+        nested: { ok: true },
+      },
+      {},
     );
+
+    const result = freezeVerifiedPlainData(
+      source,
+    ) as Record<string, unknown>;
+
+    expect(result).toEqual({
+      count: 1,
+      nested: { ok: true },
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.nested as object)).toBe(true);
+  });
+
+  it("preserves sparse arrays and extra array properties", () => {
+    const value = new Array(3) as Array<unknown> & { label?: string };
+    value[0] = 1;
+    value[2] = 3;
+    value.label = "kept";
+
+    const result = freezeVerifiedPlainData(value) as ReadonlyArray<unknown> & {
+      readonly label?: string;
+    };
+
+    expect(result.length).toBe(3);
+    expect(result[0]).toBe(1);
+    expect(1 in result).toBe(false);
+    expect(result[2]).toBe(3);
+    expect(result.label).toBe("kept");
+    expect(Object.isFrozen(result)).toBe(true);
   });
 
   it("preserves __proto__ as data when cloning frozen objects", () => {
@@ -116,7 +158,7 @@ describe("plain-data sandbox helper", () => {
     expect(result.nested).toBeInstanceOf(FrozenSet);
   });
 
-  it("rejects Map instances with extra own properties", () => {
+  it("preserves extra own properties on Maps and Sets", () => {
     const value = new Map([["a", 1]]);
     Object.defineProperty(value, "extra", {
       value: true,
@@ -124,10 +166,27 @@ describe("plain-data sandbox helper", () => {
       configurable: true,
       writable: true,
     });
+    const tags = new Set(["a"]);
+    Object.defineProperty(tags, "label", {
+      value: "kept",
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
 
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      "Collections cannot have extra own properties",
-    );
+    const frozenMap = freezeVerifiedPlainData(
+      value,
+    ) as ReadonlyMap<string, number> & { readonly extra?: boolean };
+    const frozenSet = freezeVerifiedPlainData(
+      tags,
+    ) as ReadonlySet<string> & { readonly label?: string };
+
+    expect(frozenMap).toBeInstanceOf(FrozenMap);
+    expect(frozenMap.get("a")).toBe(1);
+    expect(frozenMap.extra).toBe(true);
+    expect(frozenSet).toBeInstanceOf(FrozenSet);
+    expect(frozenSet.has("a")).toBe(true);
+    expect(frozenSet.label).toBe("kept");
   });
 
   it("rejects Map subclasses", () => {
@@ -138,20 +197,42 @@ describe("plain-data sandbox helper", () => {
     );
   });
 
-  it("rejects cycles", () => {
+  it("preserves cycles and shared references", () => {
     const value: Record<string, unknown> = {};
     value.self = value;
+    value.list = [value];
+    value.nested = { ref: value };
 
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      "Circular references are not allowed",
-    );
+    const result = freezeVerifiedPlainData(value) as Record<string, unknown>;
+
+    expect(result.self).toBe(result);
+    expect((result.list as unknown[])[0]).toBe(result);
+    expect((result.nested as Record<string, unknown>).ref).toBe(result);
+    expect(Object.isFrozen(result)).toBe(true);
   });
 
-  it("rejects non-finite numbers in collections", () => {
+  it("preserves non-finite numbers in collections", () => {
     const value = new Set([1, NaN]);
 
-    expect(() => freezeVerifiedPlainData(value)).toThrow(
-      "Non-finite numbers are not allowed",
-    );
+    const result = freezeVerifiedPlainData(value);
+
+    expect(result.has(NaN)).toBe(true);
+    expect(result.has(1)).toBe(true);
+  });
+
+  it("preserves symbol-keyed properties", () => {
+    const secret = Symbol("secret");
+    const value = {
+      visible: "ok",
+    } as Record<string | symbol, unknown>;
+    value[secret] = { count: Infinity };
+
+    const result = freezeVerifiedPlainData(
+      value,
+    ) as Record<string | symbol, unknown>;
+
+    expect(Object.getOwnPropertySymbols(result)).toEqual([secret]);
+    expect(result[secret]).toEqual({ count: Infinity });
+    expect(Object.isFrozen(result[secret] as object)).toBe(true);
   });
 });

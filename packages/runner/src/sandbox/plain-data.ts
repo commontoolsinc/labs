@@ -1,5 +1,10 @@
 import { FrozenMap, FrozenSet } from "@commontools/memory/frozen-builtins";
 
+export interface ModuleSafeRecord {
+  readonly [key: string]: ModuleSafeValue;
+  readonly [key: symbol]: ModuleSafeValue;
+}
+
 export type ModuleSafeValue =
   | null
   | undefined
@@ -8,11 +13,11 @@ export type ModuleSafeValue =
   | string
   | bigint
   | readonly ModuleSafeValue[]
-  | { readonly [key: string]: ModuleSafeValue }
+  | ModuleSafeRecord
   | ReadonlyMap<ModuleSafeValue, ModuleSafeValue>
   | ReadonlySet<ModuleSafeValue>;
 
-const PROCESSING = Symbol("processing");
+const verifiedPlainData = new WeakSet<object>();
 
 export class PlainDataValidationError extends Error {
   constructor(
@@ -28,32 +33,26 @@ export function assertPlainData(
   value: unknown,
   path = "<root>",
 ): asserts value is ModuleSafeValue {
-  validateModuleSafeValue(value, path, new WeakSet(), new WeakSet());
+  validateModuleSafeValue(value, path, new WeakSet());
 }
 
 export function freezeVerifiedPlainData<T>(
   value: T,
 ): T {
-  assertPlainData(value);
   return freezeModuleSafeValue(value, "<root>", new WeakMap()) as T;
 }
 
 function validateModuleSafeValue(
   value: unknown,
   path: string,
-  active: WeakSet<object>,
-  validated: WeakSet<object>,
+  visited: WeakSet<object>,
 ): void {
   switch (typeof value) {
     case "undefined":
     case "boolean":
+    case "number":
     case "string":
     case "bigint":
-      return;
-    case "number":
-      if (!Number.isFinite(value)) {
-        throw validationError(path, "Non-finite numbers are not allowed");
-      }
       return;
     case "object":
       if (value === null) return;
@@ -66,26 +65,20 @@ function validateModuleSafeValue(
   }
 
   const objectValue = value as object;
-  if (validated.has(objectValue)) return;
-  if (active.has(objectValue)) {
-    throw validationError(path, "Circular references are not allowed");
+  if (verifiedPlainData.has(objectValue) || visited.has(objectValue)) {
+    return;
   }
+  visited.add(objectValue);
 
-  active.add(objectValue);
   try {
     if (Array.isArray(objectValue)) {
-      validateArray(objectValue, path, active, validated);
+      validateOwnProperties(objectValue, path, visited, { skipLength: true });
       return;
     }
 
     const proto = Object.getPrototypeOf(objectValue);
     if (proto === Object.prototype || proto === null) {
-      validateObject(
-        objectValue as Record<string, unknown>,
-        path,
-        active,
-        validated,
-      );
+      validateOwnProperties(objectValue, path, visited);
       return;
     }
 
@@ -93,19 +86,15 @@ function validateModuleSafeValue(
       validateMap(
         objectValue as ReadonlyMap<unknown, unknown>,
         path,
-        active,
-        validated,
+        visited,
       );
+      validateOwnProperties(objectValue, path, visited);
       return;
     }
 
     if (proto === Set.prototype || proto === FrozenSet.prototype) {
-      validateSet(
-        objectValue as ReadonlySet<unknown>,
-        path,
-        active,
-        validated,
-      );
+      validateSet(objectValue as ReadonlySet<unknown>, path, visited);
+      validateOwnProperties(objectValue, path, visited);
       return;
     }
 
@@ -114,96 +103,31 @@ function validateModuleSafeValue(
       `Unsupported object prototype '${proto?.constructor?.name ?? "null"}'`,
     );
   } finally {
-    active.delete(objectValue);
-    validated.add(objectValue);
+    visited.delete(objectValue);
   }
 }
 
-function validateArray(
-  value: unknown[],
+function validateOwnProperties(
+  value: object,
   path: string,
-  active: WeakSet<object>,
-  validated: WeakSet<object>,
+  visited: WeakSet<object>,
+  options: { skipLength?: boolean } = {},
 ): void {
-  assertNoSymbolKeys(value, path);
+  for (const key of Reflect.ownKeys(value)) {
+    if (options.skipLength && key === "length") continue;
 
-  const names = Object.getOwnPropertyNames(value);
-  const nameSet = new Set(names);
-
-  if (!nameSet.has("length")) {
-    throw validationError(path, "Array is missing its length property");
-  }
-
-  for (const name of names) {
-    if (name === "length") continue;
-    if (!isCanonicalArrayIndex(name, value.length)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) {
       throw validationError(
-        pathForProperty(path, name),
-        "Arrays cannot have extra named properties",
-      );
-    }
-  }
-
-  for (let i = 0; i < value.length; i++) {
-    const key = String(i);
-    if (!nameSet.has(key)) {
-      throw validationError(
-        pathForIndex(path, i),
-        "Sparse arrays are not allowed",
-      );
-    }
-
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || isAccessorDescriptor(descriptor)) {
-      throw validationError(
-        pathForIndex(path, i),
-        "Array elements must be data properties",
-      );
-    }
-    if (!descriptor.enumerable) {
-      throw validationError(
-        pathForIndex(path, i),
-        "Array elements must be enumerable",
+        pathForKey(path, key),
+        "Own property descriptor is missing",
       );
     }
 
     validateModuleSafeValue(
-      descriptor.value,
-      pathForIndex(path, i),
-      active,
-      validated,
-    );
-  }
-}
-
-function validateObject(
-  value: Record<string, unknown>,
-  path: string,
-  active: WeakSet<object>,
-  validated: WeakSet<object>,
-): void {
-  assertNoSymbolKeys(value, path);
-
-  for (const name of Object.getOwnPropertyNames(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, name);
-    if (!descriptor || isAccessorDescriptor(descriptor)) {
-      throw validationError(
-        pathForProperty(path, name),
-        "Object properties must be data properties",
-      );
-    }
-    if (!descriptor.enumerable) {
-      throw validationError(
-        pathForProperty(path, name),
-        "Object properties must be enumerable",
-      );
-    }
-
-    validateModuleSafeValue(
-      descriptor.value,
-      pathForProperty(path, name),
-      active,
-      validated,
+      Reflect.get(value, key),
+      pathForKey(path, key),
+      visited,
     );
   }
 }
@@ -211,11 +135,8 @@ function validateObject(
 function validateMap(
   value: ReadonlyMap<unknown, unknown>,
   path: string,
-  active: WeakSet<object>,
-  validated: WeakSet<object>,
+  visited: WeakSet<object>,
 ): void {
-  assertCollectionHasNoOwnKeys(value, path);
-
   let index = 0;
   for (
     const [key, entryValue] of Map.prototype.entries.call(
@@ -225,14 +146,12 @@ function validateMap(
     validateModuleSafeValue(
       key,
       `${path}<map-key:${index}>`,
-      active,
-      validated,
+      visited,
     );
     validateModuleSafeValue(
       entryValue,
       `${path}<map-value:${index}>`,
-      active,
-      validated,
+      visited,
     );
     index += 1;
   }
@@ -241,18 +160,14 @@ function validateMap(
 function validateSet(
   value: ReadonlySet<unknown>,
   path: string,
-  active: WeakSet<object>,
-  validated: WeakSet<object>,
+  visited: WeakSet<object>,
 ): void {
-  assertCollectionHasNoOwnKeys(value, path);
-
   let index = 0;
   for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
     validateModuleSafeValue(
       entryValue,
       `${path}<set:${index}>`,
-      active,
-      validated,
+      visited,
     );
     index += 1;
   }
@@ -261,7 +176,7 @@ function validateSet(
 function freezeModuleSafeValue(
   value: unknown,
   path: string,
-  converted: WeakMap<object, ModuleSafeValue | typeof PROCESSING>,
+  converted: WeakMap<object, ModuleSafeValue>,
 ): ModuleSafeValue {
   switch (typeof value) {
     case "undefined":
@@ -281,51 +196,38 @@ function freezeModuleSafeValue(
   }
 
   const objectValue = value as object;
-  const existing = converted.get(objectValue);
-  if (existing === PROCESSING) {
-    throw validationError(path, "Circular references are not allowed");
+  if (verifiedPlainData.has(objectValue)) {
+    return objectValue as ModuleSafeValue;
   }
+
+  const existing = converted.get(objectValue);
   if (existing !== undefined) {
     return existing;
   }
 
-  converted.set(objectValue, PROCESSING);
-
   if (Array.isArray(objectValue)) {
-    const result = freezeArray(objectValue, path, converted);
-    converted.set(objectValue, result);
-    return result;
+    return freezeArray(objectValue, path, converted);
   }
 
   const proto = Object.getPrototypeOf(objectValue);
   if (proto === Object.prototype || proto === null) {
-    const result = freezeObject(
-      objectValue as Record<string, unknown>,
-      path,
-      converted,
-    );
-    converted.set(objectValue, result);
-    return result;
+    return freezeObject(objectValue, path, converted);
   }
 
   if (proto === Map.prototype || proto === FrozenMap.prototype) {
-    const result = freezeMap(
+    return freezeMap(
       objectValue as ReadonlyMap<unknown, unknown>,
       path,
       converted,
     );
-    converted.set(objectValue, result);
-    return result;
   }
 
   if (proto === Set.prototype || proto === FrozenSet.prototype) {
-    const result = freezeSet(
+    return freezeSet(
       objectValue as ReadonlySet<unknown>,
       path,
       converted,
     );
-    converted.set(objectValue, result);
-    return result;
   }
 
   throw validationError(
@@ -337,91 +239,43 @@ function freezeModuleSafeValue(
 function freezeArray(
   value: unknown[],
   path: string,
-  converted: WeakMap<object, ModuleSafeValue | typeof PROCESSING>,
+  converted: WeakMap<object, ModuleSafeValue>,
 ): readonly ModuleSafeValue[] {
-  const isFrozen = Object.isFrozen(value);
-  let result: ModuleSafeValue[] | undefined;
+  const result = new Array(value.length) as ModuleSafeValue[];
+  converted.set(value, result as unknown as ModuleSafeValue);
 
-  for (let i = 0; i < value.length; i++) {
-    const next = freezeModuleSafeValue(
-      value[i],
-      pathForIndex(path, i),
-      converted,
-    );
-    if (!result && next !== value[i]) {
-      result = isFrozen
-        ? value.slice() as ModuleSafeValue[]
-        : value as ModuleSafeValue[];
-    }
-    if (result) {
-      result[i] = next;
-    }
-  }
+  copyOwnProperties(value, result, path, converted, { skipLength: true });
 
-  if (!result) {
-    return isFrozen
-      ? value as readonly ModuleSafeValue[]
-      : Object.freeze(value as ModuleSafeValue[]);
-  }
-  return Object.freeze(result);
+  Object.freeze(result);
+  verifiedPlainData.add(result);
+  return result;
 }
 
 function freezeObject(
-  value: Record<string, unknown>,
+  value: object,
   path: string,
-  converted: WeakMap<object, ModuleSafeValue | typeof PROCESSING>,
-): { readonly [key: string]: ModuleSafeValue } {
-  const proto = Object.getPrototypeOf(value);
-  const isFrozen = Object.isFrozen(value);
-  let result: Record<string, ModuleSafeValue> | undefined;
-  let cloneDescriptors: PropertyDescriptorMap | undefined;
+  converted: WeakMap<object, ModuleSafeValue>,
+): ModuleSafeRecord {
+  const result = Object.create(
+    Object.getPrototypeOf(value),
+  ) as ModuleSafeRecord;
+  converted.set(value, result as ModuleSafeValue);
 
-  for (const name of Object.keys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, name);
-    if (!descriptor) continue;
-    const next = freezeModuleSafeValue(
-      value[name],
-      pathForProperty(path, name),
-      converted,
-    );
-    if (!result && next !== value[name]) {
-      result = isFrozen
-        ? Object.create(proto) as Record<string, ModuleSafeValue>
-        : value as Record<string, ModuleSafeValue>;
-      cloneDescriptors = isFrozen
-        ? Object.getOwnPropertyDescriptors(value)
-        : undefined;
-    }
-    if (result) {
-      if (result === value) {
-        result[name] = next;
-      } else {
-        cloneDescriptors![name] = {
-          ...cloneDescriptors![name],
-          value: next,
-        };
-      }
-    }
-  }
+  copyOwnProperties(value, result, path, converted);
 
-  if (!result) {
-    return isFrozen
-      ? value as { readonly [key: string]: ModuleSafeValue }
-      : Object.freeze(value as Record<string, ModuleSafeValue>);
-  }
-  if (cloneDescriptors) {
-    Object.defineProperties(result, cloneDescriptors);
-  }
-  return Object.freeze(result);
+  Object.freeze(result);
+  verifiedPlainData.add(result as object);
+  return result;
 }
 
 function freezeMap(
   value: ReadonlyMap<unknown, unknown>,
   path: string,
-  converted: WeakMap<object, ModuleSafeValue | typeof PROCESSING>,
+  converted: WeakMap<object, ModuleSafeValue>,
 ): ReadonlyMap<ModuleSafeValue, ModuleSafeValue> {
-  const entries: Array<readonly [ModuleSafeValue, ModuleSafeValue]> = [];
-  let changed = !(value instanceof FrozenMap);
+  const result = new Map<ModuleSafeValue, ModuleSafeValue>();
+  Object.setPrototypeOf(result, FrozenMap.prototype);
+  converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
   for (
@@ -429,86 +283,118 @@ function freezeMap(
       value as Map<unknown, unknown>,
     )
   ) {
-    const nextKey = freezeModuleSafeValue(
-      key,
-      `${path}<map-key:${index}>`,
-      converted,
+    Map.prototype.set.call(
+      result,
+      freezeModuleSafeValue(
+        key,
+        `${path}<map-key:${index}>`,
+        converted,
+      ),
+      freezeModuleSafeValue(
+        entryValue,
+        `${path}<map-value:${index}>`,
+        converted,
+      ),
     );
-    const nextValue = freezeModuleSafeValue(
-      entryValue,
-      `${path}<map-value:${index}>`,
-      converted,
-    );
-    changed ||= nextKey !== key || nextValue !== entryValue;
-    entries.push([nextKey, nextValue]);
     index += 1;
   }
 
-  if (!changed) return value as ReadonlyMap<ModuleSafeValue, ModuleSafeValue>;
-  return new FrozenMap(entries);
+  copyOwnProperties(value as object, result, path, converted);
+
+  Object.freeze(result);
+  verifiedPlainData.add(result);
+  return result;
 }
 
 function freezeSet(
   value: ReadonlySet<unknown>,
   path: string,
-  converted: WeakMap<object, ModuleSafeValue | typeof PROCESSING>,
+  converted: WeakMap<object, ModuleSafeValue>,
 ): ReadonlySet<ModuleSafeValue> {
-  const entries: ModuleSafeValue[] = [];
-  let changed = !(value instanceof FrozenSet);
+  const result = new Set<ModuleSafeValue>();
+  Object.setPrototypeOf(result, FrozenSet.prototype);
+  converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
   for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
-    const nextValue = freezeModuleSafeValue(
-      entryValue,
-      `${path}<set:${index}>`,
-      converted,
+    Set.prototype.add.call(
+      result,
+      freezeModuleSafeValue(
+        entryValue,
+        `${path}<set:${index}>`,
+        converted,
+      ),
     );
-    changed ||= nextValue !== entryValue;
-    entries.push(nextValue);
     index += 1;
   }
 
-  if (!changed) return value as ReadonlySet<ModuleSafeValue>;
-  return new FrozenSet(entries);
+  copyOwnProperties(value as object, result, path, converted);
+
+  Object.freeze(result);
+  verifiedPlainData.add(result);
+  return result;
 }
 
-function assertNoSymbolKeys(
-  value: object,
+function copyOwnProperties(
+  source: object,
+  target: object,
   path: string,
+  converted: WeakMap<object, ModuleSafeValue>,
+  options: { skipLength?: boolean } = {},
 ): void {
-  const symbols = Object.getOwnPropertySymbols(value);
-  if (symbols.length > 0) {
-    throw validationError(path, "Symbol keys are not allowed");
-  }
-}
+  for (const key of Reflect.ownKeys(source)) {
+    if (options.skipLength && key === "length") continue;
 
-function assertCollectionHasNoOwnKeys(
-  value: object,
-  path: string,
-): void {
-  if (Reflect.ownKeys(value).length > 0) {
-    throw validationError(
-      path,
-      "Collections cannot have extra own properties",
+    const descriptor = Reflect.getOwnPropertyDescriptor(source, key);
+    if (!descriptor) {
+      throw validationError(
+        pathForKey(path, key),
+        "Own property descriptor is missing",
+      );
+    }
+
+    defineSnapshotProperty(
+      target,
+      key,
+      freezeModuleSafeValue(
+        Reflect.get(source, key),
+        pathForKey(path, key),
+        converted,
+      ),
+      descriptor.enumerable ?? true,
     );
   }
 }
 
-function isAccessorDescriptor(
-  descriptor: PropertyDescriptor,
-): boolean {
-  return "get" in descriptor || "set" in descriptor;
+function defineSnapshotProperty(
+  target: object,
+  key: PropertyKey,
+  value: ModuleSafeValue,
+  enumerable: boolean,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable,
+    configurable: true,
+    writable: true,
+  });
 }
 
-function isCanonicalArrayIndex(
-  name: string,
-  length: number,
-): boolean {
-  const index = Number(name);
-  return Number.isInteger(index) &&
-    index >= 0 &&
-    index < length &&
-    String(index) === name;
+function pathForKey(
+  path: string,
+  key: PropertyKey,
+): string {
+  if (typeof key === "symbol") {
+    return `${path}[${String(key)}]`;
+  }
+
+  const keyString = String(key);
+  const index = Number(keyString);
+  if (Number.isInteger(index) && String(index) === keyString) {
+    return pathForIndex(path, index);
+  }
+
+  return pathForProperty(path, keyString);
 }
 
 function pathForIndex(path: string, index: number): string {
