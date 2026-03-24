@@ -6,7 +6,7 @@ import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
-const { API_URL, SPACE_NAME } = env;
+const { API_URL } = env;
 
 describe("Compile all patterns", () => {
   const skippedPatterns = [
@@ -28,7 +28,7 @@ describe("Compile all patterns", () => {
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
       const cc = await PiecesController.initialize({
-        spaceName: SPACE_NAME,
+        spaceName: `${name}-${crypto.randomUUID()}`,
         apiUrl: new URL(API_URL),
         identity: identity,
       });

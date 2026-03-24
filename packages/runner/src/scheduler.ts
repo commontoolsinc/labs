@@ -437,6 +437,7 @@ export class Scheduler {
   private pendingDependencyCollection = new Set<Action>();
 
   private idlePromises: (() => void)[] = [];
+  private backgroundTasks = new Set<Promise<unknown>>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
@@ -1252,6 +1253,12 @@ export class Scheduler {
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(() => this.idle().then(resolve));
+      } else if (this.backgroundTasks.size > 0) {
+        // Async scheduler work, such as event-triggered auto-start, is still in
+        // flight. Wait for it to settle and then re-check the scheduler state.
+        Promise.allSettled([...this.backgroundTasks]).then(() =>
+          this.idle().then(resolve)
+        );
       } else if (!this.scheduled) {
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
@@ -1289,8 +1296,7 @@ export class Scheduler {
 
     // If no handler was found, try to start the piece that should handle this event
     if (!handlerFound && !doNotLoadPieceIfNotRunning) {
-      // Use an async IIFE to handle the async operation without blocking
-      (async () => {
+      const startTask = (async () => {
         const started = await ensurePieceRunning(this.runtime, eventLink);
         if (started) {
           // Piece was started, re-queue the event. Don't trigger loading again
@@ -1299,6 +1305,10 @@ export class Scheduler {
           this.queueEvent(eventLink, event, retries, onCommit, true);
         }
       })();
+      this.backgroundTasks.add(startTask);
+      startTask.finally(() => {
+        this.backgroundTasks.delete(startTask);
+      });
     }
   }
 

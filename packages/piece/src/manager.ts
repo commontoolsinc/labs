@@ -862,9 +862,19 @@ export class PieceManager {
       "setupPersistent.runtime.setup",
       () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
     );
+    const knownPatternId = (() => {
+      try {
+        return this.runtime.patternManager.getPatternMeta(pattern).id;
+      } catch {
+        return undefined;
+      }
+    })();
     await timePiecePhase(
       "setupPersistent.syncPattern",
-      () => this.syncPattern(piece),
+      () =>
+        knownPatternId
+          ? this.syncPatternById(knownPatternId)
+          : this.syncPattern(piece),
     );
 
     if (llmRequestId) {
@@ -915,7 +925,19 @@ export class PieceManager {
     if (!sourceCell) throw new Error("piece missing source cell");
     await timePiecePhase("syncPattern.source.sync", () => sourceCell.sync());
 
-    const patternId = sourceCell.get()?.[TYPE];
+    let patternId = sourceCell.get()?.[TYPE];
+    if (!patternId) {
+      // Under remote sync, the source cell can transiently lag the result cell
+      // even though setup just wrote both. Wait for storage to settle and retry
+      // once before treating the source metadata as missing.
+      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
+      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
+      await timePiecePhase(
+        "syncPattern.retry.source.sync",
+        () => sourceCell.sync(),
+      );
+      patternId = sourceCell.get()?.[TYPE];
+    }
     if (!patternId) throw new Error("piece missing pattern ID");
 
     return await timePiecePhase(

@@ -35,7 +35,6 @@ const keyConfig: IdentityCreateConfig = {
 };
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
-const spaceName = globalThis.crypto.randomUUID();
 
 const TEST_PROGRAM = `/// <cts-enable />
 import { Cell, NAME, pattern, UI } from "commonfabric";
@@ -74,7 +73,7 @@ export default pattern<PatternState>((state) => {
 describe("RuntimeClient", () => {
   describe("lifecycle", () => {
     it("initializes and reaches ready state", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       const rt = await createRuntimeClient(session);
       await rt.dispose();
     });
@@ -82,7 +81,7 @@ describe("RuntimeClient", () => {
 
   describe("cell operations", () => {
     it("creates a cell with getCell and syncs its value", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -112,7 +111,7 @@ describe("RuntimeClient", () => {
     });
 
     it("recursively returns VNodes inline with schema-driven serialization", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEMP_PATTERN, {
@@ -129,7 +128,7 @@ describe("RuntimeClient", () => {
     });
 
     it("resolves cell links with resolveAsCell()", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       // Create a target cell with some data
@@ -170,7 +169,7 @@ describe("RuntimeClient", () => {
     });
 
     it("subscribes to cell updates via subscribe()", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -210,7 +209,7 @@ describe("RuntimeClient", () => {
     });
 
     it("updates multiple instances of the same cell with different schema", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -253,7 +252,7 @@ describe("RuntimeClient", () => {
       // Fix: connection.subscribe() copies cached value from existing subscriber
       // to new subscriber when joining an existing subscription.
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const schema = {
@@ -338,7 +337,7 @@ describe("RuntimeClient", () => {
 
   describe("page operations", () => {
     it("creates a page from URL and retrieves it", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEST_PROGRAM, {
@@ -348,7 +347,7 @@ describe("RuntimeClient", () => {
     });
 
     it("starts and stops page execution", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEST_PROGRAM, {
@@ -360,7 +359,7 @@ describe("RuntimeClient", () => {
     });
 
     it("removes a page", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEST_PROGRAM, {
@@ -375,7 +374,7 @@ describe("RuntimeClient", () => {
     });
 
     it("gets the pages list cell", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const piecesListCell = await rt.getPiecesListCell();
@@ -406,7 +405,7 @@ export default pattern((_) => {
           contents: consolePattern,
         }],
       };
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const consoleEvents: { method: string; args: unknown[] }[] = [];
@@ -436,7 +435,7 @@ export default pattern((_) => {
 
   describe("event handlers", () => {
     it("sends events to stream cells without schema error", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       // Create a cell with undefined schema (simulating what happens with handler streams)
@@ -457,7 +456,7 @@ export default pattern((_) => {
     });
 
     it("sends events to nested stream cell paths without schema error", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       // Create a root cell that will have the structure like a process cell
@@ -484,7 +483,7 @@ export default pattern((_) => {
 
   describe("html render", () => {
     it("retrieves UI markup from page cell", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEST_PROGRAM, {
@@ -501,7 +500,7 @@ export default pattern((_) => {
     });
 
     it("renders page UI using html render function with CellHandle", async () => {
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(TEST_PROGRAM, {
@@ -560,7 +559,7 @@ export default pattern<State>(({ value }) => {
         }],
       };
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(valueProgram, {
@@ -614,7 +613,7 @@ export default pattern<State>(({ value }) => {
         }],
       };
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(derivedProgram, {
@@ -669,7 +668,7 @@ export default pattern<State>(({ value }) => {
         }],
       };
 
-      const session = await createSession({ identity, spaceName });
+      const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
       const page = await rt.createPage(clickProgram, {
@@ -711,6 +710,13 @@ export default pattern<State>(({ value }) => {
     });
   });
 });
+
+async function createTestSession(): Promise<Session> {
+  return await createSession({
+    identity,
+    spaceName: globalThis.crypto.randomUUID(),
+  });
+}
 
 async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
   // If a space identity was created, replace it with a transferrable

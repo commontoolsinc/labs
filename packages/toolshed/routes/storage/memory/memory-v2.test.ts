@@ -85,14 +85,18 @@ serialTest(
     const address = new URL(
       `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
     );
+    let runtime: Runtime | undefined;
+    let storageManager:
+      | ReturnType<typeof StorageManager.open>
+      | undefined;
 
     try {
-      const storageManager = StorageManager.open({
+      storageManager = StorageManager.open({
         as: identity,
         address,
         memoryVersion: "v2",
       });
-      const runtime = new Runtime({
+      runtime = new Runtime({
         apiUrl: new URL(`http://${server.addr.hostname}:${server.addr.port}`),
         storageManager,
         memoryVersion: "v2",
@@ -108,18 +112,24 @@ serialTest(
       cell.set({ hello: "world" });
       await tx.commit();
       await runtime.idle();
+      await storageManager.synced();
 
       const provider = storageManager.open(identity.did());
       await provider.sync(cell.getAsNormalizedFullLink().id);
+      await waitFor(() =>
+        provider.replica.get({
+          id: cell.getAsNormalizedFullLink().id,
+          type: "application/json",
+        })?.is !== undefined
+      );
       const persisted = provider.replica.get({
         id: cell.getAsNormalizedFullLink().id,
         type: "application/json",
       });
 
       assertEquals(persisted?.is, { value: { hello: "world" } });
-
-      await runtime.dispose();
     } finally {
+      await runtime?.dispose();
       await server.shutdown();
     }
   },
@@ -133,9 +143,11 @@ serialTest(
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
     const address = new URL("/api/storage/memory", base);
     const cause = `memory-v2-toolshed-persist-${Date.now()}`;
+    let runtime1: Runtime | undefined;
+    let runtime2: Runtime | undefined;
 
     try {
-      const runtime1 = new Runtime({
+      runtime1 = new Runtime({
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
@@ -149,9 +161,11 @@ serialTest(
       writer.set({ persisted: true, count: 1 });
       await tx.commit();
       await runtime1.idle();
+      await runtime1.storageManager.synced();
       await runtime1.dispose();
+      runtime1 = undefined;
 
-      const runtime2 = new Runtime({
+      runtime2 = new Runtime({
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
@@ -165,9 +179,9 @@ serialTest(
       await runtime2.storageManager.synced();
 
       assertEquals(reader.get(), { persisted: true, count: 1 });
-
-      await runtime2.dispose();
     } finally {
+      await runtime2?.dispose();
+      await runtime1?.dispose();
       await server.shutdown();
     }
   },

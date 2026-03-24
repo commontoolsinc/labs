@@ -58,6 +58,7 @@ import type {
   StorageValue,
   Unit,
 } from "./interface.ts";
+import { SelectorTracker } from "./cache.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import {
@@ -73,6 +74,7 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 
+const WATCH_REFRESH_BATCH_DELAY_MS = 0;
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
@@ -676,6 +678,11 @@ type SyncTask = {
   promise: Promise<Result<Unit, PullError>>;
 };
 
+type WatchRefreshBatch = {
+  type: "pull" | "integrate";
+  pending: PromiseWithResolvers<Result<Unit, PullError>>;
+};
+
 const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
 ): SchemaPathSelector => {
@@ -691,6 +698,35 @@ const normalizeSyncEntries = (
   entries.map((
     [address, selector],
   ) => [address, normalizeSyncSelector(selector)]);
+
+const compactWatchEntries = (
+  entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
+): [{ id: URI; type: MIME }, SchemaPathSelector][] => {
+  const tracker = new SelectorTracker<Result<Unit, PullError>>();
+  const cfc = new ContextualFlowControl();
+  const compacted: [{ id: URI; type: MIME }, SchemaPathSelector][] = [];
+
+  for (const entry of entries) {
+    const [address, selector] = entry;
+    const baseAddress = { id: address.id, type: address.type, path: [] };
+    const [superset] = tracker.getSupersetSelector(
+      baseAddress,
+      selector,
+      cfc,
+    );
+    if (superset !== undefined) {
+      continue;
+    }
+    tracker.add(
+      baseAddress,
+      selector,
+      Promise.resolve({ ok: {} } as Result<Unit, PullError>),
+    );
+    compacted.push(entry);
+  }
+
+  return compacted;
+};
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
@@ -717,6 +753,8 @@ class SpaceReplica implements ISpaceReplica {
   #watchView: MemoryV2Client.QueryView | null = null;
   #watchedIds = new Set<URI>();
   #nextLocalSeq = 1;
+  #queuedWatchRefresh: WatchRefreshBatch | null = null;
+  #queuedWatchRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -789,6 +827,10 @@ class SpaceReplica implements ISpaceReplica {
 
   async close(): Promise<void> {
     await this.synced();
+    if (this.#queuedWatchRefreshTimer !== null) {
+      clearTimeout(this.#queuedWatchRefreshTimer);
+      this.#queuedWatchRefreshTimer = null;
+    }
     const sessionHandle = this.#sessionHandle;
     if (sessionHandle) {
       const { client } = await sessionHandle;
@@ -834,7 +876,7 @@ class SpaceReplica implements ISpaceReplica {
       promise: Promise.resolve({ ok: {} } as Result<Unit, PullError>),
     };
     this.#syncTasks.set(key, task);
-    const promise = this.refreshWatchSet("pull");
+    const promise = this.enqueueWatchRefresh("pull");
     task.promise = promise;
     this.#syncPromises.add(promise);
     try {
@@ -922,12 +964,13 @@ class SpaceReplica implements ISpaceReplica {
           uniqueEntries.set(JSON.stringify(entry), entry);
         }
       }
+      const watchEntries = compactWatchEntries([...uniqueEntries.values()]);
 
       const view = await session.watchSet([{
         id: "replica",
         kind: "graph",
         query: {
-          roots: [...uniqueEntries.values()].map(([address, selector]) => ({
+          roots: watchEntries.map(([address, selector]) => ({
             id: address.id,
             selector,
           })),
@@ -944,6 +987,39 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     } catch (error) {
       return { error: toConnectionError(error) };
+    }
+  }
+
+  private enqueueWatchRefresh(
+    type: "pull" | "integrate",
+  ): Promise<Result<Unit, PullError>> {
+    if (this.#queuedWatchRefresh !== null) {
+      return this.#queuedWatchRefresh.pending.promise;
+    }
+
+    const batch: WatchRefreshBatch = {
+      type,
+      pending: Promise.withResolvers<Result<Unit, PullError>>(),
+    };
+    this.#queuedWatchRefresh = batch;
+    this.#queuedWatchRefreshTimer = setTimeout(() => {
+      this.#queuedWatchRefreshTimer = null;
+      if (this.#queuedWatchRefresh !== batch) {
+        return;
+      }
+      this.#queuedWatchRefresh = null;
+      void this.flushWatchRefreshBatch(batch);
+    }, WATCH_REFRESH_BATCH_DELAY_MS);
+    return batch.pending.promise;
+  }
+
+  private async flushWatchRefreshBatch(
+    batch: WatchRefreshBatch,
+  ): Promise<void> {
+    try {
+      batch.pending.resolve(await this.refreshWatchSet(batch.type));
+    } catch (error) {
+      batch.pending.resolve({ error: toConnectionError(error) });
     }
   }
 

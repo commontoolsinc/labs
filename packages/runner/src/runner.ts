@@ -79,6 +79,7 @@ export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
+  private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
   private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
@@ -231,6 +232,7 @@ export class Runner {
       console.warn(
         "No pattern provided and no pattern found in process doc. Not running.",
       );
+      this.locallyPreparedResults.delete(this.getDocKey(resultCell));
       return { resultCell, needsStart: false };
     }
 
@@ -379,6 +381,7 @@ export class Runner {
     // Discover and cache all JavaScript functions in the pattern before start
     this.discoverAndCacheFunctions(pattern, new Set());
 
+    this.locallyPreparedResults.add(key);
     return { resultCell, pattern, processCell, needsStart: true };
   }
 
@@ -438,6 +441,7 @@ export class Runner {
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
+    this.locallyPreparedResults.delete(key);
 
     // Create cancel group early - before the $TYPE sink
     const [cancel, addCancel] = useCancelGroup();
@@ -608,6 +612,7 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
+    const wasPreparedLocally = this.locallyPreparedResults.has(key);
 
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
@@ -674,9 +679,10 @@ export class Runner {
 
     // Fast path for pieces prepared in the current runtime via setup()/run().
     // Those writes are already present locally, so we should preserve the
-    // historical synchronous start() behavior. The dependency sync below is
+    // historical synchronous start() behavior even if an earlier read flipped
+    // the cell's generic `synced` flag. The dependency sync below is
     // specifically for resumed pieces that came from storage.
-    if (!wasSyncedAtEntry) {
+    if (!wasSyncedAtEntry || wasPreparedLocally) {
       try {
         this.startCore(rootCell, processCell, {
           givenPattern: resolvedPattern,
@@ -998,6 +1004,7 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
+    this.locallyPreparedResults.delete(key);
   }
 
   stopAll(): void {
@@ -1013,6 +1020,7 @@ export class Runner {
     // Clear the result pattern cache as well, since the actions have been
     // canceled
     this.resultPatternCache.clear();
+    this.locallyPreparedResults.clear();
   }
 
   /**
