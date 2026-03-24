@@ -526,6 +526,14 @@ describe("Engine in SES mode", () => {
 
     expect(next(1)).toBe(2);
   });
+
+  it("rehydrates stringified functions in the smaller callback compartment", () => {
+    const probe = engine.getInvocation(
+      "function probe() { return typeof globalThis.RUNTIME_ENGINE_CONSOLE_HOOK; }",
+    ) as () => string;
+
+    expect(probe()).toBe("undefined");
+  });
 });
 
 describe("Engine compile + evaluate", () => {

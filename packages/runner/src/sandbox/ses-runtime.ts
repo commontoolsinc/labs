@@ -5,6 +5,7 @@ import {
   SourceMapParser,
 } from "@commontools/js-compiler";
 import "ses";
+import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 
 export interface SESRuntimeOptions {
   globals?: Record<string, unknown>;
@@ -194,6 +195,15 @@ export function evaluateFunctionSourceInSES(
     materializeHostVisibleStack(error);
     throw error;
   }
+}
+
+export function evaluateCallbackSourceInSES(
+  source: string,
+): unknown {
+  return evaluateFunctionSourceInSES(source, {
+    globals: createCallbackCompartmentGlobals(),
+    lockdown: true,
+  });
 }
 
 let sesInitialized = false;

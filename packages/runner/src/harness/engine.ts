@@ -21,14 +21,19 @@ import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
 } from "@commonfabric/ts-transformers";
-import * as RuntimeModules from "./runtime-modules.ts";
+} from "@commonfabric/ts-transformers";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 import {
-  evaluateFunctionSourceInSES,
+  createModuleCompartmentGlobals,
+  evaluateCallbackSourceInSES,
+  getRuntimeModuleExports,
+  getRuntimeModuleTypes,
+  isRuntimeModuleIdentifier,
   preflightCompiledBundle,
+  RuntimeModuleIdentifiers,
   SESIsolate,
   SESRuntime,
   verifyProgramModuleScope,
@@ -62,7 +67,7 @@ export class EngineProgramResolver extends InMemoryProgram {
     if (identifier.endsWith(".d.ts")) {
       const origSource = identifier.substring(0, identifier.length - 5);
       if (
-        RuntimeModules.isRuntimeModuleIdentifier(origSource)
+        isRuntimeModuleIdentifier(origSource)
       ) {
         if (!this.runtimeModuleTypes) {
           this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
@@ -113,16 +118,15 @@ export class Engine extends EventTarget implements Harness {
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new SESRuntime({
-      globals: {
+      globals: createModuleCompartmentGlobals({
         [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
           RUNTIME_ENGINE_CONSOLE_HOOK
         ],
-      },
+      }),
       lockdown: true,
     });
     const isolate = runtime.getIsolate("");
-    const { runtimeExports, exportsCallback } = await RuntimeModules
-      .getExports();
+    const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
     return { compiler, runtime, isolate, runtimeExports, exportsCallback };
   }
 
@@ -241,14 +245,7 @@ export class Engine extends EventTarget implements Harness {
   }
 
   getInvocation(source: string): HarnessedFunction {
-    return evaluateFunctionSourceInSES(source, {
-      globals: {
-        [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
-          RUNTIME_ENGINE_CONSOLE_HOOK
-        ],
-      },
-      lockdown: this.ctRuntime.sandbox.lockdown,
-    }) as HarnessedFunction;
+    return evaluateCallbackSourceInSES(source) as HarnessedFunction;
   }
 
   // Map a single position to its original source location.
@@ -273,7 +270,7 @@ export class Engine extends EventTarget implements Harness {
 
   // Returns a map of runtime module types.
   static getRuntimeModuleTypes(cache: StaticCache) {
-    return RuntimeModules.getTypes(cache);
+    return getRuntimeModuleTypes(cache);
   }
 
   static getEnvironmentTypes(cache: StaticCache) {
@@ -281,7 +278,7 @@ export class Engine extends EventTarget implements Harness {
   }
 
   static runtimeModuleNames() {
-    return [...RuntimeModules.RuntimeModuleIdentifiers];
+    return [...RuntimeModuleIdentifiers];
   }
 
   private async getInternals(): Promise<Internals> {
