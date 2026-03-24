@@ -79,14 +79,14 @@ const Question = pattern<QuestionInput, QuestionOutput>(
     return {
       [NAME]: computed(() => (topic ? `Question: ${topic}` : "Question")),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="1">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1">
+            <cf-heading level={4}>
               {computed(() => topic || "Question")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vstack gap="3" style="padding: 1.5rem;">
+          <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
               <div style="color: var(--ct-color-text-secondary);">
@@ -102,8 +102,8 @@ const Question = pattern<QuestionInput, QuestionOutput>(
                 onct-answer={onAnswer({ answer })}
               />,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       topic,
       question: computed(() => response.result?.question || ""),

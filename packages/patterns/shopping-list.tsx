@@ -406,13 +406,13 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   return {
     [NAME]: "Shopping List",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>🛒 Shopping List</ct-heading>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>🛒 Shopping List</cf-heading>
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span
               style={{
                 fontSize: "13px",
@@ -451,12 +451,12 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             >
               🗺️ Store
             </ct-button>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
         {/* Main scrollable content */}
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
             {/* Input field at top - with right padding to avoid FAB */}
             <div style={{ paddingRight: "60px" }}>
               <ct-message-input
@@ -469,7 +469,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             {/* QUICK LIST VIEW */}
             {ifElse(
               computed(() => viewMode.get() === "quick"),
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {/* Empty state */}
                 {ifElse(
                   computed(() => items.get().length === 0),
@@ -487,8 +487,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
 
                 {/* Item list */}
                 {items.map((item) => (
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
+                  <cf-card>
+                    <cf-hstack gap="2" align="center">
                       <ct-checkbox $checked={item.done} />
                       <ct-input
                         $value={item.title}
@@ -511,8 +511,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       >
                         ×
                       </ct-button>
-                    </ct-hstack>
-                  </ct-card>
+                    </cf-hstack>
+                  </cf-card>
                 ))}
 
                 {/* Demo layout notice */}
@@ -534,18 +534,18 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   </div>,
                   null,
                 )}
-              </ct-vstack>,
+              </cf-vstack>,
               null,
             )}
 
             {/* SORTED VIEW - Shows items with their AI-assigned aisles */}
             {ifElse(
               computed(() => viewMode.get() === "sorted"),
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {/* Items with aisles */}
                 {itemsWithAisles.map((itemWithAisle) => (
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
+                  <cf-card>
+                    <cf-hstack gap="2" align="center">
                       <ct-checkbox $checked={itemWithAisle.item.done} />
                       <div
                         style={{
@@ -618,8 +618,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       >
                         ✏️
                       </ct-button>
-                    </ct-hstack>
-                  </ct-card>
+                    </cf-hstack>
+                  </cf-card>
                 ))}
 
                 {/* Demo layout notice */}
@@ -641,11 +641,11 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   </div>,
                   null,
                 )}
-              </ct-vstack>,
+              </cf-vstack>,
               null,
             )}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
         {/* Correction panel (shown when correcting an item) */}
         {ifElse(
@@ -665,8 +665,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
               zIndex: 1000,
             }}
           >
-            <ct-vstack gap="2">
-              <ct-hstack justify="between" align="center">
+            <cf-vstack gap="2">
+              <cf-hstack justify="between" align="center">
                 <span style={{ fontWeight: 500 }}>
                   Where is "{correctionTitle}" actually located?
                 </span>
@@ -676,7 +676,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                 >
                   ✕ Cancel
                 </ct-button>
-              </ct-hstack>
+              </cf-hstack>
               <div
                 style={{
                   display: "grid",
@@ -701,11 +701,11 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   );
                 })}
               </div>
-            </ct-vstack>
+            </cf-vstack>
           </div>,
           null,
         )}
-      </ct-screen>
+      </cf-screen>
     ),
     items,
     summary: computed(() => {

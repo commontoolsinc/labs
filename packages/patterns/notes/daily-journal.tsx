@@ -352,7 +352,7 @@ ${notesXml}
     return {
       [NAME]: computed(() => `📅 ${title.get()}`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div
             style={{
               flex: 1,
@@ -371,7 +371,7 @@ ${notesXml}
             >
               {/* Column 1: Calendar + Entries */}
               <div style={{ width: "320px", flexShrink: "0" }}>
-                <ct-vstack gap="4">
+                <cf-vstack gap="4">
                   {/* Go to Today */}
                   <ct-button
                     variant="primary"
@@ -392,7 +392,7 @@ ${notesXml}
                   </ct-button>
 
                   {/* Mini calendar */}
-                  <ct-card>
+                  <cf-card>
                     <ct-calendar
                       $value={selectedDate}
                       markedDates={datesWithNotes}
@@ -403,10 +403,10 @@ ${notesXml}
                         addPiece,
                       })}
                     />
-                  </ct-card>
+                  </cf-card>
 
                   {/* Entries list */}
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     <div
                       style={{
                         display: "flex",
@@ -422,16 +422,16 @@ ${notesXml}
                     {sortedEntries.map((entry: any) => (
                       <ct-cell-link $cell={entry} />
                     ))}
-                  </ct-vstack>
-                </ct-vstack>
+                  </cf-vstack>
+                </cf-vstack>
               </div>
 
               {/* Column 2: Weekly Rollup */}
               <div style={{ flex: "1", minWidth: "0" }}>
                 {ifElse(
                   hasRecentNotes,
-                  <ct-card>
-                    <ct-vstack gap="3" padding="4">
+                  <cf-card>
+                    <cf-vstack gap="3" padding="4">
                       <div
                         style={{
                           display: "flex",
@@ -461,7 +461,7 @@ ${notesXml}
 
                       {ifElse(
                         hasRollup,
-                        <ct-vstack gap="3">
+                        <cf-vstack gap="3">
                           <p
                             style={{
                               fontSize: "15px",
@@ -473,7 +473,7 @@ ${notesXml}
                             {weeklyRollup?.headline}
                           </p>
 
-                          <ct-vstack gap="1">
+                          <cf-vstack gap="1">
                             <span
                               style={{
                                 fontSize: "11px",
@@ -507,7 +507,7 @@ ${notesXml}
                                 </div>
                               ),
                             )}
-                          </ct-vstack>
+                          </cf-vstack>
 
                           {ifElse(
                             computed(
@@ -515,7 +515,7 @@ ${notesXml}
                                 (weeklyRollup?.accomplishments?.length ?? 0) >
                                   0,
                             ),
-                            <ct-vstack gap="1">
+                            <cf-vstack gap="1">
                               <span
                                 style={{
                                   fontSize: "11px",
@@ -539,7 +539,7 @@ ${notesXml}
                                   (item: string) => <li>{item}</li>,
                                 )}
                               </ul>
-                            </ct-vstack>,
+                            </cf-vstack>,
                             <span />,
                           )}
 
@@ -548,7 +548,7 @@ ${notesXml}
                               () =>
                                 (weeklyRollup?.openThreads?.length ?? 0) > 0,
                             ),
-                            <ct-vstack gap="1">
+                            <cf-vstack gap="1">
                               <span
                                 style={{
                                   fontSize: "11px",
@@ -572,7 +572,7 @@ ${notesXml}
                                   (item: string) => <li>{item}</li>,
                                 )}
                               </ul>
-                            </ct-vstack>,
+                            </cf-vstack>,
                             <span />,
                           )}
 
@@ -586,7 +586,7 @@ ${notesXml}
                           >
                             {weeklyRollup?.mood}
                           </p>
-                        </ct-vstack>,
+                        </cf-vstack>,
                         <div
                           style={{
                             textAlign: "center",
@@ -602,16 +602,16 @@ ${notesXml}
                           )}
                         </div>,
                       )}
-                    </ct-vstack>
-                  </ct-card>,
+                    </cf-vstack>
+                  </cf-card>,
                   <span />,
                 )}
 
                 {/* Suggestion based on weekly context */}
                 {ifElse(
                   hasRollup,
-                  <ct-card style={{ marginTop: "16px" }}>
-                    <ct-vstack gap="2" padding="4">
+                  <cf-card style={{ marginTop: "16px" }}>
+                    <cf-vstack gap="2" padding="4">
                       <span
                         style={{
                           fontSize: "11px",
@@ -628,15 +628,15 @@ ${notesXml}
                         context={suggestionContext}
                         initialResults={[]}
                       />
-                    </ct-vstack>
-                  </ct-card>,
+                    </cf-vstack>
+                  </cf-card>,
                   <span />,
                 )}
               </div>
             </div>
 
             {/* Settings view */}
-            <ct-vstack
+            <cf-vstack
               gap="4"
               padding="6"
               style={{
@@ -663,9 +663,9 @@ ${notesXml}
               <ct-button variant="primary" onClick={toggleSettings}>
                 Done
               </ct-button>
-            </ct-vstack>
+            </cf-vstack>
           </div>
-        </ct-screen>
+        </cf-screen>
       ),
       title,
       entries,

@@ -33,23 +33,23 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
 
         <ct-modal $open={open} size={size} dismissable={dismissable}>
           <div slot="header">
-            <ct-heading level={4}>Modal Title</ct-heading>
+            <cf-heading level={4}>Modal Title</cf-heading>
           </div>
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <span>This is the modal body content.</span>
             <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
               You can put any content here — forms, text, images, etc.
             </span>
-          </ct-vstack>
+          </cf-vstack>
           <div slot="footer">
-            <ct-hstack gap="2" justify="end">
+            <cf-hstack gap="2" justify="end">
               <ct-button variant="secondary" onClick={closeModal}>
                 Cancel
               </ct-button>
               <ct-button variant="primary" onClick={closeModal}>
                 Confirm
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </div>
         </ct-modal>
       </div>

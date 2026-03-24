@@ -11,9 +11,9 @@ const PatternIndexUrl = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `Pattern Index: ${url}`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <ct-input $value={url} />
-        </ct-screen>
+        </cf-screen>
       ),
       url,
     };

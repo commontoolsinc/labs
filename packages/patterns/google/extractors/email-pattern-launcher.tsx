@@ -310,13 +310,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Email Pattern Launcher</ct-heading>
+          <cf-heading level={3}>Email Pattern Launcher</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI from GmailExtractor */}
             {extractor.ui.authStatusUI}
 
@@ -452,7 +452,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   Active Email Patterns
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {launchedPatterns.map((patternInfo) => (
                     <div
                       style={{
@@ -562,7 +562,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       )}
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             )}
 
@@ -604,9 +604,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                 ))}
               </div>
             </details>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

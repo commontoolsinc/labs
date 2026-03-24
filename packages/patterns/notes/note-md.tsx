@@ -126,7 +126,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
 
     // Scrollable content with markdown + backlinks (for print support)
     const markdownViewer = (
-      <ct-vscroll flex showScrollbar fadeEdges>
+      <cf-vscroll flex showScrollbar fadeEdges>
         <div style={{ padding: "1rem", minHeight: "100%" }}>
           {/* Markdown content with wiki-links converted to clickable links */}
           <ct-markdown
@@ -156,7 +156,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             >
               Linked from:
             </span>
-            <ct-hstack gap="2" wrap>
+            <cf-hstack gap="2" wrap>
               {note?.backlinks?.map((piece) => (
                 <ct-chip
                   label={piece?.[NAME] ?? "Untitled"}
@@ -164,17 +164,17 @@ export default pattern<NoteMdInput, NoteMdOutput>(
                   onct-click={handleBacklinkClick({ piece })}
                 />
               ))}
-            </ct-hstack>
+            </cf-hstack>
           </div>
         </div>
-      </ct-vscroll>
+      </cf-vscroll>
     );
 
     return {
       [NAME]: displayName,
       [UI]: (
-        <ct-screen>
-          <ct-hstack
+        <cf-screen>
+          <cf-hstack
             slot="header"
             padding="4"
             gap="3"
@@ -183,16 +183,16 @@ export default pattern<NoteMdInput, NoteMdOutput>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
-            <ct-heading level={1} style={{ flex: "1" }}>
+            <cf-heading level={1} style={{ flex: "1" }}>
               {computed(() => note?.title || "Untitled Note")}
-            </ct-heading>
+            </cf-heading>
             {/* Edit button - navigates back to source note for editing */}
             <ct-button variant="secondary" size="sm" onClick={goToEdit}>
               Edit
             </ct-button>
-          </ct-hstack>
+          </cf-hstack>
           {markdownViewer}
-        </ct-screen>
+        </cf-screen>
       ),
       note,
       isHidden: true,

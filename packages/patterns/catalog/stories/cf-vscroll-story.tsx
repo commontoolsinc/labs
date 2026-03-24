@@ -16,7 +16,7 @@ export default pattern<VScrollStoryInput, VScrollStoryOutput>(() => {
   const fadeEdges = Writable.of(false);
 
   return {
-    [NAME]: "ct-vscroll Story",
+    [NAME]: "cf-vscroll Story",
     [UI]: (
       <div
         style={{
@@ -37,44 +37,44 @@ export default pattern<VScrollStoryInput, VScrollStoryOutput>(() => {
           >
             Vertical Scrollable Area
           </div>
-          <ct-vscroll
+          <cf-vscroll
             show-scrollbar={showScrollbar}
             fade-edges={fadeEdges}
             style="border: 1px solid #e2e8f0; border-radius: 4px; height: 200px;"
           >
-            <ct-vstack gap="2" style="padding: 8px;">
-              <ct-card>
+            <cf-vstack gap="2" style="padding: 8px;">
+              <cf-card>
                 <span>Item 1</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 2</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 3</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 4</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 5</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 6</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 7</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 8</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 9</span>
-              </ct-card>
-              <ct-card>
+              </cf-card>
+              <cf-card>
                 <span>Item 10</span>
-              </ct-card>
-            </ct-vstack>
-          </ct-vscroll>
+              </cf-card>
+            </cf-vstack>
+          </cf-vscroll>
         </div>
 
         <div>
@@ -88,8 +88,8 @@ export default pattern<VScrollStoryInput, VScrollStoryOutput>(() => {
           >
             With max-height
           </div>
-          <ct-vscroll style="border: 1px solid #e2e8f0; border-radius: 4px; max-height: 150px;">
-            <ct-vstack gap="1" style="padding: 8px;">
+          <cf-vscroll style="border: 1px solid #e2e8f0; border-radius: 4px; max-height: 150px;">
+            <cf-vstack gap="1" style="padding: 8px;">
               <div style="background: #f0fdf4; padding: 8px 12px; border-radius: 4px;">
                 Row A
               </div>
@@ -108,8 +108,8 @@ export default pattern<VScrollStoryInput, VScrollStoryOutput>(() => {
               <div style="background: #34d399; padding: 8px 12px; border-radius: 4px;">
                 Row F
               </div>
-            </ct-vstack>
-          </ct-vscroll>
+            </cf-vstack>
+          </cf-vscroll>
         </div>
       </div>
     ),

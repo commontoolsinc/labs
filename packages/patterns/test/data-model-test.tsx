@@ -112,7 +112,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Data Model Test",
       [UI]: (
-        <ct-vstack gap={1} style="padding: 1rem; max-width: 500px;">
+        <cf-vstack gap={1} style="padding: 1rem; max-width: 500px;">
           <h3>Data Model Test</h3>
           <ct-textarea
             $value={inputText}
@@ -134,7 +134,7 @@ export default pattern<Input, Output>(
           </pre>
           <div style={{ color: "red", fontSize: "0.875rem" }}>{errorMsg}</div>
           <div style={{ color: "grey", fontSize: "9pt" }}>{VERSION}</div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       value,
       evalAndStore: boundEvalAndStore,

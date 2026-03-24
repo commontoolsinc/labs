@@ -506,7 +506,7 @@ const WeeklyCalendar = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title} (${eventCount})`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
           <div
             slot="header"
@@ -846,7 +846,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 userSelect: "none",
               }}
             >
-              <ct-vscroll flex showScrollbar fadeEdges>
+              <cf-vscroll flex showScrollbar fadeEdges>
                 <div
                   style={{
                     display: "flex",
@@ -1214,7 +1214,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     );
                   })}
                 </div>
-              </ct-vscroll>
+              </cf-vscroll>
             </div>
           </div>
 
@@ -1236,7 +1236,7 @@ const WeeklyCalendar = pattern<Input, Output>(
           )}
 
           {/* Backlinks footer */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
@@ -1268,8 +1268,8 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {piece?.[NAME]}
               </ct-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       events,

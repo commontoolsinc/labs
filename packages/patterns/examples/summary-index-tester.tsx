@@ -30,13 +30,13 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Summary Index Tester",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Summary Index Tester</h2>
         </ct-toolbar>
 
-        <ct-vstack gap="6" padding="6">
-          <ct-vstack gap="2">
+        <cf-vstack gap="6" padding="6">
+          <cf-vstack gap="2">
             <strong>
               Index: {entryCount} entries
             </strong>
@@ -52,7 +52,7 @@ export default pattern<Record<string, never>>((_) => {
             >
               Showing {filteredCount} results
             </span>
-          </ct-vstack>
+          </cf-vstack>
 
           <ct-table full-width>
             <thead>
@@ -79,8 +79,8 @@ export default pattern<Record<string, never>>((_) => {
               ))}
             </tbody>
           </ct-table>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
   };
 });

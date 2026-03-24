@@ -56,8 +56,8 @@ export const PhoneModule = pattern<PhoneModuleInput, PhoneModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
             <ct-autocomplete
               $value={label}
@@ -66,16 +66,16 @@ export const PhoneModule = pattern<PhoneModuleInput, PhoneModuleInput>(
               allowCustom
               style={{ width: "100%" }}
             />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Phone</label>
             <ct-input
               type="tel"
               $value={number}
               placeholder="+1 (555) 123-4567"
             />
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       label,
       number,

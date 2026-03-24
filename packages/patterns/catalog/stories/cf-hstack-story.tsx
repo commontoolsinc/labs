@@ -8,19 +8,20 @@ import {
 } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
-interface VStackStoryInput {}
-interface VStackStoryOutput {
+interface HStackStoryInput {}
+interface HStackStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;
 }
 
-export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
+export default pattern<HStackStoryInput, HStackStoryOutput>(() => {
   const gap = Writable.of<"0" | "1" | "2" | "3" | "4" | "6" | "8">("2");
+  const wrap = Writable.of(false);
   const reverse = Writable.of(false);
 
   return {
-    [NAME]: "ct-vstack Story",
+    [NAME]: "cf-hstack Story",
     [UI]: (
       <div
         style={{
@@ -41,21 +42,22 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
           >
             Interactive
           </div>
-          <ct-vstack
+          <cf-hstack
             gap={gap}
+            wrap={wrap}
             reverse={reverse}
             style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px;"
           >
-            <div style="background: #e0e7ff; padding: 8px 12px; border-radius: 4px; text-align: center;">
+            <div style="background: #e0e7ff; padding: 8px 16px; border-radius: 4px;">
               Item 1
             </div>
-            <div style="background: #dbeafe; padding: 8px 12px; border-radius: 4px; text-align: center;">
+            <div style="background: #dbeafe; padding: 8px 16px; border-radius: 4px;">
               Item 2
             </div>
-            <div style="background: #cffafe; padding: 8px 12px; border-radius: 4px; text-align: center;">
+            <div style="background: #cffafe; padding: 8px 16px; border-radius: 4px;">
               Item 3
             </div>
-          </ct-vstack>
+          </cf-hstack>
         </div>
 
         <div>
@@ -67,61 +69,55 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
               color: "#2e3438",
             }}
           >
-            Gap Comparison
+            Alignment
           </div>
-          <ct-hstack gap="4">
-            <ct-vstack
-              gap="0"
-              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
-            >
-              <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                gap=0
-              </span>
-              <div style="background: #fde68a; padding: 4px 8px; border-radius: 4px;">
-                A
-              </div>
-              <div style="background: #fde68a; padding: 4px 8px; border-radius: 4px;">
-                B
-              </div>
-              <div style="background: #fde68a; padding: 4px 8px; border-radius: 4px;">
-                C
-              </div>
-            </ct-vstack>
-            <ct-vstack
+          <cf-vstack gap="2">
+            <cf-hstack
               gap="2"
-              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
+              align="start"
+              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
             >
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                gap=2
+                align=start
               </span>
-              <div style="background: #bbf7d0; padding: 4px 8px; border-radius: 4px;">
-                A
+              <div style="background: #fde68a; padding: 4px 12px; border-radius: 4px; height: 40px;">
+                Tall
               </div>
-              <div style="background: #bbf7d0; padding: 4px 8px; border-radius: 4px;">
-                B
+              <div style="background: #fde68a; padding: 4px 12px; border-radius: 4px;">
+                Short
               </div>
-              <div style="background: #bbf7d0; padding: 4px 8px; border-radius: 4px;">
-                C
-              </div>
-            </ct-vstack>
-            <ct-vstack
-              gap="4"
-              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; flex: 1;"
+            </cf-hstack>
+            <cf-hstack
+              gap="2"
+              align="center"
+              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
             >
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                gap=4
+                align=center
               </span>
-              <div style="background: #bfdbfe; padding: 4px 8px; border-radius: 4px;">
-                A
+              <div style="background: #bbf7d0; padding: 4px 12px; border-radius: 4px; height: 40px;">
+                Tall
               </div>
-              <div style="background: #bfdbfe; padding: 4px 8px; border-radius: 4px;">
-                B
+              <div style="background: #bbf7d0; padding: 4px 12px; border-radius: 4px;">
+                Short
               </div>
-              <div style="background: #bfdbfe; padding: 4px 8px; border-radius: 4px;">
-                C
+            </cf-hstack>
+            <cf-hstack
+              gap="2"
+              align="end"
+              style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; min-height: 60px;"
+            >
+              <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                align=end
+              </span>
+              <div style="background: #bfdbfe; padding: 4px 12px; border-radius: 4px; height: 40px;">
+                Tall
               </div>
-            </ct-vstack>
-          </ct-hstack>
+              <div style="background: #bfdbfe; padding: 4px 12px; border-radius: 4px;">
+                Short
+              </div>
+            </cf-hstack>
+          </cf-vstack>
         </div>
       </div>
     ),
@@ -142,6 +138,12 @@ export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
               { label: "6", value: "6" },
               { label: "8", value: "8" },
             ]}
+          />
+          <SwitchControl
+            label="wrap"
+            description="Wrap items to next line"
+            defaultValue="false"
+            checked={wrap}
           />
           <SwitchControl
             label="reverse"

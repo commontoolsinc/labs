@@ -11,7 +11,7 @@ interface CardStoryOutput {
 
 export default pattern<CardStoryInput, CardStoryOutput>(() => {
   return {
-    [NAME]: "ct-card Story",
+    [NAME]: "cf-card Story",
     [UI]: (
       <div
         style={{
@@ -21,43 +21,43 @@ export default pattern<CardStoryInput, CardStoryOutput>(() => {
           gap: "16px",
         }}
       >
-        <ct-card>
-          <ct-vstack gap="1">
-            <ct-heading level={5}>Basic Card</ct-heading>
+        <cf-card>
+          <cf-vstack gap="1">
+            <cf-heading level={5}>Basic Card</cf-heading>
             <span style="color: var(--ct-color-gray-600);">
               A simple card with text content. Cards provide built-in padding.
             </span>
-          </ct-vstack>
-        </ct-card>
+          </cf-vstack>
+        </cf-card>
 
-        <ct-card>
-          <ct-hstack gap="3" align="center">
+        <cf-card>
+          <cf-hstack gap="3" align="center">
             <span style="font-size: 2rem;">🎨</span>
-            <ct-vstack gap="0" style="flex: 1;">
+            <cf-vstack gap="0" style="flex: 1;">
               <span style="font-weight: 600;">Card with Icon</span>
               <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
                 Horizontal layout with icon and text
               </span>
-            </ct-vstack>
+            </cf-vstack>
             <ct-button variant="secondary">Action</ct-button>
-          </ct-hstack>
-        </ct-card>
+          </cf-hstack>
+        </cf-card>
 
-        <ct-card>
-          <ct-vstack gap="2">
-            <ct-heading level={5}>Card with Nested Elements</ct-heading>
-            <ct-hstack gap="2">
+        <cf-card>
+          <cf-vstack gap="2">
+            <cf-heading level={5}>Card with Nested Elements</cf-heading>
+            <cf-hstack gap="2">
               <ct-button variant="primary">Save</ct-button>
               <ct-button variant="secondary">Cancel</ct-button>
-            </ct-hstack>
+            </cf-hstack>
             <ct-input placeholder="Input inside a card" />
-          </ct-vstack>
-        </ct-card>
+          </cf-vstack>
+        </cf-card>
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. This story shows ct-card layout variations.
+        No interactive controls. This story shows cf-card layout variations.
       </div>
     ),
   };

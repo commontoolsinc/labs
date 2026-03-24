@@ -4,10 +4,10 @@
 
 ### Layout Components (4)
 
-1. **ct-vgroup** - Vertical group with gap management
-2. **ct-hgroup** - Horizontal group with gap management
+1. **cf-vgroup** - Vertical group with gap management
+2. **cf-hgroup** - Horizontal group with gap management
 3. **ct-hscroll** - Horizontal scroll container with fade edges
-4. **ct-vscroll** - Vertical scroll container with fade edges
+4. **cf-vscroll** - Vertical scroll container with fade edges
 
 ### Form/Input Components (5)
 

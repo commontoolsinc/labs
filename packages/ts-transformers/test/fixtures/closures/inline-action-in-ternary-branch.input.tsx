@@ -26,7 +26,7 @@ interface State {
 export default pattern<State>((state) => {
   return {
     [UI]: (
-      <ct-card>
+      <cf-card>
         {state.isEditing ? (
           <div>Editing</div>
         ) : (
@@ -39,7 +39,7 @@ export default pattern<State>((state) => {
             ))}
           </div>
         )}
-      </ct-card>
+      </cf-card>
     ),
     card: state.card,
   };

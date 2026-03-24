@@ -76,32 +76,32 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
     return {
       [NAME]: computed(() => `Reading: ${title.get() || "New Item"}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header">
+            <cf-heading level={4}>
               {computed(() => title.get() || "New Item")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="3" style="padding: 1rem;">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-vstack gap="1">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="3" style="padding: 1rem;">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Title
                     </label>
                     <ct-input $value={title} placeholder="Title" />
-                  </ct-vstack>
+                  </cf-vstack>
 
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Author
                     </label>
                     <ct-input $value={author} placeholder="Author name" />
-                  </ct-vstack>
+                  </cf-vstack>
 
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       URL
                     </label>
@@ -110,10 +110,10 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                       placeholder="https://..."
                       type="url"
                     />
-                  </ct-vstack>
+                  </cf-vstack>
 
-                  <ct-hstack gap="2">
-                    <ct-vstack gap="1" style="flex: 1;">
+                  <cf-hstack gap="2">
+                    <cf-vstack gap="1" style="flex: 1;">
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Type
                       </label>
@@ -126,9 +126,9 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "🎬 Video", value: "video" },
                         ]}
                       />
-                    </ct-vstack>
+                    </cf-vstack>
 
-                    <ct-vstack gap="1" style="flex: 1;">
+                    <cf-vstack gap="1" style="flex: 1;">
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Status
                       </label>
@@ -141,10 +141,10 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "Abandoned", value: "abandoned" },
                         ]}
                       />
-                    </ct-vstack>
-                  </ct-hstack>
+                    </cf-vstack>
+                  </cf-hstack>
 
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Rating
                     </label>
@@ -159,12 +159,12 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                         { label: "★★★★★ (5)", value: 5 },
                       ]}
                     />
-                  </ct-vstack>
-                </ct-vstack>
-              </ct-card>
+                  </cf-vstack>
+                </cf-vstack>
+              </cf-card>
 
-              <ct-card>
-                <ct-vstack gap="1">
+              <cf-card>
+                <cf-vstack gap="1">
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Notes
                   </label>
@@ -173,11 +173,11 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                     placeholder="Your thoughts, highlights, quotes..."
                     rows={8}
                   />
-                </ct-vstack>
-              </ct-card>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+                </cf-vstack>
+              </cf-card>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
       title,
       author,

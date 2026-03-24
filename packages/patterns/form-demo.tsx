@@ -106,9 +106,9 @@ export const EditPerson = pattern<
             modalOpen,
           })}
         >
-          <ct-vstack gap="3">
+          <cf-vstack gap="3">
             {/* Name field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Name *
               </label>
@@ -118,10 +118,10 @@ export const EditPerson = pattern<
                 placeholder="Enter full name"
                 required
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Email field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Email *
               </label>
@@ -132,10 +132,10 @@ export const EditPerson = pattern<
                 placeholder="email@example.com"
                 required
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Role field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Role
               </label>
@@ -147,10 +147,10 @@ export const EditPerson = pattern<
                   { label: "Admin", value: "admin" },
                 ]}
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Form actions */}
-            <ct-hstack gap="2" style="margin-top: 1rem;">
+            <cf-hstack gap="2" style="margin-top: 1rem;">
               <ct-button
                 type="reset"
                 variant="secondary"
@@ -166,8 +166,8 @@ export const EditPerson = pattern<
               >
                 {isEditMode ? "Save" : "Create"}
               </ct-button>
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
         </ct-form>
       ),
     };
@@ -233,23 +233,23 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   return {
     [NAME]: computed(() => `People Directory (${people.get().length})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>People Directory</ct-heading>
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>People Directory</cf-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {peopleCount}{" "}
               {computed(() => people.get().length === 1 ? "person" : "people")}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
         {/* Main content - list of people */}
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem;">
             {people.map((person) => (
-              <ct-card
+              <cf-card
                 style="cursor: pointer;"
                 onClick={startEdit({
                   person,
@@ -259,8 +259,8 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   modalOpen,
                 })}
               >
-                <ct-hstack gap="2" align="center">
-                  <ct-vstack gap="1" style="flex: 1;">
+                <cf-hstack gap="2" align="center">
+                  <cf-vstack gap="1" style="flex: 1;">
                     <span style="font-weight: 600; font-size: 1rem;">
                       {person.name || "(unnamed)"}
                     </span>
@@ -287,15 +287,15 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                     >
                       {person.role}
                     </span>
-                  </ct-vstack>
+                  </cf-vstack>
                   <ct-button
                     variant="ghost"
                     onClick={deletePerson({ person, people })}
                   >
                     ×
                   </ct-button>
-                </ct-hstack>
-              </ct-card>
+                </cf-hstack>
+              </cf-card>
             ))}
 
             {ifElse(
@@ -305,11 +305,11 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
               </div>,
               null,
             )}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
         {/* Footer - Add button */}
-        <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
+        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
           <ct-button
             variant="primary"
             onClick={startCreate}
@@ -317,7 +317,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
           >
             + Add Person
           </ct-button>
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Modal form */}
         <ct-modal
@@ -341,7 +341,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             null,
           )}
         </ct-modal>
-      </ct-screen>
+      </cf-screen>
     ),
     people,
   };

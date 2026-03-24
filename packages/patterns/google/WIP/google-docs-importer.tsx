@@ -254,12 +254,12 @@ export default pattern<Input, Output>(
     return {
       [NAME]: pieceName,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
-          <ct-vstack slot="header" gap={1}>
-            <ct-hstack align="center" justify="between">
-              <ct-heading level={4}>Google Docs Markdown Importer</ct-heading>
-              <ct-hstack align="center" gap={1}>
+          <cf-vstack slot="header" gap={1}>
+            <cf-hstack align="center" justify="between">
+              <cf-heading level={4}>Google Docs Markdown Importer</cf-heading>
+              <cf-hstack align="center" gap={1}>
                 <span
                   style={{
                     width: "8px",
@@ -271,22 +271,22 @@ export default pattern<Input, Output>(
                 <span style={{ fontSize: "12px", color: "#666" }}>
                   {authInfo.statusText}
                 </span>
-              </ct-hstack>
-            </ct-hstack>
-          </ct-vstack>
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Main content */}
-          <ct-vstack gap="1" style="padding: 16px;">
+          <cf-vstack gap="1" style="padding: 16px;">
             {/* Auth UI */}
             {authFullUI}
 
             {/* Document URL input */}
-            <ct-card>
-              <ct-vstack gap={1}>
+            <cf-card>
+              <cf-vstack gap={1}>
                 <label style={{ fontSize: "13px", fontWeight: 500 }}>
                   Google Doc URL
                 </label>
-                <ct-hstack gap={1}>
+                <cf-hstack gap={1}>
                   <ct-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
@@ -311,19 +311,19 @@ export default pattern<Input, Output>(
                     >
                       {ifElse(
                         isFetchingCell,
-                        <ct-hstack align="center" gap={1}>
+                        <cf-hstack align="center" gap={1}>
                           <ct-loader />
                           <span>Importing...</span>
-                        </ct-hstack>,
+                        </cf-hstack>,
                         "Import",
                       )}
                     </ct-button>,
                     null,
                   )}
-                </ct-hstack>
+                </cf-hstack>
 
                 {/* Options */}
-                <ct-hstack gap={3} style={{ marginTop: "8px" }}>
+                <cf-hstack gap={3} style={{ marginTop: "8px" }}>
                   <label
                     style={{
                       display: "flex",
@@ -362,7 +362,7 @@ export default pattern<Input, Output>(
                     />
                     Embed images as base64
                   </label>
-                </ct-hstack>
+                </cf-hstack>
 
                 {/* Error display */}
                 {ifElse(
@@ -383,14 +383,14 @@ export default pattern<Input, Output>(
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Markdown preview */}
             {ifElse(
               hasMarkdown,
-              <ct-card style="flex: 1; display: flex; flex-direction: column;">
-                <ct-hstack
+              <cf-card style="flex: 1; display: flex; flex-direction: column;">
+                <cf-hstack
                   align="center"
                   justify="between"
                   style={{ marginBottom: "12px" }}
@@ -398,7 +398,7 @@ export default pattern<Input, Output>(
                   <span style={{ fontWeight: 600 }}>
                     Preview: {docTitleCell}
                   </span>
-                  <ct-hstack gap={1}>
+                  <cf-hstack gap={1}>
                     <ct-copy-button text={markdownCell} variant="secondary">
                       Copy to Clipboard
                     </ct-copy-button>
@@ -412,10 +412,10 @@ export default pattern<Input, Output>(
                     >
                       Save as Note
                     </ct-button>
-                  </ct-hstack>
-                </ct-hstack>
+                  </cf-hstack>
+                </cf-hstack>
 
-                <ct-vscroll flex showScrollbar fadeEdges>
+                <cf-vscroll flex showScrollbar fadeEdges>
                   <div
                     style={{
                       padding: "16px",
@@ -430,9 +430,9 @@ export default pattern<Input, Output>(
                   >
                     {markdownCell}
                   </div>
-                </ct-vscroll>
-              </ct-card>,
-              <ct-card>
+                </cf-vscroll>
+              </cf-card>,
+              <cf-card>
                 <div
                   style={{
                     padding: "32px",
@@ -447,10 +447,10 @@ export default pattern<Input, Output>(
                     "Please authenticate with Google to import documents",
                   )}
                 </div>
-              </ct-card>,
+              </cf-card>,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       docUrl,
       markdown,

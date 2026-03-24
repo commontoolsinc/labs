@@ -130,23 +130,23 @@ Input + button combo for adding items.
 
 ---
 
-## ct-card
+## cf-card
 
 Styled card with built-in padding (1rem). Don't add extra padding to children.
 
 ```tsx
-// ✅ Let ct-card handle padding
-<ct-card>
-  <ct-vstack gap={1}>
+// ✅ Let cf-card handle padding
+<cf-card>
+  <cf-vstack gap={1}>
     <h3>Title</h3>
     <p>Content</p>
-  </ct-vstack>
-</ct-card>
+  </cf-vstack>
+</cf-card>
 
 // ❌ Double padding
-<ct-card>
+<cf-card>
   <div style="padding: 1rem;">Content</div>
-</ct-card>
+</cf-card>
 ```
 
 ---
@@ -231,7 +231,7 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ---
 
-## ct-screen
+## cf-screen
 
 Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
 
@@ -242,12 +242,12 @@ Full-screen container for app-like layouts. Use instead of `<div style={{ height
 </div>
 
 // ✅ WORKS - full available width and height
-<ct-screen>
+<cf-screen>
   <header>Title</header>
-  <ct-vscroll style="flex: 1;">
+  <cf-vscroll style="flex: 1;">
     {/* Scrollable content */}
-  </ct-vscroll>
-</ct-screen>
+  </cf-vscroll>
+</cf-screen>
 ```
 
 ---
@@ -441,6 +441,24 @@ const mapData = {
 - **Default center:** San Francisco (37.7749, -122.4194)
 - **Emoji markers:** Use any emoji as the `icon` property
 - **Rich popups:** Pass a pattern reference via `popup` for interactive popup content
+
+---
+
+## Style Syntax
+
+| Element | Syntax | Example |
+|---------|--------|---------|
+| HTML (`div`, `span`) | Object, camelCase | `style={{ backgroundColor: "#fff" }}` |
+| Custom (`ct-*`) | String, kebab-case | `style="background-color: #fff;"` |
+
+```tsx
+// Mixed usage
+<div style={{ display: "flex", gap: "1rem" }}>
+  <cf-vstack style="flex: 1; padding: 1rem;">
+    <span style={{ color: "#333" }}>Label</span>
+  </cf-vstack>
+</div>
+```
 
 ---
 

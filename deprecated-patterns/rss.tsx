@@ -65,8 +65,8 @@ export default pattern<
             Feed Items: {derive(items, (items) => items.get().length)}
           </h2>
 
-          <ct-hstack gap="1">
-            <ct-vstack gap="1">
+          <cf-hstack gap="1">
+            <cf-vstack gap="1">
               <div>
                 <label>Feed URL</label>
                 <ct-input
@@ -75,8 +75,8 @@ export default pattern<
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
                 />
               </div>
-            </ct-vstack>
-          </ct-hstack>
+            </cf-vstack>
+          </cf-hstack>
           <div>
             <table>
               <thead>

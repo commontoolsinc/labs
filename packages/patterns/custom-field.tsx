@@ -198,23 +198,23 @@ export const CustomFieldModule = pattern<
       return `${MODULE_METADATA.icon} ${n}: ${dv}`;
     }),
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {/* Field name + type selector row */}
-        <ct-hstack style={{ gap: "8px", alignItems: "flex-end" }}>
-          <ct-vstack style={{ flex: 1, gap: "4px" }}>
+        <cf-hstack style={{ gap: "8px", alignItems: "flex-end" }}>
+          <cf-vstack style={{ flex: 1, gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Field Name
             </label>
             <ct-input $value={name} placeholder="e.g., Employee ID..." />
-          </ct-vstack>
-          <ct-vstack style={{ width: "110px", gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ width: "110px", gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Type</label>
             <ct-select $value={valueType} items={VALUE_TYPE_OPTIONS} />
-          </ct-vstack>
-        </ct-hstack>
+          </cf-vstack>
+        </cf-hstack>
 
         {/* Value input - type-specific */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Value</label>
 
           {/* Text input */}
@@ -258,7 +258,7 @@ export const CustomFieldModule = pattern<
           {/* URL input with preview */}
           {ifElse(
             isUrl,
-            <ct-vstack style={{ gap: "8px" }}>
+            <cf-vstack style={{ gap: "8px" }}>
               <ct-input $value={value} placeholder="https://..." />
               {ifElse(
                 computed(() => !!safeUrl),
@@ -276,7 +276,7 @@ export const CustomFieldModule = pattern<
                 </a>,
                 null,
               )}
-            </ct-vstack>,
+            </cf-vstack>,
             null,
           )}
 
@@ -286,8 +286,8 @@ export const CustomFieldModule = pattern<
             <ct-input $value={value} placeholder="Enter value..." />,
             null,
           )}
-        </ct-vstack>
-      </ct-vstack>
+        </cf-vstack>
+      </cf-vstack>
     ),
     name,
     value,

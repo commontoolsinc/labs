@@ -755,12 +755,12 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Google Docs Comment Orchestrator",
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
-          <ct-vstack slot="header" gap={1}>
-            <ct-hstack align="center" justify="between">
-              <ct-heading level={4}>Google Docs Comments</ct-heading>
-              <ct-hstack align="center" gap={1}>
+          <cf-vstack slot="header" gap={1}>
+            <cf-hstack align="center" justify="between">
+              <cf-heading level={4}>Google Docs Comments</cf-heading>
+              <cf-hstack align="center" gap={1}>
                 <span
                   style={{
                     width: "8px",
@@ -772,22 +772,22 @@ export default pattern<Input, Output>(
                 <span style={{ fontSize: "12px", color: "#666" }}>
                   {authInfo.statusText}
                 </span>
-              </ct-hstack>
-            </ct-hstack>
-          </ct-vstack>
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Main content */}
-          <ct-vstack gap="1" style="padding: 16px;">
+          <cf-vstack gap="1" style="padding: 16px;">
             {/* Auth UI from utility - handles all states including scope warnings */}
             {authFullUI}
 
             {/* Doc URL input */}
-            <ct-card>
-              <ct-vstack gap={1}>
+            <cf-card>
+              <cf-vstack gap={1}>
                 <label style={{ fontSize: "13px", fontWeight: 500 }}>
                   Google Doc URL
                 </label>
-                <ct-hstack gap={1}>
+                <cf-hstack gap={1}>
                   <ct-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
@@ -810,16 +810,16 @@ export default pattern<Input, Output>(
                     >
                       {ifElse(
                         computed(() => isFetchingCell.get() === true),
-                        <ct-hstack align="center" gap={1}>
+                        <cf-hstack align="center" gap={1}>
                           <ct-loader />
                           <span>Fetching...</span>
-                        </ct-hstack>,
+                        </cf-hstack>,
                         "Fetch Comments",
                       )}
                     </ct-button>,
                     null,
                   )}
-                </ct-hstack>
+                </cf-hstack>
 
                 {/* Error display */}
                 {ifElse(
@@ -839,12 +839,12 @@ export default pattern<Input, Output>(
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Global Prompt (collapsible) */}
-            <ct-card>
-              <ct-hstack
+            <cf-card>
+              <cf-hstack
                 align="center"
                 justify="between"
                 style="cursor: pointer;"
@@ -867,7 +867,7 @@ export default pattern<Input, Output>(
                 <span style={{ color: "#888" }}>
                   {ifElse(showGlobalPrompt, "\u25BC", "\u25B6")}
                 </span>
-              </ct-hstack>
+              </cf-hstack>
 
               {ifElse(
                 showGlobalPrompt,
@@ -890,11 +890,11 @@ export default pattern<Input, Output>(
                 </div>,
                 null,
               )}
-            </ct-card>
+            </cf-card>
 
             {/* Comments List */}
-            <ct-card style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-              <ct-hstack
+            <cf-card style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+              <cf-hstack
                 align="center"
                 justify="between"
                 style="margin-bottom: 12px;"
@@ -902,10 +902,10 @@ export default pattern<Input, Output>(
                 <span style={{ fontWeight: 600 }}>
                   Comments ({openCommentCount})
                 </span>
-              </ct-hstack>
+              </cf-hstack>
 
               {/* Comments list - using pre-computed values, no reactive deps in map */}
-              <ct-vscroll flex showScrollbar fadeEdges>
+              <cf-vscroll flex showScrollbar fadeEdges>
                 {commentsWithState.map((item) => (
                   <div
                     style={{
@@ -1101,7 +1101,7 @@ export default pattern<Input, Output>(
                     )}
                   </div>
                 ))}
-              </ct-vscroll>
+              </cf-vscroll>
 
               {/* AI Response Panel - OUTSIDE map, at pattern body level */}
               {ifElse(
@@ -1244,13 +1244,13 @@ export default pattern<Input, Output>(
                   Select a comment to generate an AI response
                 </div>,
               )}
-            </ct-card>
+            </cf-card>
 
             {/* Trusted Confirmation Component - renders inline when pendingAction is set */}
             {/* TRUST BOUNDARY: executeAction lives in google-docs-comment-confirm.tsx */}
             {ifElse(
               hasAction,
-              <ct-card
+              <cf-card
                 style={{
                   padding: "20px",
                   marginTop: "16px",
@@ -1260,16 +1260,16 @@ export default pattern<Input, Output>(
                 }}
               >
                 {/* Header */}
-                <ct-hstack
+                <cf-hstack
                   align="center"
                   gap={2}
                   style={{ marginBottom: "16px" }}
                 >
                   <span style={{ fontSize: "24px" }}>⚠️</span>
-                  <ct-heading level={4}>
+                  <cf-heading level={4}>
                     Confirm Action on Google Docs
-                  </ct-heading>
-                </ct-hstack>
+                  </cf-heading>
+                </cf-hstack>
 
                 {/* Action type badge */}
                 <div
@@ -1288,7 +1288,7 @@ export default pattern<Input, Output>(
                 </div>
 
                 {/* Context info */}
-                <ct-vstack gap={2} style={{ marginBottom: "16px" }}>
+                <cf-vstack gap={2} style={{ marginBottom: "16px" }}>
                   <div style={{ fontSize: "14px", color: "#666" }}>
                     <strong>Document:</strong> {actionDetails?.docUrlShort}
                   </div>
@@ -1315,7 +1315,7 @@ export default pattern<Input, Output>(
                     <strong>Original comment:</strong>{" "}
                     {actionDetails?.commentContent}
                   </div>
-                </ct-vstack>
+                </cf-vstack>
 
                 {/* Your response */}
                 <div
@@ -1362,7 +1362,7 @@ export default pattern<Input, Output>(
                 )}
 
                 {/* Action buttons */}
-                <ct-hstack gap={2} justify="end">
+                <cf-hstack gap={2} justify="end">
                   <ct-button
                     variant="secondary"
                     type="button"
@@ -1391,12 +1391,12 @@ export default pattern<Input, Output>(
                       <span>✓ Post {actionDetails?.typeLabel}</span>,
                     )}
                   </ct-button>
-                </ct-hstack>
-              </ct-card>,
+                </cf-hstack>
+              </cf-card>,
               null,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       docUrl,
       comments,

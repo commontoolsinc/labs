@@ -28,9 +28,9 @@ export default pattern<Input, Result>(
     return {
       [NAME]: "ct-tags demo",
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "1rem" }}>
+        <cf-vstack gap="3" style={{ padding: "1rem" }}>
           <ct-tags tags={tags} onct-change={updateTags({ tags })} />
-        </ct-vstack>
+        </cf-vstack>
       ),
       tags,
     };

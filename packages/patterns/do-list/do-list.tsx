@@ -278,8 +278,8 @@ const DoItemCard = pattern<
         accept="cell-link"
         onct-drop={addAttachment({ item, items })}
       >
-        <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
-          <ct-hstack gap="2" align="center">
+        <cf-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
+          <cf-hstack gap="2" align="center">
             <ct-checkbox $checked={item.done} />
             <ct-input
               $value={item.title}
@@ -292,16 +292,16 @@ const DoItemCard = pattern<
             >
               x
             </ct-button>
-          </ct-hstack>
+          </cf-hstack>
 
           {ifElse(
             hasAttachments,
-            <ct-hstack
+            <cf-hstack
               gap="1"
               style="margin-top: 4px; margin-left: 24px; flex-wrap: wrap;"
             >
               {attachments.map((att: any) => (
-                <ct-hstack gap="0" align="center">
+                <cf-hstack gap="0" align="center">
                   <ct-cell-link $cell={att} />
                   <ct-button
                     variant="ghost"
@@ -311,9 +311,9 @@ const DoItemCard = pattern<
                   >
                     ×
                   </ct-button>
-                </ct-hstack>
+                </cf-hstack>
               ))}
-            </ct-hstack>,
+            </cf-hstack>,
             null,
           )}
 
@@ -329,7 +329,7 @@ const DoItemCard = pattern<
               initialResults={[]}
             />
           </details>
-        </ct-card>
+        </cf-card>
       </ct-drop-zone>
     ),
   };
@@ -345,16 +345,16 @@ const CompletedItemCard = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <ct-card
+      <cf-card
         style={`margin-left: ${(item.indent ?? 0) * 24}px; opacity: 0.7;`}
       >
-        <ct-hstack gap="2" align="center">
+        <cf-hstack gap="2" align="center">
           <ct-checkbox $checked={item.done} />
           <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
             {item.title}
           </span>
-        </ct-hstack>
-      </ct-card>
+        </cf-hstack>
+      </cf-card>
     ),
   };
 });
@@ -394,10 +394,10 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
     <CompletedItemCard item={item} />
   ));
 
-  // Compact UI - embeddable widget without ct-screen wrapper
+  // Compact UI - embeddable widget without cf-screen wrapper
   const compactUI = (
-    <ct-vstack gap="2">
-      <ct-vstack gap="2">
+    <cf-vstack gap="2">
+      <cf-vstack gap="2">
         {itemCards}
 
         {hasNoItems
@@ -407,11 +407,11 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
             </div>
           )
           : null}
-      </ct-vstack>
+      </cf-vstack>
 
       {ifElse(
         hasCompleted,
-        <ct-hstack justify="end" style="padding: 0 0.5rem;">
+        <cf-hstack justify="end" style="padding: 0 0.5rem;">
           <ct-button
             variant="ghost"
             size="sm"
@@ -420,7 +420,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           >
             Archive completed
           </ct-button>
-        </ct-hstack>,
+        </cf-hstack>,
         null,
       )}
 
@@ -433,24 +433,24 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           }
         }}
       />
-    </ct-vstack>
+    </cf-vstack>
   );
 
   return {
     [NAME]: computed(() => `Do List (${items.get().length})`),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>Do List</ct-heading>
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Do List</cf-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {computed(() => activeItems.length)} items
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem;">
             {itemCards}
 
             {hasNoItems
@@ -467,9 +467,9 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                 <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
                   Completed ({computed(() => completedItems.length)})
                 </summary>
-                <ct-vstack gap="2" style="padding-top: 0.5rem;">
+                <cf-vstack gap="2" style="padding-top: 0.5rem;">
                   {completedCards}
-                  <ct-hstack justify="end">
+                  <cf-hstack justify="end">
                     <ct-button
                       variant="ghost"
                       size="sm"
@@ -478,15 +478,15 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                     >
                       Archive all
                     </ct-button>
-                  </ct-hstack>
-                </ct-vstack>
+                  </cf-hstack>
+                </cf-vstack>
               </details>,
               null,
             )}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
-        <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
+        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
           <ct-message-input
             placeholder="Add an item..."
             style="flex: 1;"
@@ -497,8 +497,8 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
               }
             }}
           />
-        </ct-hstack>
-      </ct-screen>
+        </cf-hstack>
+      </cf-screen>
     ),
     compactUI,
     isHidden: true,

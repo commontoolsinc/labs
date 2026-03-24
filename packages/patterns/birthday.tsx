@@ -100,7 +100,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
         `${MODULE_METADATA.icon} Birthday: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
           <div
             style={{
               display: "grid",
@@ -108,7 +108,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
               gap: "8px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Month
               </label>
@@ -119,9 +119,9 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
                 allowCustom
                 maxVisible={12}
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Day</label>
               <ct-autocomplete
                 $value={birthDay}
@@ -130,9 +130,9 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
                 allowCustom
                 maxVisible={10}
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Year</label>
               <ct-autocomplete
                 $value={birthYear}
@@ -141,9 +141,9 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
                 allowCustom
                 maxVisible={10}
               />
-            </ct-vstack>
+            </cf-vstack>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       birthMonth,
       birthDay,

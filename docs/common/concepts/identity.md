@@ -80,7 +80,7 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
 
 ```tsx
 {items.map((item) => (
-  <ct-card>
+  <cf-card>
     <span>{item.name}</span>
     <ct-button onClick={() => {
       // Use the reference you already have
@@ -92,7 +92,7 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
     }}>
       Select
     </ct-button>
-  </ct-card>
+  </cf-card>
 ))}
 ```
 

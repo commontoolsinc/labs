@@ -3,31 +3,32 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTVGroup - Vertical group component with automatic gap management
+ * CFHGroup - Horizontal group component with automatic gap management
  *
- * @element ct-vgroup
+ * @element cf-hgroup
  *
  * @attr {string} gap - Gap between items (sm, md, lg) - defaults to md
- * @attr {string} align - Align items (start, center, end, stretch)
+ * @attr {boolean} wrap - Allow items to wrap
+ * @attr {string} align - Align items (start, center, end, stretch, baseline)
  * @attr {string} justify - Justify content (start, center, end, between, around, evenly)
  *
- * @slot - Content to be grouped vertically
+ * @slot - Content to be grouped horizontally
  *
  * @example
- * <ct-vgroup gap="1">
- *   <ct-label>Name</ct-label>
- *   <ct-input placeholder="Enter your name" />
- * </ct-vgroup>
+ * <cf-hgroup gap="2">
+ *   <ct-button>Save</ct-button>
+ *   <ct-button variant="outline">Cancel</ct-button>
+ * </cf-hgroup>
  */
-export class CTVGroup extends BaseElement {
+export class CFHGroup extends BaseElement {
   static override styles = css`
     :host {
-      display: block;
+      display: inline-flex;
     }
 
     .group {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       box-sizing: border-box;
     }
 
@@ -55,6 +56,9 @@ export class CTVGroup extends BaseElement {
     .align-stretch {
       align-items: stretch;
     }
+    .align-baseline {
+      align-items: baseline;
+    }
 
     /* Justification */
     .justify-start {
@@ -76,6 +80,12 @@ export class CTVGroup extends BaseElement {
       justify-content: space-evenly;
     }
 
+    /* Wrap */
+    .wrap {
+      flex-wrap: wrap;
+      align-content: flex-start;
+    }
+
     /* Direct children - preserve sizing */
     ::slotted(*) {
       flex-shrink: 0;
@@ -84,18 +94,21 @@ export class CTVGroup extends BaseElement {
 
   static override properties = {
     gap: { type: String },
+    wrap: { type: Boolean, reflect: true },
     align: { type: String },
     justify: { type: String },
   };
 
   declare gap: "sm" | "md" | "lg";
+  declare wrap: boolean;
   declare align: string;
   declare justify: string;
 
   constructor() {
     super();
     this.gap = "md";
-    this.align = "stretch";
+    this.wrap = false;
+    this.align = "center";
     this.justify = "start";
   }
 
@@ -105,6 +118,7 @@ export class CTVGroup extends BaseElement {
       [`gap-${this.gap}`]: true,
       [`align-${this.align}`]: true,
       [`justify-${this.justify}`]: true,
+      wrap: this.wrap,
     };
 
     return html`
@@ -115,4 +129,4 @@ export class CTVGroup extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-vgroup", CTVGroup);
+globalThis.customElements.define("cf-hgroup", CFHGroup);

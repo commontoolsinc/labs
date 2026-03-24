@@ -38,44 +38,44 @@ export default pattern<Record<string, never>, Output>(() => {
   return {
     [NAME]: "Late Subscriber Repro",
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="4" style="padding: 1rem;">
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-input</ct-heading>
+      <cf-screen>
+        <cf-vstack gap="4" style="padding: 1rem;">
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>ct-input</cf-heading>
               <ct-input $value={textValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textValue}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-textarea</ct-heading>
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>ct-textarea</cf-heading>
               <ct-textarea $value={textareaValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textareaValue}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-checkbox</ct-heading>
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>ct-checkbox</cf-heading>
               <ct-checkbox $checked={checkboxValue}>Toggle me</ct-checkbox>
               <p>
                 <strong>Interpolated:</strong> [{checkboxValue}]
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
           <p style="color: gray; font-size: 0.875rem;">
             If any "Interpolated" value is blank on initial page load, the late
             subscriber bug is present. All values should appear immediately.
           </p>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     textValue,
     textareaValue,

@@ -20,8 +20,8 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="2" style={{ alignItems: "center" }}>
+      <cf-screen>
+        <cf-vstack gap="2" style={{ alignItems: "center" }}>
           <img
             src={url}
             alt={caption || "Image"}
@@ -47,8 +47,8 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
             </div>,
             null,
           )}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     url,
     caption,

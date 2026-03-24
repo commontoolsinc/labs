@@ -264,7 +264,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   );
 
   const pickerUI = (
-    <ct-card>
+    <cf-card>
       <h2>Choose Result ({initialResults.length})</h2>
       <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
       <ct-button
@@ -273,7 +273,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       >
         Confirm Selection
       </ct-button>
-    </ct-card>
+    </cf-card>
   );
 
   return {

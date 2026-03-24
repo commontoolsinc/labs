@@ -65,7 +65,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
   return {
     [NAME]: title,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
           <ct-input
             $value={title}
@@ -74,8 +74,8 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
           />
         </div>
 
-        <ct-vstack gap="3">
-          <ct-card>
+        <cf-vstack gap="3">
+          <cf-card>
             <div style={{ padding: "1rem" }}>
               <h3 style={{ marginTop: 0 }}>Record a Voice Note</h3>
               <p style={{ color: "var(--ct-color-gray-600)" }}>
@@ -108,9 +108,9 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                 </div>
               )}
             </div>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <div style={{ padding: "1rem" }}>
               <h3 style={{ marginTop: 0 }}>
                 Saved Notes ({notesCount})
@@ -123,7 +123,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                   </p>
                 )
                 : (
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {notes.map((note) => (
                       <div
                         style={{
@@ -168,12 +168,12 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                         </div>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 )}
             </div>
-          </ct-card>
-        </ct-vstack>
-      </ct-screen>
+          </cf-card>
+        </cf-vstack>
+      </cf-screen>
     ),
     transcription,
     notes,

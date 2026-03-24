@@ -122,13 +122,13 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Email Pattern Dreamer</ct-heading>
+          <cf-heading level={3}>Email Pattern Dreamer</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {gmailAuth.authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "600" }}>
@@ -233,9 +233,9 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
               </div>
               <div style={previewBoxStyle}>{united.previewUI as any}</div>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

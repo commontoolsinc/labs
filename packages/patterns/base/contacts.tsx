@@ -182,11 +182,11 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
   return {
     [NAME]: computed(() => `Contacts (${count})`),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" style="gap: 8px;">
-          <ct-hstack style="justify-content: space-between; align-items: center;">
-            <ct-heading level={4}>Contacts</ct-heading>
-            <ct-hstack style="gap: 8px;">
+      <cf-screen>
+        <cf-vstack slot="header" style="gap: 8px;">
+          <cf-hstack style="justify-content: space-between; align-items: center;">
+            <cf-heading level={4}>Contacts</cf-heading>
+            <cf-hstack style="gap: 8px;">
               <ct-button
                 variant="primary"
                 onClick={addPerson({ contacts, selectedIndex })}
@@ -206,18 +206,18 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
               >
                 + Group
               </ct-button>
-            </ct-hstack>
-          </ct-hstack>
-        </ct-vstack>
+            </cf-hstack>
+          </cf-hstack>
+        </cf-vstack>
 
         <ct-resizable-panel-group direction="horizontal" style="flex: 1;">
           {/* Left: Contact List */}
           <ct-resizable-panel default-size="35" min-size="25" max-size="50">
-            <ct-vscroll style="height: 100%;">
-              <ct-vstack style="gap: 4px; padding: 8px;">
+            <cf-vscroll style="height: 100%;">
+              <cf-vstack style="gap: 4px; padding: 8px;">
                 {/* Render contact list using reactive .map() */}
                 {contacts.map((charm, index) => (
-                  <ct-card
+                  <cf-card
                     style={computed(() =>
                       selectedIndex.get() === index
                         ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
@@ -225,7 +225,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                     )}
                     onClick={selectContact({ selectedIndex, index })}
                   >
-                    <ct-hstack style="gap: 8px; align-items: center;">
+                    <cf-hstack style="gap: 8px; align-items: center;">
                       <span
                         style={{
                           width: "32px",
@@ -264,11 +264,11 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                       >
                         ×
                       </ct-button>
-                    </ct-hstack>
-                  </ct-card>
+                    </cf-hstack>
+                  </cf-card>
                 ))}
-              </ct-vstack>
-            </ct-vscroll>
+              </cf-vstack>
+            </cf-vscroll>
           </ct-resizable-panel>
 
           <ct-resizable-handle />
@@ -279,10 +279,10 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
               const idx = selectedIndex.get();
               if (idx < 0 || idx >= (contacts.get() || []).length) {
                 return (
-                  <ct-vstack style="height: 100%; align-items: center; justify-content: center; color: #6b7280;">
+                  <cf-vstack style="height: 100%; align-items: center; justify-content: center; color: #6b7280;">
                     <span style={{ fontSize: "48px" }}>←</span>
                     <span>Select a contact to view details</span>
-                  </ct-vstack>
+                  </cf-vstack>
                 );
               }
 
@@ -290,8 +290,8 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
               // Piece already has [UI] - just render it with wrapper
               return (
-                <ct-vstack style="height: 100%;">
-                  <ct-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
+                <cf-vstack style="height: 100%;">
+                  <cf-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
                     <ct-button
                       variant="outline"
                       size="sm"
@@ -299,15 +299,15 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                     >
                       Open ↗
                     </ct-button>
-                  </ct-hstack>
+                  </cf-hstack>
 
                   <cf-render $cell={piece} />
-                </ct-vstack>
+                </cf-vstack>
               );
             })}
           </ct-resizable-panel>
         </ct-resizable-panel-group>
-      </ct-screen>
+      </cf-screen>
     ),
     contacts,
     groups,

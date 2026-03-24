@@ -7,8 +7,8 @@ export default pattern(() => {
   return {
     [NAME]: "Aside",
     [UI]: (
-      // ct-screen provides a full-height layout with header/main/footer areas
-      <ct-screen>
+      // cf-screen provides a full-height layout with header/main/footer areas
+      <cf-screen>
         {/* Header slot - fixed at top */}
         <div slot="header">
           <h2>Header Section</h2>
@@ -51,7 +51,7 @@ export default pattern(() => {
         <div slot="footer">
           <p>Footer Section</p>
         </div>
-      </ct-screen>
+      </cf-screen>
     ),
   };
 });

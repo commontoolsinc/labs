@@ -113,7 +113,7 @@ export default pattern<
     [NAME]: "Nest Bug Repro",
     requestCreate,
     [UI]: (
-      <ct-vstack gap="4" padding="6">
+      <cf-vstack gap="4" padding="6">
         <span style={{ fontSize: "18px", fontWeight: "600" }}>
           Nest Bug Repro {status}
         </span>
@@ -132,7 +132,7 @@ export default pattern<
         </ct-button>
 
         {/* Creating: indicator */}
-        <ct-hstack
+        <cf-hstack
           gap="2"
           align="center"
           style={{
@@ -149,15 +149,15 @@ export default pattern<
           >
             Creating notebooks...
           </span>
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Done: success */}
-        <ct-card
+        <cf-card
           style={{
             display: computed(() => status.get() === "done" ? "block" : "none"),
           }}
         >
-          <ct-vstack gap="2" padding="4">
+          <cf-vstack gap="2" padding="4">
             <span
               style={{
                 fontSize: "16px",
@@ -175,9 +175,9 @@ export default pattern<
             >
               3 levels of nesting: parent &gt; child &gt; grandchild
             </span>
-          </ct-vstack>
-        </ct-card>
-      </ct-vstack>
+          </cf-vstack>
+        </cf-card>
+      </cf-vstack>
     ),
   };
 });

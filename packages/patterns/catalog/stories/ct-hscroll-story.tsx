@@ -42,32 +42,32 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
             fade-edges={fadeEdges}
             style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
           >
-            <ct-hstack gap="2">
-              <ct-card style="min-width: 150px;">
+            <cf-hstack gap="2">
+              <cf-card style="min-width: 150px;">
                 <span>Card 1</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 2</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 3</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 4</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 5</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 6</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 7</span>
-              </ct-card>
-              <ct-card style="min-width: 150px;">
+              </cf-card>
+              <cf-card style="min-width: 150px;">
                 <span>Card 8</span>
-              </ct-card>
-            </ct-hstack>
+              </cf-card>
+            </cf-hstack>
           </ct-hscroll>
         </div>
 
@@ -86,7 +86,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
             fade-edges
             style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
           >
-            <ct-hstack gap="2">
+            <cf-hstack gap="2">
               <div style="min-width: 120px; height: 80px; background: #fef3c7; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
                 🌅
               </div>
@@ -105,7 +105,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
               <div style="min-width: 120px; height: 80px; background: #ffedd5; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
                 🍂
               </div>
-            </ct-hstack>
+            </cf-hstack>
           </ct-hscroll>
         </div>
       </div>

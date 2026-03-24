@@ -31,7 +31,7 @@ export default pattern<Input>(({ card }) => {
 
   return {
     [UI]: (
-      <ct-card>
+      <cf-card>
         {isEditing ? (
           <div>Editing</div>
         ) : (
@@ -47,7 +47,7 @@ export default pattern<Input>(({ card }) => {
             ))}
           </div>
         )}
-      </ct-card>
+      </cf-card>
     ),
     card,
   };

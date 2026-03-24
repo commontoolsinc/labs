@@ -55,26 +55,26 @@ export const TimelineModule = pattern<TimelineModuleInput, TimelineModuleInput>(
         `${MODULE_METADATA.icon} Timeline: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Start Date
             </label>
             <ct-input type="date" $value={startDate} />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Target Date
             </label>
             <ct-input type="date" $value={targetDate} />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Completed Date
             </label>
             <ct-input type="date" $value={completedDate} />
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       startDate,
       targetDate,

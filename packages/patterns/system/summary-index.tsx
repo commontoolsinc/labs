@@ -97,12 +97,12 @@ const SummaryIndex = pattern<Input, Output>(() => {
   return {
     [NAME]: "SummaryIndex",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Search</h2>
         </ct-toolbar>
 
-        <ct-vstack gap="4" padding="6">
+        <cf-vstack gap="4" padding="6">
           <ct-input $value={query} placeholder="Search summaries..." />
           <span
             style={{
@@ -132,8 +132,8 @@ const SummaryIndex = pattern<Input, Output>(() => {
               ))}
             </tbody>
           </ct-table>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     entries,
     search: patternTool(searchPattern, { entries }),

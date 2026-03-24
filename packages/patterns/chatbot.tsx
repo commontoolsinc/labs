@@ -211,7 +211,7 @@ export default pattern<ChatInput, ChatOutput>(
     );
 
     const chatLog = (
-      <ct-vscroll
+      <cf-vscroll
         style="padding: 1rem;"
         flex
         showScrollbar
@@ -223,11 +223,11 @@ export default pattern<ChatInput, ChatOutput>(
           $messages={messages}
           pending={pending}
         />
-      </ct-vscroll>
+      </cf-vscroll>
     );
 
     const attachmentsAndTools = (
-      <ct-hstack align="center" gap="1">
+      <cf-hstack align="center" gap="1">
         <cf-cell-context $cell={pinnedCells}>
           <ct-attachments-bar pinnedCells={pinnedCells} />
         </cf-cell-context>
@@ -243,22 +243,22 @@ export default pattern<ChatInput, ChatOutput>(
         >
           Clear
         </ct-button>
-      </ct-hstack>
+      </cf-hstack>
     );
 
     return {
       [NAME]: title,
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header">
-            <ct-heading level={4}>{title}</ct-heading>
+        <cf-screen>
+          <cf-vstack slot="header">
+            <cf-heading level={4}>{title}</cf-heading>
             {attachmentsAndTools}
-          </ct-vstack>
+          </cf-vstack>
 
           {chatLog}
 
           {promptInput}
-        </ct-screen>
+        </cf-screen>
       ),
       messages,
       pending,

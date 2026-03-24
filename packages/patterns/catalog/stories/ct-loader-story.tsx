@@ -36,24 +36,24 @@ export default pattern<LoaderStoryInput, LoaderStoryOutput>(() => {
             Sizes
           </div>
           <div style={{ display: "flex", gap: "24px", alignItems: "center" }}>
-            <ct-vstack gap="1" align="center">
+            <cf-vstack gap="1" align="center">
               <ct-loader size="sm" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 sm
               </span>
-            </ct-vstack>
-            <ct-vstack gap="1" align="center">
+            </cf-vstack>
+            <cf-vstack gap="1" align="center">
               <ct-loader size="md" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 md
               </span>
-            </ct-vstack>
-            <ct-vstack gap="1" align="center">
+            </cf-vstack>
+            <cf-vstack gap="1" align="center">
               <ct-loader size="lg" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 lg
               </span>
-            </ct-vstack>
+            </cf-vstack>
           </div>
         </div>
       </div>

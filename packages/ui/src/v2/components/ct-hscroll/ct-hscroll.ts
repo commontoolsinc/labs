@@ -15,11 +15,11 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @example
  * <ct-hscroll>
- *   <ct-hstack gap="4">
- *     <ct-card>Card 1</ct-card>
- *     <ct-card>Card 2</ct-card>
- *     <ct-card>Card 3</ct-card>
- *   </ct-hstack>
+ *   <cf-hstack gap="4">
+ *     <cf-card>Card 1</cf-card>
+ *     <cf-card>Card 2</cf-card>
+ *     <cf-card>Card 3</cf-card>
+ *   </cf-hstack>
  * </ct-hscroll>
  */
 export class CTHScroll extends BaseElement {

@@ -76,7 +76,7 @@ describe("Chat pattern test", () => {
       assert(clearButton, "Should find clear chat button");
 
       // Check for empty chat history (ul should exist but be empty initially)
-      const chatHistory = await page.waitForSelector("ct-vscroll", {
+      const chatHistory = await page.waitForSelector("cf-vscroll", {
         strategy: "pierce",
       });
       assert(chatHistory, "Should find chat history container");
@@ -120,7 +120,7 @@ describe("Chat pattern test", () => {
       await sendButton.click();
 
       // Wait for the message to appear in chat history
-      const chatHistory = await page.waitForSelector("ct-vscroll", {
+      const chatHistory = await page.waitForSelector("cf-vscroll", {
         strategy: "pierce",
       });
       assert(chatHistory, "Should find chat history container");
@@ -148,7 +148,7 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Wait for LLM response to appear (this may take some time)
-      const chatHistory = await page.waitForSelector("ct-vscroll", {
+      const chatHistory = await page.waitForSelector("cf-vscroll", {
         strategy: "pierce",
       });
       assert(chatHistory, "Should find chat history container");

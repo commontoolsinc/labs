@@ -96,19 +96,19 @@ export default pattern<ContactBookInput, ContactBookOutput>(
     return {
       [NAME]: "Contact Book",
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="2">
-            <ct-hstack justify="between" align="center">
-              <ct-heading level={4}>Contacts ({contactCount})</ct-heading>
-            </ct-hstack>
+        <cf-screen>
+          <cf-vstack slot="header" gap="2">
+            <cf-hstack justify="between" align="center">
+              <cf-heading level={4}>Contacts ({contactCount})</cf-heading>
+            </cf-hstack>
             <ct-input
               $value={searchQuery}
               placeholder="Search contacts..."
             />
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="2" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="2" style="padding: 1rem;">
               {contacts.map((contact) => {
                 const isVisible = computed(() =>
                   matchesSearch(contact, searchQuery.get())
@@ -139,12 +139,12 @@ export default pattern<ContactBookInput, ContactBookOutput>(
 
                 return ifElse(
                   isVisible,
-                  <ct-card
+                  <cf-card
                     style="cursor: pointer;"
                     onClick={onClick}
                   >
-                    <ct-hstack gap="2" align="start">
-                      <ct-vstack gap="1" style="flex: 1;">
+                    <cf-hstack gap="2" align="start">
+                      <cf-vstack gap="1" style="flex: 1;">
                         <span style="font-weight: 600; font-size: 1rem;">
                           {contact.name || "(unnamed)"}
                         </span>
@@ -167,15 +167,15 @@ export default pattern<ContactBookInput, ContactBookOutput>(
                             {rel.label && <span>({rel.label})</span>}
                           </span>
                         ))}
-                      </ct-vstack>
+                      </cf-vstack>
                       <ct-button
                         variant="ghost"
                         onClick={onDelete}
                       >
                         ×
                       </ct-button>
-                    </ct-hstack>
-                  </ct-card>,
+                    </cf-hstack>
+                  </cf-card>,
                   null,
                 );
               })}
@@ -187,20 +187,20 @@ export default pattern<ContactBookInput, ContactBookOutput>(
                 </div>,
                 null,
               )}
-            </ct-vstack>
-          </ct-vscroll>
+            </cf-vstack>
+          </cf-vscroll>
 
-          <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-            <ct-hstack gap="2">
+          <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+            <cf-hstack gap="2">
               <ct-button
                 variant="primary"
                 onClick={onAddContact}
               >
                 Add Contact
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="2">
+            <cf-hstack gap="2">
               <ct-select
                 $value={newRelationFrom}
                 items={contactSelectItems}
@@ -223,9 +223,9 @@ export default pattern<ContactBookInput, ContactBookOutput>(
               >
                 Link
               </ct-button>
-            </ct-hstack>
-          </ct-vstack>
-        </ct-screen>
+            </cf-hstack>
+          </cf-vstack>
+        </cf-screen>
       ),
       contacts,
       relationships,

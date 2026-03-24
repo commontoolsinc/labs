@@ -44,11 +44,11 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Favorites Manager",
     [UI]: (
-      <ct-vstack gap="3">
+      <cf-vstack gap="3">
         {favorites!.map((item) => (
           <cf-cell-context $cell={item.cell}>
-            <ct-vstack gap="2">
-              <ct-hstack gap="2" align="center">
+            <cf-vstack gap="2">
+              <cf-hstack gap="2" align="center">
                 <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
                 <ct-button
                   variant="destructive"
@@ -60,16 +60,16 @@ export default pattern<Record<string, never>>((_) => {
                 >
                   Remove
                 </ct-button>
-              </ct-hstack>
+              </cf-hstack>
               <ct-tags
                 tags={item.userTags}
                 onct-change={onUpdateUserTags({ userTags: item.userTags })}
               />
-            </ct-vstack>
+            </cf-vstack>
           </cf-cell-context>
         ))}
         {favorites!.length === 0 && <ct-text>No favorites yet.</ct-text>}
-      </ct-vstack>
+      </cf-vstack>
     ),
   };
 });

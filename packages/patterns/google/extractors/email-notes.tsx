@@ -336,19 +336,19 @@ export default pattern<PatternInput, PatternOutput>(() => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-hstack align="center" gap="2">
-            <ct-heading level={3}>Email Notes</ct-heading>
+          <cf-hstack align="center" gap="2">
+            <cf-heading level={3}>Email Notes</cf-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({noteCount} notes)
             </span>
             <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
-          </ct-hstack>
+          </cf-hstack>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI */}
             {authUI}
 
@@ -467,7 +467,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                   "task-current" to see it here.
                 </div>
               </div>,
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {notes.map((note) => {
                   // Check if this note is being processed
                   // Extract noteId before computed to avoid OpaqueRef issues
@@ -567,11 +567,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     </div>
                   );
                 })}
-              </ct-vstack>,
+              </cf-vstack>,
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

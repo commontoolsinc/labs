@@ -43,9 +43,9 @@ export default pattern<QueueTestInput>(({ title }) => {
   return {
     [NAME]: title,
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-heading level={3}>{title}</ct-heading>
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-heading level={3}>{title}</cf-heading>
           <p>
             Fires 5 LLM calls through queue "test-queue" (maxConcurrency=2).
             Check the network tab to verify only 2 are in-flight at once.
@@ -53,12 +53,12 @@ export default pattern<QueueTestInput>(({ title }) => {
           <p>
             <strong>Completed: {completedCount} / {prompts.length}</strong>
           </p>
-        </ct-vstack>
+        </cf-vstack>
 
-        <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vstack gap="2" style="padding: 1rem;">
           {responses.map((r, i) => (
-            <ct-card>
-              <ct-hstack gap="2" align="center">
+            <cf-card>
+              <cf-hstack gap="2" align="center">
                 <strong>{prompts[i]}</strong>
                 {computed(() =>
                   r.pending
@@ -67,11 +67,11 @@ export default pattern<QueueTestInput>(({ title }) => {
                     ? <span style="color: green">{r.result}</span>
                     : <span style="color: gray">waiting...</span>
                 )}
-              </ct-hstack>
-            </ct-card>
+              </cf-hstack>
+            </cf-card>
           ))}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     responses: responses.map((r) => ({
       pending: r.pending,

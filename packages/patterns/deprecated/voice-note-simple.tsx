@@ -46,7 +46,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
     return {
       [NAME]: title,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
             <ct-input
               $value={title}
@@ -54,8 +54,8 @@ const VoiceNoteSimple = pattern<Input, Output>(
             />
           </div>
 
-          <ct-vstack gap="3" style="padding: 1rem; max-width: 600px;">
-            <ct-card>
+          <cf-vstack gap="3" style="padding: 1rem; max-width: 600px;">
+            <cf-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>Voice Input Component Test</h3>
                 <p style={{ color: "var(--ct-color-gray-600)" }}>
@@ -70,10 +70,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                   showWaveform
                 />
               </div>
-            </ct-card>
+            </cf-card>
 
             {hasTranscription && (
-              <ct-card>
+              <cf-card>
                 <div style={{ padding: "1rem" }}>
                   <h3 style={{ marginTop: 0 }}>Latest Transcription</h3>
                   <p style={{ margin: "1rem 0" }}>{transcriptionText}</p>
@@ -94,10 +94,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                     </span>
                   </div>
                 </div>
-              </ct-card>
+              </cf-card>
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       transcription,
     };

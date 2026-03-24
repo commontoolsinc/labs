@@ -48,14 +48,14 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
   return {
     [NAME]: computed(() => (topic ? `Diagram: ${topic}` : "Diagram")),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-heading level={4}>
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-heading level={4}>
             {computed(() => topic || "Diagram")}
-          </ct-heading>
-        </ct-vstack>
+          </cf-heading>
+        </cf-vstack>
 
-        <ct-vstack gap="3" style="padding: 1.5rem;">
+        <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
             response.pending,
             <div style="color: var(--ct-color-text-secondary);">
@@ -65,8 +65,8 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
               {response.result}
             </pre>,
           )}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     topic,
     diagram: computed(() => response.result || ""),

@@ -16,7 +16,7 @@ Only do this AFTER all logic is verified and tests pass.
 
 ## Available Components
 
-Layout: `ct-screen`, `ct-vstack`, `ct-hstack`, `ct-box` Input: `ct-input`,
+Layout: `cf-screen`, `cf-vstack`, `cf-hstack`, `ct-box` Input: `ct-input`,
 `ct-textarea`, `ct-checkbox`, `ct-select` Action: `ct-button` Display:
 `ct-text`, `ct-status-pill`
 
@@ -32,13 +32,13 @@ Layout: `ct-screen`, `ct-vstack`, `ct-hstack`, `ct-box` Input: `ct-input`,
 **Layout structure:**
 
 ```tsx
-<ct-screen title="My Pattern">
-  <ct-vstack gap="md">
-    <ct-hstack gap="sm">
+<cf-screen title="My Pattern">
+  <cf-vstack gap="md">
+    <cf-hstack gap="sm">
       {/* horizontal items */}
-    </ct-hstack>
-  </ct-vstack>
-</ct-screen>;
+    </cf-hstack>
+  </cf-vstack>
+</cf-screen>;
 ```
 
 ## Reference Existing Patterns

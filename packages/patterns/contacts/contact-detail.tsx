@@ -27,9 +27,9 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
     return {
       [NAME]: computed(() => `Contact: ${contact.key("name").get()}`),
       [UI]: (
-        <ct-card>
-          <ct-vstack gap="2">
-            <ct-vstack gap="1">
+        <cf-card>
+          <cf-vstack gap="2">
+            <cf-vstack gap="1">
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Name
               </label>
@@ -37,9 +37,9 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
                 $value={contact.key("name")}
                 placeholder="Full name"
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Email
               </label>
@@ -48,9 +48,9 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
                 placeholder="email@example.com"
                 type="email"
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Phone
               </label>
@@ -59,9 +59,9 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
                 placeholder="+1 (555) 123-4567"
                 type="tel"
               />
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Company
               </label>
@@ -69,9 +69,9 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
                 $value={contact.key("company")}
                 placeholder="Company name"
               />
-            </ct-vstack>
-          </ct-vstack>
-        </ct-card>
+            </cf-vstack>
+          </cf-vstack>
+        </cf-card>
       ),
       contact,
       summary: computed(() => {

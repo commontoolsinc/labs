@@ -322,7 +322,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
       return `Knowledge Graph (${total} links)`;
     }),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">
@@ -343,7 +343,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
             )}
           </div>
         </ct-toolbar>
-        <ct-vstack gap="4" padding="6">
+        <cf-vstack gap="4" padding="6">
           <span
             style={{
               fontSize: "13px",
@@ -409,8 +409,8 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
               ))}
             </tbody>
           </ct-table>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     edges: allEdges,
     compoundNodes,

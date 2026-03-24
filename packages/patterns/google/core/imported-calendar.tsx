@@ -489,7 +489,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   return {
     [NAME]: computed(() => `${title} (${eventCount})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
         <div
           slot="header"
@@ -815,7 +815,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               userSelect: "none",
             }}
           >
-            <ct-vscroll flex showScrollbar fadeEdges>
+            <cf-vscroll flex showScrollbar fadeEdges>
               <div
                 style={{
                   display: "flex",
@@ -1369,7 +1369,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   );
                 })}
               </div>
-            </ct-vscroll>
+            </cf-vscroll>
           </div>
         </div>
 
@@ -1391,7 +1391,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           </div>,
           null,
         )}
-      </ct-screen>
+      </cf-screen>
     ),
     title,
     eventCount,

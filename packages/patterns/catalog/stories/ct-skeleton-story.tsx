@@ -33,11 +33,11 @@ export default pattern<SkeletonStoryInput, SkeletonStoryOutput>(() => {
           >
             Text Variants
           </div>
-          <ct-vstack gap="3">
+          <cf-vstack gap="3">
             <ct-skeleton width="100%" height="20px" />
             <ct-skeleton variant="text" width="80%" />
             <ct-skeleton variant="text" width="60%" />
-          </ct-vstack>
+          </cf-vstack>
         </div>
 
         <div>
@@ -51,13 +51,13 @@ export default pattern<SkeletonStoryInput, SkeletonStoryOutput>(() => {
           >
             Card Skeleton
           </div>
-          <ct-hstack gap="3" align="center">
+          <cf-hstack gap="3" align="center">
             <ct-skeleton variant="circular" width="40px" height="40px" />
-            <ct-vstack gap="2" style="flex: 1;">
+            <cf-vstack gap="2" style="flex: 1;">
               <ct-skeleton variant="text" width="70%" />
               <ct-skeleton variant="text" width="40%" />
-            </ct-vstack>
-          </ct-hstack>
+            </cf-vstack>
+          </cf-hstack>
         </div>
       </div>
     ),

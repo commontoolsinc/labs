@@ -2871,28 +2871,28 @@ interface CTSelectElement extends CTHTMLElement {}
 interface CTRadioGroupElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
-interface CTHeadingElement extends CTHTMLElement {}
+interface CFHeadingElement extends CTHTMLElement {}
 interface CTCollapsibleElement extends CTHTMLElement {}
 interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
-interface CTScreenElement extends CTHTMLElement {}
+interface CFScreenElement extends CTHTMLElement {}
 interface CTAutostartElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
 interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
-interface CTHStackElement extends CTHTMLElement {}
+interface CFHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
 interface CTModalElement extends CTHTMLElement {}
 interface CTModalProviderElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
-interface CTCardElement extends CTHTMLElement {}
+interface CFCardElement extends CTHTMLElement {}
 interface CTCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
-interface CTVStackElement extends CTHTMLElement {}
+interface CFVStackElement extends CTHTMLElement {}
 interface CTMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
 interface CTKbdElement extends CTHTMLElement {}
@@ -2904,7 +2904,7 @@ interface CTDropZoneElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
 interface CTMarkdownElement extends CTHTMLElement {}
 interface CTSvgElement extends CTHTMLElement {}
-interface CTVScrollElement extends CTHTMLElement {}
+interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
 interface CTTableElement extends CTHTMLElement {}
@@ -2969,8 +2969,8 @@ interface CTTileElement extends CTHTMLElement {}
 
 // Layout components
 interface CTGridElement extends CTHTMLElement {}
-interface CTHGroupElement extends CTHTMLElement {}
-interface CTVGroupElement extends CTHTMLElement {}
+interface CFHGroupElement extends CTHTMLElement {}
+interface CFVGroupElement extends CTHTMLElement {}
 interface CTAspectRatioElement extends CTHTMLElement {}
 
 // Resizable components
@@ -3240,7 +3240,7 @@ type TailwindNumberType =
   | "16"
   | "20"
   | "24";
-interface CTStackAttributes<T> extends CTHTMLAttributes<T> {
+interface CFStackAttributes<T> extends CTHTMLAttributes<T> {
   "gap"?: TailwindNumberType;
   "padding"?: TailwindNumberType;
   "align"?: "start" | "center" | "end" | "stretch" | "baseline";
@@ -3269,7 +3269,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "inline"?: Booleanish;
 }
 
-interface CTScrollAttributes<T> extends CTHTMLAttributes<T> {
+interface CFScrollAttributes<T> extends CTHTMLAttributes<T> {
   "flex"?: boolean;
   "showScrollbar"?: boolean;
   "fadeEdges"?: boolean;
@@ -3322,7 +3322,7 @@ interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
   "onct-dismiss"?: EventHandler<{}>;
 }
 
-interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCardAttributes<T> extends CTHTMLAttributes<T> {
   "clickable"?: boolean;
 }
 
@@ -3745,7 +3745,7 @@ interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
 
-interface CTHeadingAttributes<T> extends CTHTMLAttributes<T> {
+interface CFHeadingAttributes<T> extends CTHTMLAttributes<T> {
   "level"?: number;
   "no-margin"?: boolean;
 }
@@ -4007,7 +4007,7 @@ interface CTGridAttributes<T> extends CTHTMLAttributes<T> {
   "padding"?: string | CellLike<string>;
 }
 
-interface CTHGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFHGroupAttributes<T> extends CTHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
   "wrap"?: boolean | CellLike<boolean>;
   "align"?:
@@ -4027,7 +4027,7 @@ interface CTHGroupAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
-interface CTVGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFVGroupAttributes<T> extends CTHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
   "align"?:
     | "start"
@@ -4647,9 +4647,9 @@ declare global {
         CTToolsChipAttributes<CTToolsChipElement>,
         CTToolsChipElement
       >;
-      "ct-heading": CTDOM.DetailedHTMLProps<
-        CTHeadingAttributes<CTHeadingElement>,
-        CTHeadingElement
+      "cf-heading": CTDOM.DetailedHTMLProps<
+        CFHeadingAttributes<CFHeadingElement>,
+        CFHeadingElement
       >;
       "ct-collapsible": CTDOM.DetailedHTMLProps<
         CTCollapsibleAttributes<CTCollapsibleElement>,
@@ -4663,9 +4663,9 @@ declare global {
         CTCodeEditorAttributes<CTCodeEditorElement>,
         CTCodeEditorElement
       >;
-      "ct-screen": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTScreenElement>,
-        CTScreenElement
+      "cf-screen": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CFScreenElement>,
+        CFScreenElement
       >;
       "ct-autostart": CTDOM.DetailedHTMLProps<
         CTAutostartAttributes<CTAutostartElement>,
@@ -4715,9 +4715,9 @@ declare global {
         CTMarkdownAttributes<CTMarkdownElement>,
         CTMarkdownElement
       >;
-      "ct-card": CTDOM.DetailedHTMLProps<
-        CTCardAttributes<CTCardElement>,
-        CTCardElement
+      "cf-card": CTDOM.DetailedHTMLProps<
+        CFCardAttributes<CFCardElement>,
+        CFCardElement
       >;
       "ct-router": CTDOM.DetailedHTMLProps<
         CTRouterAttributes<CTRouterElement>,
@@ -4763,13 +4763,13 @@ declare global {
         CTDropZoneAttributes<CTDropZoneElement>,
         CTDropZoneElement
       >;
-      "ct-vscroll": CTDOM.DetailedHTMLProps<
-        CTScrollAttributes<CTVScrollElement>,
-        CTVScrollElement
+      "cf-vscroll": CTDOM.DetailedHTMLProps<
+        CFScrollAttributes<CFVScrollElement>,
+        CFVScrollElement
       >;
       "ct-hscroll": CTDOM.DetailedHTMLProps<
-        CTScrollAttributes<CTVScrollElement>,
-        CTVScrollElement
+        CFScrollAttributes<CFVScrollElement>,
+        CFVScrollElement
       >;
       "ct-text": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTTextElement>,
@@ -4867,13 +4867,13 @@ declare global {
         CTSecretViewerAttributes<CTSecretViewerElement>,
         CTSecretViewerElement
       >;
-      "ct-hstack": CTDOM.DetailedHTMLProps<
-        CTStackAttributes<CTHStackElement>,
-        CTHStackElement
+      "cf-hstack": CTDOM.DetailedHTMLProps<
+        CFStackAttributes<CFHStackElement>,
+        CFHStackElement
       >;
-      "ct-vstack": CTDOM.DetailedHTMLProps<
-        CTStackAttributes<CTVStackElement>,
-        CTVStackElement
+      "cf-vstack": CTDOM.DetailedHTMLProps<
+        CFStackAttributes<CFVStackElement>,
+        CFVStackElement
       >;
 
       // Tab components
@@ -4973,13 +4973,13 @@ declare global {
         CTGridAttributes<CTGridElement>,
         CTGridElement
       >;
-      "ct-hgroup": CTDOM.DetailedHTMLProps<
-        CTHGroupAttributes<CTHGroupElement>,
-        CTHGroupElement
+      "cf-hgroup": CTDOM.DetailedHTMLProps<
+        CFHGroupAttributes<CFHGroupElement>,
+        CFHGroupElement
       >;
-      "ct-vgroup": CTDOM.DetailedHTMLProps<
-        CTVGroupAttributes<CTVGroupElement>,
-        CTVGroupElement
+      "cf-vgroup": CTDOM.DetailedHTMLProps<
+        CFVGroupAttributes<CFVGroupElement>,
+        CFVGroupElement
       >;
       "ct-aspect-ratio": CTDOM.DetailedHTMLProps<
         CTAspectRatioAttributes<CTAspectRatioElement>,

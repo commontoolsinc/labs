@@ -115,13 +115,13 @@ export const RelationshipModule = pattern<
         `${MODULE_METADATA.icon} Relationship: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
+        <cf-vstack style={{ gap: "16px" }}>
           {/* Relation types (multi-select chips) */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Relationship Type(s)
             </label>
-            <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+            <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
               {RELATION_TYPE_OPTIONS.map((type, index) => {
                 const isSelected = computed(() =>
                   (relationTypes || []).some((t: string) => t === type)
@@ -147,19 +147,19 @@ export const RelationshipModule = pattern<
                   </button>
                 );
               })}
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Closeness */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Closeness
             </label>
             <ct-select $value={closeness} items={CLOSENESS_OPTIONS} />
-          </ct-vstack>
+          </cf-vstack>
 
           {/* How we met */}
-          <ct-vstack style={{ gap: "4px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               How We Met
             </label>
@@ -168,10 +168,10 @@ export const RelationshipModule = pattern<
               placeholder="How did you meet?"
               rows={2}
             />
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Inner circle toggle */}
-          <ct-hstack style={{ alignItems: "center", gap: "8px" }}>
+          <cf-hstack style={{ alignItems: "center", gap: "8px" }}>
             <button
               type="button"
               onClick={toggleInnerCircle({ innerCircle })}
@@ -192,8 +192,8 @@ export const RelationshipModule = pattern<
               {innerCircle ? "✓" : ""}
             </button>
             <span style={{ fontSize: "14px" }}>Inner Circle ⭐</span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
       ),
       relationTypes,
       closeness,

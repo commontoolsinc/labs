@@ -151,11 +151,11 @@ export const TextImportModule = pattern<
   return {
     [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {ifElse(
           hasContent,
           // File is uploaded - show preview with clear button
-          <ct-vstack style={{ gap: "8px" }}>
+          <cf-vstack style={{ gap: "8px" }}>
             {/* Header with filename and clear button */}
             <div
               style={{
@@ -245,7 +245,7 @@ export const TextImportModule = pattern<
                 {contentPreview}
               </pre>
             </div>
-          </ct-vstack>,
+          </cf-vstack>,
           // No file yet - show upload input
           <ct-file-input
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
@@ -255,7 +255,7 @@ export const TextImportModule = pattern<
             style={{ width: "100%" }}
           />,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     content,
     filename,

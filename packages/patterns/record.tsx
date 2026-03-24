@@ -1073,9 +1073,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
-        <ct-vstack style={{ height: "100%", gap: "0" }}>
+        <cf-vstack style={{ height: "100%", gap: "0" }}>
           {/* Header toolbar */}
-          <ct-hstack
+          <cf-hstack
             style={{
               padding: "8px 12px",
               gap: "8px",
@@ -1103,7 +1103,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 style={{ width: "130px" }}
               />
             )}
-          </ct-hstack>
+          </cf-hstack>
 
           {/* Main content area */}
           <div
@@ -2172,7 +2172,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 editingNoteText,
               })}
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
@@ -2196,7 +2196,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               >
                 Save Note
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </ct-modal>
 
           {/* Settings Modal */}
@@ -2211,7 +2211,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               Settings
             </span>
             {currentSettingsUI}
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
@@ -2222,7 +2222,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               >
                 Done
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </ct-modal>
 
           {/* Expanded (Maximize) Module Overlay - backdrop + escape handler */}
@@ -2249,7 +2249,7 @@ const Record = pattern<RecordInput, RecordOutput>(
             </div>,
             null,
           )}
-        </ct-vstack>
+        </cf-vstack>
       ),
       title,
       subPieces,

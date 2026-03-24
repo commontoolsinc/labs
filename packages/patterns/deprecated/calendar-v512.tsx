@@ -5141,10 +5141,10 @@ export default pattern<Input, Output>(
     return {
       [NAME]: str`${name}`,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <style>
             {`
-              ct-screen {
+              cf-screen {
                 display: flex;
                 flex-direction: column;
                 height: 100%;
@@ -5412,7 +5412,7 @@ export default pattern<Input, Output>(
               }
 
               .note-item {
-                /* Spacing handled by ct-vstack gap */
+                /* Spacing handled by cf-vstack gap */
               }
 
               .note-time {
@@ -5592,19 +5592,19 @@ export default pattern<Input, Output>(
                 letter-spacing: -0.3px;
               }
 
-              .column-section ct-card {
+              .column-section cf-card {
                 transition: all 0.15s ease;
                 width: 100%;
                 max-width: 100%;
                 box-sizing: border-box;
               }
 
-              .column-section ct-card:hover {
+              .column-section cf-card:hover {
                 background: #f5f5f7;
                 transform: translateX(2px);
               }
 
-              .column-section ct-card p {
+              .column-section cf-card p {
                 word-wrap: break-word;
                 overflow-wrap: break-word;
                 max-width: 100%;
@@ -5621,7 +5621,7 @@ export default pattern<Input, Output>(
                 min-height: 0;
               }
 
-              .column-section ct-vstack {
+              .column-section cf-vstack {
                 width: 100%;
                 max-width: 100%;
                 overflow: hidden;
@@ -5889,8 +5889,8 @@ export default pattern<Input, Output>(
             <div className="settings-modal">
               <div className="settings-content">
                 <h3 className="settings-header">Settings</h3>
-                <ct-vstack gap="3">
-                  <ct-vstack gap="1">
+                <cf-vstack gap="3">
+                  <cf-vstack gap="1">
                     <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
                       Calendar Name
                     </label>
@@ -5899,8 +5899,8 @@ export default pattern<Input, Output>(
                       button-text="Save"
                       onct-send={updateName({ name, showSettings })}
                     />
-                  </ct-vstack>
-                  <ct-vstack gap="2">
+                  </cf-vstack>
+                  <cf-vstack gap="2">
                     <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
                       Time Grid Settings
                     </label>
@@ -5936,19 +5936,19 @@ export default pattern<Input, Output>(
                         style="width: 100%;"
                       />
                     </div>
-                  </ct-vstack>
-                  <ct-vstack gap="2">
+                  </cf-vstack>
+                  <cf-vstack gap="2">
                     <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
                       Display Options
                     </label>
-                    <ct-hstack gap="2" style="align-items: center;">
+                    <cf-hstack gap="2" style="align-items: center;">
                       <ct-checkbox $checked={showMonthView} />
                       <span style="font-size: 0.875rem; color: #1d1d1f;">
                         Show month calendar
                       </span>
-                    </ct-hstack>
-                  </ct-vstack>
-                  <ct-vstack gap="2">
+                    </cf-hstack>
+                  </cf-vstack>
+                  <cf-vstack gap="2">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                       <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
                         Time Labels
@@ -5962,7 +5962,7 @@ export default pattern<Input, Output>(
                         +
                       </button>
                     </div>
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       {customTimeLabels.map((
                         label: TimeLabel,
                         index: number,
@@ -6005,9 +6005,9 @@ export default pattern<Input, Output>(
                           </button>
                         </div>
                       ))}
-                    </ct-vstack>
-                  </ct-vstack>
-                  <ct-hstack
+                    </cf-vstack>
+                  </cf-vstack>
+                  <cf-hstack
                     gap="2"
                     style="justify-content: flex-end; margin-top: 8px;"
                   >
@@ -6017,8 +6017,8 @@ export default pattern<Input, Output>(
                     >
                       Close
                     </ct-button>
-                  </ct-hstack>
-                </ct-vstack>
+                  </cf-hstack>
+                </cf-vstack>
               </div>
             </div>,
             <div></div>,
@@ -6069,7 +6069,7 @@ export default pattern<Input, Output>(
                 {ifElse(
                   scheduleConfirmingScopeCell,
                   // Scope confirmation UI
-                  <ct-vstack gap="3" style="padding-bottom: 8px;">
+                  <cf-vstack gap="3" style="padding-bottom: 8px;">
                     <div style="text-align: center; padding: 20px 0 12px 0;">
                       <div style="font-size: 1.125rem; font-weight: 600; margin-bottom: 12px; color: #1d1d1f;">
                         Apply changes to recurring event?
@@ -6078,7 +6078,7 @@ export default pattern<Input, Output>(
                         Choose which occurrences should be updated
                       </div>
                     </div>
-                    <ct-vstack
+                    <cf-vstack
                       gap="2"
                       style="margin-bottom: 4px; padding: 0 2px;"
                     >
@@ -6186,7 +6186,7 @@ export default pattern<Input, Output>(
                         </div>,
                         <div></div>,
                       )}
-                    </ct-vstack>
+                    </cf-vstack>
                     <ct-button
                       onClick={cancelScopeConfirmation({
                         scheduleConfirmingScopeCell,
@@ -6197,9 +6197,9 @@ export default pattern<Input, Output>(
                     >
                       Cancel
                     </ct-button>
-                  </ct-vstack>,
+                  </cf-vstack>,
                   // Normal edit UI
-                  <ct-vstack gap="4">
+                  <cf-vstack gap="4">
                     <div className="modal-section">
                       <div className="modal-label">Note</div>
                       <ct-input
@@ -6227,7 +6227,7 @@ export default pattern<Input, Output>(
 
                     <div className="modal-section">
                       <div className="modal-label">Start Date & Time</div>
-                      <ct-hstack gap="2" style="align-items: center;">
+                      <cf-hstack gap="2" style="align-items: center;">
                         <ct-input
                           type="date"
                           $value={scheduleStartDateCell}
@@ -6251,7 +6251,7 @@ export default pattern<Input, Output>(
                           items={periodItems}
                           style="flex: 0.8;"
                         />
-                      </ct-hstack>
+                      </cf-hstack>
                     </div>
 
                     <div className="modal-section">
@@ -6493,19 +6493,19 @@ export default pattern<Input, Output>(
                     )}
 
                     <div className="modal-section">
-                      <ct-hstack gap="2" style="align-items: center;">
+                      <cf-hstack gap="2" style="align-items: center;">
                         <ct-checkbox $checked={scheduleNotifEnabledCell} />
                         <div className="modal-label" style="margin-bottom: 0;">
                           Enable Notification
                         </div>
-                      </ct-hstack>
+                      </cf-hstack>
                     </div>
 
                     {ifElse(
                       scheduleNotifEnabledCell,
                       <div className="modal-section">
                         <div className="modal-label">Notify me</div>
-                        <ct-hstack gap="2" style="align-items: center;">
+                        <cf-hstack gap="2" style="align-items: center;">
                           <ct-input
                             type="number"
                             $value={scheduleNotifValueCell}
@@ -6524,7 +6524,7 @@ export default pattern<Input, Output>(
                           <span style="font-size: 0.875rem; color: #86868b;">
                             before
                           </span>
-                        </ct-hstack>
+                        </cf-hstack>
                       </div>,
                       <div></div>,
                     )}
@@ -6607,7 +6607,7 @@ export default pattern<Input, Output>(
                         Save
                       </ct-button>
                     </div>
-                  </ct-vstack>,
+                  </cf-vstack>,
                 )}
               </div>
             </div>,
@@ -6637,7 +6637,7 @@ export default pattern<Input, Output>(
                   </button>
                 </div>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   <div style="text-align: center; padding: 20px 0;">
                     <div style="font-size: 1.125rem; font-weight: 600; margin-bottom: 12px; color: #1d1d1f;">
                       Choose which occurrences to delete
@@ -6646,7 +6646,7 @@ export default pattern<Input, Output>(
                       This action cannot be undone
                     </div>
                   </div>
-                  <ct-vstack gap="2" style="padding: 0 2px;">
+                  <cf-vstack gap="2" style="padding: 0 2px;">
                     <div
                       onClick={deleteScopeThis({
                         entries,
@@ -6701,7 +6701,7 @@ export default pattern<Input, Output>(
                         All past and future occurrences will be deleted
                       </div>
                     </div>
-                  </ct-vstack>
+                  </cf-vstack>
                   <ct-button
                     onClick={cancelDeletionConfirmation({
                       deletionConfirmingScopeCell,
@@ -6713,7 +6713,7 @@ export default pattern<Input, Output>(
                   >
                     Cancel
                   </ct-button>
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>,
             <div></div>,
@@ -6768,7 +6768,7 @@ export default pattern<Input, Output>(
               </div>
 
               <div className="column-section">
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   <div className="daily-note-header">
                     <label className="daily-note-label">Daily Notes</label>
                     <button
@@ -6780,7 +6780,7 @@ export default pattern<Input, Output>(
                     </button>
                   </div>
 
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="1">
                     {/* OPTIMIZATION v12: Pre-computed display values (icon, buttonClass, formattedTime) */}
                     {unifiedTimeline.map((item: any, idx: number) => {
                       const theNote = item.note ||
@@ -6809,7 +6809,7 @@ export default pattern<Input, Output>(
                             className="note-item"
                             style={item.showUnscheduled ? "" : "display: none"}
                           >
-                            <ct-hstack gap="1" style="align-items: center;">
+                            <cf-hstack gap="1" style="align-items: center;">
                               <input
                                 type="text"
                                 value={theNote.text || ""}
@@ -6878,7 +6878,7 @@ export default pattern<Input, Output>(
                               >
                                 ×
                               </button>
-                            </ct-hstack>
+                            </cf-hstack>
                           </div>
 
                           {/* Scheduled note */}
@@ -6886,7 +6886,7 @@ export default pattern<Input, Output>(
                             className="note-item"
                             style={item.showScheduled ? "" : "display: none"}
                           >
-                            <ct-hstack gap="1" style="align-items: center;">
+                            <cf-hstack gap="1" style="align-items: center;">
                               <span
                                 className="note-time"
                                 onClick={openScheduleModal({
@@ -6986,13 +6986,13 @@ export default pattern<Input, Output>(
                               >
                                 ×
                               </button>
-                            </ct-hstack>
+                            </cf-hstack>
                           </div>
                         </div>
                       );
                     })}
-                  </ct-vstack>
-                </ct-vstack>
+                  </cf-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -7047,7 +7047,7 @@ export default pattern<Input, Output>(
               <div></div>,
             )}
           </div>
-        </ct-screen>
+        </cf-screen>
       ),
       entries: mergedEntries,
       currentDate,

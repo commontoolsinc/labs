@@ -25,59 +25,59 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
           gap: "24px",
         }}
       >
-        <ct-vstack gap="1">
+        <cf-vstack gap="1">
           <span style="font-weight: 600;">Interactive</span>
           <ct-progress value={65} max={100} indeterminate={indeterminate} />
-        </ct-vstack>
+        </cf-vstack>
 
-        <ct-vstack gap="1">
+        <cf-vstack gap="1">
           <span style="font-weight: 600;">Various Values</span>
-          <ct-hstack gap="2" align="center">
+          <cf-hstack gap="2" align="center">
             <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); width: 30px;">
               0%
             </span>
             <div style={{ flex: "1" }}>
               <ct-progress value={0} max={100} />
             </div>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); width: 30px;">
               25%
             </span>
             <div style={{ flex: "1" }}>
               <ct-progress value={25} max={100} />
             </div>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); width: 30px;">
               50%
             </span>
             <div style={{ flex: "1" }}>
               <ct-progress value={50} max={100} />
             </div>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); width: 30px;">
               75%
             </span>
             <div style={{ flex: "1" }}>
               <ct-progress value={75} max={100} />
             </div>
-          </ct-hstack>
-          <ct-hstack gap="2" align="center">
+          </cf-hstack>
+          <cf-hstack gap="2" align="center">
             <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); width: 30px;">
               100%
             </span>
             <div style={{ flex: "1" }}>
               <ct-progress value={100} max={100} />
             </div>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
-        <ct-vstack gap="1">
+        <cf-vstack gap="1">
           <span style="font-weight: 600;">Indeterminate</span>
           <ct-progress indeterminate />
-        </ct-vstack>
+        </cf-vstack>
       </div>
     ),
     controls: (

@@ -133,7 +133,7 @@ export default pattern(
             </p>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
-              <ct-card>
+              <cf-card>
                 <div slot="header">
                   <h3>Card Title</h3>
                   <p>Card description goes here</p>
@@ -147,14 +147,14 @@ export default pattern(
                 <div slot="footer">
                   <ct-button size="sm">Action</ct-button>
                 </div>
-              </ct-card>
+              </cf-card>
 
-              <ct-card>
+              <cf-card>
                 <div slot="content">
                   <h3>Simple Card</h3>
                   <p>Cards don't require all slots to be filled.</p>
                 </div>
-              </ct-card>
+              </cf-card>
             </div>
           </section>
 
@@ -431,7 +431,7 @@ export default pattern(
               <ct-skeleton style="width: 100px; height: 100px; border-radius: 50%;">
               </ct-skeleton>
 
-              <ct-card>
+              <cf-card>
                 <div slot="content">
                   <ct-skeleton style="width: 100%; height: 20px; margin-bottom: 8px;">
                   </ct-skeleton>
@@ -439,7 +439,7 @@ export default pattern(
                   </ct-skeleton>
                   <ct-skeleton style="width: 60%; height: 20px;"></ct-skeleton>
                 </div>
-              </ct-card>
+              </cf-card>
             </div>
           </section>
 

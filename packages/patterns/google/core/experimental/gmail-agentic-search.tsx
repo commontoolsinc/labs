@@ -2990,21 +2990,21 @@ Be conservative: when in doubt, recommend "do_not_share".`,
 
       // Full UI (composed from pieces)
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
             <h2 style={{ margin: "0", fontSize: "18px" }}>{title}</h2>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack style="padding: 16px; gap: 16px;">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack style="padding: 16px; gap: 16px;">
               {authUI}
               {controlsUI}
               {progressUI}
               {statsUI}
               {extrasUI}
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

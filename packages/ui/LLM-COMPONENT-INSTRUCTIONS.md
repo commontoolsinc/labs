@@ -198,9 +198,9 @@ shadcn/ui design system. All components:
 <ct-input id="email" type="email"></ct-input>
 ```
 
-### 12. ct-card
+### 12. cf-card
 
-**Purpose**: Content container **Tag**: `<ct-card>` **Attributes**: None
+**Purpose**: Content container **Tag**: `<cf-card>` **Attributes**: None
 **Events**: None **Slots**:
 
 - `header` - Card header content
@@ -208,11 +208,11 @@ shadcn/ui design system. All components:
 - `footer` - Card footer content **Example**:
 
 ```html
-<ct-card>
+<cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content goes here</p>
   <ct-button slot="footer">Action</ct-button>
-</ct-card>
+</cf-card>
 ```
 
 ### 13. ct-badge
@@ -450,9 +450,9 @@ Default slot for ct-tab elements
 
 ## Layout Components
 
-### 32. ct-hstack
+### 32. cf-hstack
 
-**Purpose**: Horizontal flexbox container **Tag**: `<ct-hstack>` **Attributes**:
+**Purpose**: Horizontal flexbox container **Tag**: `<cf-hstack>` **Attributes**:
 
 - `gap` - "0" | "1" | "2" | "3" | "4" | "5" | "6" | "8"
 - `align` - "start" | "center" | "end" | "stretch" | "baseline"
@@ -461,36 +461,36 @@ Default slot for ct-tab elements
 - `reverse` - boolean **Slots**: Default slot for child elements **Example**:
 
 ```html
-<ct-hstack gap="4" align="center" justify="between">
+<cf-hstack gap="4" align="center" justify="between">
   <ct-button>Left</ct-button>
   <ct-button>Right</ct-button>
-</ct-hstack>
+</cf-hstack>
 ```
 
-### 33. ct-vstack
+### 33. cf-vstack
 
-**Purpose**: Vertical flexbox container **Tag**: `<ct-vstack>` **Attributes**:
-Same as ct-hstack **Example**:
+**Purpose**: Vertical flexbox container **Tag**: `<cf-vstack>` **Attributes**:
+Same as cf-hstack **Example**:
 
 ```html
-<ct-vstack gap="2" align="stretch">
-  <ct-card>Card 1</ct-card>
-  <ct-card>Card 2</ct-card>
-</ct-vstack>
+<cf-vstack gap="2" align="stretch">
+  <cf-card>Card 1</cf-card>
+  <cf-card>Card 2</cf-card>
+</cf-vstack>
 ```
 
-### 34. ct-hgroup
+### 34. cf-hgroup
 
-**Purpose**: Horizontal group with semantic spacing **Tag**: `<ct-hgroup>`
+**Purpose**: Horizontal group with semantic spacing **Tag**: `<cf-hgroup>`
 **Attributes**:
 
 - `gap` - "xs" | "sm" | "md" | "lg" | "xl" **Slots**: Default slot for grouped
   elements
 
-### 35. ct-vgroup
+### 35. cf-vgroup
 
-**Purpose**: Vertical group with semantic spacing **Tag**: `<ct-vgroup>`
-**Attributes**: Same as ct-hgroup
+**Purpose**: Vertical group with semantic spacing **Tag**: `<cf-vgroup>`
+**Attributes**: Same as cf-hgroup
 
 ### 36. ct-hscroll
 
@@ -504,9 +504,9 @@ Same as ct-hstack **Example**:
 - `scrollToX(x, smooth)` - Scroll to position
 - `scrollByX(x, smooth)` - Scroll by amount
 
-### 37. ct-vscroll
+### 37. cf-vscroll
 
-**Purpose**: Vertical scroll container **Tag**: `<ct-vscroll>` **Attributes**:
+**Purpose**: Vertical scroll container **Tag**: `<cf-vscroll>` **Attributes**:
 
 - `height` - string (CSS height)
 - `fade-edges` - boolean
@@ -574,47 +574,47 @@ Same as ct-hstack **Example**:
 
 ```html
 <ct-form>
-  <ct-vstack gap="4">
-    <ct-vgroup gap="1">
+  <cf-vstack gap="4">
+    <cf-vgroup gap="1">
       <ct-label for="name" required>Full Name</ct-label>
       <ct-input id="name" name="name" required></ct-input>
-    </ct-vgroup>
+    </cf-vgroup>
 
-    <ct-vgroup gap="1">
+    <cf-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
       <ct-input id="email" name="email" type="email" required></ct-input>
-    </ct-vgroup>
+    </cf-vgroup>
 
-    <ct-vgroup gap="1">
+    <cf-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
       <ct-textarea id="message" name="message" rows="4"></ct-textarea>
-    </ct-vgroup>
+    </cf-vgroup>
 
-    <ct-hstack gap="3" justify="end">
+    <cf-hstack gap="3" justify="end">
       <ct-button variant="outline" type="reset">Cancel</ct-button>
       <ct-button type="submit">Submit</ct-button>
-    </ct-hstack>
-  </ct-vstack>
+    </cf-hstack>
+  </cf-vstack>
 </ct-form>
 ```
 
 ### Dashboard Layout Example
 
 ```html
-<ct-vstack gap="4" style="padding: 2rem">
-  <ct-card>
+<cf-vstack gap="4" style="padding: 2rem">
+  <cf-card>
     <h2 slot="header">Dashboard</h2>
     <ct-grid slot="content" columns="3" gap="4">
-      <ct-card>
-        <ct-vstack slot="content" gap="2">
+      <cf-card>
+        <cf-vstack slot="content" gap="2">
           <ct-badge variant="secondary">Active</ct-badge>
           <h3>Total Users</h3>
           <p style="font-size: 2rem">1,234</p>
-        </ct-vstack>
-      </ct-card>
+        </cf-vstack>
+      </cf-card>
       <!-- More stat cards... -->
     </ct-grid>
-  </ct-card>
+  </cf-card>
 
   <ct-tabs default-value="overview">
     <ct-tab-list>
@@ -626,7 +626,7 @@ Same as ct-hstack **Example**:
       <!-- Overview content -->
     </ct-tab-panel>
   </ct-tabs>
-</ct-vstack>
+</cf-vstack>
 ```
 
 ## Event Handling Patterns
@@ -665,7 +665,7 @@ ct-input::part(input) {
   font-family: monospace;
 }
 
-ct-card::part(header) {
+cf-card::part(header) {
   background: #f3f4f6;
 }
 ```

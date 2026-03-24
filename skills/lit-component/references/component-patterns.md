@@ -11,7 +11,7 @@ Common UI components fall into distinct categories, each with specific patterns:
 
 Components that arrange other components without providing content themselves.
 
-**Examples:** `ct-vstack`, `ct-hstack`, `ct-screen`, `ct-autolayout`
+**Examples:** `cf-vstack`, `cf-hstack`, `cf-screen`, `ct-autolayout`
 
 **Characteristics:**
 
@@ -24,7 +24,7 @@ Components that arrange other components without providing content themselves.
 **Pattern:**
 
 ```typescript
-export class CTVStack extends BaseElement {
+export class CFVStack extends BaseElement {
   static override properties = {
     gap: { type: String },
     align: { type: String },

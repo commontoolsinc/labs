@@ -38,10 +38,10 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
               <span slot="center" style="font-size: 13px; font-weight: 600;">
                 Page Title
               </span>
-              <ct-hstack slot="end" gap="2">
+              <cf-hstack slot="end" gap="2">
                 <ct-button variant="ghost" size="sm">Help</ct-button>
                 <ct-button variant="primary" size="sm">Save</ct-button>
-              </ct-hstack>
+              </cf-hstack>
             </ct-toolbar>
           </div>
         </div>

@@ -662,19 +662,19 @@ Respond with the most appropriate action.`;
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-hstack align="center" gap="2">
-            <ct-heading level={3}>Email Task Engine</ct-heading>
+          <cf-hstack align="center" gap="2">
+            <cf-heading level={3}>Email Task Engine</cf-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({taskCount} tasks)
             </span>
             <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
-          </ct-hstack>
+          </cf-hstack>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI */}
             {authUI}
 
@@ -816,7 +816,7 @@ Respond with the most appropriate action.`;
                   "task-current" label to see it here.
                 </div>
               </div>,
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {analyses.map((analysis) => {
                   const isProcessing = computed(() =>
                     processingTasks.get().includes(analysis.email.id)
@@ -1235,11 +1235,11 @@ Respond with the most appropriate action.`;
                     </div>
                   );
                 })}
-              </ct-vstack>,
+              </cf-vstack>,
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

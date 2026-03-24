@@ -647,18 +647,18 @@ export default pattern<Input, Output>(({ importJson }) => {
   return {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-toolbar slot="header" sticky>
           <div slot="start">
             <span style={{ fontWeight: "bold" }}>Record Backup</span>
           </div>
         </ct-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="6" padding="6">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack gap="6" padding="6">
             {/* Export Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Export Records</h2>
                 <p>
                   Found <strong>{recordCount}</strong>{" "}
@@ -688,12 +688,12 @@ export default pattern<Input, Output>(({ importJson }) => {
                   }}
                   readonly
                 />
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Import Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Import Records</h2>
                 <p>
                   Upload a backup file or paste JSON to restore your records.
@@ -743,7 +743,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                       border: importResultBorder,
                     }}
                   >
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       <strong>{importResultTitle}</strong>
                       <p>{importResultMessage}</p>
                       <ct-button
@@ -753,15 +753,15 @@ export default pattern<Input, Output>(({ importJson }) => {
                       >
                         Dismiss
                       </ct-button>
-                    </ct-vstack>
+                    </cf-vstack>
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+              </cf-vstack>
+            </cf-card>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     exportedJson,
     importJson,

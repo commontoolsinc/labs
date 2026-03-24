@@ -19,16 +19,16 @@ interface Input {
 
 export default pattern<Input>(({ items }) => ({
   [UI]: (
-    <ct-screen>
+    <cf-screen>
       {items.map((item) => (
-        <ct-card>
+        <cf-card>
           {item.name}
           <ct-button onClick={() => navigateTo(ItemDetail({ item }))}>
             Edit
           </ct-button>
-        </ct-card>
+        </cf-card>
       ))}
-    </ct-screen>
+    </cf-screen>
   ),
   items,
 }));
@@ -52,7 +52,7 @@ interface Input {
 
 export default pattern<Input>(({ item }) => ({
   [UI]: (
-    <ct-screen>
+    <cf-screen>
       <ct-input $value={item.key("name")} placeholder="Name" />
       <ct-select
         $value={item.key("status")}
@@ -61,7 +61,7 @@ export default pattern<Input>(({ item }) => ({
           { label: "Done", value: "done" },
         ]}
       />
-    </ct-screen>
+    </cf-screen>
   ),
   item,
 }));

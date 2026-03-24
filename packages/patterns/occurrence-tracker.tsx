@@ -295,7 +295,7 @@ export const OccurrenceTrackerModule = pattern<
   return {
     [NAME]: displayName,
     [UI]: (
-      <ct-vstack gap="3">
+      <cf-vstack gap="3">
         {/* Label input */}
         <ct-input
           $value={label}
@@ -337,7 +337,7 @@ export const OccurrenceTrackerModule = pattern<
             );
           }
           return (
-            <ct-vstack
+            <cf-vstack
               gap="1"
               style={{
                 textAlign: "center",
@@ -382,12 +382,12 @@ export const OccurrenceTrackerModule = pattern<
                   }
                 }}
               />
-            </ct-vstack>
+            </cf-vstack>
           );
         })}
 
         {/* Stats Section - using component attributes for layout */}
-        <ct-hstack
+        <cf-hstack
           gap="4"
           justify="around"
           style={{
@@ -396,7 +396,7 @@ export const OccurrenceTrackerModule = pattern<
             borderRadius: "8px",
           }}
         >
-          <ct-vstack gap="0" align="center">
+          <cf-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1.5rem",
@@ -413,8 +413,8 @@ export const OccurrenceTrackerModule = pattern<
             >
               Total
             </span>
-          </ct-vstack>
-          <ct-vstack gap="0" align="center">
+          </cf-vstack>
+          <cf-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1rem",
@@ -431,8 +431,8 @@ export const OccurrenceTrackerModule = pattern<
             >
               Avg frequency
             </span>
-          </ct-vstack>
-        </ct-hstack>
+          </cf-vstack>
+        </cf-hstack>
 
         {/* Expandable History - using ifElse to preserve details state */}
         {ifElse(
@@ -448,7 +448,7 @@ export const OccurrenceTrackerModule = pattern<
             >
               History ({totalCount})
             </summary>
-            <ct-vstack
+            <cf-vstack
               gap="1"
               style={{
                 marginTop: "0.5rem",
@@ -457,7 +457,7 @@ export const OccurrenceTrackerModule = pattern<
               }}
             >
               {occurrences.map((occ) => (
-                <ct-hstack
+                <cf-hstack
                   gap="2"
                   align="center"
                   style={{
@@ -466,7 +466,7 @@ export const OccurrenceTrackerModule = pattern<
                     borderRadius: "6px",
                   }}
                 >
-                  <ct-vstack gap="0" style={{ flex: "1" }}>
+                  <cf-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
                       {computed(() =>
                         `${formatRelativeTime(occ.timestamp)} · ${
@@ -483,7 +483,7 @@ export const OccurrenceTrackerModule = pattern<
                         flex: "1",
                       }}
                     />
-                  </ct-vstack>
+                  </cf-vstack>
                   <ct-button
                     variant="ghost"
                     onClick={deleteOccurrence({
@@ -500,13 +500,13 @@ export const OccurrenceTrackerModule = pattern<
                   >
                     ×
                   </ct-button>
-                </ct-hstack>
+                </cf-hstack>
               ))}
-            </ct-vstack>
+            </cf-vstack>
           </details>,
           null,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     label,
     occurrences,

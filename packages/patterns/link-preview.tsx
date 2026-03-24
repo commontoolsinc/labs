@@ -10,13 +10,13 @@ export const LinkPreview = pattern<LinkPreviewInput, LinkPreviewInput>(
     return {
       [NAME]: computed(() => `Link Preview: ${url}`),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
           <ct-input
             $value={url}
             placeholder="Enter a URL..."
           />
           <ct-link-preview url={url} />
-        </ct-vstack>
+        </cf-vstack>
       ),
       url,
     };

@@ -52,13 +52,13 @@ Write content personalized to the user when appropriate.`;
       <div>
         <h2>{title}</h2>
 
-        <ct-card>
+        <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
           <ct-code-editor
             $value={profile.result}
             style={{ maxHeight: "256px" }}
           />
-        </ct-card>
+        </cf-card>
 
         <div>
           <ct-message-input

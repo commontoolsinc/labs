@@ -12,7 +12,7 @@ export default pattern<CheckboxSimpleInput, CheckboxSimpleOutput>(
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <ct-vstack gap="2" style="padding: 2rem; max-width: 400px;">
+        <cf-vstack gap="2" style="padding: 2rem; max-width: 400px;">
           <h3>Simple ct-checkbox + ifElse Demo</h3>
 
           <ct-checkbox $checked={enabled}>
@@ -28,7 +28,7 @@ export default pattern<CheckboxSimpleInput, CheckboxSimpleOutput>(
           <p data-testid="status">
             Status: {ifElse(enabled, "ON", "OFF")}
           </p>
-        </ct-vstack>
+        </cf-vstack>
       ),
       enabled,
     };

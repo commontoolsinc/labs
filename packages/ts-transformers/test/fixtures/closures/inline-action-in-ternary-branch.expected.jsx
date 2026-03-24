@@ -22,7 +22,7 @@ interface State {
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern((state) => {
     return {
-        [UI]: (<ct-card>
+        [UI]: (<cf-card>
         {__ctHelpers.ifElse({
             type: "boolean",
             asCell: true
@@ -103,7 +103,7 @@ export default pattern((state) => {
                 }
             })}>Edit</ct-button>))}
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card: state.key("card"),
     };
 }, {

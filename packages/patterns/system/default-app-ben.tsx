@@ -299,7 +299,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     quickCapture,
     [NAME]: computed(() => `Ben's Space (${visiblePieces.length})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-keybind
           code="KeyO"
           meta
@@ -391,7 +391,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             />
 
             {/* Dropdown Menu */}
-            <ct-vstack
+            <cf-vstack
               gap="0"
               style={{
                 display: computed(() => (menuOpen.get() ? "flex" : "none")),
@@ -442,28 +442,28 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   margin: "4px 8px",
                 }}
               />
-            </ct-vstack>
+            </cf-vstack>
           </div>
         </ct-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-hstack gap="6" padding="6" align="start">
+        <cf-vscroll flex showScrollbar>
+          <cf-hstack gap="6" padding="6" align="start">
             <div style={{ flex: "1", minWidth: "0" }}>
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
                 <ct-cell-link $cell={doList} />
                 {doList.compactUI}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
               {ifElse(
                 computed(() => recentPieces.get().length > 0),
-                <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <ct-hstack gap="2" align="center">
+                <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
+                  <cf-hstack gap="2" align="center">
                     <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
                     <ct-cell-link $cell={recentGridView} />
-                  </ct-hstack>
+                  </cf-hstack>
                   <ct-table full-width hover>
                     <tbody>
                       {recentPieces.map((piece: any) => (
@@ -477,15 +477,15 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       ))}
                     </tbody>
                   </ct-table>
-                </ct-vstack>,
+                </cf-vstack>,
                 undefined,
               )}
 
-              <ct-vstack gap="4">
-                <ct-hstack gap="2" align="center">
+              <cf-vstack gap="4">
+                <cf-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
                   <ct-cell-link $cell={gridView} />
-                </ct-hstack>
+                </cf-hstack>
 
                 <ct-table full-width hover>
                   <tbody>
@@ -535,11 +535,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     })}
                   </tbody>
                 </ct-table>
-              </ct-vstack>
+              </cf-vstack>
             </div>
-          </ct-hstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-hstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     sidebarUI: undefined,
     fabUI: fab[UI],

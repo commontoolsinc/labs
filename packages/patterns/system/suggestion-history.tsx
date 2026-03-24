@@ -67,7 +67,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
   return {
     [NAME]: "Suggestion History",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-grid columns="3" gap="4" padding="4">
           {allEntries.map((entry: SuggestionHistoryEntry) => (
             <div
@@ -111,7 +111,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
             </div>
           ))}
         </ct-grid>
-      </ct-screen>
+      </cf-screen>
     ),
     entries: allEntries,
     search: patternTool(searchPattern, { entries: allEntries }),

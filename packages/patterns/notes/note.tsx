@@ -370,8 +370,8 @@ const Note = pattern<NoteInput, NoteOutput>(
         content,
       },
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
@@ -380,7 +380,7 @@ const Note = pattern<NoteInput, NoteOutput>(
             }}
           >
             {/* Parent notebook chip */}
-            <ct-hstack
+            <cf-hstack
               gap="2"
               align="center"
               style={{
@@ -401,9 +401,9 @@ const Note = pattern<NoteInput, NoteOutput>(
                 interactive
                 onct-click={goToParent}
               />
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -477,7 +477,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               />
 
               {/* Dropdown Menu */}
-              <ct-vstack
+              <cf-vstack
                 gap="0"
                 style={{
                   display: menuDisplayStyle,
@@ -524,20 +524,20 @@ const Note = pattern<NoteInput, NoteOutput>(
                 >
                   {"  "}📁 All Notes
                 </ct-button>
-              </ct-vstack>
-            </ct-hstack>
-          </ct-vstack>
+              </cf-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {editorUI}
 
-          <ct-hstack slot="footer">
+          <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
               <ct-button onClick={handleBacklinkClick({ piece })}>
                 {piece?.[NAME]}
               </ct-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       content,

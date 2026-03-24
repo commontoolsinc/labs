@@ -41,13 +41,13 @@ export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleInput>(
         `${MODULE_METADATA.icon} Nickname: ${displayText}`
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Nickname</label>
           <ct-input
             $value={nickname}
             placeholder="Enter nickname..."
           />
-        </ct-vstack>
+        </cf-vstack>
       ),
       nickname,
     };

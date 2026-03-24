@@ -62,7 +62,7 @@ export default pattern((__ct_pattern_input) => {
         return desc && desc.length > 0;
     });
     return {
-        [UI]: (<ct-card>
+        [UI]: (<cf-card>
         {__ctHelpers.ifElse({
             type: "boolean",
             asCell: true
@@ -104,7 +104,7 @@ export default pattern((__ct_pattern_input) => {
             {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
             <ct-button onClick={startEditing}>Edit</ct-button>
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card,
     };
 }, {

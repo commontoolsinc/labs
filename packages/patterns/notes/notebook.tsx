@@ -942,7 +942,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       isNotebook,
       isHidden,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div
             style={{
               flex: 1,
@@ -950,7 +950,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               minHeight: 0,
             }}
           >
-            <ct-vstack gap="4" padding="6">
+            <cf-vstack gap="4" padding="6">
               {/* Header row - parent link on left, Notebooks dropdown on right */}
               <div
                 style={{
@@ -961,7 +961,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 }}
               >
                 {/* Parent link - shows parent notebook chip if parentNotebook is set */}
-                <ct-hstack
+                <cf-hstack
                   gap="2"
                   align="center"
                   style={{
@@ -983,7 +983,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     interactive
                     onct-click={goToParentAction}
                   />
-                </ct-hstack>
+                </cf-hstack>
                 {/* Spacer when no parent */}
                 <div
                   style={{
@@ -1007,8 +1007,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 </ct-button>
               </div>
 
-              <ct-card>
-                <ct-vstack gap="4">
+              <cf-card>
+                <cf-vstack gap="4">
                   {/* Header - also a drop zone for receiving items from "Other notebooks" */}
                   <ct-drop-zone
                     accept="sibling"
@@ -1129,7 +1129,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     </span>
                   </div>
 
-                  <ct-vstack
+                  <cf-vstack
                     gap="0"
                     style={{
                       display: notesListDisplay,
@@ -1251,10 +1251,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       {/* Text aligned with piece pills */}
                       <span style={{ paddingLeft: "4px" }}>Select All</span>
                     </div>
-                  </ct-vstack>
+                  </cf-vstack>
 
                   {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
-                  <ct-hstack
+                  <cf-hstack
                     padding="3"
                     gap="3"
                     style={{
@@ -1317,12 +1317,12 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     >
                       Delete
                     </ct-button>
-                  </ct-hstack>
-                </ct-vstack>
-              </ct-card>
+                  </cf-hstack>
+                </cf-vstack>
+              </cf-card>
 
               {/* Siblings feature disabled for performance - see _notebookRelationships for re-enabling */}
-            </ct-vstack>
+            </cf-vstack>
           </div>
 
           {/* New Notebook Prompt Modal */}
@@ -1337,7 +1337,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               $value={newNotebookName}
               placeholder="Enter notebook name..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
@@ -1362,7 +1362,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               >
                 Create
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </ct-modal>
 
           {/* New Note Prompt Modal */}
@@ -1377,7 +1377,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               $value={newNoteTitle}
               placeholder="Enter note title..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
@@ -1400,7 +1400,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               >
                 Create
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </ct-modal>
 
           {/* New Nested Notebook Prompt Modal */}
@@ -1415,7 +1415,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               $value={newNestedNotebookTitle}
               placeholder="Enter notebook title..."
             />
-            <ct-hstack
+            <cf-hstack
               slot="footer"
               gap="2"
               style={{ justifyContent: "flex-end" }}
@@ -1438,11 +1438,11 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               >
                 Create
               </ct-button>
-            </ct-hstack>
+            </cf-hstack>
           </ct-modal>
 
           {/* Backlinks footer - show pieces that link to this notebook */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
@@ -1472,8 +1472,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 {piece?.[NAME]}
               </ct-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       notes,

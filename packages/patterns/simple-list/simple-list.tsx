@@ -127,11 +127,11 @@ export const SimpleListModule = pattern<
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} List: ${displayText}`),
     [UI]: (
-      <ct-vstack gap="2">
+      <cf-vstack gap="2">
         {/* List items */}
-        <ct-vstack gap="0">
+        <cf-vstack gap="0">
           {items.map((item, index: number) => (
-            <ct-hstack
+            <cf-hstack
               gap="2"
               style={{
                 alignItems: "center",
@@ -214,9 +214,9 @@ export const SimpleListModule = pattern<
               >
                 x
               </button>
-            </ct-hstack>
+            </cf-hstack>
           ))}
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Add item input - at bottom for natural list growth */}
         <ct-message-input
@@ -232,7 +232,7 @@ export const SimpleListModule = pattern<
             }
           }}
         />
-      </ct-vstack>
+      </cf-vstack>
     ),
     items,
     summary,

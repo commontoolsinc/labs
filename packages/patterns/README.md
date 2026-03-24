@@ -24,7 +24,7 @@ keywords/features.
 
 - aside.tsx: Full-screen layout demonstration with header, footer, and sidebars
   - **Data types**: none (layout only)
-  - **Keywords**: ct-screen, ct-autolayout, slots (left/right/header/footer),
+  - **Keywords**: cf-screen, ct-autolayout, slots (left/right/header/footer),
     tabNames
 
 - system/backlinks-index.tsx: Backlinks computation system for bi-directional

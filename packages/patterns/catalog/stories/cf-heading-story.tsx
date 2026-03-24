@@ -11,7 +11,7 @@ interface HeadingStoryOutput {
 
 export default pattern<HeadingStoryInput, HeadingStoryOutput>(() => {
   return {
-    [NAME]: "ct-heading Story",
+    [NAME]: "cf-heading Story",
     [UI]: (
       <div
         style={{
@@ -21,12 +21,12 @@ export default pattern<HeadingStoryInput, HeadingStoryOutput>(() => {
           gap: "12px",
         }}
       >
-        <ct-heading level={1}>Heading Level 1</ct-heading>
-        <ct-heading level={2}>Heading Level 2</ct-heading>
-        <ct-heading level={3}>Heading Level 3</ct-heading>
-        <ct-heading level={4}>Heading Level 4</ct-heading>
-        <ct-heading level={5}>Heading Level 5</ct-heading>
-        <ct-heading level={6}>Heading Level 6</ct-heading>
+        <cf-heading level={1}>Heading Level 1</cf-heading>
+        <cf-heading level={2}>Heading Level 2</cf-heading>
+        <cf-heading level={3}>Heading Level 3</cf-heading>
+        <cf-heading level={4}>Heading Level 4</cf-heading>
+        <cf-heading level={5}>Heading Level 5</cf-heading>
+        <cf-heading level={6}>Heading Level 6</cf-heading>
       </div>
     ),
     controls: (

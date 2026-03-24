@@ -9,9 +9,9 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Mentionable Inspector",
     [UI]: (
-      <ct-vstack gap="3">
+      <cf-vstack gap="3">
         {mentionable!.map((item) => <ct-cell-link $cell={item} />)}
-      </ct-vstack>
+      </cf-vstack>
     ),
   };
 });

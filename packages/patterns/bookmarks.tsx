@@ -71,7 +71,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
     return {
       [NAME]: computed(() => `🔖 Bookmarks (${count})`),
       [UI]: (
-        <ct-vstack gap="4">
+        <cf-vstack gap="4">
           {/* Add URL input */}
           <ct-message-input
             placeholder="Add a URL..."
@@ -92,7 +92,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
           {/* Grid of link previews */}
           <ct-grid columns="3" gap="4">
             {filteredBookmarks.map((bookmark: Bookmark, index: number) => (
-              <ct-vstack
+              <cf-vstack
                 gap="1"
                 style={{
                   position: "relative",
@@ -124,10 +124,10 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
                 >
                   ✕
                 </button>
-              </ct-vstack>
+              </cf-vstack>
             ))}
           </ct-grid>
-        </ct-vstack>
+        </cf-vstack>
       ),
       bookmarks,
       count,

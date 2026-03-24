@@ -20,7 +20,7 @@ export default pattern<HGroupStoryInput, HGroupStoryOutput>(() => {
   const wrap = Writable.of(false);
 
   return {
-    [NAME]: "ct-hgroup Story",
+    [NAME]: "cf-hgroup Story",
     [UI]: (
       <div
         style={{
@@ -41,17 +41,17 @@ export default pattern<HGroupStoryInput, HGroupStoryOutput>(() => {
           >
             Interactive
           </div>
-          <ct-hgroup gap={gap} wrap={wrap}>
-            <ct-card>
+          <cf-hgroup gap={gap} wrap={wrap}>
+            <cf-card>
               <span>Card A</span>
-            </ct-card>
-            <ct-card>
+            </cf-card>
+            <cf-card>
               <span>Card B</span>
-            </ct-card>
-            <ct-card>
+            </cf-card>
+            <cf-card>
               <span>Card C</span>
-            </ct-card>
-          </ct-hgroup>
+            </cf-card>
+          </cf-hgroup>
         </div>
 
         <div>
@@ -65,56 +65,56 @@ export default pattern<HGroupStoryInput, HGroupStoryOutput>(() => {
           >
             Gap Sizes
           </div>
-          <ct-vstack gap="2">
-            <ct-vstack gap="1">
+          <cf-vstack gap="2">
+            <cf-vstack gap="1">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=sm
               </span>
-              <ct-hgroup gap="sm">
-                <ct-card>
+              <cf-hgroup gap="sm">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-hgroup>
-            </ct-vstack>
-            <ct-vstack gap="1">
+                </cf-card>
+              </cf-hgroup>
+            </cf-vstack>
+            <cf-vstack gap="1">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=md
               </span>
-              <ct-hgroup gap="md">
-                <ct-card>
+              <cf-hgroup gap="md">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-hgroup>
-            </ct-vstack>
-            <ct-vstack gap="1">
+                </cf-card>
+              </cf-hgroup>
+            </cf-vstack>
+            <cf-vstack gap="1">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=lg
               </span>
-              <ct-hgroup gap="lg">
-                <ct-card>
+              <cf-hgroup gap="lg">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-hgroup>
-            </ct-vstack>
-          </ct-vstack>
+                </cf-card>
+              </cf-hgroup>
+            </cf-vstack>
+          </cf-vstack>
         </div>
       </div>
     ),

@@ -52,8 +52,8 @@ export default pattern<Input, Output>(({ items }) => {
   return {
     [NAME]: "Computed Array Bug",
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
           <ct-tabs $value={filter}>
             <ct-tab-list>
               <ct-tab value="all">All</ct-tab>
@@ -61,10 +61,10 @@ export default pattern<Input, Output>(({ items }) => {
               <ct-tab value="done">Done</ct-tab>
             </ct-tab-list>
           </ct-tabs>
-        </ct-vstack>
+        </cf-vstack>
 
-        <ct-vscroll flex>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex>
+          <cf-vstack gap="2" style="padding: 1rem;">
             <ct-button
               variant="secondary"
               onClick={() => {
@@ -94,9 +94,9 @@ export default pattern<Input, Output>(({ items }) => {
                   </div>
                 ))
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     items,
   };

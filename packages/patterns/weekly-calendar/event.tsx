@@ -271,9 +271,9 @@ const Event = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title.get()}`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
-          <ct-vstack
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
@@ -281,7 +281,7 @@ const Event = pattern<Input, Output>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -327,10 +327,10 @@ const Event = pattern<Input, Output>(
                   onct-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
-            </ct-hstack>
+            </cf-hstack>
 
             {/* Date/Time summary */}
-            <ct-hstack gap="2" style={{ alignItems: "center" }}>
+            <cf-hstack gap="2" style={{ alignItems: "center" }}>
               <span
                 style={{
                   fontSize: "0.875rem",
@@ -339,11 +339,11 @@ const Event = pattern<Input, Output>(
               >
                 {dateDisplay} | {timeDisplay} ({durationDisplay})
               </span>
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Main Content */}
-          <ct-vstack padding="4" gap="4" style={{ flex: 1, overflow: "auto" }}>
+          <cf-vstack padding="4" gap="4" style={{ flex: 1, overflow: "auto" }}>
             {/* Date Input */}
             <div>
               <label style={STYLES.label}>Date</label>
@@ -405,10 +405,10 @@ const Event = pattern<Input, Output>(
                 style={{ flex: 1, minHeight: "100px" }}
               />
             </div>
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Backlinks footer */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
@@ -440,8 +440,8 @@ const Event = pattern<Input, Output>(
                 {piece?.[NAME]}
               </ct-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       date,

@@ -4,9 +4,9 @@ import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTVScroll - Vertical scroll container
+ * CFVScroll - Vertical scroll container
  *
- * @element ct-vscroll
+ * @element cf-vscroll
  *
  * @attr {boolean} show-scrollbar - Always show scrollbar
  * @attr {boolean} fade-edges - Show fade effect at edges
@@ -18,13 +18,13 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Content to be scrolled vertically
  *
  * @example
- * <ct-vscroll height="400px">
- *   <ct-vstack gap="4">
+ * <cf-vscroll height="400px">
+ *   <cf-vstack gap="4">
  *     <p>Long content...</p>
- *   </ct-vstack>
- * </ct-vscroll>
+ *   </cf-vstack>
+ * </cf-vscroll>
  */
-export class CTVScroll extends BaseElement {
+export class CFVScroll extends BaseElement {
   static override properties = {
     showScrollbar: {
       type: Boolean,
@@ -43,10 +43,10 @@ export class CTVScroll extends BaseElement {
 
   static override styles = css`
     :host {
-      --ct-vscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --ct-vscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
-      --ct-vscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
-      --ct-vscroll-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-vscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --cf-vscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
+      --cf-vscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
+      --cf-vscroll-color-background: var(--ct-theme-color-background, #ffffff);
 
       display: block;
       position: relative;
@@ -89,17 +89,17 @@ export class CTVScroll extends BaseElement {
     }
 
     .scroll-container::-webkit-scrollbar-track {
-      background: var(--ct-vscroll-color-surface, #f1f5f9);
+      background: var(--cf-vscroll-color-surface, #f1f5f9);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--ct-vscroll-color-thumb, #64748b);
+      background: var(--cf-vscroll-color-thumb, #64748b);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--ct-vscroll-color-thumb-hover, #475569);
+      background: var(--cf-vscroll-color-thumb-hover, #475569);
     }
 
     /* Padding utilities */
@@ -145,7 +145,7 @@ export class CTVScroll extends BaseElement {
       top: 0;
       background: linear-gradient(
         to bottom,
-        var(--ct-vscroll-color-background, white),
+        var(--cf-vscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -155,7 +155,7 @@ export class CTVScroll extends BaseElement {
       bottom: 0;
       background: linear-gradient(
         to top,
-        var(--ct-vscroll-color-background, white),
+        var(--cf-vscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -369,4 +369,4 @@ export class CTVScroll extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-vscroll", CTVScroll);
+globalThis.customElements.define("cf-vscroll", CFVScroll);

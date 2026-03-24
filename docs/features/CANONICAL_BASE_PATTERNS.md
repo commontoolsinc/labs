@@ -636,28 +636,28 @@ export default pattern<Input, Output>(({ title, items, subLists }) => {
   return {
     [NAME]: computed(() => title ?? "Contacts"),
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="sm">
+      <cf-screen>
+        <cf-vstack gap="sm">
           {/* Direct items */}
           {data.map(entry => (
-            <ct-card>
+            <cf-card>
               <span>{entry.name}</span>
-            </ct-card>
+            </cf-card>
           ))}
 
           {/* Sub-lists (e.g., AutoImportedGoogleContacts) */}
           {lists.map(subList => (
-            <ct-card>
-              <ct-vstack gap="xs">
+            <cf-card>
+              <cf-vstack gap="xs">
                 <strong>{subList[NAME]}</strong>
                 {subList.allItems.map(entry => (
                   <span style="margin-left: 1em">{entry.name}</span>
                 ))}
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
           ))}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     items: data,
     subLists: lists,
@@ -691,13 +691,13 @@ export default pattern<{ contact: Writable<Default<Contact, { name: "" }>> }, { 
   return {
     [NAME]: computed(() => contact.name || "Contact"),
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="md">
+      <cf-screen>
+        <cf-vstack gap="md">
           <ct-input $value={contact.key("name")} placeholder="Name" />
           <ct-input $value={contact.key("email")} placeholder="Email" />
           <ct-input $value={contact.key("phone")} placeholder="Phone" />
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     contact,
   };
@@ -727,8 +727,8 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
   return {
     [NAME]: computed(() => member.name || "Family Member"),
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="md">
+      <cf-screen>
+        <cf-vstack gap="md">
           <ct-input $value={member.key("name")} placeholder="Name" />
           <ct-picker
             $value={member.key("relationship")}
@@ -737,8 +737,8 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
           <ct-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
           <ct-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
           <ct-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     member,
   };

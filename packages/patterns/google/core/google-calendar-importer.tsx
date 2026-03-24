@@ -723,15 +723,15 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     return {
       [NAME]: str`Calendar Importer ${currentEmail}`,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-hstack align="center" gap="2">
-              <ct-heading level={3}>Google Calendar Importer</ct-heading>
-            </ct-hstack>
+            <cf-hstack align="center" gap="2">
+              <cf-heading level={3}>Google Calendar Importer</cf-heading>
+            </cf-hstack>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth status - handled by createGoogleAuth utility */}
               {fullUI}
 
@@ -743,7 +743,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 Calendars found: {computed(() => calendars.get().length)}
               </div>
 
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 <div>
                   <label
                     style={{
@@ -843,7 +843,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   </ct-button>,
                   null,
                 )}
-              </ct-vstack>
+              </cf-vstack>
 
               {/* Calendar list with selection */}
               <div style={{ marginTop: "16px" }}>
@@ -1059,9 +1059,9 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   </p>,
                 )}
               </div>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
       events,
       calendars,

@@ -124,7 +124,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
         </div>
 
         {/* Chat messages */}
-        <ct-vscroll
+        <cf-vscroll
           style="padding: 1rem; flex: 1;"
           flex
           showScrollbar
@@ -132,7 +132,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
           snapToBottom
         >
           <ct-chat $messages={messages} pending={pending} />
-        </ct-vscroll>
+        </cf-vscroll>
 
         {/* Prompt input */}
         <div style={{ borderTop: "1px solid #e6e9ed", padding: "8px" }}>

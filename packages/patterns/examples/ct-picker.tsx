@@ -28,10 +28,10 @@ export default pattern<Input, Result>(
     return {
       [NAME]: "ct-picker demo",
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "1rem" }}>
+        <cf-vstack gap="3" style={{ padding: "1rem" }}>
           <h3>ct-picker Component Demo</h3>
 
-          <ct-card>
+          <cf-card>
             <ct-button
               onClick={() => {
                 selectedIndex.set(Math.max(0, selectedIndex.get() - 1));
@@ -51,13 +51,13 @@ export default pattern<Input, Result>(
             <div>
               {selection}
             </div>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             {/* The cast is because OpaqueCell does not satisfy CellLike, but... it is */}
             <ct-picker $items={items as any} $selectedIndex={selectedIndex} />
-          </ct-card>
-        </ct-vstack>
+          </cf-card>
+        </cf-vstack>
       ),
       counterAValue: counterA.value,
       counterBValue: 0, // Note doesn't have .value

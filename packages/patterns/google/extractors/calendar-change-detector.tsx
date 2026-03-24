@@ -449,13 +449,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Calendar Change Detector</ct-heading>
+          <cf-heading level={3}>Calendar Change Detector</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI from GmailExtractor */}
             {extractor.ui.authStatusUI}
 
@@ -629,7 +629,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Critical - Today/Tomorrow
                   </span>
                 </div>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {criticalChanges.map((change) => (
                     <div
                       style={{
@@ -702,7 +702,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -742,7 +742,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Urgent - Within 48 Hours
                   </span>
                 </div>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {urgentChanges.map((change) => (
                     <div
                       style={{
@@ -815,7 +815,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -854,7 +854,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Upcoming - Within 7 Days
                   </span>
                 </div>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {normalChanges.map((change) => (
                     <div
                       style={{
@@ -927,7 +927,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -966,7 +966,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   >
                     Fetched Emails:
                   </h4>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {extractor.emails.map((email) => (
                       <div
                         style={{
@@ -1008,7 +1008,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         </details>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
 
                   <h4
                     style={{
@@ -1021,7 +1021,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   >
                     LLM Analysis Results:
                   </h4>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {emailAnalyses.map((analysis) => {
                       const debugResult = analysis.result as
                         | ScheduleChangeAnalysisResult
@@ -1168,13 +1168,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         </div>
                       );
                     })}
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
               </details>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

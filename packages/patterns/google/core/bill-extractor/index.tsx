@@ -44,7 +44,7 @@
  *     [NAME]: "My Bill Tracker",
  *     bills: tracker.bills,
  *     [UI]: (
- *       <ct-screen>
+ *       <cf-screen>
  *         {tracker.ui.summaryStatsUI}
  *         {tracker.unpaidBills.map((bill) => (
  *           <div>
@@ -54,7 +54,7 @@
  *             </button>
  *           </div>
  *         ))}
- *       </ct-screen>
+ *       </cf-screen>
  *     ),
  *   };
  * });

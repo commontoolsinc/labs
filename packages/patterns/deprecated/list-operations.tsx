@@ -120,8 +120,8 @@ export default pattern<ListInput, ListOutput>(
     return {
       [NAME]: "List demo",
       [UI]: (
-        <ct-vstack gap="2">
-          <ct-card>
+        <cf-vstack gap="2">
+          <cf-card>
             <ct-button
               id="reset-demo"
               onClick={resetList({ items })}
@@ -176,8 +176,8 @@ export default pattern<ListInput, ListOutput>(
             <pre id="filtered-list">{show(itemsLessThanB)}</pre>
             <pre id="extended-list">{show(extendedItems)}</pre>
             <pre id="combined-list">{combinedItems}</pre>
-          </ct-card>
-        </ct-vstack>
+          </cf-card>
+        </cf-vstack>
       ),
       items,
     };

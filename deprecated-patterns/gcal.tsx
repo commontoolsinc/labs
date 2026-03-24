@@ -605,8 +605,8 @@ export default pattern(
             {ifElse(settings.syncToken, settings.syncToken, "Not yet obtained")}
           </h2>
 
-          <ct-hstack gap="1">
-            <ct-vstack gap="1">
+          <cf-hstack gap="1">
+            <cf-vstack gap="1">
               <div>
                 <label>Import Limit</label>
                 <ct-input
@@ -673,8 +673,8 @@ export default pattern(
               >
                 Clear Events
               </ct-button>
-            </ct-vstack>
-          </ct-hstack>
+            </cf-vstack>
+          </cf-hstack>
           <ct-google-oauth
             $auth={auth}
             scopes={[

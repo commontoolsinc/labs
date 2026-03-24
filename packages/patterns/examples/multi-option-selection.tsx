@@ -21,10 +21,10 @@ export default pattern<Input, Result>(
     return {
       [NAME]: "ct-select demo",
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "1rem" }}>
+        <cf-vstack gap="3" style={{ padding: "1rem" }}>
           <h3>ct-select Component Demo</h3>
 
-          <ct-card>
+          <cf-card>
             <h4>String Values</h4>
             <p>
               ct-select uses an `items` attribute with {`{label, value}`}{" "}
@@ -39,9 +39,9 @@ export default pattern<Input, Result>(
               $value={selected}
             />
             <p>Selected: {selected}</p>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>
               <code>ct-autocomplete</code>
             </h4>
@@ -53,9 +53,9 @@ export default pattern<Input, Result>(
               ]}
               $value={selected}
             />
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>
               <code>ct-radio-group</code>
             </h4>
@@ -68,9 +68,9 @@ export default pattern<Input, Result>(
               ]}
               orientation="horizontal"
             />
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>Numeric Values</h4>
             <p>Values can be any type, not just strings</p>
             <ct-select
@@ -82,9 +82,9 @@ export default pattern<Input, Result>(
               $value={numericChoice}
             />
             <p>Selected number: {numericChoice}</p>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>Common Categories Example</h4>
             <ct-select
               $value={category}
@@ -97,9 +97,9 @@ export default pattern<Input, Result>(
               ]}
             />
             <p>Selected category: {category}</p>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>
               <code>ct-tabs</code>
             </h4>
@@ -121,8 +121,8 @@ export default pattern<Input, Result>(
               </ct-tab-panel>
             </ct-tabs>
             <p>Active tab: {activeTab}</p>
-          </ct-card>
-        </ct-vstack>
+          </cf-card>
+        </cf-vstack>
       ),
       selected,
       numericChoice,

@@ -197,9 +197,9 @@ export const LocationTrackModule = pattern<
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Track: ${displayText}`),
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {/* Label input */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Track Label (optional)
           </label>
@@ -207,10 +207,10 @@ export const LocationTrackModule = pattern<
             $value={label}
             placeholder="e.g., Morning walk, Commute..."
           />
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Location capture button */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Capture Location
           </label>
@@ -218,10 +218,10 @@ export const LocationTrackModule = pattern<
             $location={currentCapture}
             onct-location-update={handleLocationUpdate({ locations })}
           />
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Points summary */}
-        <ct-hstack
+        <cf-hstack
           style={{
             justifyContent: "space-between",
             alignItems: "center",
@@ -254,7 +254,7 @@ export const LocationTrackModule = pattern<
             </ct-button>,
             null,
           )}
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Points list (collapsible for many points) */}
         {ifElse(
@@ -263,9 +263,9 @@ export const LocationTrackModule = pattern<
             <span slot="trigger" style={{ fontSize: "12px", color: "#6b7280" }}>
               View all points
             </span>
-            <ct-vstack style={{ gap: "0", marginTop: "8px" }}>
+            <cf-vstack style={{ gap: "0", marginTop: "8px" }}>
               {validLocationsWithIndex.map(({ point, index }) => (
-                <ct-hstack
+                <cf-hstack
                   key={index}
                   gap="3"
                   style={{
@@ -296,7 +296,7 @@ export const LocationTrackModule = pattern<
                   </span>
 
                   {/* Main content: coords + metadata stacked */}
-                  <ct-vstack style={{ flex: "1", gap: "2px", minWidth: "0" }}>
+                  <cf-vstack style={{ flex: "1", gap: "2px", minWidth: "0" }}>
                     {/* Coordinates */}
                     <span
                       style={{
@@ -313,7 +313,7 @@ export const LocationTrackModule = pattern<
                       <span style={{ color: "#d1d5db" }}>·</span>{" "}
                       {formatAccuracy(point.accuracy)}
                     </span>
-                  </ct-vstack>
+                  </cf-vstack>
 
                   {/* Delete button - more visible */}
                   <button
@@ -333,13 +333,13 @@ export const LocationTrackModule = pattern<
                   >
                     ×
                   </button>
-                </ct-hstack>
+                </cf-hstack>
               ))}
-            </ct-vstack>
+            </cf-vstack>
           </ct-collapsible>,
           null,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     locations,
     label,

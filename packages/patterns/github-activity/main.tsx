@@ -134,7 +134,7 @@ export default pattern<{
                     .toLocaleDateString();
 
                   return (
-                    <ct-card style="margin-bottom: 8px;">
+                    <cf-card style="margin-bottom: 8px;">
                       <div style="padding: 12px;">
                         <div style="font-weight: 500; margin-bottom: 4px;">
                           {firstLine}
@@ -151,7 +151,7 @@ export default pattern<{
                           View commit →
                         </a>
                       </div>
-                    </ct-card>
+                    </cf-card>
                   );
                 })}
               </div>

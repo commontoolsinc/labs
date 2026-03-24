@@ -391,8 +391,8 @@ const Profile = pattern<ProfileInput, Output>(
     return {
       [NAME]: computed(() => `👤 ${displayName}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
@@ -411,14 +411,14 @@ const Profile = pattern<ProfileInput, Output>(
             >
               Personal data blackboard - tag with #profile for discovery
             </span>
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vscroll style={{ flex: 1, padding: "16px" }}>
-            <ct-vstack
+          <cf-vscroll style={{ flex: 1, padding: "16px" }}>
+            <cf-vstack
               style={{ gap: "16px", maxWidth: "800px", margin: "0 auto" }}
             >
               {/* === SELF === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -438,26 +438,26 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Your Name</label>
                         <ct-input
                           $value={self.key("name")}
                           placeholder="Your full name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", width: "150px" }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", width: "150px" }}>
                         <label style={labelStyle}>Nickname</label>
                         <ct-input
                           $value={self.key("nickname")}
                           placeholder="Nickname"
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Birthday</label>
-                      <ct-hstack style={{ gap: "8px" }}>
+                      <cf-hstack style={{ gap: "8px" }}>
                         <ct-input
                           $value={self.key("birthday", "month")}
                           placeholder="Month"
@@ -473,22 +473,22 @@ const Profile = pattern<ProfileInput, Output>(
                           placeholder="Year"
                           style={{ width: "80px" }}
                         />
-                      </ct-hstack>
-                    </ct-vstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-hstack>
+                    </cf-vstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
                       <ct-textarea
                         $value={self.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === PARTNER === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -508,37 +508,37 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Name</label>
                         <ct-input
                           $value={partner.key("name")}
                           placeholder="Partner's name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", width: "120px" }}>
                         <label style={labelStyle}>Relationship</label>
                         <ct-select
                           $value={partner.key("relationship")}
                           items={RELATIONSHIP_OPTIONS}
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
                       <ct-textarea
                         $value={partner.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === CHILDREN === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -569,27 +569,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {children.map((child) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
                               <ct-input
                                 $value={child.name}
                                 placeholder="Child's name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Nickname</label>
                               <ct-input
                                 $value={child.nickname}
                                 placeholder="Nickname"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -597,33 +597,33 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>School</label>
                               <ct-input
                                 $value={child.school.name}
                                 placeholder="School name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Grade</label>
                               <ct-input
                                 $value={child.school.gradeLevel}
                                 placeholder="Grade"
                               />
-                            </ct-vstack>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                            </cf-vstack>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={child.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -632,12 +632,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Child
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === PARENTS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -668,27 +668,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {parents.map((person) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
                               <ct-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
                               <ct-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -696,17 +696,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -715,12 +715,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Parent
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === IN-LAWS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -751,27 +751,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {inlaws.map((person) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
                               <ct-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
                               <ct-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -779,17 +779,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -798,12 +798,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add In-Law
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === ADDRESSES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -835,27 +835,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {addresses.map((addr) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", width: "100px" }}>
+                            <cf-vstack style={{ gap: "4px", width: "100px" }}>
                               <label style={labelStyle}>Label</label>
                               <ct-select
                                 $value={addr.label}
                                 items={ADDRESS_LABELS}
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Street</label>
                               <ct-input
                                 $value={addr.street}
                                 placeholder="123 Main St"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -863,23 +863,23 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>City</label>
                               <ct-input $value={addr.city} placeholder="City" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>State</label>
                               <ct-input $value={addr.state} placeholder="CA" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>ZIP</label>
                               <ct-input $value={addr.zip} placeholder="12345" />
-                            </ct-vstack>
-                          </ct-hstack>
-                        </ct-vstack>
-                      </ct-card>
+                            </cf-vstack>
+                          </cf-hstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -888,12 +888,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Address
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === VEHICLES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -924,25 +924,25 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {vehicles.map((v) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", width: "80px" }}>
+                            <cf-vstack style={{ gap: "4px", width: "80px" }}>
                               <label style={labelStyle}>Year</label>
                               <ct-input $value={v.year} placeholder="2024" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Make</label>
                               <ct-input $value={v.make} placeholder="Toyota" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Model</label>
                               <ct-input $value={v.model} placeholder="Camry" />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -950,30 +950,30 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>License Plate</label>
                               <ct-input
                                 $value={v.licensePlate}
                                 placeholder="ABC 1234"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>VIN</label>
                               <ct-input $value={v.vin} placeholder="VIN" />
-                            </ct-vstack>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                            </cf-vstack>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={v.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -982,12 +982,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Vehicle
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === MEMBERSHIPS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1021,27 +1021,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {memberships.map((m) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>Program</label>
                               <ct-input
                                 $value={m.program}
                                 placeholder="United MileagePlus"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Member #</label>
                               <ct-input
                                 $value={m.memberNumber}
                                 placeholder="12345678"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -1049,17 +1049,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={m.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -1068,12 +1068,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Membership
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === BANKS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1106,20 +1106,20 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {banks.map((b) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Bank Name</label>
                               <ct-input
                                 $value={b.name}
                                 placeholder="Chase, Wells Fargo..."
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -1127,25 +1127,25 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "16px" }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "16px" }}>
                             <ct-checkbox $checked={b.hasCheckingAccount}>
                               Checking Account
                             </ct-checkbox>
                             <ct-checkbox $checked={b.hasCreditCard}>
                               Credit Card
                             </ct-checkbox>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
                             <ct-textarea
                               $value={b.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -1154,12 +1154,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Bank
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === EMPLOYMENT === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1180,26 +1180,26 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Employer</label>
                         <ct-input
                           $value={employment.key("employer")}
                           placeholder="Company name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Title</label>
                         <ct-input
                           $value={employment.key("title")}
                           placeholder="Job title"
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Work Address</label>
-                      <ct-hstack style={{ gap: "8px" }}>
+                      <cf-hstack style={{ gap: "8px" }}>
                         <ct-input
                           $value={employment.key("street")}
                           placeholder="Street"
@@ -1215,22 +1215,22 @@ const Profile = pattern<ProfileInput, Output>(
                           placeholder="State"
                           style={{ width: "60px" }}
                         />
-                      </ct-hstack>
-                    </ct-vstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-hstack>
+                    </cf-vstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
                       <ct-textarea
                         $value={employment.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === LEARNED === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1263,13 +1263,13 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "20px" }}>
+                  <cf-vstack style={{ gap: "20px" }}>
                     {/* Personas */}
                     {computed(() => learned.key("personas").get().length > 0) &&
                       (
-                        <ct-vstack style={{ gap: "8px" }}>
+                        <cf-vstack style={{ gap: "8px" }}>
                           <label style={labelStyle}>Personas</label>
-                          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+                          <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
                             {learned.key("personas").map((persona) => (
                               <span
                                 style={{
@@ -1284,12 +1284,12 @@ const Profile = pattern<ProfileInput, Output>(
                                 {persona}
                               </span>
                             ))}
-                          </ct-hstack>
-                        </ct-vstack>
+                          </cf-hstack>
+                        </cf-vstack>
                       )}
 
                     {/* Facts Table */}
-                    <ct-vstack style={{ gap: "8px" }}>
+                    <cf-vstack style={{ gap: "8px" }}>
                       <label style={labelStyle}>Learned Facts</label>
                       {computed(() =>
                         learned.key("facts").get().length === 0
@@ -1463,13 +1463,13 @@ const Profile = pattern<ProfileInput, Output>(
                             </table>
                           </div>
                         )}
-                    </ct-vstack>
+                    </cf-vstack>
 
                     {/* Preferences Table */}
                     {computed(() =>
                       learned.key("preferences").get().length > 0
                     ) && (
-                      <ct-vstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "8px" }}>
                         <label style={labelStyle}>Preferences</label>
                         <div
                           style={{
@@ -1593,7 +1593,7 @@ const Profile = pattern<ProfileInput, Output>(
                             </tbody>
                           </table>
                         </div>
-                      </ct-vstack>
+                      </cf-vstack>
                     )}
 
                     {/* Open Questions - Plain Text */}
@@ -1604,7 +1604,7 @@ const Profile = pattern<ProfileInput, Output>(
                       );
                       return pending.length > 0;
                     }) && (
-                      <ct-vstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "8px" }}>
                         <label style={labelStyle}>
                           Pending Questions ({computed(() =>
                             learned
@@ -1613,7 +1613,7 @@ const Profile = pattern<ProfileInput, Output>(
                               .filter((q) => q.status === "pending").length
                           )})
                         </label>
-                        <ct-vstack
+                        <cf-vstack
                           style={{
                             gap: "4px",
                             padding: "12px",
@@ -1646,15 +1646,15 @@ const Profile = pattern<ProfileInput, Output>(
                               )}
                             </div>
                           ))}
-                        </ct-vstack>
-                      </ct-vstack>
+                        </cf-vstack>
+                      </cf-vstack>
                     )}
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === NOTES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <label
                   style={{
                     fontSize: "14px",
@@ -1673,10 +1673,10 @@ const Profile = pattern<ProfileInput, Output>(
                     borderRadius: "8px",
                   }}
                 />
-              </ct-vstack>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
 
       // Pass through all data

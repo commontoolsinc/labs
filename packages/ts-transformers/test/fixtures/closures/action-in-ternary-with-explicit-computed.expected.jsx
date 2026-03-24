@@ -39,7 +39,7 @@ export default pattern((__ct_pattern_input) => {
         isEditing: isEditing
     });
     return {
-        [UI]: (<ct-card>
+        [UI]: (<cf-card>
         {__ctHelpers.ifElse({
             type: "boolean",
             asCell: true
@@ -109,7 +109,7 @@ export default pattern((__ct_pattern_input) => {
                 <ct-button onClick={startEditing}>Edit</ct-button>
               </div>))}
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card,
     };
 }, {

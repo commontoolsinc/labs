@@ -161,7 +161,7 @@ export default pattern(
             onct-input={updateTitle({ title })}
             customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
           />
-          <ct-vstack gap="1">
+          <cf-vstack gap="1">
             {results.map((
               { title, question, item }: {
                 title: string;
@@ -170,7 +170,7 @@ export default pattern(
               },
             ) => (
               <li>
-                <ct-vstack>
+                <cf-vstack>
                   <blockquote>
                     {title}
                   </blockquote>
@@ -182,10 +182,10 @@ export default pattern(
                   >
                     Delete
                   </ct-button>
-                </ct-vstack>
+                </cf-vstack>
               </li>
             ))}
-          </ct-vstack>
+          </cf-vstack>
           <ct-message-input
             name="Add"
             placeholder="New question"

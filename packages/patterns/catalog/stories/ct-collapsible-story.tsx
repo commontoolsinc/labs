@@ -19,7 +19,7 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
           maxWidth: "400px",
         }}
       >
-        <ct-vstack gap="2">
+        <cf-vstack gap="2">
           <ct-collapsible>
             <ct-button
               slot="trigger"
@@ -44,7 +44,7 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
               This section starts open.
             </div>
           </ct-collapsible>
-        </ct-vstack>
+        </cf-vstack>
       </div>
     ),
     controls: (

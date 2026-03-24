@@ -950,13 +950,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     return {
       [NAME]: "Parking Coordinator",
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
           <div
             slot="header"
             style="padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--ct-color-gray-200);"
           >
-            <ct-heading level={4}>Parking</ct-heading>
+            <cf-heading level={4}>Parking</cf-heading>
             <div style="display: flex; align-items: center; gap: 0.75rem;">
               <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
                 {todayFormatted}
@@ -973,19 +973,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             </div>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack gap="3" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack gap="3" style="padding: 1rem;">
               {/* === Section A: Today Strip === */}
-              <ct-vstack gap="1">
-                <ct-heading level={6}>Today — {todayFormatted}</ct-heading>
+              <cf-vstack gap="1">
+                <cf-heading level={6}>Today — {todayFormatted}</cf-heading>
 
                 {noPeople
                   ? (
-                    <ct-card>
+                    <cf-card>
                       <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
                         No team members yet — ask your admin to add people.
                       </span>
-                    </ct-card>
+                    </cf-card>
                   )
                   : null}
 
@@ -997,13 +997,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   const stripIsOwn = stripCell.isOwn;
                   const stripShowAdmin = stripCell.showAdmin;
                   return (
-                    <ct-card
+                    <cf-card
                       style={`padding: 0.625rem 0.875rem; border-left: 3px solid ${
                         stripIsAvailable ? "#22c55e" : "#93c5fd"
                       };`}
                     >
-                      <ct-hstack justify="between" align="center" gap="2" wrap>
-                        <ct-hstack gap="2" align="center">
+                      <cf-hstack justify="between" align="center" gap="2" wrap>
+                        <cf-hstack gap="2" align="center">
                           <span style="font-weight: 600; font-size: 0.875rem; min-width: 2rem;">
                             #{stripSpotNumber}
                           </span>
@@ -1014,7 +1014,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               </span>
                             )
                             : null}
-                        </ct-hstack>
+                        </cf-hstack>
 
                         <span
                           style={{
@@ -1032,7 +1032,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           {stripReq ? stripReq.personName : "Available"}
                         </span>
 
-                        <ct-hstack gap="1">
+                        <cf-hstack gap="1">
                           {stripReq && stripIsOwn
                             ? (
                               <ct-button
@@ -1063,20 +1063,20 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               </ct-button>
                             )
                             : null}
-                        </ct-hstack>
-                      </ct-hstack>
-                    </ct-card>
+                        </cf-hstack>
+                      </cf-hstack>
+                    </cf-card>
                   );
                 })}
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === Section B: Request Form === */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={6}>Request a Spot</ct-heading>
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={6}>Request a Spot</cf-heading>
 
-                  <ct-hstack gap="2" align="end" wrap>
-                    <ct-vstack gap="1" style="flex: 1; min-width: 140px;">
+                  <cf-hstack gap="2" align="end" wrap>
+                    <cf-vstack gap="1" style="flex: 1; min-width: 140px;">
                       <span style="font-size: 0.75rem; font-weight: 500;">
                         Person
                       </span>
@@ -1093,9 +1093,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             style="width: 100%;"
                           />
                         )}
-                    </ct-vstack>
+                    </cf-vstack>
 
-                    <ct-vstack gap="1" style="min-width: 140px;">
+                    <cf-vstack gap="1" style="min-width: 140px;">
                       <span style="font-size: 0.75rem; font-weight: 500;">
                         Date
                       </span>
@@ -1104,7 +1104,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         type="date"
                         style="width: 100%;"
                       />
-                    </ct-vstack>
+                    </cf-vstack>
 
                     <ct-button
                       variant="primary"
@@ -1117,7 +1117,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     >
                       Request Spot
                     </ct-button>
-                  </ct-hstack>
+                  </cf-hstack>
 
                   {computed(() => {
                     if (!(requestDate.get() < todayStr)) return null;
@@ -1142,12 +1142,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       </span>
                     );
                   })}
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
 
               {/* === Section C: Week-Ahead Grid === */}
-              <ct-vstack gap="1">
-                <ct-heading level={6}>This Week</ct-heading>
+              <cf-vstack gap="1">
+                <cf-heading level={6}>This Week</cf-heading>
 
                 {weekMonthInfo
                   ? (
@@ -1234,7 +1234,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           >
                             {gridIsOverride
                               ? (
-                                <ct-vstack
+                                <cf-vstack
                                   gap="1"
                                   style="background: white; border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.375rem;"
                                 >
@@ -1256,7 +1256,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       </span>
                                     )
                                     : null}
-                                  <ct-hstack gap="1">
+                                  <cf-hstack gap="1">
                                     <ct-button
                                       variant="primary"
                                       size="sm"
@@ -1276,8 +1276,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     >
                                       ×
                                     </ct-button>
-                                  </ct-hstack>
-                                </ct-vstack>
+                                  </cf-hstack>
+                                </cf-vstack>
                               )
                               : gridIsAllocated && gridReq
                               ? (
@@ -1354,16 +1354,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </>
                   ))}
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === Section D: Admin (admin mode only) === */}
               {adminMode
                 ? (
                   <>
                     {/* People */}
-                    <ct-vstack gap="2">
-                      <ct-hstack justify="between" align="center">
-                        <ct-heading level={6}>People</ct-heading>
+                    <cf-vstack gap="2">
+                      <cf-hstack justify="between" align="center">
+                        <cf-heading level={6}>People</cf-heading>
                         <ct-button
                           variant="primary"
                           size="sm"
@@ -1371,18 +1371,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         >
                           + Add Person
                         </ct-button>
-                      </ct-hstack>
+                      </cf-hstack>
 
                       {people.get().length === 0
                         ? (
-                          <ct-card style="text-align: center; padding: 1.5rem;">
-                            <ct-vstack gap="2" align="center">
+                          <cf-card style="text-align: center; padding: 1.5rem;">
+                            <cf-vstack gap="2" align="center">
                               <span style="font-size: 2rem;">👥</span>
                               <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
                                 No team members yet. Add the first person below.
                               </span>
-                            </ct-vstack>
-                          </ct-card>
+                            </cf-vstack>
+                          </cf-card>
                         )
                         : null}
 
@@ -1421,7 +1421,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
 
                         return (
-                          <ct-card
+                          <cf-card
                             style={computed(() =>
                               isEditing
                                 ? "border: 2px solid var(--ct-color-blue-300);"
@@ -1430,9 +1430,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           >
                             {isEditing
                               ? (
-                                <ct-vstack gap="2">
-                                  <ct-hstack gap="2" wrap>
-                                    <ct-vstack
+                                <cf-vstack gap="2">
+                                  <cf-hstack gap="2" wrap>
+                                    <cf-vstack
                                       gap="1"
                                       style="flex: 1; min-width: 120px;"
                                     >
@@ -1444,8 +1444,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         placeholder="Full name"
                                         style="width: 100%;"
                                       />
-                                    </ct-vstack>
-                                    <ct-vstack
+                                    </cf-vstack>
+                                    <cf-vstack
                                       gap="1"
                                       style="flex: 1; min-width: 120px;"
                                     >
@@ -1457,10 +1457,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         placeholder="email@company.com"
                                         style="width: 100%;"
                                       />
-                                    </ct-vstack>
-                                  </ct-hstack>
-                                  <ct-hstack gap="2" wrap>
-                                    <ct-vstack
+                                    </cf-vstack>
+                                  </cf-hstack>
+                                  <cf-hstack gap="2" wrap>
+                                    <cf-vstack
                                       gap="1"
                                       style="min-width: 100px;"
                                     >
@@ -1472,8 +1472,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         items={commuteModeOptions}
                                         style="width: 100%;"
                                       />
-                                    </ct-vstack>
-                                    <ct-vstack gap="1" style="min-width: 80px;">
+                                    </cf-vstack>
+                                    <cf-vstack gap="1" style="min-width: 80px;">
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Priority *
                                       </span>
@@ -1482,8 +1482,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         type="number"
                                         style="width: 5rem;"
                                       />
-                                    </ct-vstack>
-                                    <ct-vstack
+                                    </cf-vstack>
+                                    <cf-vstack
                                       gap="1"
                                       style="min-width: 100px;"
                                     >
@@ -1495,9 +1495,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         items={editSpotItems}
                                         style="width: 100%;"
                                       />
-                                    </ct-vstack>
-                                  </ct-hstack>
-                                  <ct-vstack gap="1">
+                                    </cf-vstack>
+                                  </cf-hstack>
+                                  <cf-vstack gap="1">
                                     <span style="font-size: 0.75rem; font-weight: 500;">
                                       Preferences (comma-separated spot numbers)
                                     </span>
@@ -1506,8 +1506,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       placeholder="e.g. 1, 5, 12"
                                       style="width: 100%;"
                                     />
-                                  </ct-vstack>
-                                  <ct-hstack gap="2">
+                                  </cf-vstack>
+                                  <cf-hstack gap="2">
                                     <ct-button
                                       variant="primary"
                                       size="sm"
@@ -1525,19 +1525,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     >
                                       Cancel
                                     </ct-button>
-                                  </ct-hstack>
-                                </ct-vstack>
+                                  </cf-hstack>
+                                </cf-vstack>
                               )
                               : (
-                                <ct-vstack gap="1">
-                                  <ct-hstack
+                                <cf-vstack gap="1">
+                                  <cf-hstack
                                     justify="between"
                                     align="start"
                                     gap="2"
                                     wrap
                                   >
-                                    <ct-vstack gap="0">
-                                      <ct-hstack gap="2" align="center" wrap>
+                                    <cf-vstack gap="0">
+                                      <cf-hstack gap="2" align="center" wrap>
                                         <span style="font-weight: 600;">
                                           {personName}
                                         </span>
@@ -1551,16 +1551,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             </span>
                                           )
                                           : null}
-                                      </ct-hstack>
+                                      </cf-hstack>
                                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                                         {email}
                                       </span>
                                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                                         {commuteIcon(commuteMode)} {commuteMode}
                                       </span>
-                                    </ct-vstack>
+                                    </cf-vstack>
 
-                                    <ct-hstack gap="1" align="center">
+                                    <cf-hstack gap="1" align="center">
                                       <ct-button
                                         variant="ghost"
                                         size="sm"
@@ -1603,8 +1603,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       >
                                         Remove
                                       </ct-button>
-                                    </ct-hstack>
-                                  </ct-hstack>
+                                    </cf-hstack>
+                                  </cf-hstack>
 
                                   {spotPreferences.length > 0
                                     ? (
@@ -1618,14 +1618,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                                   {isRemoveConfirm
                                     ? (
-                                      <ct-card style="background: #fef2f2; border: 1px solid #fecaca;">
-                                        <ct-vstack gap="1">
+                                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
+                                        <cf-vstack gap="1">
                                           <span style="font-size: 0.75rem; color: var(--ct-color-red-700);">
                                             This person has upcoming requests.
                                             They will be preserved. Remove
                                             anyway?
                                           </span>
-                                          <ct-hstack gap="2">
+                                          <cf-hstack gap="2">
                                             <ct-button
                                               variant="primary"
                                               size="sm"
@@ -1644,24 +1644,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             >
                                               Cancel
                                             </ct-button>
-                                          </ct-hstack>
-                                        </ct-vstack>
-                                      </ct-card>
+                                          </cf-hstack>
+                                        </cf-vstack>
+                                      </cf-card>
                                     )
                                     : null}
-                                </ct-vstack>
+                                </cf-vstack>
                               )}
-                          </ct-card>
+                          </cf-card>
                         );
                       })}
 
                       {addPersonFormOpen
                         ? (
-                          <ct-card style="border: 2px dashed var(--ct-color-gray-200);">
-                            <ct-vstack gap="2">
-                              <ct-heading level={6}>Add Person</ct-heading>
-                              <ct-hstack gap="2" wrap>
-                                <ct-vstack
+                          <cf-card style="border: 2px dashed var(--ct-color-gray-200);">
+                            <cf-vstack gap="2">
+                              <cf-heading level={6}>Add Person</cf-heading>
+                              <cf-hstack gap="2" wrap>
+                                <cf-vstack
                                   gap="1"
                                   style="flex: 1; min-width: 120px;"
                                 >
@@ -1673,8 +1673,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     placeholder="Full name"
                                     style="width: 100%;"
                                   />
-                                </ct-vstack>
-                                <ct-vstack
+                                </cf-vstack>
+                                <cf-vstack
                                   gap="1"
                                   style="flex: 1; min-width: 120px;"
                                 >
@@ -1686,10 +1686,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     placeholder="email@company.com"
                                     style="width: 100%;"
                                   />
-                                </ct-vstack>
-                              </ct-hstack>
-                              <ct-hstack gap="2" wrap>
-                                <ct-vstack gap="1" style="min-width: 100px;">
+                                </cf-vstack>
+                              </cf-hstack>
+                              <cf-hstack gap="2" wrap>
+                                <cf-vstack gap="1" style="min-width: 100px;">
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Commute
                                   </span>
@@ -1698,8 +1698,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     items={commuteModeOptions}
                                     style="width: 100%;"
                                   />
-                                </ct-vstack>
-                                <ct-vstack gap="1" style="min-width: 80px;">
+                                </cf-vstack>
+                                <cf-vstack gap="1" style="min-width: 80px;">
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Priority *
                                   </span>
@@ -1709,8 +1709,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     placeholder="1"
                                     style="width: 5rem;"
                                   />
-                                </ct-vstack>
-                                <ct-vstack gap="1" style="min-width: 100px;">
+                                </cf-vstack>
+                                <cf-vstack gap="1" style="min-width: 100px;">
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Default Spot
                                   </span>
@@ -1727,9 +1727,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     ])}
                                     style="width: 100%;"
                                   />
-                                </ct-vstack>
-                              </ct-hstack>
-                              <ct-vstack gap="1">
+                                </cf-vstack>
+                              </cf-hstack>
+                              <cf-vstack gap="1">
                                 <span style="font-size: 0.75rem; font-weight: 500;">
                                   Preferences (comma-separated)
                                 </span>
@@ -1738,7 +1738,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   placeholder="e.g. 1, 5"
                                   style="width: 100%;"
                                 />
-                              </ct-vstack>
+                              </cf-vstack>
                               {computed(() => {
                                 const err = addPersonError.get();
                                 if (!err) return null;
@@ -1748,7 +1748,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   </span>
                                 );
                               })}
-                              <ct-hstack gap="2">
+                              <cf-hstack gap="2">
                                 <ct-button
                                   variant="primary"
                                   size="sm"
@@ -1764,17 +1764,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 >
                                   Cancel
                                 </ct-button>
-                              </ct-hstack>
-                            </ct-vstack>
-                          </ct-card>
+                              </cf-hstack>
+                            </cf-vstack>
+                          </cf-card>
                         )
                         : null}
-                    </ct-vstack>
+                    </cf-vstack>
 
                     {/* Parking Spots */}
-                    <ct-vstack gap="2">
-                      <ct-hstack justify="between" align="center">
-                        <ct-heading level={6}>Parking Spots</ct-heading>
+                    <cf-vstack gap="2">
+                      <cf-hstack justify="between" align="center">
+                        <cf-heading level={6}>Parking Spots</cf-heading>
                         <ct-button
                           variant="primary"
                           size="sm"
@@ -1782,7 +1782,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         >
                           + Add Spot
                         </ct-button>
-                      </ct-hstack>
+                      </cf-hstack>
 
                       {adminSpotsData.map((spot) => {
                         const spotNum2 = spot.spotNumber;
@@ -1797,12 +1797,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
 
                         return (
-                          <ct-card style={spotActive2 ? "" : "opacity: 0.65;"}>
+                          <cf-card style={spotActive2 ? "" : "opacity: 0.65;"}>
                             {isEditingSpot
                               ? (
-                                <ct-vstack gap="2">
-                                  <ct-hstack gap="2" wrap>
-                                    <ct-vstack gap="1" style="min-width: 60px;">
+                                <cf-vstack gap="2">
+                                  <cf-hstack gap="2" wrap>
+                                    <cf-vstack gap="1" style="min-width: 60px;">
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Number *
                                       </span>
@@ -1811,8 +1811,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         placeholder="e.g. 12"
                                         style="width: 4rem;"
                                       />
-                                    </ct-vstack>
-                                    <ct-vstack gap="1" style="flex: 1;">
+                                    </cf-vstack>
+                                    <cf-vstack gap="1" style="flex: 1;">
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Label
                                       </span>
@@ -1821,9 +1821,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         placeholder="e.g. Near entrance"
                                         style="width: 100%;"
                                       />
-                                    </ct-vstack>
-                                  </ct-hstack>
-                                  <ct-vstack gap="1">
+                                    </cf-vstack>
+                                  </cf-hstack>
+                                  <cf-vstack gap="1">
                                     <span style="font-size: 0.75rem; font-weight: 500;">
                                       Notes
                                     </span>
@@ -1832,8 +1832,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       placeholder="e.g. Tight, no large vehicles"
                                       style="width: 100%;"
                                     />
-                                  </ct-vstack>
-                                  <ct-hstack gap="2" align="center">
+                                  </cf-vstack>
+                                  <cf-hstack gap="2" align="center">
                                     <ct-checkbox $checked={editSpotActive}>
                                       Active
                                     </ct-checkbox>
@@ -1845,8 +1845,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         </span>
                                       )
                                       : null}
-                                  </ct-hstack>
-                                  <ct-hstack gap="2">
+                                  </cf-hstack>
+                                  <cf-hstack gap="2">
                                     <ct-button
                                       variant="primary"
                                       size="sm"
@@ -1864,18 +1864,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     >
                                       Cancel
                                     </ct-button>
-                                  </ct-hstack>
-                                </ct-vstack>
+                                  </cf-hstack>
+                                </cf-vstack>
                               )
                               : (
                                 <>
-                                  <ct-hstack
+                                  <cf-hstack
                                     justify="between"
                                     align="center"
                                     gap="2"
                                     wrap
                                   >
-                                    <ct-hstack gap="2" align="center" wrap>
+                                    <cf-hstack gap="2" align="center" wrap>
                                       <span
                                         style={`font-weight: 700; font-size: 1rem; color: ${
                                           spotActive2
@@ -1885,7 +1885,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       >
                                         #{spotNum2}
                                       </span>
-                                      <ct-vstack gap="0">
+                                      <cf-vstack gap="0">
                                         <span
                                           style={`font-size: 0.875rem; color: ${
                                             spotActive2
@@ -1906,7 +1906,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             </span>
                                           )
                                           : null}
-                                      </ct-vstack>
+                                      </cf-vstack>
                                       {!spotActive2
                                         ? (
                                           <span style="font-size: 0.6875rem; background-color: #f3f4f6; color: #6b7280; padding: 1px 6px; border-radius: 9999px;">
@@ -1914,8 +1914,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           </span>
                                         )
                                         : null}
-                                    </ct-hstack>
-                                    <ct-hstack gap="1">
+                                    </cf-hstack>
+                                    <cf-hstack gap="1">
                                       <ct-button
                                         variant="ghost"
                                         size="sm"
@@ -1936,18 +1936,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       >
                                         Remove
                                       </ct-button>
-                                    </ct-hstack>
-                                  </ct-hstack>
+                                    </cf-hstack>
+                                  </cf-hstack>
                                   {isRemoveSpotConfirm
                                     ? (
-                                      <ct-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
-                                        <ct-vstack gap="1">
+                                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
+                                        <cf-vstack gap="1">
                                           <span style="font-size: 0.75rem; color: var(--ct-color-red-700);">
                                             Spot #{spotNum2}{" "}
                                             has upcoming allocations. They will
                                             be preserved. Remove anyway?
                                           </span>
-                                          <ct-hstack gap="2">
+                                          <cf-hstack gap="2">
                                             <ct-button
                                               variant="primary"
                                               size="sm"
@@ -1966,24 +1966,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             >
                                               Cancel
                                             </ct-button>
-                                          </ct-hstack>
-                                        </ct-vstack>
-                                      </ct-card>
+                                          </cf-hstack>
+                                        </cf-vstack>
+                                      </cf-card>
                                     )
                                     : null}
                                 </>
                               )}
-                          </ct-card>
+                          </cf-card>
                         );
                       })}
 
                       {addSpotFormOpen
                         ? (
-                          <ct-card style="border: 2px dashed var(--ct-color-gray-200);">
-                            <ct-vstack gap="2">
-                              <ct-heading level={6}>Add Spot</ct-heading>
-                              <ct-hstack gap="2" wrap>
-                                <ct-vstack gap="1" style="min-width: 60px;">
+                          <cf-card style="border: 2px dashed var(--ct-color-gray-200);">
+                            <cf-vstack gap="2">
+                              <cf-heading level={6}>Add Spot</cf-heading>
+                              <cf-hstack gap="2" wrap>
+                                <cf-vstack gap="1" style="min-width: 60px;">
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Number *
                                   </span>
@@ -1992,8 +1992,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     placeholder="e.g. 12"
                                     style="width: 4rem;"
                                   />
-                                </ct-vstack>
-                                <ct-vstack gap="1" style="flex: 1;">
+                                </cf-vstack>
+                                <cf-vstack gap="1" style="flex: 1;">
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Label
                                   </span>
@@ -2002,9 +2002,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     placeholder="e.g. Near entrance"
                                     style="width: 100%;"
                                   />
-                                </ct-vstack>
-                              </ct-hstack>
-                              <ct-vstack gap="1">
+                                </cf-vstack>
+                              </cf-hstack>
+                              <cf-vstack gap="1">
                                 <span style="font-size: 0.75rem; font-weight: 500;">
                                   Notes
                                 </span>
@@ -2013,7 +2013,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   placeholder="e.g. Compact only"
                                   style="width: 100%;"
                                 />
-                              </ct-vstack>
+                              </cf-vstack>
                               {computed(() => {
                                 const err = addSpotError.get();
                                 if (!err) return null;
@@ -2023,7 +2023,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   </span>
                                 );
                               })}
-                              <ct-hstack gap="2">
+                              <cf-hstack gap="2">
                                 <ct-button
                                   variant="primary"
                                   size="sm"
@@ -2039,18 +2039,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 >
                                   Cancel
                                 </ct-button>
-                              </ct-hstack>
-                            </ct-vstack>
-                          </ct-card>
+                              </cf-hstack>
+                            </cf-vstack>
+                          </cf-card>
                         )
                         : null}
-                    </ct-vstack>
+                    </cf-vstack>
                   </>
                 )
                 : null}
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
 
       // Exposed state (Writables auto-unwrap to their T type)

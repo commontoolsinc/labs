@@ -159,11 +159,11 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   return {
     [NAME]: computed(() => `Reading List (${asArray(items.get()).length})`),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>Reading List ({totalCount})</ct-heading>
-          </ct-hstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Reading List ({totalCount})</cf-heading>
+          </cf-hstack>
 
           <ct-tabs $value={filterStatus}>
             <ct-tab-list>
@@ -174,20 +174,20 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
               <ct-tab value="abandoned">Dropped</ct-tab>
             </ct-tab-list>
           </ct-tabs>
-        </ct-vstack>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem;">
             {computed(() => {
               return filteredItems.filter((item) => item).map((
                 item: ReadingItemPiece,
               ) => (
-                <ct-card>
-                  <ct-hstack gap="2" align="center">
+                <cf-card>
+                  <cf-hstack gap="2" align="center">
                     <span style="font-size: 1.5rem;">
                       {getTypeEmoji(item.type)}
                     </span>
-                    <ct-vstack gap="0" style="flex: 1;">
+                    <cf-vstack gap="0" style="flex: 1;">
                       <span style="font-weight: 500;">
                         {item.title || "(untitled)"}
                       </span>
@@ -196,7 +196,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                           by {item.author}
                         </span>
                       )}
-                      <ct-hstack gap="2" align="center">
+                      <cf-hstack gap="2" align="center">
                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
                           {item.status}
                         </span>
@@ -205,13 +205,13 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                             {renderStars(item.rating)}
                           </span>
                         )}
-                      </ct-hstack>
+                      </cf-hstack>
                       {item.notes && (
                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                           {item.notes}
                         </span>
                       )}
-                    </ct-vstack>
+                    </cf-vstack>
                     <ct-button
                       variant="secondary"
                       onClick={() => navigateTo(item)}
@@ -224,8 +224,8 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                     >
                       ×
                     </ct-button>
-                  </ct-hstack>
-                </ct-card>
+                  </cf-hstack>
+                </cf-card>
               ));
             })}
 
@@ -236,11 +236,11 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                 </div>
               )
               : null}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
-        <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-hstack gap="2">
+        <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+          <cf-hstack gap="2">
             <ct-input
               $value={newTitle}
               placeholder="Title..."
@@ -272,9 +272,9 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
             >
               Add
             </ct-button>
-          </ct-hstack>
-        </ct-vstack>
-      </ct-screen>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-screen>
     ),
     items,
     mentionable: items,

@@ -54,10 +54,10 @@ export const StatusModule = pattern<StatusModuleInput, StatusModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Status: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "8px" }}>
+        <cf-vstack style={{ gap: "8px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Status</label>
           <ct-select $value={status} items={STATUS_OPTIONS} />
-        </ct-vstack>
+        </cf-vstack>
       ),
       status,
     };

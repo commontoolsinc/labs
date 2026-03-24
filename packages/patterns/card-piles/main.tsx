@@ -167,7 +167,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
   return {
     [NAME]: "Card Piles",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div style={{ padding: "1rem" }}>
           <ct-button onClick={shuffle}>Shuffle</ct-button>
         </div>
@@ -296,7 +296,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
             </div>
           </ct-drop-zone>
         </div>
-      </ct-screen>
+      </cf-screen>
     ),
     pile1,
     pile2,

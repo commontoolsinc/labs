@@ -35,10 +35,10 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <ct-vstack gap="2" style="padding: 2rem; max-width: 600px;">
+        <cf-vstack gap="2" style="padding: 2rem; max-width: 600px;">
           <h3>ct-checkbox Bidirectional Binding Demo</h3>
 
-          <ct-card>
+          <cf-card>
             <h4>Simple Bidirectional Binding (Preferred)</h4>
             <p>
               Using $checked alone - no handler needed! The cell automatically
@@ -55,9 +55,9 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
                 "⚠ Feature is disabled",
               )}
             </p>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>With Handler for Additional Logic</h4>
             <p>
               Use a handler when you need to run additional code (logging,
@@ -76,17 +76,17 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
             <p>
               <small>(Check console for logging)</small>
             </p>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <h4>Key Takeaway</h4>
             <p>
               <strong>$checked automatically updates the Writable</strong>{" "}
               - you don't need a handler unless you want to add extra logic
               beyond just updating the value.
             </p>
-          </ct-card>
-        </ct-vstack>
+          </cf-card>
+        </cf-vstack>
       ),
       simpleEnabled,
       trackedEnabled,

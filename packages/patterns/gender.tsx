@@ -130,10 +130,10 @@ export const GenderModule = pattern<GenderModuleInput, GenderModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Gender: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "8px" }}>
+        <cf-vstack style={{ gap: "8px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Gender</label>
           <ct-select $value={gender} items={GENDER_OPTIONS} />
-        </ct-vstack>
+        </cf-vstack>
       ),
       gender,
       setGender: setGender({ gender }),

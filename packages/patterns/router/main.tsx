@@ -115,12 +115,12 @@ export default pattern<MainInput, MainOutput>(() => {
   return {
     [NAME]: "Main",
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div>Current path: {path}</div>
         <main>
           {Pattern}
         </main>
-      </ct-screen>
+      </cf-screen>
     ),
   };
 });

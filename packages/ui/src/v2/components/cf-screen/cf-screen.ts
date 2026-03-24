@@ -2,22 +2,22 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTScreen - Full height screen layout component with header/main/footer slots
+ * CFScreen - Full height screen layout component with header/main/footer slots
  *
- * @element ct-screen
+ * @element cf-screen
  *
  * @slot header - Fixed header content at the top
  * @slot main - Main content that expands to fill available space (default slot)
  * @slot footer - Fixed footer content at the bottom
  *
  * @example
- * <ct-screen>
+ * <cf-screen>
  *   <h1 slot="header">Title</h1>
  *   <div slot="main">Expandable content</div>
  *   <div slot="footer">Footer</div>
- * </ct-screen>
+ * </cf-screen>
  */
-export class CTScreen extends BaseElement {
+export class CFScreen extends BaseElement {
   static override styles = css`
     :host {
       display: flex;
@@ -58,4 +58,4 @@ export class CTScreen extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-screen", CTScreen);
+globalThis.customElements.define("cf-screen", CFScreen);

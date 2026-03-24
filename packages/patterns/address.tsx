@@ -65,8 +65,8 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
             <ct-autocomplete
               $value={label}
@@ -75,11 +75,11 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
               allowCustom
               style={{ width: "100%" }}
             />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Street</label>
             <ct-input $value={street} placeholder="123 Main St" />
-          </ct-vstack>
+          </cf-vstack>
           <div
             style={{
               display: "grid",
@@ -87,22 +87,22 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
               gap: "8px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>City</label>
               <ct-input $value={city} placeholder="City" />
-            </ct-vstack>
-            <ct-vstack style={{ gap: "4px" }}>
+            </cf-vstack>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 State
               </label>
               <ct-input $value={state} placeholder="CA" />
-            </ct-vstack>
-            <ct-vstack style={{ gap: "4px" }}>
+            </cf-vstack>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>ZIP</label>
               <ct-input $value={zip} placeholder="12345" />
-            </ct-vstack>
+            </cf-vstack>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       label,
       street,

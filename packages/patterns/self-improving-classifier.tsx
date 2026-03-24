@@ -2063,9 +2063,9 @@ Each suggestion should have:
     return {
       [NAME]: displayName,
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="2">
-            <ct-heading level={4}>{displayName}</ct-heading>
+        <cf-screen>
+          <cf-vstack slot="header" gap="2">
+            <cf-heading level={4}>{displayName}</cf-heading>
             <ct-input
               value={computed(() => config.get()?.question ?? "")}
               placeholder="Enter your classification question (e.g., 'Is this email a bill?')"
@@ -2075,48 +2075,48 @@ Each suggestion should have:
                 config.set({ ...current, question: q });
               }}
             />
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="3" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="3" style="padding: 1rem;">
               {/* Stats Section */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Statistics</ct-heading>
-                  <ct-hstack gap="4" justify="around">
-                    <ct-vstack gap="0" align="center">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Statistics</cf-heading>
+                  <cf-hstack gap="4" justify="around">
+                    <cf-vstack gap="0" align="center">
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.totalExamples}
                       </span>
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                         Examples
                       </span>
-                    </ct-vstack>
-                    <ct-vstack gap="0" align="center">
+                    </cf-vstack>
+                    <cf-vstack gap="0" align="center">
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.positiveExamples}
                       </span>
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                         YES
                       </span>
-                    </ct-vstack>
-                    <ct-vstack gap="0" align="center">
+                    </cf-vstack>
+                    <cf-vstack gap="0" align="center">
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.negativeExamples}
                       </span>
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                         NO
                       </span>
-                    </ct-vstack>
-                    <ct-vstack gap="0" align="center">
+                    </cf-vstack>
+                    <cf-vstack gap="0" align="center">
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.totalRules}
                       </span>
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                         Rules
                       </span>
-                    </ct-vstack>
-                  </ct-hstack>
+                    </cf-vstack>
+                  </cf-hstack>
                   {ifElse(
                     computed(() => stats.autoClassified > 0),
                     <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); text-align: center;">
@@ -2125,15 +2125,15 @@ Each suggestion should have:
                     </span>,
                     null,
                   )}
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
 
               {/* Submit New Item */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>
                     Submit Item for Classification
-                  </ct-heading>
+                  </cf-heading>
 
                   {/* Current fields - show empty message or field list */}
                   {ifElse(
@@ -2144,10 +2144,10 @@ Each suggestion should have:
                     <span style="color: var(--ct-color-gray-400); font-size: 0.875rem;">
                       No fields added yet
                     </span>,
-                    <ct-vstack gap="1">
+                    <cf-vstack gap="1">
                       {newItemFieldEntries.map(
                         (entry: { key: string; value: string }) => (
-                          <ct-hstack gap="2" align="center">
+                          <cf-hstack gap="2" align="center">
                             <span style="font-weight: 500; min-width: 80px;">
                               {getFieldKey(entry)}:
                             </span>
@@ -2171,14 +2171,14 @@ Each suggestion should have:
                             >
                               x
                             </ct-button>
-                          </ct-hstack>
+                          </cf-hstack>
                         ),
                       )}
-                    </ct-vstack>,
+                    </cf-vstack>,
                   )}
 
                   {/* Add field */}
-                  <ct-hstack gap="2">
+                  <cf-hstack gap="2">
                     <ct-input
                       $value={newFieldKey}
                       placeholder="Field name"
@@ -2192,7 +2192,7 @@ Each suggestion should have:
                     <ct-button variant="secondary" onClick={addFieldToNewItem}>
                       Add
                     </ct-button>
-                  </ct-hstack>
+                  </cf-hstack>
 
                   <ct-button
                     variant="primary"
@@ -2207,14 +2207,14 @@ Each suggestion should have:
                   >
                     Classify
                   </ct-button>
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
 
               {/* Currently classifying - show loader or result */}
               {ifElse(
                 computed(() => currentItem.get() !== null),
-                <ct-card style="border-left: 4px solid var(--ct-color-info-500);">
-                  <ct-vstack gap="2">
+                <cf-card style="border-left: 4px solid var(--ct-color-info-500);">
+                  <cf-vstack gap="2">
                     {/* Show item being classified */}
                     <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
                       {computed(() => {
@@ -2231,8 +2231,8 @@ Each suggestion should have:
                     {ifElse(
                       hasClassificationResult,
                       // Result is ready - show classification with action buttons
-                      <ct-vstack gap="2">
-                        <ct-hstack gap="2" align="center">
+                      <cf-vstack gap="2">
+                        <cf-hstack gap="2" align="center">
                           <span
                             style={{
                               fontWeight: "600",
@@ -2266,7 +2266,7 @@ Each suggestion should have:
                                 .decidedBy ?? ""
                             )})
                           </span>
-                        </ct-hstack>
+                        </cf-hstack>
 
                         <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
                           {computed(() =>
@@ -2275,7 +2275,7 @@ Each suggestion should have:
                           )}
                         </span>
 
-                        <ct-hstack gap="2">
+                        <cf-hstack gap="2">
                           <ct-button
                             variant="primary"
                             onClick={acceptCurrentClassification}
@@ -2301,30 +2301,30 @@ Each suggestion should have:
                           >
                             Dismiss
                           </ct-button>
-                        </ct-hstack>
-                      </ct-vstack>,
+                        </cf-hstack>
+                      </cf-vstack>,
                       // Still loading
-                      <ct-hstack gap="2" align="center">
+                      <cf-hstack gap="2" align="center">
                         <ct-loader size="sm" />
                         <span style="font-weight: 500;">Classifying...</span>
-                      </ct-hstack>,
+                      </cf-hstack>,
                     )}
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Undone Auto-Classification - Manual Review */}
               {ifElse(
                 computed(() => undoneAutoItem.get() !== null),
-                <ct-card style="border-left: 4px solid var(--ct-color-warning-500);">
-                  <ct-vstack gap="2">
-                    <ct-hstack gap="2" align="center">
-                      <ct-heading level={5}>Manual Review</ct-heading>
+                <cf-card style="border-left: 4px solid var(--ct-color-warning-500);">
+                  <cf-vstack gap="2">
+                    <cf-hstack gap="2" align="center">
+                      <cf-heading level={5}>Manual Review</cf-heading>
                       <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
                         (undone auto-classification)
                       </span>
-                    </ct-hstack>
+                    </cf-hstack>
 
                     {/* Show item fields */}
                     <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
@@ -2337,7 +2337,7 @@ Each suggestion should have:
                     </pre>
 
                     {/* Show the original rules-based classification */}
-                    <ct-hstack gap="2" align="center">
+                    <cf-hstack gap="2" align="center">
                       <span
                         style={{
                           fontWeight: "600",
@@ -2364,13 +2364,13 @@ Each suggestion should have:
                         )}% confidence via rules - Tier{" "}
                         {computed(() => undoneAutoItem.get()?.tier ?? 0)})
                       </span>
-                    </ct-hstack>
+                    </cf-hstack>
 
                     <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
                       {computed(() => undoneAutoItem.get()?.reasoning ?? "")}
                     </span>
 
-                    <ct-hstack gap="2">
+                    <cf-hstack gap="2">
                       <ct-button
                         variant="primary"
                         onClick={acceptUndoneClassification}
@@ -2390,28 +2390,28 @@ Each suggestion should have:
                       <ct-button variant="ghost" onClick={dismissUndoneItem}>
                         Dismiss
                       </ct-button>
-                    </ct-hstack>
-                  </ct-vstack>
-                </ct-card>,
+                    </cf-hstack>
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Pending Classifications */}
               {ifElse(
                 computed(() => pendingClassifications.get().length > 0),
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={5}>Awaiting Confirmation</ct-heading>
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Awaiting Confirmation</cf-heading>
                     {pendingClassifications.map((pending) => (
-                      <ct-card style="background: var(--ct-color-gray-50);">
-                        <ct-vstack gap="2">
+                      <cf-card style="background: var(--ct-color-gray-50);">
+                        <cf-vstack gap="2">
                           <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0;">
                             {computed(() =>
                               JSON.stringify(pending.input.fields, null, 2)
                             )}
                           </pre>
 
-                          <ct-hstack gap="2" align="center">
+                          <cf-hstack gap="2" align="center">
                             <span
                               style={{
                                 fontWeight: "600",
@@ -2434,13 +2434,13 @@ Each suggestion should have:
                               )}% confidence via{" "}
                               {pending.result.decidedBy ?? "unknown"})
                             </span>
-                          </ct-hstack>
+                          </cf-hstack>
 
                           <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
                             {pending.result.reasoning ?? ""}
                           </span>
 
-                          <ct-hstack gap="2">
+                          <cf-hstack gap="2">
                             <ct-button
                               variant="primary"
                               onClick={confirmPendingClassification({
@@ -2474,23 +2474,23 @@ Each suggestion should have:
                             >
                               Dismiss
                             </ct-button>
-                          </ct-hstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-hstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Rules Section */}
               {ifElse(
                 computed(() => rules.get().length > 0),
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={5}>Classification Rules</ct-heading>
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Classification Rules</cf-heading>
                     {rules.map((rule) => (
-                      <ct-hstack
+                      <cf-hstack
                         gap="2"
                         align="center"
                         style="padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 4px;"
@@ -2511,7 +2511,7 @@ Each suggestion should have:
                         >
                           T{rule.tier}
                         </span>
-                        <ct-vstack gap="0" style="flex: 1;">
+                        <cf-vstack gap="0" style="flex: 1;">
                           <span style="font-weight: 500;">{rule.name}</span>
                           <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                             {rule.targetField}: /{rule.pattern}/{ifElse(
@@ -2529,35 +2529,35 @@ Each suggestion should have:
                               getTierLabel(rule.tier)
                             )}
                           </span>
-                        </ct-vstack>
+                        </cf-vstack>
                         <ct-button
                           variant="ghost"
                           onClick={removeRuleHandler({ rule, rules })}
                         >
                           x
                         </ct-button>
-                      </ct-hstack>
+                      </cf-hstack>
                     ))}
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Suggested Rules */}
               {ifElse(
                 computed(() => visibleSuggestions.length > 0),
-                <ct-card style="border-left: 4px solid var(--ct-color-success-500);">
-                  <ct-vstack gap="2">
-                    <ct-hstack gap="2" align="center" justify="between">
-                      <ct-heading level={5}>Suggested Rules</ct-heading>
+                <cf-card style="border-left: 4px solid var(--ct-color-success-500);">
+                  <cf-vstack gap="2">
+                    <cf-hstack gap="2" align="center" justify="between">
+                      <cf-heading level={5}>Suggested Rules</cf-heading>
                       <ct-button variant="ghost" onClick={refreshSuggestions}>
                         Refresh
                       </ct-button>
-                    </ct-hstack>
+                    </cf-hstack>
                     {visibleSuggestions.map(({ suggestion, originalIndex }) => (
-                      <ct-card style="background: var(--ct-color-success-50);">
-                        <ct-vstack gap="2">
-                          <ct-vstack gap="0">
+                      <cf-card style="background: var(--ct-color-success-50);">
+                        <cf-vstack gap="2">
+                          <cf-vstack gap="0">
                             <span style="font-weight: 500;">
                               {suggestion.name}
                             </span>
@@ -2566,11 +2566,11 @@ Each suggestion should have:
                               {" "}
                               {suggestion.predicts ? "YES" : "NO"}
                             </span>
-                          </ct-vstack>
+                          </cf-vstack>
                           <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
                             {suggestion.reasoning}
                           </span>
-                          <ct-hstack gap="2">
+                          <cf-hstack gap="2">
                             <ct-button
                               variant="primary"
                               onClick={acceptSuggestionHandler({
@@ -2591,28 +2591,28 @@ Each suggestion should have:
                             >
                               Reject
                             </ct-button>
-                          </ct-hstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-hstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Auto-Classified Items (with Undo) */}
               {ifElse(
                 computed(() => recentAutoClassified.get().length > 0),
-                <ct-card style="margin-bottom: 1rem; border-left: 4px solid var(--ct-color-warning-500);">
-                  <ct-vstack gap="2">
-                    <ct-hstack align="center" gap="2">
+                <cf-card style="margin-bottom: 1rem; border-left: 4px solid var(--ct-color-warning-500);">
+                  <cf-vstack gap="2">
+                    <cf-hstack align="center" gap="2">
                       <h5 style="margin: 0;">Auto-Classified</h5>
                       <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
                         (click Undo to review manually)
                       </span>
-                    </ct-hstack>
+                    </cf-hstack>
                     {recentAutoClassified.map((autoItem) => (
-                      <ct-hstack
+                      <cf-hstack
                         gap="2"
                         align="center"
                         style={{
@@ -2670,10 +2670,10 @@ Each suggestion should have:
                         >
                           Undo
                         </ct-button>
-                      </ct-hstack>
+                      </cf-hstack>
                     ))}
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
@@ -2684,11 +2684,11 @@ Each suggestion should have:
                   <summary style="cursor: pointer; padding: 0.5rem; color: var(--ct-color-gray-600);">
                     Recent Examples ({computed(() => examples.get().length)})
                   </summary>
-                  <ct-vstack gap="1" style="margin-top: 0.5rem;">
+                  <cf-vstack gap="1" style="margin-top: 0.5rem;">
                     {examples.map((example) => (
-                      <ct-vstack gap="0">
+                      <cf-vstack gap="0">
                         {/* Clickable example row */}
-                        <ct-hstack
+                        <cf-hstack
                           gap="2"
                           align="center"
                           onClick={toggleExampleSelectionHandler({
@@ -2751,14 +2751,14 @@ Each suggestion should have:
                               "[+]",
                             )}
                           </span>
-                        </ct-hstack>
+                        </cf-hstack>
 
                         {/* Expanded details panel */}
                         {ifElse(
                           computed(() =>
                             selectedExampleId.get() === example.input.id
                           ),
-                          <ct-card
+                          <cf-card
                             style={{
                               marginTop: "0",
                               borderRadius: "0 0 4px 4px",
@@ -2766,9 +2766,9 @@ Each suggestion should have:
                               background: "var(--ct-color-gray-25)",
                             }}
                           >
-                            <ct-vstack gap="2">
+                            <cf-vstack gap="2">
                               {/* All input fields */}
-                              <ct-vstack gap="1">
+                              <cf-vstack gap="1">
                                 <span style="font-weight: 600; font-size: 0.75rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                   Input Fields
                                 </span>
@@ -2781,11 +2781,11 @@ Each suggestion should have:
                                     )
                                   )}
                                 </pre>
-                              </ct-vstack>
+                              </cf-vstack>
 
                               {/* Classification details */}
-                              <ct-hstack gap="4" wrap>
-                                <ct-vstack gap="0">
+                              <cf-hstack gap="4" wrap>
+                                <cf-vstack gap="0">
                                   <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                     Label
                                   </span>
@@ -2801,8 +2801,8 @@ Each suggestion should have:
                                   >
                                     {ifElse(example.label, "YES", "NO")}
                                   </span>
-                                </ct-vstack>
-                                <ct-vstack gap="0">
+                                </cf-vstack>
+                                <cf-vstack gap="0">
                                   <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                     Confidence
                                   </span>
@@ -2811,16 +2811,16 @@ Each suggestion should have:
                                       (example.confidence * 100).toFixed(0)
                                     )}%
                                   </span>
-                                </ct-vstack>
-                                <ct-vstack gap="0">
+                                </cf-vstack>
+                                <cf-vstack gap="0">
                                   <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                     Decided By
                                   </span>
                                   <span style="font-size: 0.875rem;">
                                     {getExampleDecidedBy(example)}
                                   </span>
-                                </ct-vstack>
-                                <ct-vstack gap="0">
+                                </cf-vstack>
+                                <cf-vstack gap="0">
                                   <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                     Timestamp
                                   </span>
@@ -2831,27 +2831,27 @@ Each suggestion should have:
                                       ).toLocaleString()
                                     )}
                                   </span>
-                                </ct-vstack>
-                              </ct-hstack>
+                                </cf-vstack>
+                              </cf-hstack>
 
                               {/* Reasoning */}
                               {ifElse(
                                 computed(() => !!example.reasoning),
-                                <ct-vstack gap="1">
+                                <cf-vstack gap="1">
                                   <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
                                     Reasoning
                                   </span>
                                   <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
                                     {example.reasoning}
                                   </span>
-                                </ct-vstack>,
+                                </cf-vstack>,
                                 null,
                               )}
 
                               {/* Correction info */}
                               {ifElse(
                                 example.wasCorrection,
-                                <ct-hstack
+                                <cf-hstack
                                   gap="1"
                                   align="center"
                                   style="font-size: 0.75rem; color: var(--ct-color-warning-600); padding: 0.25rem 0.5rem; background: var(--ct-color-warning-50); border-radius: 4px;"
@@ -2866,12 +2866,12 @@ Each suggestion should have:
                                       "NO",
                                     )}
                                   </span>
-                                </ct-hstack>,
+                                </cf-hstack>,
                                 null,
                               )}
 
                               {/* Action buttons */}
-                              <ct-hstack gap="2" style="margin-top: 0.5rem;">
+                              <cf-hstack gap="2" style="margin-top: 0.5rem;">
                                 <ct-button
                                   variant="secondary"
                                   size="sm"
@@ -2898,20 +2898,20 @@ Each suggestion should have:
                                 >
                                   Remove
                                 </ct-button>
-                              </ct-hstack>
-                            </ct-vstack>
-                          </ct-card>,
+                              </cf-hstack>
+                            </cf-vstack>
+                          </cf-card>,
                           null,
                         )}
-                      </ct-vstack>
+                      </cf-vstack>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>,
                 null,
               )}
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
       config,
       examples,

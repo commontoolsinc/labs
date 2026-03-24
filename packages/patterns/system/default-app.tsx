@@ -175,7 +175,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <ct-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
@@ -229,7 +229,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             />
 
             {/* Dropdown Menu */}
-            <ct-vstack
+            <cf-vstack
               gap="0"
               style={{
                 display: computed(() => (menuOpen.get() ? "flex" : "none")),
@@ -266,19 +266,19 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   margin: "4px 8px",
                 }}
               />
-            </ct-vstack>
+            </cf-vstack>
           </div>
         </ct-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="6" padding="6">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack gap="6" padding="6">
             {ifElse(
               computed(() => recentPieces.get().length > 0),
-              <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
-                <ct-hstack gap="2" align="center">
+              <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
+                <cf-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
                   <ct-cell-link $cell={recentGridView} />
-                </ct-hstack>
+                </cf-hstack>
                 <ct-table full-width hover>
                   <tbody>
                     {recentPieces.map((piece: any) => (
@@ -292,15 +292,15 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     ))}
                   </tbody>
                 </ct-table>
-              </ct-vstack>,
+              </cf-vstack>,
               undefined,
             )}
 
-            <ct-vstack gap="4">
-              <ct-hstack gap="2" align="center">
+            <cf-vstack gap="4">
+              <cf-hstack gap="2" align="center">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
                 <ct-cell-link $cell={gridView} />
-              </ct-hstack>
+              </cf-hstack>
 
               <ct-table full-width hover>
                 <tbody>
@@ -350,10 +350,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   })}
                 </tbody>
               </ct-table>
-            </ct-vstack>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+            </cf-vstack>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     sidebarUI: undefined,
     // Exported data

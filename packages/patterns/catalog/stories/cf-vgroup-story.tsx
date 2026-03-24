@@ -15,7 +15,7 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
   const gap = Writable.of<"sm" | "md" | "lg">("md");
 
   return {
-    [NAME]: "ct-vgroup Story",
+    [NAME]: "cf-vgroup Story",
     [UI]: (
       <div
         style={{
@@ -36,17 +36,17 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
           >
             Interactive
           </div>
-          <ct-vgroup gap={gap}>
-            <ct-card>
+          <cf-vgroup gap={gap}>
+            <cf-card>
               <span>First card in group</span>
-            </ct-card>
-            <ct-card>
+            </cf-card>
+            <cf-card>
               <span>Second card in group</span>
-            </ct-card>
-            <ct-card>
+            </cf-card>
+            <cf-card>
               <span>Third card in group</span>
-            </ct-card>
-          </ct-vgroup>
+            </cf-card>
+          </cf-vgroup>
         </div>
 
         <div>
@@ -60,56 +60,56 @@ export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
           >
             Gap Sizes
           </div>
-          <ct-hstack gap="4">
-            <ct-vstack gap="1" style="flex: 1;">
+          <cf-hstack gap="4">
+            <cf-vstack gap="1" style="flex: 1;">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=sm
               </span>
-              <ct-vgroup gap="sm">
-                <ct-card>
+              <cf-vgroup gap="sm">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-vgroup>
-            </ct-vstack>
-            <ct-vstack gap="1" style="flex: 1;">
+                </cf-card>
+              </cf-vgroup>
+            </cf-vstack>
+            <cf-vstack gap="1" style="flex: 1;">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=md
               </span>
-              <ct-vgroup gap="md">
-                <ct-card>
+              <cf-vgroup gap="md">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-vgroup>
-            </ct-vstack>
-            <ct-vstack gap="1" style="flex: 1;">
+                </cf-card>
+              </cf-vgroup>
+            </cf-vstack>
+            <cf-vstack gap="1" style="flex: 1;">
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 gap=lg
               </span>
-              <ct-vgroup gap="lg">
-                <ct-card>
+              <cf-vgroup gap="lg">
+                <cf-card>
                   <span>A</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>B</span>
-                </ct-card>
-                <ct-card>
+                </cf-card>
+                <cf-card>
                   <span>C</span>
-                </ct-card>
-              </ct-vgroup>
-            </ct-vstack>
-          </ct-hstack>
+                </cf-card>
+              </cf-vgroup>
+            </cf-vstack>
+          </cf-hstack>
         </div>
       </div>
     ),

@@ -101,18 +101,18 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   return {
     [NAME]: "Calendar",
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>Calendar ({eventCount})</ct-heading>
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Calendar ({eventCount})</cf-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {todayDate}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
             {computed(() => {
               const sorted = sortedEvents;
               if (sorted.length === 0) {
@@ -133,7 +133,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                   const dateIsToday = isToday(date);
                   const dateIsPast = isPast(date);
                   items.push(
-                    <ct-hstack gap="2" align="center">
+                    <cf-hstack gap="2" align="center">
                       <span
                         style={{
                           fontWeight: "600",
@@ -154,19 +154,19 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                           </span>
                         )
                         : null}
-                    </ct-hstack>,
+                    </cf-hstack>,
                   );
                 }
 
                 items.push(
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
+                  <cf-card>
+                    <cf-hstack gap="2" align="center">
                       {event.time && (
                         <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); min-width: 50px;">
                           {event.time}
                         </span>
                       )}
-                      <ct-vstack gap="0" style="flex: 1;">
+                      <cf-vstack gap="0" style="flex: 1;">
                         <span style="font-weight: 500;">
                           {event.title || "(untitled)"}
                         </span>
@@ -175,7 +175,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                             {event.notes}
                           </span>
                         )}
-                      </ct-vstack>
+                      </cf-vstack>
                       <ct-button
                         variant="secondary"
                         onClick={() => navigateTo(event)}
@@ -188,18 +188,18 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                       >
                         ×
                       </ct-button>
-                    </ct-hstack>
-                  </ct-card>,
+                    </cf-hstack>
+                  </cf-card>,
                 );
 
                 return items;
               });
             })}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
-        <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-hstack gap="2">
+        <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+          <cf-hstack gap="2">
             <ct-input
               $value={newTitle}
               placeholder="Event title..."
@@ -218,9 +218,9 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
             >
               Add
             </ct-button>
-          </ct-hstack>
-        </ct-vstack>
-      </ct-screen>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-screen>
     ),
     events,
     sortedEvents,

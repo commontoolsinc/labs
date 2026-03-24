@@ -78,21 +78,21 @@ Register keyboard shortcuts with a handler. These registrations are mediated by 
 
 Layout components do not provide any content themselves, they are used to arrange other components. We draw quite directly from the [Swift UI Layout Fundamentals](https://developer.apple.com/documentation/swiftui/layout-fundamentals).
 
-## ct-screen
+## cf-screen
 
 Designed to represent content that could fill the entire screen or a panel / content area. This will expand to fill the available space. It offers two optional slots: `header` and `footer`.
 
 When to use: your `<main>` or `<div>` is not growing to full the available space. Typically appears _once_ at the root of a pattern's `[UI]` tree:
 
-```{figure} ./images/diagrams/ct-screen.svg
+```{figure} ./images/diagrams/cf-screen.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<ct-screen>
-  <ct-heading slot="header">
+<cf-screen>
+  <cf-heading slot="header">
     Hello
-  </ct-heading>
+  </cf-heading>
 
   <div>...</div>
   <div>...</div>
@@ -100,88 +100,88 @@ When to use: your `<main>` or `<div>` is not growing to full the available space
   <div slot="footer">
     World
   </div>
-</ct-screen>
+</cf-screen>
 ```
 
 Inspired by this [Swift UI convention](https://scottsmithdev.com/screen-vs-view-in-swiftui). A `Screen` is just a `View` but it represents the kind of view that MIGHT fill a screen on some device.
 
 ## ct-toolbar
 
-Stack several actions into a horizontal bar, typically at the top of `<ct-screen>`.
+Stack several actions into a horizontal bar, typically at the top of `<cf-screen>`.
 
 ```{figure} ./images/diagrams/ct-toolbar.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<ct-screen>
+<cf-screen>
   <ct-toolbar slot="header">
       <ct-button>A</ct-button>
       <ct-button>B</ct-button>
   </ct-toolbar>
-</ct-screen>
+</cf-screen>
 ```
 
 ## Stacks are all you need
 
 ... almost. Just the [horizontal and vertical stacks](https://developer.apple.com/tutorials/swiftui-concepts/organizing-and-aligning-content-with-stacks) if you control the [spacing and alignment](https://developer.apple.com/tutorials/swiftui-concepts/adjusting-the-space-between-views).
 
-## ct-vstack
+## cf-vstack
 
 Stack items vertically, this is a layer over the [CSS flexbox API](https://flexbox.malven.co/). You can permuate `gap`, `align`, `justify` and `reverse` attributes to control the behavior.
 
 When to use: any time you need to stack items vertically.
 
-```{figure} ./images/diagrams/ct-vstack-1.svg
+```{figure} ./images/diagrams/cf-vstack-1.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<ct-vstack gap="1" align="start" justify="stretch">
+<cf-vstack gap="1" align="start" justify="stretch">
     <div>A</div>
     <div>B</div>
     <div>C</div>
-</ct-vstack>
+</cf-vstack>
 ```
 
-## ct-hstack
+## cf-hstack
 
 Stack items horizontally, this is a layer over the [CSS flexbox API](https://flexbox.malven.co/). You can permuate `gap`, `align`, `justify` and `reverse` attributes to control the behavior.
 
 When to use: toolbars, column layouts, grouping icons and buttons and text together.
 
-```{figure} ./images/diagrams/ct-hstack.svg
+```{figure} ./images/diagrams/cf-hstack.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<ct-hstack gap="1" align="start" justify="stretch">
+<cf-hstack gap="1" align="start" justify="stretch">
     <div>A</div>
     <div>B</div>
     <div>C</div>
-</ct-hstack>
+</cf-hstack>
 ```
 
 ## ct-zstack
 
 Currently missing, would allow similar control for layering items on top of one another. [Swift UI ZStack](https://developer.apple.com/documentation/swiftui/zstack).
 
-## ct-vscroll
+## cf-vscroll
 
 Wrap tall vertical content in a scrollable container with control over autoscroll and scrollbar appearance. Inspired by [SwiftUI ScrollView](https://developer.apple.com/documentation/swiftui/scrollview).
 
 ```{code-block} html
-<ct-vscroll height="400px">
-  <ct-vstack gap="4">
+<cf-vscroll height="400px">
+  <cf-vstack gap="4">
     <p>Long content...</p>
-  </ct-vstack>
-</ct-vscroll>
+  </cf-vstack>
+</cf-vscroll>
 ```
 
 In practice we often use a specific set of properties if dealing with a "chat view" that scrolls:
 
 ```{code-block} html
-<ct-vscroll flex showScrollbar fadeEdges snapToBottom />
+<cf-vscroll flex showScrollbar fadeEdges snapToBottom />
 ```
 
 Here `flex` will force the `vscroll` to expand without a fixed height. `snapToBottom` will automatically scroll to the bottom when new content is added.
@@ -203,7 +203,7 @@ Will attempt to lay out the children provided as best it can. Provides two slots
 ```
 
 ```{code-block} html
-<ct-screen>
+<cf-screen>
   <!-- Header slot - fixed at top -->
   <div slot="header">
     <h2>Header Section</h2>
@@ -246,7 +246,7 @@ Will attempt to lay out the children provided as best it can. Provides two slots
   <div slot="footer">
     <p>Footer Section</p>
   </div>
-</ct-screen>
+</cf-screen>
 ```
 
 ## ct-grid (stale)
@@ -262,45 +262,45 @@ Will attempt to lay out the children provided as best it can. Provides two slots
 You can mix-and-match the above components to achieve practically any (standard) layout.
 
 ```{code-block} html
-<ct-screen>
+<cf-screen>
     <ct-toolbar slot="top">
         <ct-button>hello</ct-button>
     </ct-toolbar>
     <ct-autolayout>
-        <ct-vstack slot="left">
-            <ct-hstack gap="1">
+        <cf-vstack slot="left">
+            <cf-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
                 <ct-spacer />
                 <button>hello</button>
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="1">
+            <cf-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
-            </ct-hstack>
-        </ct-vstack>
+            </cf-hstack>
+        </cf-vstack>
 
-        <ct-screen>
-            <ct-vstack>
+        <cf-screen>
+            <cf-vstack>
                 <ct-grid rows="3" cols="4" gap="2">
                     ...
                 </ct-grid>
-            </ct-vstack>
-        </ct-screen>
+            </cf-vstack>
+        </cf-screen>
 
-        <ct-vscroll slot="right">
+        <cf-vscroll slot="right">
             <ul>
                 <li>Imagine this was long</li>
             </ul>
-        </ct-vscroll>
+        </cf-vscroll>
     </ct-autolayout>
-</ct-screen>
+</cf-screen>
 ```
 
 # Visual Components
 
-- typesetting: `ct-label`, `ct-heading`
+- typesetting: `ct-label`, `cf-heading`
 	- gap: `ct-text` for themed paragraph usecase (`p` works)
 	- <p>, <Text>
 
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `ct-hgroup`, `ct-input-otp`, `ct-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `ct-vgroup`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `ct-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

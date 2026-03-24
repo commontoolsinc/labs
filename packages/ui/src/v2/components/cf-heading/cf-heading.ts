@@ -10,16 +10,16 @@ import {
 } from "../theme-context.ts";
 
 /**
- * CTHeading – Theme-compliant heading that replaces h1–h6.
+ * CFHeading – Theme-compliant heading that replaces h1–h6.
  *
- * @element ct-heading
+ * @element cf-heading
  *
  * @attr {number} level - Heading level (1–6). Default: 3.
  * @attr {boolean} noMargin - Remove default bottom margin.
  *
  * @slot - Heading content
  */
-export class CTHeading extends BaseElement {
+export class CFHeading extends BaseElement {
   static override properties = {
     level: { type: Number, reflect: true },
     noMargin: { type: Boolean, reflect: true, attribute: "no-margin" },
@@ -125,6 +125,6 @@ export class CTHeading extends BaseElement {
   }
 }
 
-if (!customElements.get("ct-heading")) {
-  customElements.define("ct-heading", CTHeading);
+if (!customElements.get("cf-heading")) {
+  customElements.define("cf-heading", CFHeading);
 }

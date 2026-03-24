@@ -345,7 +345,7 @@ export const FolksonomyTags = pattern<
     return {
       [NAME]: displayName,
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "8px 0" }}>
+        <cf-vstack gap="3" style={{ padding: "8px 0" }}>
           {/* Hidden render to force aggregator to execute */}
           <div style={{ display: "none" }}>
             <cf-render $cell={aggregator} />
@@ -373,7 +373,7 @@ export const FolksonomyTags = pattern<
           {/* Current tags */}
           {hasTags(tags)
             ? (
-              <ct-hstack gap="2" wrap>
+              <cf-hstack gap="2" wrap>
                 {tags.map((tag: string, index: number) => (
                   <span
                     key={index}
@@ -411,7 +411,7 @@ export const FolksonomyTags = pattern<
                     </button>
                   </span>
                 ))}
-              </ct-hstack>
+              </cf-hstack>
             )
             : (
               <span style={{ color: "#9ca3af", fontSize: "13px" }}>
@@ -420,7 +420,7 @@ export const FolksonomyTags = pattern<
             )}
 
           {/* Aggregator status indicator */}
-          <ct-hstack
+          <cf-hstack
             gap="1"
             align="center"
             style={{ fontSize: "11px", color: "#9ca3af" }}
@@ -438,8 +438,8 @@ export const FolksonomyTags = pattern<
                 ? "Connected to community aggregator"
                 : "Local mode (favorite folksonomy-aggregator for community)"}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
       ),
       tags,
       addTag: addTagHandler({ tags }),

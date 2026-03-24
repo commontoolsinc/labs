@@ -2694,7 +2694,7 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Emoji: ${displayText}`),
       [UI]: (
-        <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
+        <cf-hstack style={{ gap: "8px", alignItems: "center" }}>
           <div
             style={{
               fontSize: "32px",
@@ -2714,7 +2714,7 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
           <ct-button onClick={clearSelection({ selectedEmoji })}>
             Clear
           </ct-button>
-        </ct-hstack>
+        </cf-hstack>
       ),
       selectedEmoji,
     };

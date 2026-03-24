@@ -2098,8 +2098,8 @@ Use \`ct-*\` custom elements:
 - \`<ct-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
 - \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
 - \`<ct-button onClick={handler}>Label</ct-button>\` — Button
-- \`<ct-card>...</ct-card>\` — Styled card container
-- \`<ct-vstack gap={N}>...</ct-vstack>\` — Vertical stack layout
+- \`<cf-card>...</cf-card>\` — Styled card container
+- \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout
 - \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style

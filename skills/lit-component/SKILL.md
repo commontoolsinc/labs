@@ -409,7 +409,7 @@ Study these components to understand architectural patterns:
 **Basic patterns:**
 
 - **Simple visual:** `ct-separator` - Minimal component, CSS parts, ARIA
-- **Layout:** `ct-vstack` - Flexbox abstraction, utility classes with `classMap`
+- **Layout:** `cf-vstack` - Flexbox abstraction, utility classes with `classMap`
 - **Themed input:** `ct-button` - Theme consumption, event emission, variants
 
 **Advanced patterns:**

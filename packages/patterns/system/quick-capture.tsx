@@ -214,13 +214,13 @@ ${profileSection}`;
     return {
       [NAME]: "Quick Capture",
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <ct-toolbar slot="header" sticky>
             <h2 style={{ margin: 0, fontSize: "18px" }}>Quick Capture</h2>
           </ct-toolbar>
 
-          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <ct-vstack gap="3" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar fadeEdges snapToBottom>
+            <cf-vstack gap="3" style="padding: 1rem;">
               <ct-message-beads
                 label="capture"
                 $messages={messages}
@@ -234,13 +234,13 @@ ${profileSection}`;
                   break them into linked notes.
                 </div>,
               )}
-            </ct-vstack>
-          </ct-vscroll>
+            </cf-vstack>
+          </cf-vscroll>
 
           <div slot="footer" style="padding: 0.5rem 1rem 1rem;">
             {ifElse(
               hasMessages,
-              <ct-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
+              <cf-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
                 <ct-button
                   variant="pill"
                   type="button"
@@ -249,7 +249,7 @@ ${profileSection}`;
                 >
                   Clear
                 </ct-button>
-              </ct-hstack>,
+              </cf-hstack>,
               <span />,
             )}
             <ct-prompt-input
@@ -260,7 +260,7 @@ ${profileSection}`;
               onct-stop={cancelGeneration}
             />
           </div>
-        </ct-screen>
+        </cf-screen>
       ),
       summary,
       capture: captureHandler({ addMessage }),

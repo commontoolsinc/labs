@@ -1272,13 +1272,13 @@ function getAutocompleteItems(): AutocompleteItem[] {
 
 // Empty state for when no restrictions
 const emptyState = (
-  <ct-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
+  <cf-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
     <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
     <span>No dietary restrictions added</span>
     <span style="font-size: 13px;">
       Search for allergies, diets (vegetarian, keto), or intolerances
     </span>
-  </ct-vstack>
+  </cf-vstack>
 );
 
 // ===== Handlers =====
@@ -1484,9 +1484,9 @@ export const DietaryRestrictionsModule = pattern<
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
-      <ct-vstack gap="4">
+      <cf-vstack gap="4">
         {/* Input row */}
-        <ct-hstack gap="2" align="center">
+        <cf-hstack gap="2" align="center">
           <ct-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
@@ -1500,16 +1500,16 @@ export const DietaryRestrictionsModule = pattern<
             items={levelOptions}
             style="width: 120px;"
           />
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Restrictions list - map directly over Cell for reactive $value binding */}
         {ifElse(
           hasRestrictions,
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               Your Restrictions
             </span>
-            <ct-hstack gap="2" wrap>
+            <cf-hstack gap="2" wrap>
               {restrictions.map(
                 // deno-lint-ignore no-explicit-any
                 (item: any, index: number) => {
@@ -1571,22 +1571,22 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </ct-hstack>
-          </ct-vstack>,
+            </cf-hstack>
+          </cf-vstack>,
           emptyState,
         )}
 
         {/* Implied items section */}
         {ifElse(
           hasImpliedItems(impliedItems),
-          <ct-vstack
+          <cf-vstack
             gap="2"
             style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
           >
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               What This Means (Avoid These)
             </span>
-            <ct-hstack gap="1" wrap>
+            <cf-hstack gap="1" wrap>
               {impliedItems.map(
                 (
                   item: {
@@ -1608,11 +1608,11 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </ct-hstack>
-          </ct-vstack>,
+            </cf-hstack>
+          </cf-vstack>,
           null,
         )}
-      </ct-vstack>
+      </cf-vstack>
     ),
     restrictions,
   };

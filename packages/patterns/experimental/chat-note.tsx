@@ -460,8 +460,8 @@ const ChatNote = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `💬 ${title.get()}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
@@ -470,7 +470,7 @@ const ChatNote = pattern<Input, Output>(
             }}
           >
             {/* Parent notebook chip */}
-            <ct-hstack
+            <cf-hstack
               gap="2"
               align="center"
               style={{
@@ -497,9 +497,9 @@ const ChatNote = pattern<Input, Output>(
                 interactive
                 onct-click={goToParent({ self })}
               />
-            </ct-hstack>
+            </cf-hstack>
 
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -576,7 +576,7 @@ const ChatNote = pattern<Input, Output>(
               </ct-button>
 
               {/* Generation status / Cancel button - shown when generating */}
-              <ct-hstack
+              <cf-hstack
                 gap="2"
                 align="center"
                 style={{
@@ -596,9 +596,9 @@ const ChatNote = pattern<Input, Output>(
                 >
                   Cancel
                 </ct-button>
-              </ct-hstack>
-            </ct-hstack>
-          </ct-vstack>
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Keyboard shortcut: Cmd+Enter to generate */}
           <ct-keybind
@@ -645,14 +645,14 @@ const ChatNote = pattern<Input, Output>(
             readonly={isGenerating}
           />
 
-          <ct-hstack slot="footer">
+          <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
               <ct-button onClick={handlePieceLinkClicked({ piece })}>
                 {piece?.[NAME]}
               </ct-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       content,

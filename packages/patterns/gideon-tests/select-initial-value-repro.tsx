@@ -36,11 +36,11 @@ export default pattern<Record<string, never>, Output>(() => {
   return {
     [NAME]: "Select Initial Value Repro",
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="4" style="padding: 1rem;">
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>Type Select</ct-heading>
+      <cf-screen>
+        <cf-vstack gap="4" style="padding: 1rem;">
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>Type Select</cf-heading>
               <ct-select
                 $value={type}
                 items={[
@@ -53,12 +53,12 @@ export default pattern<Record<string, never>, Output>(() => {
               <p>
                 <strong>Current value:</strong> {type}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>Status Select</ct-heading>
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>Status Select</cf-heading>
               <ct-select
                 $value={status}
                 items={[
@@ -71,16 +71,16 @@ export default pattern<Record<string, never>, Output>(() => {
               <p>
                 <strong>Current value:</strong> {status}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
           <p style="color: gray; font-size: 0.875rem;">
             If either dropdown shows "-" instead of its value on page load, the
             bug is present. Both dropdowns should show their selected values
             immediately.
           </p>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     type,
     status,

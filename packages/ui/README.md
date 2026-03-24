@@ -33,7 +33,7 @@ src/
 
 ```typescript
 // Import v2 components (default)
-import { CTButton, CTCard, CTInput } from "@commonfabric/ui";
+import { CTButton, CFCard, CTInput } from "@commonfabric/ui";
 
 // Or import specific versions
 import { v2 } from "@commonfabric/ui";
@@ -49,10 +49,10 @@ registerAllComponents();
 <!-- V2 Components (ct- prefix) -->
 <ct-button variant="primary">Click Me</ct-button>
 <ct-input type="email" placeholder="Enter email"></ct-input>
-<ct-card>
+<cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content</p>
-</ct-card>
+</cf-card>
 ```
 
 ## 📖 V2 Components (39 total)
@@ -61,7 +61,7 @@ registerAllComponents();
 
 - **Forms**: `ct-button`, `ct-input`, `ct-textarea`, `ct-checkbox`, `ct-radio`,
   `ct-switch`, `ct-toggle`, `ct-slider`
-- **Layout**: `ct-card`, `ct-separator`, `ct-accordion`, `ct-collapsible`,
+- **Layout**: `cf-card`, `ct-separator`, `ct-accordion`, `ct-collapsible`,
   `ct-tabs`, `ct-scroll-area`
 - **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `ct-skeleton`, `ct-label`
 - **Data**: `ct-table`, `ct-form`, `ct-input-otp`
@@ -69,8 +69,8 @@ registerAllComponents();
 
 ### Layout Components (8)
 
-- **Flexbox**: `ct-hstack`, `ct-vstack`, `ct-hgroup`, `ct-vgroup`
-- **Scrolling**: `ct-hscroll`, `ct-vscroll`
+- **Flexbox**: `cf-hstack`, `cf-vstack`, `cf-hgroup`, `cf-vgroup`
+- **Scrolling**: `ct-hscroll`, `cf-vscroll`
 - **Grid**: `ct-grid`, `ct-table`
 
 ## 🔒 Security Constraints
@@ -147,43 +147,43 @@ packages/ui/
 
 ```html
 <ct-form>
-  <ct-vstack gap="4">
-    <ct-vgroup gap="1">
+  <cf-vstack gap="4">
+    <cf-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
       <ct-input id="email" type="email" name="email" required></ct-input>
-    </ct-vgroup>
+    </cf-vgroup>
 
-    <ct-vgroup gap="1">
+    <cf-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
       <ct-textarea id="message" name="message" rows="4"></ct-textarea>
-    </ct-vgroup>
+    </cf-vgroup>
 
-    <ct-hstack gap="3" justify="end">
+    <cf-hstack gap="3" justify="end">
       <ct-button variant="outline" type="reset">Cancel</ct-button>
       <ct-button type="submit">Submit</ct-button>
-    </ct-hstack>
-  </ct-vstack>
+    </cf-hstack>
+  </cf-vstack>
 </ct-form>
 ```
 
 ### Dashboard Layout
 
 ```html
-<ct-vstack gap="4">
-  <ct-card>
+<cf-vstack gap="4">
+  <cf-card>
     <h2 slot="header">Dashboard</h2>
     <ct-grid slot="content" columns="3" gap="4">
-      <ct-card>
-        <ct-vstack slot="content" gap="2">
+      <cf-card>
+        <cf-vstack slot="content" gap="2">
           <ct-badge variant="secondary">Active</ct-badge>
           <h3>Total Users</h3>
           <p style="font-size: 2rem">1,234</p>
-        </ct-vstack>
-      </ct-card>
+        </cf-vstack>
+      </cf-card>
       <!-- More cards... -->
     </ct-grid>
-  </ct-card>
-</ct-vstack>
+  </cf-card>
+</cf-vstack>
 ```
 
 ### Event Handling
@@ -216,7 +216,7 @@ ct-input::part(input) {
   font-family: monospace;
 }
 
-ct-card::part(header) {
+cf-card::part(header) {
   background: #f3f4f6;
 }
 ```

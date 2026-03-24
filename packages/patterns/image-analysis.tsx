@@ -61,18 +61,18 @@ export default pattern<ImageChatInput, ImageChatOutput>(
     });
 
     const ui = (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
-          <ct-heading level={4}>Image Chat</ct-heading>
-        </ct-vstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
+          <cf-heading level={4}>Image Chat</cf-heading>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
             {/* Image Upload */}
             <cf-cell-context $cell={images} label="Uploaded Images">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Upload Images</ct-heading>
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Upload Images</cf-heading>
                   <ct-image-input
                     multiple
                     maxImages={5}
@@ -81,43 +81,43 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                     removable
                     $images={images}
                   />
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
             </cf-cell-context>
 
             {/* Prompt Input */}
             <cf-cell-context $cell={prompt} label="Image Prompt">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Your Question</ct-heading>
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Your Question</cf-heading>
                   <ct-input
                     $value={prompt}
                     placeholder="Ask about the images..."
                   />
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
             </cf-cell-context>
 
             {/* Response */}
             {ifElse(
               pending,
-              <ct-card>
+              <cf-card>
                 <div>Analyzing...</div>
-              </ct-card>,
+              </cf-card>,
               ifElse(
                 result,
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={5}>Response</ct-heading>
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Response</cf-heading>
                     <div style="white-space: pre-wrap;">{result}</div>
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               ),
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     );
 
     return {

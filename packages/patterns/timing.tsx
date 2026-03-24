@@ -58,7 +58,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Timing: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
+        <cf-vstack style={{ gap: "16px" }}>
           <div
             style={{
               display: "grid",
@@ -66,11 +66,11 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
               gap: "12px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Prep Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
                 <ct-input
                   type="number"
                   $value={prepTime}
@@ -79,14 +79,14 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Cook Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
                 <ct-input
                   type="number"
                   $value={cookTime}
@@ -95,14 +95,14 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Rest Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
                 <ct-input
                   type="number"
                   $value={restTime}
@@ -111,8 +111,8 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
           </div>
 
           {/* Total time display */}
@@ -131,7 +131,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
               {displayText}
             </span>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       prepTime,
       cookTime,
