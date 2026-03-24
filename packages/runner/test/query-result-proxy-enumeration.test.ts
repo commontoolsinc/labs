@@ -360,6 +360,52 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect(keys).toContain("2");
   });
 
+  it("array at() reads only the selected slot without parent enumeration", () => {
+    const cell = runtime.getCell<number[]>(
+      space,
+      "test-array-at-observations",
+      undefined,
+      tx,
+    );
+    cell.set([10, 20, 30]);
+
+    const proxy = createQueryResultProxy<number[]>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.at(1)).toBe(20);
+
+    const observedReads = canonicalizeBoundaryActivity(tx.journal.activity())
+      .reads.filter((read) =>
+        read.cfc?.op !== undefined && !read.internalVerifierRead
+      );
+    expect(
+      observedReads.some((read) =>
+        read.path === "/" && read.op === "enumerate"
+      ),
+    ).toBe(false);
+    expect(
+      observedReads.some((read) => read.path === "/" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      observedReads.some((read) => read.path === "/1" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      observedReads.some((read) => read.path === "/1" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      observedReads.some((read) => read.path === "/0" && read.op !== undefined),
+    ).toBe(false);
+    expect(
+      observedReads.some((read) => read.path === "/2" && read.op !== undefined),
+    ).toBe(false);
+  });
+
   it("empty object returns empty keys", () => {
     const cell = runtime.getCell<Record<string, never>>(
       space,

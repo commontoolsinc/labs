@@ -99,6 +99,53 @@ function readValueInternally(
   return tx.readValueOrThrow(link, withInternalVerifierRead());
 }
 
+function readObservedChildValue(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  depth: number,
+  writable: boolean,
+): any {
+  const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+  const childValue = readValueInternally(readTx, link);
+  observeLink(tx, link, "shape");
+  if (!isRecord(childValue)) {
+    observeLink(tx, link, "value");
+    return childValue;
+  }
+  return createQueryResultProxy(
+    runtime,
+    tx,
+    link,
+    depth + 1,
+    writable,
+    "skip",
+  );
+}
+
+function normalizeArrayAtIndex(
+  length: number,
+  indexArg: unknown,
+): number | undefined {
+  const numericIndex = Number(indexArg ?? 0);
+  if (!Number.isFinite(numericIndex)) {
+    return undefined;
+  }
+
+  const relativeIndex = Number.isNaN(numericIndex)
+    ? 0
+    : Math.trunc(numericIndex);
+  const normalizedIndex = relativeIndex >= 0
+    ? relativeIndex
+    : length + relativeIndex;
+
+  if (normalizedIndex < 0 || normalizedIndex >= length) {
+    return undefined;
+  }
+
+  return normalizedIndex;
+}
+
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
@@ -269,9 +316,29 @@ export function createQueryResultProxy<T>(
 
         return isReadWrite === ArrayMethodType.ReadOnly
           ? (...args: any[]) => {
+            if (prop === "at") {
+              const readTx = (tx?.status().status === "ready")
+                ? tx
+                : runtime.edit();
+              observeLink(tx, link, "shape");
+              observeLink(tx, link, "count");
+              const length =
+                (readValueInternally(readTx, link) as any[]).length;
+              const index = normalizeArrayAtIndex(length, args[0]);
+              if (index === undefined) {
+                return undefined;
+              }
+              return readObservedChildValue(
+                runtime,
+                tx,
+                { ...link, path: [...link.path, String(index)] },
+                depth,
+                writable,
+              );
+            }
+
             // This will also mark each element read in the log. Almost all
-            // methods implicitly read all elements. TODO: Deal with
-            // exceptions like at().
+            // methods implicitly read all elements.
             const readTx = (tx?.status().status === "ready")
               ? tx
               : runtime.edit();
@@ -416,20 +483,12 @@ export function createQueryResultProxy<T>(
         ...link,
         path: [...link.path, prop],
       };
-      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const childValue = readValueInternally(readTx, childLink);
-      observeLink(tx, childLink, "shape");
-      if (!isRecord(childValue)) {
-        observeLink(tx, childLink, "value");
-        return childValue;
-      }
-      return createQueryResultProxy(
+      return readObservedChildValue(
         runtime,
         tx,
         childLink,
-        depth + 1,
+        depth,
         writable,
-        "skip",
       );
     },
     set: (_, prop, value) => {
