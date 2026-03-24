@@ -1213,7 +1213,7 @@ export class Scheduler {
         this.executingAction = action;
         this.currentActionId = actionId;
         logger.timeStart("scheduler", "run", "action");
-        Promise.resolve(action(tx))
+        Promise.resolve(this.runtime.harness.invoke(() => action(tx)))
           .then((actionResult) => {
             logger.timeEnd("scheduler", "run", "action");
             result = actionResult;

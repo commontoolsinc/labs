@@ -251,6 +251,19 @@ describe("Engine.evaluate()", () => {
   });
 
   it("throws when toSchema() reaches runtime without CTS", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      sandbox: {
+        mode: "unsafe-eval",
+      },
+    });
+    engine = runtime.harness as Engine;
+
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -295,6 +308,19 @@ describe("Engine.evaluate()", () => {
   });
 
   it("characterizes shared top-level mutable state in untransformed modules", async () => {
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      sandbox: {
+        mode: "unsafe-eval",
+      },
+    });
+    engine = runtime.harness as Engine;
+
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -469,6 +495,27 @@ describe("Engine in SES mode", () => {
 
     await expect(engine.compile(program)).rejects.toThrow(
       "Callback captures top-level data binding 'state'",
+    );
+  });
+
+  it("rejects untransformed toSchema() before evaluation in SES mode", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { toSchema } from "commontools";',
+            "export default toSchema<{ count: number }>({",
+            "  default: { count: 0 },",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Only trusted builder calls and schema() are allowed at module scope in SES mode",
     );
   });
 

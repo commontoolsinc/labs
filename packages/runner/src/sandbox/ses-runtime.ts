@@ -11,6 +11,23 @@ export interface SESRuntimeOptions {
   lockdown?: boolean;
 }
 
+interface SESLockdownOptions {
+  errorTaming: "safe" | "unsafe" | "unsafe-debug";
+  errorTrapping: "platform" | "none" | "report" | "abort" | "exit";
+  reporting: "platform" | "console" | "none";
+  unhandledRejectionTrapping: "none" | "report";
+  regExpTaming: "safe" | "unsafe";
+  localeTaming: "safe" | "unsafe";
+  consoleTaming: "unsafe" | "safe";
+  overrideTaming: "moderate" | "min" | "severe";
+  stackFiltering: "concise" | "omit-frames" | "shorten-paths" | "verbose";
+  domainTaming: "safe" | "unsafe";
+  evalTaming: "safe-eval" | "unsafe-eval" | "no-eval";
+  overrideDebug: string[];
+  legacyRegeneratorRuntimeTaming: "safe" | "unsafe-ignore";
+  __hardenTaming__: "safe" | "unsafe";
+}
+
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
   inner(): unknown;
@@ -26,6 +43,7 @@ class SESInternals {
       return callback();
     } catch (e: unknown) {
       const error = e as Error;
+      materializeHostVisibleStack(error);
       if (error.stack) {
         error.stack = this.sourceMaps.parse(error.stack);
       }
@@ -169,20 +187,45 @@ export function evaluateFunctionSourceInSES(
 ): unknown {
   ensureSESInitialized(!!options.lockdown);
   const compartment = createCompartment(options.globals ?? {});
-  return compartment.evaluate(`(${source})`);
+  try {
+    return compartment.evaluate(`(${source})`);
+  } catch (e: unknown) {
+    const error = e as Error;
+    materializeHostVisibleStack(error);
+    throw error;
+  }
 }
 
 let sesInitialized = false;
+
+const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
+  errorTaming: "safe",
+  errorTrapping: "platform",
+  reporting: "platform",
+  unhandledRejectionTrapping: "report",
+  regExpTaming: "safe",
+  localeTaming: "safe",
+  consoleTaming: "unsafe",
+  overrideTaming: "severe",
+  stackFiltering: "concise",
+  domainTaming: "safe",
+  evalTaming: "safe-eval",
+  overrideDebug: [],
+  legacyRegeneratorRuntimeTaming: "safe",
+  __hardenTaming__: "safe",
+};
 
 function ensureSESInitialized(lockdownEnabled: boolean): void {
   if (sesInitialized || !lockdownEnabled) {
     return;
   }
-  const lockdownFn = (globalThis as { lockdown?: () => void }).lockdown;
+  const lockdownFn = (globalThis as {
+    lockdown?: (options?: SESLockdownOptions) => void;
+  }).lockdown;
   if (typeof lockdownFn !== "function") {
     throw new Error("SES lockdown() is unavailable");
   }
-  lockdownFn();
+  lockdownFn(DEFAULT_LOCKDOWN_OPTIONS);
   sesInitialized = true;
 }
 
@@ -196,4 +239,21 @@ function createCompartment(globals: Record<string, unknown>) {
     throw new Error("SES Compartment is unavailable");
   }
   return new CompartmentCtor(globals);
+}
+
+function materializeHostVisibleStack(error: Error): void {
+  if (typeof error.stack === "string" && error.stack.length > 0) {
+    return;
+  }
+  const getStackString = (globalThis as {
+    getStackString?: (error: Error) => string;
+  }).getStackString;
+  if (typeof getStackString !== "function") {
+    return;
+  }
+  const frames = getStackString(error);
+  if (!frames) {
+    return;
+  }
+  error.stack = `${error}${frames.startsWith("\n") ? frames : `\n${frames}`}`;
 }

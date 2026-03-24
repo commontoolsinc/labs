@@ -333,6 +333,13 @@ function classifyTopLevelExpression(
     };
   }
 
+  if (
+    ts.isPropertyAccessExpression(expr) ||
+    ts.isElementAccessExpression(expr)
+  ) {
+    return classifyReferenceExpression(expr, sourceFile, env);
+  }
+
   if (ts.isCallExpression(expr)) {
     return classifyCallExpression(
       expr,
@@ -368,41 +375,49 @@ function classifyCallExpression(
   pendingCaptureChecks: PendingCaptureCheck[],
 ): BindingInfo {
   const trustedName = resolveTrustedCallName(expression.expression, env);
-  if (!trustedName) {
-    throw verificationError(
+  if (trustedName) {
+    if (trustedName === "schema") {
+      verifySchemaCall(expression, sourceFile, env);
+      return {
+        kind: "data",
+        captureSafe: false,
+      };
+    }
+
+    if (trustedName === "__ct_data") {
+      verifyCtDataCall(expression, sourceFile, env);
+      return {
+        kind: "data",
+        captureSafe: true,
+      };
+    }
+
+    verifyTrustedBuilderCall(
+      trustedName,
+      expression,
       sourceFile,
-      expression.expression,
-      "Only trusted builder calls and schema() are allowed at module scope in SES mode",
+      env,
+      pendingCaptureChecks,
     );
+    return {
+      kind: "builder",
+      captureSafe: true,
+    };
   }
 
-  if (trustedName === "schema") {
-    verifySchemaCall(expression, sourceFile, env);
+  if (isLocalCallableExpression(expression.expression, env)) {
+    verifyLocalTopLevelCall(expression, sourceFile, env);
     return {
       kind: "data",
       captureSafe: false,
     };
   }
 
-  if (trustedName === "__ct_data") {
-    verifyCtDataCall(expression, sourceFile, env);
-    return {
-      kind: "data",
-      captureSafe: true,
-    };
-  }
-
-  verifyTrustedBuilderCall(
-    trustedName,
-    expression,
+  throw verificationError(
     sourceFile,
-    env,
-    pendingCaptureChecks,
+    expression.expression,
+    "Only trusted builder calls and schema() are allowed at module scope in SES mode",
   );
-  return {
-    kind: "builder",
-    captureSafe: true,
-  };
 }
 
 function verifySchemaCall(
@@ -439,6 +454,16 @@ function verifyCtDataCall(
     );
   }
   verifyCtDataExpression(expression.arguments[0], sourceFile, env, new Set());
+}
+
+function verifyLocalTopLevelCall(
+  expression: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): void {
+  for (const argument of expression.arguments) {
+    verifyTrustedValueExpression(argument, sourceFile, env);
+  }
 }
 
 function verifyTrustedBuilderCall(
@@ -1141,6 +1166,41 @@ function resolveTrustedCallName(
   return undefined;
 }
 
+function classifyReferenceExpression(
+  expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): BindingInfo {
+  const root = getAccessRootIdentifier(expression);
+  if (!root) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "Top-level value is not allowed in SES mode",
+    );
+  }
+
+  if (
+    ts.isElementAccessExpression(expression) && expression.argumentExpression
+  ) {
+    verifyTrustedValueExpression(
+      expression.argumentExpression,
+      sourceFile,
+      env,
+    );
+  }
+
+  const binding = env.get(root.text);
+  if (!binding || binding.kind === "unknown") {
+    throw verificationError(
+      sourceFile,
+      root,
+      `Unknown top-level identifier '${root.text}' in SES mode`,
+    );
+  }
+  return cloneBindingInfo(binding);
+}
+
 function unwrapExpression(expression: ts.Expression): ts.Expression {
   let expr = expression;
   while (
@@ -1193,6 +1253,43 @@ function isAllowedHelperMutationStatement(
   } catch {
     return false;
   }
+}
+
+function isLocalCallableExpression(
+  expression: ts.LeftHandSideExpression,
+  env: Map<string, BindingInfo>,
+): boolean {
+  if (ts.isIdentifier(expression)) {
+    const binding = env.get(expression.text);
+    return !!binding &&
+      (
+        binding.kind === "function" ||
+        (binding.kind === "import" && !binding.trustedRuntimeName)
+      );
+  }
+
+  if (ts.isPropertyAccessExpression(expression)) {
+    const root = getAccessRootIdentifier(expression);
+    if (!root) return false;
+    const binding = env.get(root.text);
+    return !!binding && binding.kind === "import" &&
+      !binding.trustedRuntimeName;
+  }
+
+  return false;
+}
+
+function getAccessRootIdentifier(
+  expression: ts.Expression,
+): ts.Identifier | undefined {
+  let current: ts.Expression = expression;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return ts.isIdentifier(current) ? current : undefined;
 }
 
 function isPrimitiveLikeExpression(expression: ts.Expression): boolean {

@@ -303,11 +303,12 @@ export class Runtime {
       canonicalHashing: undefined,
       ...options.experimental,
     };
+    const sandboxMode = options.sandbox?.mode ?? "ses";
     this.sandbox = {
-      mode: "unsafe-eval",
-      verifyModules: options.sandbox?.mode === "ses",
-      lockdown: options.sandbox?.mode === "ses",
+      verifyModules: sandboxMode === "ses",
+      lockdown: sandboxMode === "ses",
       ...options.sandbox,
+      mode: sandboxMode,
     };
 
     if (
