@@ -34,19 +34,23 @@ let modernSchemaHashEnabled = false;
 /**
  * Activates or deactivates modern schema hash mode. Called by the `Runtime`
  * constructor to propagate `ExperimentalOptions.modernSchemaHash` into the
- * memory layer.
+ * memory layer. Wipes the intern cache since cached hashes are
+ * flag-dependent.
  */
 export function setSchemaHashConfig(enabled: boolean): void {
   modernSchemaHashEnabled = enabled;
+  resetInternCache();
 }
 
 /**
  * Restores modern schema hash mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
- * test runs.
+ * test runs. Wipes the intern cache since cached hashes are
+ * flag-dependent.
  */
 export function resetSchemaHashConfig(): void {
   modernSchemaHashEnabled = false;
+  resetInternCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -81,40 +85,64 @@ export function hashSchemaItem(item: FabricValue): FabricHash {
 /**
  * Bidirectional intern cache for schemas.
  *
+ * All intern state is flag-dependent (legacy vs modern produce different
+ * hashes) and is wiped whenever the flag changes via `resetInternCache()`.
+ *
  * - `schemaToSah`: object schema → SchemaAndHash (WeakMap so schemas can be
  *   GC'd when no longer referenced elsewhere).
  * - `hashToSah`: hash string → { sah, ref } where `ref` is a WeakRef to the
  *   frozen schema (dead entries cleaned up by `schemaFinalizer` and on lookup).
+ *   Entries with no `ref` are permanent (boolean interns).
  * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSah`
  *   entries when interned schemas are garbage-collected.
  * - `booleanInterns`: prefab SchemaAndHash for `true` and `false` (boolean
- *   schemas are primitives — initialized at module load and seeded into
- *   `hashToSah` as permanent entries with no WeakRef).
+ *   schemas are primitives — seeded into `hashToSah` as permanent entries).
  */
-const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
+let schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
 const hashToSah = new Map<
   string,
   { sah: SchemaAndHash; ref?: WeakRef<JSONSchemaObj> }
 >();
-
-const booleanInterns = {
+let booleanInterns = {
   true: new SchemaAndHash(true, hashSchema(true)),
   false: new SchemaAndHash(false, hashSchema(false)),
-} as const;
-
-// Seed the hash map with boolean interns (permanent entries, no WeakRef needed).
-hashToSah.set(booleanInterns.true.hashString, { sah: booleanInterns.true });
-hashToSah.set(booleanInterns.false.hashString, { sah: booleanInterns.false });
-
-/** Removes dead `hashToSah` entries when interned schemas are GC'd. */
-const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
+};
+let schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   const entry = hashToSah.get(hashStr);
-  // Only delete if the entry still points to a dead ref — a new schema with
-  // the same hash may have replaced it.
   if (entry && entry.ref && entry.ref.deref() === undefined) {
     hashToSah.delete(hashStr);
   }
 });
+
+/** Seeds `hashToSah` with the current boolean interns. */
+function seedBooleanInterns(): void {
+  hashToSah.set(booleanInterns.true.hashString, { sah: booleanInterns.true });
+  hashToSah.set(booleanInterns.false.hashString, { sah: booleanInterns.false });
+}
+
+/**
+ * Wipes all intern caches and re-seeds boolean interns with fresh hashes
+ * for the current flag state. Called whenever `modernSchemaHashEnabled`
+ * changes.
+ */
+function resetInternCache(): void {
+  schemaToSah = new WeakMap();
+  hashToSah.clear();
+  schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
+    const entry = hashToSah.get(hashStr);
+    if (entry && entry.ref && entry.ref.deref() === undefined) {
+      hashToSah.delete(hashStr);
+    }
+  });
+  booleanInterns = {
+    true: new SchemaAndHash(true, hashSchema(true)),
+    false: new SchemaAndHash(false, hashSchema(false)),
+  };
+  seedBooleanInterns();
+}
+
+// Initial seed.
+seedBooleanInterns();
 
 /**
  * Intern a schema: freeze it, compute its hash, and cache the
