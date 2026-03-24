@@ -127,6 +127,7 @@ const attemptRefresh = handler<
 >((_event, { refreshStream, refreshing, refreshFailed, refreshStartedAt }) => {
   if (!refreshStream?.send) {
     refreshFailed.set(true);
+    refreshStartedAt.set(0);
     return;
   }
   refreshing.set(true);
@@ -134,16 +135,6 @@ const attemptRefresh = handler<
   refreshStartedAt.set(safeDateNow());
 
   refreshStream.send({});
-
-  // Note: in theory the Writable could be invalid if the pattern were
-  // hot-reloaded, but CTS pattern lifecycle matches page lifecycle so
-  // there is no practical risk of accessing a stale Writable here.
-  setTimeout(() => {
-    if (refreshing.get()) {
-      refreshing.set(false);
-      refreshFailed.set(true);
-    }
-  }, REFRESH_FAILURE_TIMEOUT_MS);
 });
 
 // =============================================================================
@@ -367,6 +358,19 @@ export function createAuthManager<T, R>(
         if (expiresAt > now.get()) {
           refreshing.set(false);
           refreshFailed.set(false);
+          refreshStartedAt.set(0);
+        }
+      });
+
+      // Mark the refresh attempt as failed if no new token arrives in time.
+      computed(() => {
+        if (!refreshing.get()) return;
+        const startedAt = refreshStartedAt.get();
+        if (!startedAt) return;
+        if (now.get() - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
+          refreshing.set(false);
+          refreshFailed.set(true);
+          refreshStartedAt.set(0);
         }
       });
 
