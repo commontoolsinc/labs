@@ -8,6 +8,7 @@ import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { markCfcRelevantForSchema } from "../src/cfc/relevance.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
 import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
+import { cfcLabelsAddress } from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { URI } from "../src/storage/interface.ts";
 
@@ -218,6 +219,52 @@ describe("CFC prepare schema hash", () => {
       "/": {
         label: {
           classification: [["secret"]],
+        },
+      },
+      "/count": {
+        label: {
+          classification: [["secret"]],
+        },
+      },
+    });
+  });
+
+  it("preserves explicit label writes when prepare persists schema labels", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-labels-explicit-merge",
+      ifcObjectSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({ count: 1 });
+    tx.writeOrThrow(
+      cfcLabelsAddress({
+        space,
+        id: link.id,
+        type: "application/json",
+      }),
+      {
+        "/": {
+          label: {
+            classification: [["secret"]],
+            integrity: ["proof-token"],
+          },
+        },
+      } as never,
+    );
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const persistedLabels = await readCfcPath(link.id, ["labels"]);
+    expect(persistedLabels).toEqual({
+      "/": {
+        label: {
+          classification: [["secret"]],
+          integrity: ["proof-token"],
         },
       },
       "/count": {
